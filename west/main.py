@@ -43,7 +43,7 @@ def validate_context(args, unknown):
             args.zephyr_base = os.environ['ZEPHYR_BASE']
 
 
-def parse_args(argv=None):
+def parse_args(argv):
     west_parser = argparse.ArgumentParser(
         prog='west', description='The Zephyr RTOS meta-tool.',
         epilog='Run "west <command> -h" for help on each command.')
@@ -61,8 +61,6 @@ def parse_args(argv=None):
         parser = command.add_parser(subparser_gen)
         parser.set_defaults(handler=partial(command_handler, command))
 
-    if argv is None:
-        argv = sys.argv[1:]
     args, unknown = west_parser.parse_known_args(args=argv)
 
     # Set up logging verbosity before doing anything else, so
@@ -85,8 +83,10 @@ def parse_args(argv=None):
     return args, unknown
 
 
-def main():
-    args, unknown = parse_args()
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    args, unknown = parse_args(argv)
 
     for_stack_trace = 'run as "west -v ... {} ..." for a stack trace'.format(
         args.command)
