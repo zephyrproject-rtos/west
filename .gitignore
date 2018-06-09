@@ -1,3 +1,4 @@
 build/
 dist/
 west.egg-info/
+__pycache__/
