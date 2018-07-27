@@ -17,7 +17,8 @@ setuptools.setup(
     # http://docutils.sourceforge.net/FAQ.html#what-s-the-official-mime-type-for-restructuredtext-data
     long_description_content_type="text/x-rst",
     url='https://github.com/zephyrproject-rtos/west',
-    packages=setuptools.find_packages('bootstrap'),
+    packages=setuptools.find_packages('src', include=('bootstrap',)),
+    package_dir={'': 'src'},
     classifiers=(
         'Programming Language :: Python :: 3',
         'License :: OSI Approved :: Apache Software License',
