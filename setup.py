@@ -7,6 +7,9 @@ import setuptools
 with open('README.rst', 'r') as f:
     long_description = f.read()
 
+with open('requirements.txt', 'r') as f:
+    install_requires = f.readlines()
+
 setuptools.setup(
     name='west',
     version='0.2.5',
@@ -26,11 +29,7 @@ setuptools.setup(
         'Operating System :: MacOS :: MacOS X',
         'Operating System :: Microsoft :: Windows',
         ),
-    # Note: the bootstrap script only depends on the standard library;
-    #       these dependencies are for West itself.
-    install_requires=(
-        'PyYAML',
-        ),
+    install_requires=install_requires,
     python_requires='>=3.4',
     entry_points={
         'console_scripts': (
