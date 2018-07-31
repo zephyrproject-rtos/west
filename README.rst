@@ -70,3 +70,12 @@ $ python3 -m west
 Only do this if you know what you're doing (and make sure to install
 the requirements as specified by the install_requires line in
 setup.py).
+
+Test Suite
+----------
+
+To run the test suite, use:
+
+```
+$ python3 setup.py test
+```
