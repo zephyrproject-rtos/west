@@ -10,6 +10,9 @@ with open('README.rst', 'r') as f:
 with open('requirements.txt', 'r') as f:
     install_requires = f.readlines()
 
+with open('tests_requirements.txt', 'r') as f:
+    tests_require = f.readlines()
+
 setuptools.setup(
     name='west',
     version='0.2.5',
@@ -31,6 +34,8 @@ setuptools.setup(
         ),
     install_requires=install_requires,
     python_requires='>=3.4',
+    tests_require=tests_require,
+    setup_requires=('pytest-runner',),
     entry_points={
         'console_scripts': (
             'west = bootstrap.main:main',
