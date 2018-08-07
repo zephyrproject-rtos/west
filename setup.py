@@ -29,6 +29,7 @@ setuptools.setup(
     #       these dependencies are for West itself.
     install_requires=(
         'PyYAML',
+        'pykwalify',
         ),
     python_requires='>=3.4',
     entry_points={
