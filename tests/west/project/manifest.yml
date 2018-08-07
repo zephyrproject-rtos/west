@@ -1,0 +1,18 @@
+# Testing manifest
+
+manifest:
+  defaults:
+    remote: zephyrproject-rtos
+    revision: master
+
+  remotes:
+    - name: zephyrproject-rtos
+      url: https://github.com/zephyrproject-rtos
+
+  projects:
+    - name: net-tools
+      clone-depth: 1
+    - name: Kconfiglib
+      clone-depth: 1
+      revision: zephyr
+      path: sub/kconfiglib
