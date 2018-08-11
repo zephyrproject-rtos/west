@@ -16,10 +16,11 @@ from . import log
 from .cmd import CommandContextError
 from .cmd.flash import Flash
 from .cmd.debug import Debug, DebugServer
+from .cmd.git import Sync, Diff, Status
 from .util import quote_sh_list
 
 
-COMMANDS = (Flash(), Debug(), DebugServer())
+COMMANDS = (Flash(), Debug(), DebugServer(), Sync(), Diff(), Status())
 '''Supported top-level commands.'''
 
 
