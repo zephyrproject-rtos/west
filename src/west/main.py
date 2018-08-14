@@ -16,7 +16,7 @@ from . import log
 from .cmd import CommandContextError
 from .cmd.build import Build
 from .cmd.flash import Flash
-from .cmd.debug import Debug, DebugServer
+from .cmd.debug import Debug, DebugServer, Attach
 from .cmd.project import ListProjects, Fetch, Pull, Rebase, Branch, Checkout, \
                          Diff, Status, ForAll
 from .util import quote_sh_list
@@ -27,6 +27,7 @@ COMMANDS = (
     Flash(),
     Debug(),
     DebugServer(),
+    Attach(),
 
     # Project-related commands
     ListProjects(),
