@@ -1,0 +1,17 @@
+language: python
+# TODO: 3.7 is failing. It'd be good to figure this out eventually as
+# it's the latest version which is likely what Windows and macOS users
+# run on, but is left out for now.
+python:
+  - 3.4                         # minimum supported version
+  - 3.5                         # ubuntu 16.04
+  - 3.6                         # ubuntu 18.04
+
+build:
+  ci:
+    - pip install -r requirements.txt
+    - pip install -r tests_requirements.txt
+    - pip install -e .
+    - mkdir -p shippable/{testresults,codecoverage}
+    - pytest --junitxml=shippable/testresults/nosetests.xml tests
+    - pytest --cov=west --cov-report=xml:shippable/codecoverage/coverage.xml tests
