@@ -101,7 +101,10 @@ class Build(WestCommand):
         self._setup_build_dir()
         if is_zephyr_build(self.build_dir):
             self._update_cache()
-        self.force_cmake = self.args.cmake or self.args.cmake_opts
+            if self.args.cmake or self.args.cmake_opts:
+                self.force_cmake = True
+        else:
+            self.force_cmake = True
         self._setup_source_dir()
         self._sanity_check()
 
