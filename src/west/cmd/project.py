@@ -225,6 +225,39 @@ class Status(WestCommand):
                 _git(project, 'status', extra_args=user_args)
 
 
+class ForAll(WestCommand):
+    def __init__(self):
+        super().__init__(
+            'forall',
+            _wrap('''
+            Runs a shell (Linux) or batch (Windows) command within the
+            repository of each of the specified projects (default: all cloned
+            projects). Note that you have to quote the command if it consists
+            of more than one word, to prevent the shell you use to run 'west'
+            from splitting it up.
+
+            Since the command is run through the shell, you can use wildcards
+            and the like.
+
+            For example, the following command will list the contents of
+            proj-1's and proj-2's repositories on Linux, in long form:
+
+              west forall -c 'ls -l' proj-1 proj-2
+            '''))
+
+    def do_add_parser(self, parser_adder):
+        return _add_parser(parser_adder, self, _command_arg, _project_list_arg)
+
+    def do_run(self, args, user_args):
+        for project in _projects(args):
+            if _cloned(project):
+                _inf(project, "Running '{}' in (name-and-path)"
+                              .format(args.command))
+                subprocess.Popen(
+                    args.command, shell=True, cwd=project.abspath
+                ).wait()
+
+
 def _add_parser(parser_adder, cmd, *extra_args):
     # Adds and returns a subparser for the project-related WestCommand 'cmd'.
     # All of these commands (currently) take the manifest path flag, so it's
@@ -278,6 +311,13 @@ _b_flag = _arg(
 # Common branch argument
 _branch_arg = _arg('branch', metavar='BRANCH_NAME')
 
+# Command flag, for 'forall'
+_command_arg = _arg(
+    '-c',
+    dest='command',
+    metavar='COMMAND',
+    required=True)
+
 # Common project list argument
 _project_list_arg = _arg('projects', metavar='PROJECT', nargs='*')
 
@@ -285,7 +325,7 @@ _project_list_arg = _arg('projects', metavar='PROJECT', nargs='*')
 # Holds information about a project, taken from the manifest file
 Project = collections.namedtuple(
     'Project',
-    'name url revision path clone_depth')
+    'name url revision path abspath clone_depth')
 
 
 def _projects(args, listed_must_be_cloned=True):
@@ -372,6 +412,9 @@ def _all_projects(args):
             log.die('Remote {} not defined in {}'
                     .format(mp['remote'], manifest_path))
 
+        # If no clone path is specified, the project's name is used
+        clone_path = mp.get('path', mp['name'])
+
         # Use named tuples to store project information. That gives nicer
         # syntax compared to a dict (project.name instead of project['name'],
         # etc.)
@@ -380,8 +423,9 @@ def _all_projects(args):
             mp['url'],
             # If no revision is specified, 'master' is used
             mp.get('revision', 'master'),
-            # If no clone path is specified, the project's name is used
-            mp.get('path', mp['name']),
+            clone_path,
+            # Absolute clone path
+            os.path.join(util.west_topdir(), clone_path),
             # If no clone depth is specified, we fetch the entire history
             mp.get('clone-depth', None)))
 
@@ -420,7 +464,7 @@ def _fetch(project):
     #
     # Returns True if the project already existed, and False if it was cloned.
 
-    if os.path.exists(os.path.join(util.west_topdir(), project.path)):
+    if os.path.exists(project.abspath):
         existed = True
         _verify_repo(project)
         _inf(project, 'Fetching changes for (name-and-path)')
@@ -469,7 +513,7 @@ def _cloned(project):
     # Prints a warning if the project's clone path exist but doesn't look like
     # a Git repository.
 
-    if os.path.exists(os.path.join(util.west_topdir(), project.path)):
+    if os.path.exists(project.abspath):
         _verify_repo(project)
         return True
 
@@ -539,8 +583,7 @@ def _git(project, cmd, *, extra_args=(), capture_stdout=False, check=True):
     #
     # Returns a CompletedProcess instance (see below).
 
-    return _git_helper(project, cmd, extra_args,
-                       os.path.join(util.west_topdir(), project.path),
+    return _git_helper(project, cmd, extra_args, project.abspath,
                        capture_stdout, check)
 
 

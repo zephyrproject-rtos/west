@@ -25,6 +25,7 @@ COMMAND_OBJECTS = (
     west.cmd.project.Checkout(),
     west.cmd.project.Diff(),
     west.cmd.project.Status(),
+    west.cmd.project.ForAll(),
 )
 
 
@@ -187,13 +188,30 @@ def test_status(clean_west_topdir):
     # TODO: Check output
 
     # Status with no projects cloned shouldn't fail
+
     cmd('status')
 
     # Neither should it fail after fetching one or both projects
+
     cmd('fetch net-tools')
     cmd('status')
 
-    # Neither should it fail after fetching one or both projects
     cmd('fetch Kconfiglib')
-    # Pass a custom flag too
     cmd('status --long')  # Pass a custom flag too
+
+
+def test_forall(clean_west_topdir):
+    # TODO: Check output
+    # The 'echo' command is available in both 'shell' and 'batch'
+
+    # 'forall' with no projects cloned shouldn't fail
+
+    cmd("forall -c 'echo *'")
+
+    # Neither should it fail after fetching one or both projects
+
+    cmd('fetch net-tools')
+    cmd("forall -c 'echo *'")
+
+    cmd('fetch Kconfiglib')
+    cmd("forall -c 'echo *'")

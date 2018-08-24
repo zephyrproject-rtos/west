@@ -18,7 +18,7 @@ from .cmd.build import Build
 from .cmd.flash import Flash
 from .cmd.debug import Debug, DebugServer
 from .cmd.project import ListProjects, Fetch, Pull, Rebase, Branch, Checkout, \
-                         Diff, Status
+                         Diff, Status, ForAll
 from .util import quote_sh_list
 
 
@@ -37,6 +37,7 @@ COMMANDS = (
     Checkout(),
     Diff(),
     Status(),
+    ForAll(),
 )
 '''Built-in West commands.'''
 
