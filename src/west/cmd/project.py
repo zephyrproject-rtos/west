@@ -486,9 +486,8 @@ def _fetch(project):
     #
     # Returns True if the project already existed, and False if it was cloned.
 
-    if os.path.exists(project.abspath):
+    if _cloned(project):
         existed = True
-        _verify_repo(project)
         _inf(project, 'Fetching changes for (name-and-path)')
         _git(project, 'remote update')
     else:
@@ -529,23 +528,19 @@ def _rebase(project):
 
 
 def _cloned(project):
-    # Returns True if the project's repository exists and looks like a Git
-    # repository.
-    #
-    # Prints a warning if the project's clone path exist but doesn't look like
-    # a Git repository.
+    # Returns True if the project's path is a directory that looks
+    # like the top-level directory of a Git repository, and False
+    # otherwise.
 
-    if os.path.exists(project.abspath):
-        _verify_repo(project)
-        return True
+    def handle(result):
+        log.dbg('project', project.name,
+                'is {}cloned'.format('' if result else 'not '),
+                level=log.VERBOSE_EXTREME)
+        return result
 
-    return False
+    if not os.path.isdir(project.abspath):
+        return handle(False)
 
-
-def _verify_repo(project):
-    # Raises an error if the project's clone path is not the top-level
-    # directory of a Git repository
-    log.dbg('verifying project:', project.name, level=log.VERBOSE_EXTREME)
     # --is-inside-work-tree doesn't require that the directory is the top-level
     # directory of a Git repository. Use --show-cdup instead, which prints an
     # empty string (i.e., just a newline, which we strip) for the top-level
@@ -553,10 +548,7 @@ def _verify_repo(project):
     res = _git(project, 'rev-parse --show-cdup', capture_stdout=True,
                check=False)
 
-    if res.returncode or res.stdout:
-        _die(project, '(name-and-path) is not the top-level directory of a '
-                      'Git repository, as reported by '
-                      "'git rev-parse --show-cdup'")
+    return handle(not(res.returncode or res.stdout))
 
 
 def _branches(project):
