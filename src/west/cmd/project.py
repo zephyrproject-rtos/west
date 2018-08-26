@@ -415,11 +415,13 @@ def _all_projects(args):
     projects = []
 
     # mp = manifest project (dictionary with values parsed from the manifest)
+    project_defaults = ('remote', 'revision')
     for mp in manifest['projects']:
         # Fill in any missing fields in 'mp' with values from the 'defaults'
         # dictionary
         for key, val in manifest['defaults'].items():
-            mp.setdefault(key, val)
+            if key in project_defaults:
+                mp.setdefault(key, val)
 
         # Add the repository URL to 'mp'
         for remote in manifest['remotes']:
