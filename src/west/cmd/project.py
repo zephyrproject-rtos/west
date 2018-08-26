@@ -7,7 +7,6 @@
 import argparse
 import collections
 import os
-import shlex
 import shutil
 import subprocess
 import textwrap
@@ -70,6 +69,7 @@ class Fetch(WestCommand):
 
     def do_run(self, args, user_args):
         for project in _projects(args, listed_must_be_cloned=False):
+            log.dbg('fetching:', project, level=log.VERBOSE_VERY)
             _fetch(project)
 
 
@@ -541,7 +541,7 @@ def _cloned(project):
 def _verify_repo(project):
     # Raises an error if the project's clone path is not the top-level
     # directory of a Git repository
-
+    log.dbg('verifying project:', project.name, level=log.VERBOSE_EXTREME)
     # --is-inside-work-tree doesn't require that the directory is the top-level
     # directory of a Git repository. Use --show-cdup instead, which prints an
     # empty string (i.e., just a newline, which we strip) for the top-level
@@ -653,7 +653,9 @@ def _git_helper(project, cmd, extra_args, cwd, capture_stdout, check):
     args = (('git',) +
             tuple(_expand_shorthands(project, arg) for arg in cmd.split()) +
             tuple(extra_args))
+    cmd_str = util.quote_sh_list(args)
 
+    log.dbg("running '{}'".format(cmd_str), 'in', cwd, level=log.VERBOSE_VERY)
     popen = subprocess.Popen(
         args, stdout=subprocess.PIPE if capture_stdout else None, cwd=cwd)
 
@@ -661,7 +663,7 @@ def _git_helper(project, cmd, extra_args, cwd, capture_stdout, check):
 
     if check and popen.returncode:
         _die(project, "Command '{}' failed for (name-and-path)"
-                      .format(" ".join(shlex.quote(arg) for arg in args)))
+                      .format(cmd_str))
 
     if capture_stdout:
         # Manual UTF-8 decoding and universal newlines. Before Python 3.6,
