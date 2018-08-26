@@ -167,9 +167,9 @@ def wrap(argv):
     except WestNotFound:
         sys.exit('Error: not a Zephyr directory (or any parent): {}\n'
                  'Use "west init" to install Zephyr here'.format(start))
-    # Put the top-level west at the highest priority except for the
-    # script directory / current working directory.
-    sys.path.insert(1, join(topdir, WEST))
+    # Put the top-level west source directory at the highest priority
+    # except for the script directory / current working directory.
+    sys.path.insert(1, join(topdir, WEST, 'src'))
     main_module = importlib.import_module('west.main')
     main_module.main(argv=argv)
 
