@@ -413,9 +413,11 @@ def _all_projects(args):
         manifest = yaml.safe_load(f)['manifest']
 
     projects = []
+    # Manifest "defaults" keys whose values get copied to each project
+    # that doesn't specify its own value.
+    project_defaults = ('remote', 'revision')
 
     # mp = manifest project (dictionary with values parsed from the manifest)
-    project_defaults = ('remote', 'revision')
     for mp in manifest['projects']:
         # Fill in any missing fields in 'mp' with values from the 'defaults'
         # dictionary
@@ -426,7 +428,7 @@ def _all_projects(args):
         # Add the repository URL to 'mp'
         for remote in manifest['remotes']:
             if remote['name'] == mp['remote']:
-                mp['url'] = remote['url']
+                mp['url'] = remote['url'] + '/' + mp['name']
                 break
         else:
             log.die('Remote {} not defined in {}'
@@ -507,7 +509,7 @@ def _fetch(project):
         if project.clone_depth:
             msg += ' with --depth (clone-depth)'
             cmd += ' --depth (clone-depth)'
-        cmd += ' (url)/(name) (path)'
+        cmd += ' (url) (path)'
 
         _inf(project, msg)
         _git_base(project, cmd)
