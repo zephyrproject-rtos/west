@@ -369,7 +369,6 @@ def _projects(args, listed_must_be_cloned=True):
         # No projects specified. Return all projects.
         return projects
 
-
     # Got a list of projects on the command line. First, check that they exist
     # in the manifest.
 
@@ -409,7 +408,6 @@ def _all_projects(args):
     manifest_path = _manifest_path(args)
 
     _validate_manifest(manifest_path)
-
 
     with open(manifest_path) as f:
         manifest = yaml.safe_load(f)['manifest']
@@ -599,7 +597,8 @@ def _is_sha(s):
     return len(s) == 40
 
 
-def _git_base(project, cmd, *, extra_args=(), capture_stdout=False, check=True):
+def _git_base(project, cmd, *, extra_args=(), capture_stdout=False,
+              check=True):
     # Runs a git command in the West top directory. See _git_helper() for
     # parameter documentation.
     #
@@ -651,9 +650,9 @@ def _git_helper(project, cmd, extra_args, cwd, capture_stdout, check):
     if shutil.which('git') is None:
         log.die('Git is not installed or cannot be found')
 
-    args = ('git',) + \
-           tuple(_expand_shorthands(project, arg) for arg in cmd.split()) + \
-           tuple(extra_args)
+    args = (('git',) +
+            tuple(_expand_shorthands(project, arg) for arg in cmd.split()) +
+            tuple(extra_args))
 
     popen = subprocess.Popen(
         args, stdout=subprocess.PIPE if capture_stdout else None, cwd=cwd)
