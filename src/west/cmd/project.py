@@ -124,22 +124,39 @@ class Branch(WestCommand):
         super().__init__(
             'branch',
             _wrap('''
-            Create topic branch.
+            Create a branch or list branches, in multiple projects.
 
             Creates a branch in each of the specified projects (default: all
-            cloned projects).
+            cloned projects). The new branches are set to track '{}'.
 
-            The new branches are set to track '{}'.
+            With no arguments, lists all local branches along with the
+            repositories they appear in.
 
             '''.format(_MANIFEST_REV_BRANCH) + _MANIFEST_REV_HELP))
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(parser_adder, self, _branch_arg, _project_list_arg)
+        return _add_parser(parser_adder, self, _opt_branch_arg,
+                           _project_list_arg)
 
     def do_run(self, args, user_args):
-        for project in _projects(args):
-            if _cloned(project):
+        # Generator
+        projects = (project for project in _projects(args) if _cloned(project))
+
+        if args.branch:
+            # Create a branch in the specified projects
+            for project in projects:
                 _create_branch(project, args.branch)
+        else:
+            # No arguments. List local branches from all projects along with
+            # the projects they appear in.
+
+            branch2projs = collections.defaultdict(list)
+            for project in projects:
+                for branch in _branches(project):
+                    branch2projs[branch].append(project.name)
+
+            for branch, projs in sorted(branch2projs.items()):
+                log.inf('{:18} {}'.format(branch, ", ".join(projs)))
 
 
 class Checkout(WestCommand):
@@ -308,7 +325,10 @@ _b_flag = _arg(
     action='store_true',
     help='create the branch before checking it out')
 
-# Common branch argument
+# Optional branch argument
+_opt_branch_arg = _arg('branch', nargs='?', metavar='BRANCH_NAME')
+
+# Mandatory branch argument
 _branch_arg = _arg('branch', metavar='BRANCH_NAME')
 
 # Command flag, for 'forall'
@@ -535,6 +555,18 @@ def _verify_repo(project):
         _die(project, '(name-and-path) is not the top-level directory of a '
                       'Git repository, as reported by '
                       "'git rev-parse --show-cdup'")
+
+
+def _branches(project):
+    # Returns a sorted list of all local branches in 'project'
+
+    # refname:lstrip=-1 isn't available before Git 2.8 (introduced by commit
+    # 'tag: do not show ambiguous tag names as "tags/foo"'). Strip
+    # 'refs/heads/' manually instead.
+    return [ref[len('refs/heads/'):] for ref in
+            _git(project,
+                 'for-each-ref --sort=refname --format=%(refname) refs/heads',
+                 capture_stdout=True).stdout.split('\n')]
 
 
 def _create_branch(project, branch):

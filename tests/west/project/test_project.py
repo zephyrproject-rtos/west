@@ -121,10 +121,6 @@ def test_rebase(clean_west_topdir):
 def test_branches(clean_west_topdir):
     # Missing branch name
     with pytest.raises(SystemExit):
-        cmd('branch')
-
-    # Missing branch name
-    with pytest.raises(SystemExit):
         cmd('checkout')
 
 
@@ -166,6 +162,9 @@ def test_branches(clean_west_topdir):
     # exists in one project
     cmd('checkout foo')
     cmd('checkout bar')
+
+    # List all branches and the projects they appear in (TODO: Check output)
+    cmd('branch')
 
 
 def test_diff(clean_west_topdir):
