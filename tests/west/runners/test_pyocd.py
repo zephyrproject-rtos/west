@@ -19,6 +19,7 @@ from conftest import RC_BUILD_DIR, RC_GDB, RC_KERNEL_BIN, RC_KERNEL_ELF
 TEST_TOOL = 'test-tool'
 TEST_ADDR = 0xadd
 TEST_BOARD_ID = 'test-board-id'
+TEST_FREQUENCY = 'test-frequency'
 TEST_DAPARG = 'test-daparg'
 TEST_TARGET = 'test-target'
 TEST_FLASHTOOL_OPTS = ['--test-flashtool', 'args']
@@ -33,6 +34,7 @@ TEST_ALL_KWARGS = {
     'gdb_port': TEST_PORT,
     'tui': False,
     'board_id': TEST_BOARD_ID,
+    'frequency': TEST_FREQUENCY,
     'daparg': TEST_DAPARG
     }
 
@@ -45,7 +47,8 @@ TEST_ALL_PARAMS = (['--target', TEST_TARGET,
                     TEST_FLASHTOOL_OPTS] +
                    ['--gdbserver', TEST_SERVER,
                     '--gdb-port', str(TEST_PORT),
-                    '--board-id', TEST_BOARD_ID])
+                    '--board-id', TEST_BOARD_ID,
+                    '--frequency', str(TEST_FREQUENCY)])
 
 TEST_DEF_PARAMS = ['--target', TEST_TARGET]
 
@@ -63,7 +66,8 @@ TEST_DEF_PARAMS = ['--target', TEST_TARGET]
 
 FLASH_ALL_EXPECTED_CALL = ([TEST_TOOL,
                             '-a', hex(TEST_ADDR), '-da', TEST_DAPARG,
-                            '-t', TEST_TARGET, '-b', TEST_BOARD_ID] +
+                            '-t', TEST_TARGET, '-b', TEST_BOARD_ID,
+                            '-f', TEST_FREQUENCY] +
                            TEST_FLASHTOOL_OPTS +
                            [RC_KERNEL_BIN])
 FLASH_DEF_EXPECTED_CALL = ['pyocd-flashtool', '-t', TEST_TARGET, RC_KERNEL_BIN]
@@ -73,7 +77,8 @@ DEBUG_ALL_EXPECTED_SERVER = [TEST_SERVER,
                              '-da', TEST_DAPARG,
                              '-p', str(TEST_PORT),
                              '-t', TEST_TARGET,
-                             '-b', TEST_BOARD_ID]
+                             '-b', TEST_BOARD_ID,
+                             '-f', TEST_FREQUENCY]
 DEBUG_ALL_EXPECTED_CLIENT = [RC_GDB, RC_KERNEL_ELF,
                              '-ex', 'target remote :{}'.format(TEST_PORT),
                              '-ex', 'load',
@@ -91,7 +96,8 @@ DEBUGSERVER_ALL_EXPECTED_CALL = [TEST_SERVER,
                                  '-da', TEST_DAPARG,
                                  '-p', str(TEST_PORT),
                                  '-t', TEST_TARGET,
-                                 '-b', TEST_BOARD_ID]
+                                 '-b', TEST_BOARD_ID,
+                                 '-f', TEST_FREQUENCY]
 DEBUGSERVER_DEF_EXPECTED_CALL = ['pyocd-gdbserver',
                                  '-p', '3333',
                                  '-t', TEST_TARGET]
