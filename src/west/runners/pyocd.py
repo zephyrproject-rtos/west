@@ -20,7 +20,7 @@ class PyOcdBinaryRunner(ZephyrBinaryRunner):
                  flashtool_opts=None,
                  gdbserver='pyocd-gdbserver',
                  gdb_port=DEFAULT_PYOCD_GDB_PORT, tui=False,
-                 board_id=None, daparg=None):
+                 board_id=None, daparg=None, frequency=None):
         super(PyOcdBinaryRunner, self).__init__(cfg)
 
         self.target_args = ['-t', target]
@@ -42,6 +42,11 @@ class PyOcdBinaryRunner(ZephyrBinaryRunner):
         if daparg is not None:
             daparg_args = ['-da', daparg]
         self.daparg_args = daparg_args
+
+        frequency_args = []
+        if frequency is not None:
+            frequency_args = ['-f', frequency]
+        self.frequency_args = frequency_args
 
         self.flashtool_extra = flashtool_opts if flashtool_opts else []
 
@@ -66,6 +71,8 @@ class PyOcdBinaryRunner(ZephyrBinaryRunner):
         parser.add_argument('--flashtool-opt', default=[], action='append',
                             help='''Additional options for pyocd-flashtool,
                             e.g. -ce to chip erase''')
+        parser.add_argument('--frequency',
+                            help='SWD clock frequency in Hz')
         parser.add_argument('--gdbserver', default='pyocd-gdbserver',
                             help='GDB server, default is pyocd-gdbserver')
         parser.add_argument('--gdb-port', default=DEFAULT_PYOCD_GDB_PORT,
@@ -94,7 +101,7 @@ class PyOcdBinaryRunner(ZephyrBinaryRunner):
             cfg, args.target, flashtool=args.flashtool,
             flash_addr=flash_addr, flashtool_opts=args.flashtool_opt,
             gdbserver=args.gdbserver, gdb_port=args.gdb_port, tui=args.tui,
-            board_id=args.board_id, daparg=args.daparg)
+            board_id=args.board_id, daparg=args.daparg, frequency=args.frequency)
 
     def port_args(self):
         return ['-p', str(self.gdb_port)]
@@ -114,6 +121,7 @@ class PyOcdBinaryRunner(ZephyrBinaryRunner):
                self.daparg_args +
                self.target_args +
                self.board_args +
+               self.frequency_args +
                self.flashtool_extra +
                [self.bin_name])
 
@@ -128,7 +136,8 @@ class PyOcdBinaryRunner(ZephyrBinaryRunner):
                       self.daparg_args +
                       self.port_args() +
                       self.target_args +
-                      self.board_args)
+                      self.board_args  +
+                      self.frequency_args)
 
         if command == 'debugserver':
             self.print_gdbserver_message()
