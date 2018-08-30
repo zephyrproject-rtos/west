@@ -503,8 +503,15 @@ def _fetch(project):
 
         msg = 'Cloning (name-and-path)'
         cmd = 'clone'
-        if not _is_sha(project.revision):
+        if _is_sha(project.revision):
+            # If the project revision is a SHA and the remote repo's
+            # HEAD doesn't point to anything valid, the clone
+            # operation might fail to check anything out. In that
+            # case, make sure to check out the given revision.
+            checkout = True
+        else:
             cmd += ' --branch (revision)'
+            checkout = False
         if project.clone_depth:
             msg += ' with --depth (clone-depth)'
             cmd += ' --depth (clone-depth)'
@@ -512,6 +519,9 @@ def _fetch(project):
 
         _inf(project, msg)
         _git_base(project, cmd)
+
+        if checkout:
+            _checkout(project, project.revision)
 
     # Update manifest-rev branch
     _git(project,
@@ -548,7 +558,7 @@ def _cloned(project):
     res = _git(project, 'rev-parse --show-cdup', capture_stdout=True,
                check=False)
 
-    return handle(not(res.returncode or res.stdout))
+    return handle(not (res.returncode or res.stdout))
 
 
 def _branches(project):
