@@ -15,7 +15,7 @@ with open('tests_requirements.txt', 'r') as f:
 
 setuptools.setup(
     name='west',
-    version='0.2.5',
+    version='0.1.0',
     author='Zephyr Project',
     author_email='devel@lists.zephyrproject.org',
     description='Zephyr RTOS Project meta-tool (wrapper and bootstrap)',
