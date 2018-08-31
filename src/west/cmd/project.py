@@ -721,8 +721,11 @@ def _die(project, msg):
 def _inf(project, msg):
     # Print '=== msg' (to clearly separate it from Git output). Supports the
     # same (foo) shorthands as the git commands.
+    #
+    # Prints the message in green if stdout is a terminal, to clearly separate
+    # it from command (usually Git) output.
 
-    log.inf('=== ' + _expand_shorthands(project, msg))
+    log.inf('=== ' + _expand_shorthands(project, msg), colorize=True)
 
 
 def _wrn(project, msg):

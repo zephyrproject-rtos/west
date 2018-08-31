@@ -7,6 +7,7 @@
 
 
 import argparse
+import colorama
 from functools import partial
 import os
 import sys
@@ -104,6 +105,10 @@ def parse_args(argv):
 
 
 def main(argv=None):
+    # Makes ANSI color escapes work on Windows, and strips them when
+    # stdout/stderr isn't a terminal
+    colorama.init()
+
     if argv is None:
         argv = sys.argv[1:]
     args, unknown = parse_args(argv)
