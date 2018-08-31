@@ -1,81 +1,110 @@
-This package contains the Zephyr RTOS meta tool, 'west'.
-
-WARNING
--------
-
-DO NOT INSTALL WITH "python3 setup.py install".
-
-Please use pip to install in development mode as documented below.
-
-Important Note
---------------
-
-West is distributed in two pieces:
-
-1. A bootstrap/wrapper script, which is distributed via PyPI.
-2. The "main" west package and entry points, which are fetched by the
-   bootstrap script.
-
-This somewhat unusual arrangement is because:
-
-- One of West's jobs is to manage interaction with Zephyr's multiple
-  Git repositories, including its own.
-- West is in its experimental stages and is moving quickly, meaning
-  users need to stay on HEAD.
-
-The default setup.py installs the **wrapper script only**.
+This is the Zephyr RTOS meta tool, ``west``.
 
 Installation
 ------------
 
-To install the West bootstrapping/wrapper script from this package in
-development mode, clone this repository and run this from the top
-level directory:
+Install west's bootstrapper with pip::
 
-$ pip3 install -e .
+  pip3 install west
 
-Then use the wrapper script to initialize a Zephyr installation with::
+Then install the rest of west and a Zephyr development environment in
+a directory of your choosing::
 
-  $ west init your/zephyr/install-dir
-  $ cd your/zephyr/install-dir
-  $ west <command>
+  mkdir zephyrproject && cd zephyrproject
+  west init
+  west fetch
 
-The ``west init`` call will:
+What just happened:
 
-- create your/zephyr/install-dir
-- clone the Zephyr manifest repository (whose URL can be overridden
-  with the ``-u`` option, and branch with ``--mr`` / ``--manifest-rev``)
-- clone the latest West repository (the URL override is ``-w``, and
-  revision/branch override is ``--wr`` / ``--west-rev``)
+- ``west init`` runs the bootstrapper, which clones the west source
+  repository and a *west manifest* repository. The manifest contains a
+  YAML description of the Zephyr installation, including Git
+  repositories and other metadata. The ``init`` command is the only
+  one supported by the bootstrapper itself; all other commands are
+  implemented in the west source repository it clones.
 
-Running ``west <command>`` from :file:`your/zephyr/install-dir` or
-underneath it will invoke west in "wrapper" mode: any commands other
-than ``init`` will be delegated to the West tree pulled by ``west
-init``.
+- ``west fetch`` clones the repositories in the manifest, creating
+  working trees in the installation directory. In this case, the
+  bootstrapper notices the command (``fetch``) is not ``init``, and
+  delegates handling to the "main" west implementation in the source
+  repository it cloned in the previous step.
 
-This arrangement may seem familiar to Android (platform, not app)
-developers. The source management features of West were indeed
-inspired by the Android Repo tool's features, but West makes
-significant departures from Repo's behavior.
+(For those familiar with it, this is similar to how Android's Repo
+tool works.)
 
-Alternative Usage
------------------
+Usage
+-----
 
-If you don't want to change your system outside of cloning this
-repository, you can also clone West's Git repository and run the
-package as a module:
+West has multiple sub-commands. After running ``west init``, you can
+run them from anywhere under ``zephyrproject``.
 
-$ python3 -m west
+For a list of available commands, run ``west -h``. Get help on a
+command with ``west <command> -h``. For example::
 
-Only do this if you know what you're doing (and make sure to install
-the requirements as specified by the install_requires line in
-setup.py).
+  $ west -h
+  usage: west [-h] [-z ZEPHYR_BASE] [-v]
+              {build,flash,debug,debugserver,attach,list-projects,fetch,pull,rebase,branch,checkout,diff,status,forall}
+              ...
+  [snip]
+  $ west flash -h
+  usage: west flash [-h] [-H] [-d BUILD_DIR] ...
+  [snip]
 
 Test Suite
 ----------
 
-To run the test suite, use:
+To run the test suite, run this from the west repository::
 
-```
-$ python3 setup.py test
-```
+  pip3 install -r tests_requirements.txt
+  python3 setup.py test
+
+Hacking on West
+---------------
+
+West is distributed as two Python packages:
+
+1. A ``bootstrap`` package, which is distributed via PyPI. Running
+   ``pip3 install west`` installs this **bootstrapper package only**.
+2. The "main" ``west`` package, which is fetched by the bootstrapper
+   when ``west init`` is run.
+
+This somewhat unusual arrangement is because:
+
+- One of west's jobs is to manage a Zephyr installation's Git
+  repositories, including its own.
+- It allows easy customization of the version of west that's shipped
+  with non-upstream distributions of Zephyr.
+- West is experimental and is not stable. Users need to stay in sync
+  with upstream, and this allows west to automatically update itself.
+
+To initialize west from a non-default location::
+
+  west init -w https://example.com/your-west-repository.git
+
+You can also add ``--west-rev some-branch`` to use ``some-branch``
+instead of ``master``.
+
+To use another manifest repository (optionally with ``--mr
+some-manifest-branch``)::
+
+  west init -u https://example.com/your-manifest-repository.git
+
+After ``init`` time, you can hack on the west tree in ``zephyrproject``.
+
+To install everything in development mode instead, clone the west
+repository and run this from the top level directory::
+
+  pip3 install -e .
+
+(On Linux, make sure ``~/.local/bin`` is in your ``PATH`` if you go
+this route.)
+
+If you don't want to change your system outside of cloning this
+repository (and installing dependencies), you can run the ``west``
+package as a module. In a Bash shell::
+
+  PYTHONPATH=/path/to/west/repository/src python3 -m west
+
+In a Windows command shell::
+
+  cmd /C "set PYTHONPATH=/path/to/west/repo && python3 -m west"
