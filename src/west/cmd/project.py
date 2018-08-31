@@ -114,9 +114,8 @@ class Rebase(WestCommand):
         return _add_parser(parser_adder, self, _project_list_arg)
 
     def do_run(self, args, user_args):
-        for project in _projects(args):
-            if _cloned(project):
-                _rebase(project)
+        for project in _cloned_projects(args):
+            _rebase(project)
 
 
 class Branch(WestCommand):
@@ -139,19 +138,16 @@ class Branch(WestCommand):
                            _project_list_arg)
 
     def do_run(self, args, user_args):
-        # Generator
-        projects = (project for project in _projects(args) if _cloned(project))
-
         if args.branch:
             # Create a branch in the specified projects
-            for project in projects:
+            for project in _cloned_projects(args):
                 _create_branch(project, args.branch)
         else:
-            # No arguments. List local branches from all projects along with
-            # the projects they appear in.
+            # No arguments. List local branches from all cloned projects along
+            # with the projects they appear in.
 
             branch2projs = collections.defaultdict(list)
-            for project in projects:
+            for project in _cloned_projects(args):
                 for branch in _branches(project):
                     branch2projs[branch].append(project.name)
 
@@ -178,15 +174,14 @@ class Checkout(WestCommand):
     def do_run(self, args, user_args):
         branch_exists = False
 
-        for project in _projects(args):
-            if _cloned(project):
-                if args.create_branch:
-                    _create_branch(project, args.branch)
-                    _checkout(project, args.branch)
-                    branch_exists = True
-                elif _has_branch(project, args.branch):
-                    _checkout(project, args.branch)
-                    branch_exists = True
+        for project in _cloned_projects(args):
+            if args.create_branch:
+                _create_branch(project, args.branch)
+                _checkout(project, args.branch)
+                branch_exists = True
+            elif _has_branch(project, args.branch):
+                _checkout(project, args.branch)
+                branch_exists = True
 
         if not branch_exists:
             msg = 'No branch {} exists in any '.format(args.branch)
@@ -214,12 +209,11 @@ class Diff(WestCommand):
         return _add_parser(parser_adder, self, _project_list_arg)
 
     def do_run(self, args, user_args):
-        for project in _projects(args):
-            if _cloned(project):
-                # Use paths that are relative to the base directory to make it
-                # easier to see where the changes are
-                _git(project, 'diff --src-prefix=(path)/ --dst-prefix=(path)/',
-                     extra_args=user_args)
+        for project in _cloned_projects(args):
+            # Use paths that are relative to the base directory to make it
+            # easier to see where the changes are
+            _git(project, 'diff --src-prefix=(path)/ --dst-prefix=(path)/',
+                 extra_args=user_args)
 
 
 class Status(WestCommand):
@@ -236,10 +230,9 @@ class Status(WestCommand):
         return _add_parser(parser_adder, self, _project_list_arg)
 
     def do_run(self, args, user_args):
-        for project in _projects(args):
-            if _cloned(project):
-                _inf(project, 'status of (name-and-path)')
-                _git(project, 'status', extra_args=user_args)
+        for project in _cloned_projects(args):
+            _inf(project, 'status of (name-and-path)')
+            _git(project, 'status', extra_args=user_args)
 
 
 class ForAll(WestCommand):
@@ -266,13 +259,12 @@ class ForAll(WestCommand):
         return _add_parser(parser_adder, self, _command_arg, _project_list_arg)
 
     def do_run(self, args, user_args):
-        for project in _projects(args):
-            if _cloned(project):
-                _inf(project, "Running '{}' in (name-and-path)"
-                              .format(args.command))
-                subprocess.Popen(
-                    args.command, shell=True, cwd=project.abspath
-                ).wait()
+        for project in _cloned_projects(args):
+            _inf(project, "Running '{}' in (name-and-path)"
+                          .format(args.command))
+
+            subprocess.Popen(args.command, shell=True, cwd=project.abspath) \
+                .wait()
 
 
 def _add_parser(parser_adder, cmd, *extra_args):
@@ -348,6 +340,16 @@ Project = collections.namedtuple(
     'name url revision path abspath clone_depth')
 
 
+def _cloned_projects(args):
+    # Returns _projects(args, listed_must_be_cloned=True) if a list of projects
+    # was given by the user (i.e., listed projects are required to be cloned).
+    # If no projects were listed, returns all cloned projects.
+
+    # This approach avoids redundant _cloned() checks
+    return _projects(args) if args.projects else \
+        [project for project in _all_projects(args) if _cloned(project)]
+
+
 def _projects(args, listed_must_be_cloned=True):
     # Returns a list of project instances for the projects requested in 'args'
     # (the command-line arguments), in the same order that they were listed by
@@ -359,8 +361,7 @@ def _projects(args, listed_must_be_cloned=True):
     # An error is raised on validation errors.
     #
     # listed_must_be_cloned (default: True):
-    #   If True, an error is raised if an uncloned project was listed (or if a
-    #   listed project's directory doesn't look like a Git repository). This
+    #   If True, an error is raised if an uncloned project was listed. This
     #   only applies to projects listed explicitly on the command line.
 
     projects = _all_projects(args)
