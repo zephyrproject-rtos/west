@@ -480,56 +480,67 @@ def _manifest_path(args):
 
 
 def _fetch(project):
-    # Clone 'project' if it does not exist, and 'git fetch' it otherwise. Also
-    # update the 'manifest-rev' branch to point to the revision specified in
-    # the manifest.
+    # Fetches upstream changes for 'project' and updates the 'manifest-rev'
+    # branch to point to the revision specified in the manifest. If the
+    # project's repository does not already exist, it is created first.
     #
-    # Returns True if the project already existed, and False if it was cloned.
+    # Returns True if the project's repository already existed.
 
-    if _cloned(project):
-        existed = True
-        _inf(project, 'Fetching changes for (name-and-path)')
-        _git(project, 'remote update')
-    else:
-        existed = False
+    exists = _cloned(project)
 
-        # --depth implies --single-branch, so we must pass --branch when
-        # creating a shallow clone (since the remote might not have HEAD
-        # pointing to the 'revision' branch).
+    if not exists:
+        _inf(project, 'Creating repository for (name-and-path)')
+        _git_base(project, 'init (abspath)')
+        _git(project, 'remote add origin (url)')
+
+    if project.clone_depth:
+        _inf(project,
+             'Fetching changes for (name-and-path) with --depth (clone-depth)')
+
+        # If 'clone-depth' is specified, fetch just the specified revision
+        # (probably a branch). That will download the minimum amount of data,
+        # which is probably what's wanted whenever 'clone-depth is used. The
+        # default 'git fetch' behavior is to do a shallow clone of all branches
+        # on the remote.
         #
-        # Currently, we also pass --branch for non-shallow clones, which checks
-        # the 'revision' branch out in the newly created repo, but this might
-        # change.
+        # Note: Many servers won't allow fetching arbitrary commits by SHA.
+        # Combining --depth with an SHA will break for those.
 
-        msg = 'Cloning (name-and-path)'
-        cmd = 'clone'
-        if _is_sha(project.revision):
-            # If the project revision is a SHA and the remote repo's
-            # HEAD doesn't point to anything valid, the clone
-            # operation might fail to check anything out. In that
-            # case, make sure to check out the given revision.
-            checkout = True
-        else:
-            cmd += ' --branch (revision)'
-            checkout = False
-        if project.clone_depth:
-            msg += ' with --depth (clone-depth)'
-            cmd += ' --depth (clone-depth)'
-        cmd += ' (url) (path)'
+        # Qualify branch names with refs/heads/, just to be safe. Just the
+        # branch name is likely to work as well though.
+        _git(project,
+             'fetch --depth=(clone-depth) origin ' +
+                 (project.revision if _is_sha(project.revision) else \
+                     'refs/heads/' + project.revision))
 
-        _inf(project, msg)
-        _git_base(project, cmd)
+    else:
+        _inf(project, 'Fetching changes for (name-and-path)')
 
-        if checkout:
-            _checkout(project, project.revision)
+        # If 'clone-depth' is not specified, fetch all branches on the
+        # remote. This gives a more usable repository.
+        _git(project, 'fetch origin')
 
-    # Update manifest-rev branch
+    # Create/update the 'manifest-rev' branch
     _git(project,
-         'update-ref refs/heads/(manifest-rev-branch) {}'.format(
+         'update-ref refs/heads/(manifest-rev-branch) ' +
              (project.revision if _is_sha(project.revision) else
-                 'origin/' + project.revision)))
+                 'remotes/origin/' + project.revision))
 
-    return existed
+    if not exists:
+        # If we just initialized the repository, check out 'manifest-rev' in a
+        # detached HEAD state.
+        #
+        # Otherwise, the initial state would have nothing checked out, and HEAD
+        # would point to a non-existent refs/heads/master branch (that would
+        # get created if the user makes an initial commit). That state causes
+        # e.g. 'west rebase' to fail, and might look confusing.
+        #
+        # (The --detach flag is strictly redundant here, because the
+        # refs/heads/<branch> form already detaches HEAD, but it avoids a
+        # spammy detached HEAD warning from Git.)
+        _git(project, 'checkout --detach refs/heads/(manifest-rev-branch)')
+
+    return exists
 
 
 def _rebase(project):
@@ -694,6 +705,7 @@ def _expand_shorthands(project, s):
                          project.name, os.path.join(project.path, ""))) \
             .replace('(url)', project.url) \
             .replace('(path)', project.path) \
+            .replace('(abspath)', project.abspath) \
             .replace('(revision)', project.revision) \
             .replace('(manifest-rev-branch)', _MANIFEST_REV_BRANCH) \
             .replace('(clone-depth)', str(project.clone_depth))
