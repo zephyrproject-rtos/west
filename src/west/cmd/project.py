@@ -308,7 +308,7 @@ def _arg(*args, **kwargs):
 # Common manifest file argument
 _manifest_arg = _arg(
     '-m', '--manifest',
-    help='path to manifest file (default: <west-topdir>/manifest/default.yml)')
+    help='path to manifest file (default: west/manifest/default.yml)')
 
 # Optional -b flag for 'west checkout'
 _b_flag = _arg(
@@ -471,13 +471,11 @@ def _validate_manifest(manifest_path):
 
 
 def _manifest_path(args):
-    # Returns the path to the manifest file. Unless explicitly specified by the
-    # user, it defaults to manifest/default.yml within the West top directory.
+    # Returns the path to the manifest file. Defaults to
+    # .west/manifest/default.yml if the user didn't specify a manifest.
 
-    if args.manifest:
-        return args.manifest
-
-    return os.path.join(util.west_topdir(), 'manifest', 'default.yml')
+    return args.manifest or os.path.join(util.west_dir(), 'manifest',
+                                         'default.yml')
 
 
 def _fetch(project):

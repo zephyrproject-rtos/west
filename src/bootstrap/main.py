@@ -7,7 +7,6 @@
 
 import argparse
 import os
-from os.path import join
 import importlib
 import platform
 import subprocess
@@ -22,8 +21,7 @@ MANIFEST_REV_DEFAULT = 'master'
 WEST = 'west'
 WEST_DEFAULT = 'https://github.com/zephyrproject-rtos/west'
 WEST_REV_DEFAULT = 'master'
-# NB: on Windows, this will be hidden manually, using attrib.
-WEST_DIR = '.west'
+WEST_DIR = 'west'
 
 #
 # Helpers shared between init and wrapper mode
@@ -54,24 +52,6 @@ def find_west_topdir(start):
         raise WestNotFound()
     else:
         return find_west_topdir(dirname)
-
-
-def make_topdir_sentinel(directory):
-    '''Make the hidden sentinel that marks a West installation.
-
-    This is similar to .git or .repo directories: it marks the top
-    level directory of the installation. This allows runtime building
-    other paths, etc., which is how this script delegates to the
-    cloned west in wrapper mode (i.e. after 'west init' is run and the
-    "real" west repository has been cloned).'''
-    # The sentinel is a directory in case we ever need to stash
-    # anything inside. It could just as well be an empty file for now,
-    # but this is more future-proof.
-    sentinel = join(directory, WEST_DIR)
-    os.mkdir(sentinel)
-    # On Windows, we have to manually mark a file as hidden.
-    if platform.system() == 'Windows':
-        subprocess.check_call(['attrib', '+H', sentinel])
 
 
 def clone(url, rev, dest):
@@ -163,9 +143,14 @@ def init_bootstrap(directory, args):
     else:
         print('Initializing in', directory)
 
-    make_topdir_sentinel(directory)
-    clone(args.manifest_url, args.manifest_rev, join(directory, MANIFEST))
-    clone(args.west_url, args.west_rev, join(directory, WEST))
+    # Clone the west source code and the manifest into west/. Git will create
+    # the west/ directory if it does not exist.
+
+    clone(args.west_url, args.west_rev,
+          os.path.join(directory, WEST_DIR, WEST))
+
+    clone(args.manifest_url, args.manifest_rev,
+          os.path.join(directory, WEST_DIR, MANIFEST))
 
 
 def init_reinit(directory, args):
@@ -187,7 +172,7 @@ def wrap(argv):
                  'Use "west init" to install Zephyr here'.format(start))
     # Put the top-level west source directory at the highest priority
     # except for the script directory / current working directory.
-    sys.path.insert(1, join(topdir, WEST, 'src'))
+    sys.path.insert(1, os.path.join(topdir, WEST, 'src'))
     main_module = importlib.import_module('west.main')
     main_module.main(argv=argv)
 

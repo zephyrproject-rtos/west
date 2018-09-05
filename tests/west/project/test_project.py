@@ -53,7 +53,7 @@ def cmd(cmd):
 
 @pytest.fixture
 def clean_west_topdir(tmpdir):
-    tmpdir.mkdir('.west')
+    tmpdir.mkdir('west')
     tmpdir.chdir()
 
 
