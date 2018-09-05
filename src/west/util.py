@@ -27,20 +27,30 @@ class WestNotFound(RuntimeError):
     '''Neither the current directory nor any parent has a West installation.'''
 
 
+def west_dir():
+    '''
+    Returns the absolute path of the first west/ directory found, searching the
+    current directory and its parents.
+
+    Raises WestNotFound if no west/ directory is found.
+    '''
+    return os.path.join(west_topdir(), 'west')
+
+
 def west_topdir():
     '''
-    Returns the absolute path of the first directory containing a .west/
-    directory, searching the current directory and its parents.
-
-    Raises WestNotFound if no .west/ directory is found.
+    Like west_dir(), but returns the path to the parent directory of the west/
+    directory instead, where project repositories are stored
     '''
-    search_dir = os.getcwd()
+    cur_dir = os.getcwd()
 
-    # While the directory is not the root directory...
-    while search_dir != os.path.dirname(search_dir):
-        if os.path.isdir(os.path.join(search_dir, '.west')):
-            return search_dir
-        search_dir = os.path.dirname(search_dir)
+    while True:
+        if os.path.isdir(os.path.join(cur_dir, 'west')):
+            return cur_dir
 
-    raise WestNotFound('Could not find a West installation (a .west/ '
-                       'directory) in this or any parent directory')
+        parent_dir = os.path.dirname(cur_dir)
+        if cur_dir == parent_dir:
+            # At the root
+            raise WestNotFound('Could not find a West installation (a west/ '
+                               'directory) in this or any parent directory')
+        cur_dir = parent_dir
