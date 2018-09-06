@@ -13,6 +13,9 @@ import platform
 import subprocess
 import sys
 
+if sys.version_info < (3,):
+    sys.exit('fatal error: you are running Python 2')
+
 MANIFEST = 'manifest'
 MANIFEST_DEFAULT = 'https://github.com/zephyrproject-rtos/manifest'
 MANIFEST_REV_DEFAULT = 'master'
