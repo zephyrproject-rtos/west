@@ -101,14 +101,18 @@ def init(argv):
         prog='west init',
         description='Bootstrap initialize a Zephyr installation')
     init_parser.add_argument(
-        '-u', '--manifest-url', default=MANIFEST_DEFAULT,
+        '-b', '--base-url',
+        help='''Base URL for both 'manifest' and 'zephyr' repositories; cannot
+        be given if either -u or -w are''')
+    init_parser.add_argument(
+        '-u', '--manifest-url',
         help='Zephyr manifest fetch URL, default ' + MANIFEST_DEFAULT)
     init_parser.add_argument(
         '--mr', '--manifest-rev', default=MANIFEST_REV_DEFAULT,
         dest='manifest_rev',
         help='Manifest revision to fetch, default ' + MANIFEST_REV_DEFAULT)
     init_parser.add_argument(
-        '-w', '--west-url', default=WEST_DEFAULT,
+        '-w', '--west-url',
         help='West fetch URL, default ' + WEST_DEFAULT)
     init_parser.add_argument(
         '--wr', '--west-rev', default=WEST_REV_DEFAULT, dest='west_rev',
@@ -119,6 +123,17 @@ def init(argv):
 
     args = init_parser.parse_args(args=argv)
     directory = args.directory or os.getcwd()
+
+    if args.base_url:
+        if args.manifest_url or args.west_url:
+            sys.exit('fatal error: -b is incompatible with -u and -w')
+        args.manifest_url = args.base_url.rstrip('/') + '/manifest'
+        args.west_url = args.base_url.rstrip('/') + '/west'
+    else:
+        if not args.manifest_url:
+            args.manifest_url = MANIFEST_DEFAULT
+        if not args.west_url:
+            args.west_url = WEST_DEFAULT
 
     try:
         topdir = find_west_topdir(directory)
