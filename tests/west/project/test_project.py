@@ -1,19 +1,22 @@
 import argparse
 import os
 import shlex
+import shutil
+import subprocess
 
 import pytest
 
 import west.cmd.project
 
-
-MANIFEST_PATH = os.path.abspath(
+# Path to the template manifest used to construct a real one when
+# running each test case.
+MANIFEST_TEMPLATE_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), 'manifest.yml')
 )
 
 # Where the projects are cloned to
 NET_TOOLS_PATH = 'net-tools'
-KCONFIGLIB_PATH = 'sub/kconfiglib'
+KCONFIGLIB_PATH = 'sub/Kconfiglib'
 
 COMMAND_OBJECTS = (
     west.cmd.project.ListProjects(),
@@ -29,7 +32,10 @@ COMMAND_OBJECTS = (
 
 
 def cmd(cmd):
-    cmd += ' -m ' + MANIFEST_PATH
+    # We assume the manifest is in ../manifest.yml when tests are run.
+    manifest_path = os.path.abspath(os.path.join(os.path.dirname(os.getcwd()),
+                                                 'manifest.yml'))
+    cmd += ' -m ' + manifest_path
 
     # cmd() takes the command as a string, which is less clunky to work with.
     # Split it according to shell rules.
@@ -52,8 +58,48 @@ def cmd(cmd):
 
 @pytest.fixture
 def clean_west_topdir(tmpdir):
-    tmpdir.mkdir('west')
-    tmpdir.chdir()
+    # Initialize the repositories used for testing.
+    repos = tmpdir.join('repositories')
+    repos.mkdir()
+    git = shutil.which('git')
+    for path in ('net-tools', 'Kconfiglib'):
+        fullpath = str(repos.join(path))
+        subprocess.check_call([git, 'init', fullpath])
+        # The repository gets user name and email set in case there is
+        # no global default.
+        #
+        # The extra '--no-xxx' flags are for convenience when testing
+        # on developer workstations, which may have global git
+        # configuration to sign commits, etc.
+        #
+        # We don't want any of that, as it could require user
+        # intervention or fail in environments where Git isn't
+        # configured.
+        subprocess.check_call([git, 'config', 'user.name', 'West Test'],
+                              cwd=fullpath)
+        subprocess.check_call([git, 'config', 'user.email',
+                               'west-test@example.com'],
+                              cwd=fullpath)
+        subprocess.check_call([git, 'commit',
+                               '--allow-empty',
+                               '-m', 'empty commit',
+                               '--no-verify',
+                               '--no-gpg-sign',
+                               '--no-post-rewrite'],
+                              cwd=fullpath)
+        if path == 'Kconfiglib':
+            subprocess.check_call([git, 'branch', 'zephyr'], cwd=fullpath)
+
+    # Create the per-tmpdir manifest file.
+    with open(MANIFEST_TEMPLATE_PATH, 'r') as src:
+        with open(str(tmpdir.join('manifest.yml')), 'w') as dst:
+            dst.write(src.read().format(tmpdir=str(repos)))
+
+    # Initialize and change to the installation directory.
+    zephyrproject = tmpdir.join('zephyrproject')
+    zephyrproject.mkdir()
+    zephyrproject.mkdir('west')
+    zephyrproject.chdir()
 
 
 def test_list_projects(clean_west_topdir):

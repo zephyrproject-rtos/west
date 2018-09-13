@@ -1,18 +1,19 @@
-# Testing manifest
+# Simple manifest template used for testing project commands.
+#
+# The local-tmpdir URL is rewritten to the temporary directory used
+# when tests are run.
 
 manifest:
   defaults:
-    remote: zephyrproject-rtos
+    remote: local-tmpdir
     revision: master
 
   remotes:
-    - name: zephyrproject-rtos
-      url: https://github.com/zephyrproject-rtos
+    - name: local-tmpdir
+      url: file://{tmpdir}
 
   projects:
     - name: net-tools
-      clone-depth: 1
     - name: Kconfiglib
-      clone-depth: 1
       revision: zephyr
-      path: sub/kconfiglib
+      path: sub/Kconfiglib
