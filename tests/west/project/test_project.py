@@ -1,7 +1,6 @@
 import argparse
 import os
 import shlex
-import tempfile
 
 import pytest
 
