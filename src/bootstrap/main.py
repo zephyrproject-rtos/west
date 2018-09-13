@@ -18,10 +18,22 @@ if sys.version_info < (3,):
 MANIFEST = 'manifest'
 MANIFEST_DEFAULT = 'https://github.com/zephyrproject-rtos/manifest'
 MANIFEST_REV_DEFAULT = 'master'
-WEST = 'west'
-WEST_DEFAULT = 'https://github.com/zephyrproject-rtos/west'
-WEST_REV_DEFAULT = 'master'
+
+# Top-level west directory, containing west itself and the manifest.
 WEST_DIR = 'west'
+# Subdirectory to check out the west source repository into.
+WEST = 'west'
+# Default west repository URL.
+WEST_DEFAULT = 'https://github.com/zephyrproject-rtos/west'
+# Default revision to check out of the west repository.
+WEST_REV_DEFAULT = 'master'
+# File inside of WEST_DIR which marks it as the top level of the
+# Zephyr project installation.
+#
+# (The WEST_DIR name is not distinct enough to use when searching for
+# the top level; other directories named "west" may exist elsewhere,
+# e.g. zephyr/doc/west.)
+WEST_TOPDIR = '.west_topdir'
 
 #
 # Helpers shared between init and wrapper mode
@@ -40,18 +52,22 @@ def find_west_topdir(start):
     '''Find the top-level installation directory, starting at ``start``.
 
     If none is found, raises WestNotFound.'''
-    if not os.path.isdir(start):
-        raise WestNotFound()
+    # If you change this function, make sure to update west.util.west_topdir().
+    def is_west_dir(d):
+        return os.path.isdir(d) and '.west_topdir' in os.listdir(d)
 
-    if WEST_DIR in os.listdir(start):
-        return start
+    cur_dir = os.getcwd()
 
-    dirname = os.path.dirname(start)
-    if start == dirname:
-        # / on POSIX, top level drive name on Windows.
-        raise WestNotFound()
-    else:
-        return find_west_topdir(dirname)
+    while True:
+        if is_west_dir(os.path.join(cur_dir, 'west')):
+            return cur_dir
+
+        parent_dir = os.path.dirname(cur_dir)
+        if cur_dir == parent_dir:
+            # At the root
+            raise WestNotFound('Could not find a West installation '
+                               'in this or any parent directory')
+        cur_dir = parent_dir
 
 
 def clone(url, rev, dest):
@@ -125,6 +141,29 @@ def init(argv):
         init_bootstrap(directory, args)
 
 
+def hide_file(path):
+    '''Ensure path is a hidden file.
+
+    On Windows, this uses attrib to hide the file manually.
+
+    On UNIX systems, this just checks that the path's basename begins
+    with a period ('.'), for it to be hidden already. It's a fatal
+    error if it does not begin with a period in this case.
+
+    On other systems, this just prints a warning.
+    '''
+    system = platform.system()
+
+    if system == 'Windows':
+        subprocess.check_call(['attrib', '+H', path])
+    elif os.name == 'posix':  # Try to check for all Unix, not just macOS/Linux
+        if not os.path.basename(path).startswith('.'):
+            sys.exit("internal error: {} can't be hidden on UNIX".format(path))
+    else:
+        print("warning: unknown platform {}; {} may not be hidden"
+              .format(system, path), file=sys.stderr)
+
+
 def init_bootstrap(directory, args):
     '''Bootstrap a new manifest + West installation in the given directory.'''
     if not os.path.isdir(directory):
@@ -151,6 +190,11 @@ def init_bootstrap(directory, args):
 
     clone(args.manifest_url, args.manifest_rev,
           os.path.join(directory, WEST_DIR, MANIFEST))
+
+    # Mark the top level installation.
+
+    with open(os.path.join(directory, WEST_DIR, WEST_TOPDIR), 'w') as f:
+        hide_file(f.name)
 
 
 def init_reinit(directory, args):
