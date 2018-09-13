@@ -15,9 +15,13 @@ import sys
 if sys.version_info < (3,):
     sys.exit('fatal error: you are running Python 2')
 
-MANIFEST = 'manifest'
-MANIFEST_DEFAULT = 'https://github.com/zephyrproject-rtos/manifest'
-MANIFEST_REV_DEFAULT = 'master'
+
+#
+# Special files and directories in the west installation.
+#
+# These are given variable names for clarity, but they can't be
+# changed without propagating the changes into west itself.
+#
 
 # Top-level west directory, containing west itself and the manifest.
 WEST_DIR = 'west'
@@ -34,6 +38,14 @@ WEST_REV_DEFAULT = 'master'
 # the top level; other directories named "west" may exist elsewhere,
 # e.g. zephyr/doc/west.)
 WEST_TOPDIR = '.west_topdir'
+
+# Manifest repository directory under WEST_DIR.
+MANIFEST = 'manifest'
+# Default manifest repository URL.
+MANIFEST_DEFAULT = 'https://github.com/zephyrproject-rtos/manifest'
+# Default revision to check out of the manifest repository.
+MANIFEST_REV_DEFAULT = 'master'
+
 
 #
 # Helpers shared between init and wrapper mode
