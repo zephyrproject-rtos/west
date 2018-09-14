@@ -99,6 +99,7 @@ def clean_west_topdir(tmpdir):
     zephyrproject = tmpdir.join('zephyrproject')
     zephyrproject.mkdir()
     zephyrproject.mkdir('west')
+    zephyrproject.join('west', '.west_topdir').ensure()
     zephyrproject.chdir()
 
 
