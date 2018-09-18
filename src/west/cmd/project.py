@@ -509,8 +509,8 @@ def _fetch(project):
         # branch name is likely to work as well though.
         _git(project,
              'fetch --depth=(clone-depth) origin ' +
-                 (project.revision if _is_sha(project.revision) else \
-                     'refs/heads/' + project.revision))
+             (project.revision if _is_sha(project.revision) else
+              'refs/heads/' + project.revision))
 
     else:
         _inf(project, 'Fetching changes for (name-and-path)')
@@ -522,8 +522,8 @@ def _fetch(project):
     # Create/update the 'manifest-rev' branch
     _git(project,
          'update-ref refs/heads/(manifest-rev-branch) ' +
-             (project.revision if _is_sha(project.revision) else
-                 'remotes/origin/' + project.revision))
+         (project.revision if _is_sha(project.revision) else
+          'remotes/origin/' + project.revision))
 
     if not exists:
         # If we just initialized the repository, check out 'manifest-rev' in a

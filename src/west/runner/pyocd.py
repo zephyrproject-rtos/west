@@ -5,7 +5,6 @@
 '''Runner for pyOCD .'''
 
 import os
-import sys
 from .core import ZephyrBinaryRunner, RunnerCaps, BuildConfiguration
 from .. import log
 

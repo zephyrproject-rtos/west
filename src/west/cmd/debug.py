@@ -50,6 +50,7 @@ class DebugServer(WestCommand):
         do_run_common(self, my_args, runner_args,
                       'ZEPHYR_BOARD_DEBUG_RUNNER')
 
+
 class Attach(WestCommand):
 
     def __init__(self):

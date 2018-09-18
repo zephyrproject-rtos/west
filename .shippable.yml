@@ -11,7 +11,8 @@ build:
   ci:
     - pip install -r requirements.txt
     - pip install -r tests_requirements.txt
-    - pip install -e .
+    - flake8 src tests
+    - python setup.py install
     - mkdir -p shippable/{testresults,codecoverage}
-    - pytest --junitxml=shippable/testresults/nosetests.xml tests
-    - pytest --cov=west --cov-report=xml:shippable/codecoverage/coverage.xml tests
+    - PYTHONPATH=src pytest --junitxml=shippable/testresults/nosetests.xml tests
+    - PYTHONPATH=src pytest --cov=west --cov-report=xml:shippable/codecoverage/coverage.xml tests

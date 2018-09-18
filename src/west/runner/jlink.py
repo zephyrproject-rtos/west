@@ -84,7 +84,7 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
 
     def do_run(self, command, **kwargs):
         server_cmd = (self.gdbserver_cmd +
-                      ['-select', 'usb', # only USB connections supported
+                      ['-select', 'usb',  # only USB connections supported
                        '-port', str(self.gdb_port),
                        '-if', self.iface,
                        '-speed', self.speed,
@@ -117,15 +117,15 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
         if self.bin_name is None:
             raise ValueError('Cannot flash; bin_name is missing')
 
-        lines = ['r'] # Reset and halt the target
+        lines = ['r']  # Reset and halt the target
 
         if self.erase:
-            lines.append('erase') # Erase all flash sectors
+            lines.append('erase')  # Erase all flash sectors
 
         lines.append('loadfile {} 0x{:x}'.format(self.bin_name,
                                                  self.flash_addr))
-        lines.append('g') # Start the CPU
-        lines.append('q') # Close the connection and quit
+        lines.append('g')  # Start the CPU
+        lines.append('q')  # Close the connection and quit
 
         # Don't use NamedTemporaryFile: the resulting file can't be
         # opened again on Windows.

@@ -169,7 +169,6 @@ def test_branches(clean_west_topdir):
     with pytest.raises(SystemExit):
         cmd('checkout')
 
-
     # Clone just one project
     cmd('fetch net-tools')
 

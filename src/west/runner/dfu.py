@@ -5,7 +5,6 @@
 '''Runner for flashing with dfu-util.'''
 
 from collections import namedtuple
-import os
 import sys
 import time
 
