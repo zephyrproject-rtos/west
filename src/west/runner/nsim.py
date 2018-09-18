@@ -56,7 +56,7 @@ class NsimBinaryRunner(ZephyrBinaryRunner):
 
     def do_run(self, command, **kwargs):
         kwargs['nsim-cfg'] = path.join(self.cfg.board_dir, 'support',
-                                          self.props)
+                                       self.props)
 
         if command == 'flash':
             self.do_flash(**kwargs)
@@ -69,14 +69,14 @@ class NsimBinaryRunner(ZephyrBinaryRunner):
         config = kwargs['nsim-cfg']
 
         cmd = (self.nsim_cmd +
-            ['-propsfile', config, self.cfg.kernel_elf])
+               ['-propsfile', config, self.cfg.kernel_elf])
         self.check_call(cmd)
 
     def do_debug(self, **kwargs):
         config = kwargs['nsim-cfg']
 
         server_cmd = (self.nsim_cmd +
-                       ['-gdb', '-port={}'.format(self.gdb_port),
+                      ['-gdb', '-port={}'.format(self.gdb_port),
                        '-propsfile', config])
 
         gdb_cmd = (self.gdb_cmd +
@@ -89,7 +89,7 @@ class NsimBinaryRunner(ZephyrBinaryRunner):
         config = kwargs['nsim-cfg']
 
         cmd = (self.nsim_cmd +
-                       ['-gdb', '-port={}'.format(self.gdb_port),
-                       '-propsfile', config])
+               ['-gdb', '-port={}'.format(self.gdb_port),
+                '-propsfile', config])
 
         self.check_call(cmd)

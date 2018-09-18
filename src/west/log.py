@@ -72,8 +72,8 @@ def wrn(*args):
 
 def err(*args, fatal=False):
     '''Print an error.'''
-    print(colorama.Fore.LIGHTRED_EX
-              + ('FATAL ERROR: ' if fatal else 'ERROR: '),
+    print(colorama.Fore.LIGHTRED_EX +
+          ('FATAL ERROR: ' if fatal else 'ERROR: '),
           end='', file=sys.stderr)
     print(*args, file=sys.stderr)
     print(colorama.Style.RESET_ALL, end='', file=sys.stderr, flush=True)
