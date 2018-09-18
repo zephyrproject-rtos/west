@@ -11,6 +11,7 @@ build:
   ci:
     - pip install -r requirements.txt
     - pip install -r tests_requirements.txt
+    - flake8 src tests
     - pip install -e .
     - mkdir -p shippable/{testresults,codecoverage}
     - pytest --junitxml=shippable/testresults/nosetests.xml tests
