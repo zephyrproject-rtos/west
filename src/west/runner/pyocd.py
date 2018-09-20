@@ -5,9 +5,9 @@
 '''Runner for pyOCD .'''
 
 import os
-import sys
-from .core import ZephyrBinaryRunner, RunnerCaps, BuildConfiguration
-from .. import log
+
+from west.runner.core import ZephyrBinaryRunner, RunnerCaps, BuildConfiguration
+from west import log
 
 DEFAULT_PYOCD_GDB_PORT = 3333
 

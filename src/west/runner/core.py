@@ -18,13 +18,21 @@ import platform
 import signal
 import subprocess
 
-from .. import log
-from ..util import quote_sh_list
+from west import log
+from west.util import quote_sh_list
 
 # Turn on to enable just printing the commands that would be run,
 # without actually running them. This can break runners that are expecting
 # output or if one command depends on another, so it's just for debugging.
 JUST_PRINT = False
+
+
+def get_runner_cls(runner):
+    '''Get a runner's class object, given its name.'''
+    for cls in ZephyrBinaryRunner.get_runners():
+        if cls.name() == runner:
+            return cls
+    raise ValueError('unknown runner "{}"'.format(runner))
 
 
 class _DebugDummyPopen:
@@ -288,8 +296,8 @@ class ZephyrBinaryRunner(abc.ABC):
        abstract methods. You may need to override capabilities().
 
     2. Make sure the Python module defining your runner class is
-       imported, e.g. by editing this package's __init__.py (otherwise,
-       get_runners() won't work).
+       imported, e.g. by adding it to the imports at the bottom of
+       this module (otherwise, get_runners() won't work).
 
     3. Give your runner's name to the Zephyr build system in your
        board's build files.
@@ -506,3 +514,24 @@ class ZephyrBinaryRunner(abc.ABC):
 
         log.dbg(quoted)
         return subprocess.Popen(cmd, creationflags=cflags, preexec_fn=preexec)
+
+# HACK: we import these here to ensure the ZephyrBinaryRunner
+# subclasses are defined; otherwise, ZephyrBinaryRunner.get_runners()
+# won't work. A better solution is needed to introspect the currently
+# available runners.
+
+# Explicitly silence the unused import warning.
+# flake8: noqa: F401
+import west.runner.arc
+import west.runner.bossac
+import west.runner.dfu
+import west.runner.esp32
+import west.runner.jlink
+import west.runner.nios2
+import west.runner.nrfjprog
+import west.runner.nsim
+import west.runner.openocd
+import west.runner.pyocd
+import west.runner.qemu
+import west.runner.xtensa
+import west.runner.intel_s1000
