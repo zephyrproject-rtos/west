@@ -7,9 +7,6 @@ import setuptools
 with open('README.rst', 'r') as f:
     long_description = f.read()
 
-with open('tests_requirements.txt', 'r') as f:
-    tests_require = f.readlines()
-
 setuptools.setup(
     name='west',
     version='0.1.99',
@@ -35,8 +32,6 @@ setuptools.setup(
         'pykwalify',
         ],
     python_requires='>=3.4',
-    tests_require=tests_require,
-    setup_requires=('pytest-runner',),
     entry_points={
         'console_scripts': (
             'west = bootstrap.main:main',
