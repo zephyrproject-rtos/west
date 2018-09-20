@@ -7,9 +7,6 @@ import setuptools
 with open('README.rst', 'r') as f:
     long_description = f.read()
 
-with open('requirements.txt', 'r') as f:
-    install_requires = f.readlines()
-
 with open('tests_requirements.txt', 'r') as f:
     tests_require = f.readlines()
 
@@ -32,7 +29,11 @@ setuptools.setup(
         'Operating System :: MacOS :: MacOS X',
         'Operating System :: Microsoft :: Windows',
         ],
-    install_requires=install_requires,
+    install_requires=[
+        'colorama',
+        'PyYAML',
+        'pykwalify',
+        ],
     python_requires='>=3.4',
     tests_require=tests_require,
     setup_requires=('pytest-runner',),
