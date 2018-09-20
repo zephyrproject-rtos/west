@@ -88,6 +88,9 @@ This somewhat unusual arrangement is because:
 - West is experimental and is not stable. Users need to stay in sync
   with upstream, and this allows west to automatically update itself.
 
+Using a Custom "Main" West
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 To initialize west from a non-default location::
 
   west init -w https://example.com/your-west-repository.git
@@ -102,20 +105,42 @@ some-manifest-branch``)::
 
 After ``init`` time, you can hack on the west tree in ``zephyrproject``.
 
-To install everything in development mode instead, clone the west
-repository and run this from the top level directory::
+Using a Custom West Bootstrapper
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  pip3 install -e .
+To package and install the west bootstrapper from a west repository
+checkout, `wheel`_ must be installed. It probably already is, but see
+"Installing Wheel" below if these instructions fail.
 
-(On Linux, make sure ``~/.local/bin`` is in your ``PATH`` if you go
-this route.)
+To build the west bootstrapper wheel file::
 
-If you don't want to change your system outside of cloning this
-repository (and installing dependencies), you can run the ``west``
-package as a module. In a Bash shell::
+  python3 setup.py bdist_wheel
 
-  PYTHONPATH=/path/to/west/repository/src python3 -m west
+This will create a file named ``dist/west-x.y.z-py3-none-any.whl``,
+where ``x.y.z`` is the current version in setup.py. Install it with::
 
-In a Windows command shell::
+  pip3 install -U dist/west-x.y.z-py3-none-any.whl
 
-  cmd /C "set PYTHONPATH=/path/to/west/repo && python3 -m west"
+You can then run ``west init`` with a bootstrapper created from the
+current repository contents.  (On Linux, make sure ``~/.local/bin`` is
+in your ``PATH``.)
+
+To uninstall this bootstrapper, use::
+
+  pip3 uninstall west
+
+You can then reinstall the mainline version from PyPI, etc.
+
+Installing Wheel
+~~~~~~~~~~~~~~~~
+
+On macOS and Windows, you can install wheel with::
+
+  pip3 install wheel
+
+That also works on Linux, but you may want to install wheel from your
+system package manager instead -- e.g. if you installed pip from your
+system package manager. The wheel package is likely named something
+like ``python3-wheel`` in that case.
+
+.. _wheel: https://wheel.readthedocs.io/en/latest/
