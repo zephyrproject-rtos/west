@@ -60,7 +60,14 @@ Test Suite
 To run the test suite, run this from the west repository::
 
   pip3 install -r tests_requirements.txt
-  python3 setup.py test
+
+Then, in a Bash shell::
+
+  PYTHONPATH=src py.test
+
+On Windows::
+
+  cmd /C "set PYTHONPATH=/path/to/west/src && py.test"
 
 Hacking on West
 ---------------
