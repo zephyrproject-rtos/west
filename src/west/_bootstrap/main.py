@@ -7,8 +7,8 @@
 
 import argparse
 import os
-import importlib
 import platform
+import shlex
 import subprocess
 import sys
 
@@ -226,11 +226,18 @@ def wrap(argv):
     except WestNotFound:
         sys.exit('Error: not a Zephyr directory (or any parent): {}\n'
                  'Use "west init" to install Zephyr here'.format(start))
-    # Put the top-level west source directory at the highest priority
-    # except for the script directory / current working directory.
-    sys.path.insert(1, os.path.join(topdir, WEST, 'src'))
-    main_module = importlib.import_module('west.main')
-    main_module.main(argv=argv)
+
+    # Replace the wrapper process with the "real" west
+    argv = ([sys.executable,
+            os.path.join(topdir, WEST_DIR, WEST, 'src', 'west', 'main.py')] +
+            argv[1:])
+
+    try:
+        os.execv(sys.executable, argv)
+    except OSError as e:
+        sys.exit('Error: Failed to run the main West script from the wrapper, '
+                 "via '{}': {}"
+                 .format(' '.join(shlex.quote(s) for s in argv), e))
 
 
 #
