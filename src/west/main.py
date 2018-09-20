@@ -13,14 +13,14 @@ import os
 import sys
 from subprocess import CalledProcessError
 
-from . import log
-from .cmd import CommandContextError
-from .cmd.build import Build
-from .cmd.flash import Flash
-from .cmd.debug import Debug, DebugServer, Attach
-from .cmd.project import ListProjects, Fetch, Pull, Rebase, Branch, Checkout, \
-                         Diff, Status, ForAll
-from .util import quote_sh_list
+from west import log
+from west.cmd.command import CommandContextError
+from west.cmd.build import Build
+from west.cmd.flash import Flash
+from west.cmd.debug import Debug, DebugServer, Attach
+from west.cmd.project import ListProjects, Fetch, Pull, Rebase, Branch, \
+                         Checkout, Diff, Status, ForAll
+from west.util import quote_sh_list
 
 
 COMMANDS = (
@@ -135,3 +135,7 @@ def main(argv=None):
             raise
         else:
             log.inf(for_stack_trace)
+
+
+if __name__ == '__main__':
+    main()

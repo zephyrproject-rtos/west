@@ -5,11 +5,10 @@
 import argparse
 import os
 
-from ..build import DEFAULT_BUILD_DIR, DEFAULT_CMAKE_GENERATOR, \
+from west import cmake, log
+from west.build import DEFAULT_BUILD_DIR, DEFAULT_CMAKE_GENERATOR, \
     is_zephyr_build
-from .. import log
-from .. import cmake
-from . import WestCommand
+from west.cmd.command import WestCommand
 
 BUILD_HELP = '''\
 Convenience wrapper for building Zephyr applications.
