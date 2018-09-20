@@ -228,11 +228,17 @@ def wrap(argv):
                  'Use "west init" to install Zephyr here'.format(start))
 
     # Replace the wrapper process with the "real" west
+    west_src = os.path.join(topdir, WEST_DIR, WEST, 'src')
     argv = ([sys.executable,
-            os.path.join(topdir, WEST_DIR, WEST, 'src', 'west', 'main.py')] +
+             os.path.join(west_src, 'west', 'main.py')] +
             argv[1:])
 
     try:
+        # Make sure the west directory is on PYTHONPATH, so its own
+        # imports work properly.
+        pp = os.environ.get('PYTHONPATH', '')
+        os.environ['PYTHONPATH'] = os.pathsep.join(([pp] if pp else []) +
+                                                   [west_src])
         os.execv(sys.executable, argv)
     except OSError as e:
         sys.exit('Error: Failed to run the main West script from the wrapper, '
