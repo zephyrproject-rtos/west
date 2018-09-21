@@ -82,20 +82,13 @@ def find_west_topdir(start):
 
 
 def clone(url, rev, dest):
-    def repository_type(url):
-        if url.startswith(('http:', 'https:', 'git:', 'git+ssh:', 'file:')):
-            return 'GIT'
-        else:
-            return 'UNKNOWN'
-
     if os.path.exists(dest):
-        msg = 'refusing to clone into existing location {}'.format(dest)
-        raise WestError(msg)
+        raise WestError('refusing to clone into existing location ' + dest)
 
-    if repository_type(url) == 'GIT':
-        subprocess.check_call(['git', 'clone', '-b', rev, '--', url, dest])
-    else:
+    if not url.startswith(('http:', 'https:', 'git:', 'git+shh:', 'file:')):
         raise WestError('Unknown URL scheme for repository: {}'.format(url))
+
+    subprocess.check_call(('git', 'clone', '-b', rev, '--', url, dest))
 
 
 #
