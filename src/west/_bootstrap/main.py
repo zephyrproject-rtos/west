@@ -95,7 +95,7 @@ def clone(url, rev, dest):
         raise WestError(msg)
 
     if repository_type(url) == 'GIT':
-        subprocess.check_call(['git', 'clone', url, '-b', rev, dest])
+        subprocess.check_call(['git', 'clone', '-b', rev, '--', url, dest])
     else:
         raise WestError('Unknown URL scheme for repository: {}'.format(url))
 
