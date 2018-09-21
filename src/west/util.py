@@ -44,13 +44,11 @@ def west_topdir():
     '''
     # If you change this function, make sure to update the bootstrap
     # script's find_west_topdir().
-    def is_west_dir(d):
-        return os.path.isdir(d) and '.west_topdir' in os.listdir(d)
 
     cur_dir = os.getcwd()
 
     while True:
-        if is_west_dir(os.path.join(cur_dir, 'west')):
+        if os.path.isfile(os.path.join(cur_dir, 'west', '.west_topdir')):
             return cur_dir
 
         parent_dir = os.path.dirname(cur_dir)
