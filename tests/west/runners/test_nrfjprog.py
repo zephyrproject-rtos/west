@@ -7,8 +7,8 @@ from unittest.mock import patch, call
 
 import pytest
 
-from west.runner.nrfjprog import NrfJprogBinaryRunner
-from .conftest import RC_KERNEL_HEX
+from runners.nrfjprog import NrfJprogBinaryRunner
+from conftest import RC_KERNEL_HEX
 
 
 #
@@ -159,9 +159,9 @@ def id_fn(test_case):
 
 
 @pytest.mark.parametrize('test_case', TEST_CASES, ids=id_fn)
-@patch('west.runner.nrfjprog.NrfJprogBinaryRunner.get_board_snr_from_user',
+@patch('runners.nrfjprog.NrfJprogBinaryRunner.get_board_snr_from_user',
        side_effect=get_board_snr_patch)
-@patch('west.runner.nrfjprog.NrfJprogBinaryRunner.check_call')
+@patch('runners.nrfjprog.NrfJprogBinaryRunner.check_call')
 def test_nrfjprog_init(cc, get_snr, test_case, runner_config):
     family, softreset, snr, erase = test_case
 
@@ -178,9 +178,9 @@ def test_nrfjprog_init(cc, get_snr, test_case, runner_config):
 
 
 @pytest.mark.parametrize('test_case', TEST_CASES, ids=id_fn)
-@patch('west.runner.nrfjprog.NrfJprogBinaryRunner.get_board_snr_from_user',
+@patch('runners.nrfjprog.NrfJprogBinaryRunner.get_board_snr_from_user',
        side_effect=get_board_snr_patch)
-@patch('west.runner.nrfjprog.NrfJprogBinaryRunner.check_call')
+@patch('runners.nrfjprog.NrfJprogBinaryRunner.check_call')
 def test_nrfjprog_create(cc, get_snr, test_case, runner_config):
     family, softreset, snr, erase = test_case
 

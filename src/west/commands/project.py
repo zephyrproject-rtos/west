@@ -14,9 +14,9 @@ import textwrap
 import pykwalify.core
 import yaml
 
-from . import WestCommand
-from .. import log
-from .. import util
+import log
+import util
+from commands import WestCommand
 
 
 # Branch that points to the revision specified in the manifest (which might be
@@ -62,12 +62,20 @@ class Fetch(WestCommand):
             (default: all projects). Repositories that do not already exist are
             cloned.
 
+            Unless --no-update is passed, the manifest and West source code
+            repositories are updated prior to fetching. See the 'update'
+            command.
+
             ''' + _MANIFEST_REV_HELP))
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(parser_adder, self, _project_list_arg)
+        return _add_parser(parser_adder, self, _no_update_arg,
+                           _project_list_arg)
 
     def do_run(self, args, user_args):
+        if args.update:
+            _update(True, True)
+
         for project in _projects(args, listed_must_be_cloned=False):
             log.dbg('fetching:', project, level=log.VERBOSE_VERY)
             _fetch(project)
@@ -86,12 +94,20 @@ class Pull(WestCommand):
             branch up to date. Repositories that do not already exist are
             cloned.
 
+            Unless --no-update is passed, the manifest and West source code
+            repositories are updated prior to pulling. See the 'update'
+            command.
+
             '''.format(_MANIFEST_REV_BRANCH) + _MANIFEST_REV_HELP))
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(parser_adder, self, _project_list_arg)
+        return _add_parser(parser_adder, self, _no_update_arg,
+                           _project_list_arg)
 
     def do_run(self, args, user_args):
+        if args.update:
+            _update(True, True)
+
         for project in _projects(args, listed_must_be_cloned=False):
             if _fetch(project):
                 _rebase(project)
@@ -134,8 +150,10 @@ class Branch(WestCommand):
             '''.format(_MANIFEST_REV_BRANCH) + _MANIFEST_REV_HELP))
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(parser_adder, self, _opt_branch_arg,
-                           _project_list_arg)
+        return _add_parser(
+            parser_adder, self,
+            _arg('branch', nargs='?', metavar='BRANCH_NAME'),
+            _project_list_arg)
 
     def do_run(self, args, user_args):
         if args.branch:
@@ -168,8 +186,14 @@ class Checkout(WestCommand):
             '''))
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(parser_adder, self, _b_flag, _branch_arg,
-                           _project_list_arg)
+        return _add_parser(
+            parser_adder, self,
+            _arg('-b',
+                 dest='create_branch',
+                 action='store_true',
+                 help='create the branch before checking it out'),
+            _arg('branch', metavar='BRANCH_NAME'),
+            _project_list_arg)
 
     def do_run(self, args, user_args):
         branch_exists = False
@@ -235,6 +259,42 @@ class Status(WestCommand):
             _git(project, 'status', extra_args=user_args)
 
 
+class Update(WestCommand):
+    def __init__(self):
+        super().__init__(
+            'update',
+            _wrap('''
+            Updates the manifest repository and/or the West source code
+            repository.
+
+            There is normally no need to run this command manually, because
+            'west fetch' and 'west pull' automatically update the West and
+            manifest repositories to the latest version before doing anything
+            else.
+
+            Pass --update-west or --update-manifest to update just that
+            repository. With no arguments, both are updated.
+            '''))
+
+    def do_add_parser(self, parser_adder):
+        return _add_parser(
+            parser_adder, self,
+            _arg('--update-west',
+                 dest='update_west',
+                 action='store_true',
+                 help='update the West source code repository'),
+            _arg('--update-manifest',
+                 dest='update_manifest',
+                 action='store_true',
+                 help='update the manifest repository'))
+
+    def do_run(self, args, user_args):
+        if not args.update_west and not args.update_manifest:
+            _update(True, True)
+        else:
+            _update(args.update_west, args.update_manifest)
+
+
 class ForAll(WestCommand):
     def __init__(self):
         super().__init__(
@@ -256,7 +316,13 @@ class ForAll(WestCommand):
             '''))
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(parser_adder, self, _command_arg, _project_list_arg)
+        return _add_parser(
+            parser_adder, self,
+            _arg('-c',
+                 dest='command',
+                 metavar='COMMAND',
+                 required=True),
+            _project_list_arg)
 
     def do_run(self, args, user_args):
         for project in _cloned_projects(args):
@@ -265,6 +331,32 @@ class ForAll(WestCommand):
 
             subprocess.Popen(args.command, shell=True, cwd=project.abspath) \
                 .wait()
+
+
+def _arg(*args, **kwargs):
+    # Helper for creating a new argument parser for a single argument,
+    # later passed in parents= to add_parser()
+
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(*args, **kwargs)
+    return parser
+
+
+# Arguments shared between more than one command
+
+_manifest_arg = _arg(
+    '-m', '--manifest',
+    help='path to manifest file (default: west/manifest/default.yml)')
+
+# For 'fetch' and 'pull'
+_no_update_arg = _arg(
+    '--no-update',
+    dest='update',
+    action='store_false',
+    help='do not update the manifest or West before fetching project data')
+
+# List of projects
+_project_list_arg = _arg('projects', metavar='PROJECT', nargs='*')
 
 
 def _add_parser(parser_adder, cmd, *extra_args):
@@ -296,45 +388,8 @@ project as of the most recent 'west fetch'/'west pull'.
 """.format(_MANIFEST_REV_BRANCH)[1:].replace("\n", " ")
 
 
-def _arg(*args, **kwargs):
-    # Helper for creating a new argument parser for a single argument,
-    # later passed in parents= to add_parser()
-
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument(*args, **kwargs)
-    return parser
-
-
-# Common manifest file argument
-_manifest_arg = _arg(
-    '-m', '--manifest',
-    help='path to manifest file (default: west/manifest/default.yml)')
-
-# Optional -b flag for 'west checkout'
-_b_flag = _arg(
-    '-b',
-    dest='create_branch',
-    action='store_true',
-    help='create the branch before checking it out')
-
-# Optional branch argument
-_opt_branch_arg = _arg('branch', nargs='?', metavar='BRANCH_NAME')
-
-# Mandatory branch argument
-_branch_arg = _arg('branch', metavar='BRANCH_NAME')
-
-# Command flag, for 'forall'
-_command_arg = _arg(
-    '-c',
-    dest='command',
-    metavar='COMMAND',
-    required=True)
-
-# Common project list argument
-_project_list_arg = _arg('projects', metavar='PROJECT', nargs='*')
-
-
-# Holds information about a project, taken from the manifest file
+# Holds information about a project, taken from the manifest file (or
+# constructed manually for "special" projects)
 Project = collections.namedtuple(
     'Project',
     'name url revision path abspath clone_depth')
@@ -604,6 +659,72 @@ def _checkout(project, branch):
     _git(project, 'checkout ' + branch)
 
 
+def _special_project(name):
+    # Returns a Project instance for one of the special repositories in west/,
+    # so that we can reuse the project-related functions for them
+
+    return Project(
+        name,
+        'dummy URL for {} repository'.format(name),
+        'master',
+        os.path.join('west', name.lower()),  # Path
+        os.path.join(util.west_dir(), name.lower()),  # Absolute path
+        None  # Clone depth
+    )
+
+
+def _update(update_west, update_manifest):
+    # 'try' is a keyword
+    def attempt(project, cmd):
+        res = _git(project, cmd, capture_stdout=True, check=False)
+        if res.returncode:
+            # The Git command's stderr isn't redirected and will also be
+            # available
+            _die(project, _FAILED_UPDATE_MSG.format(cmd))
+        return res.stdout
+
+    projects = []
+    if update_west:
+        projects.append(_special_project('West'))
+    if update_manifest:
+        projects.append(_special_project('manifest'))
+
+    for project in projects:
+        _dbg(project, 'Updating (name-and-path)', level=log.VERBOSE_NORMAL)
+
+        # Fetch changes from upstream
+        attempt(project, 'fetch')
+
+        # Get the SHA of the last commit in common with the upstream branch
+        merge_base = attempt(project, 'merge-base HEAD remotes/origin/master')
+
+        # Get the current SHA of the upstream branch
+        head_sha = attempt(project, 'show-ref --hash remotes/origin/master')
+
+        # If they differ, we need to rebase
+        if merge_base != head_sha:
+            attempt(project, 'rebase remotes/origin/master')
+
+            _inf(project, 'Updated (rebased) (name-and-path) to the '
+                          'latest version')
+
+            if project.name == 'west':
+                # Signal self-update, which will cause a restart. This is a bit
+                # nicer than doing the restart here, as callers will have a
+                # chance to flush file buffers, etc.
+                raise WestUpdated()
+
+
+_FAILED_UPDATE_MSG = """
+Failed to update (name-and-path), while running command '{}'. Please fix the
+state of the repository, or pass --no-update to 'west fetch/pull' to skip
+updating the manifest and West for the duration of the command."""[1:]
+
+
+class WestUpdated(Exception):
+    '''Raised after West has updated its own source code'''
+
+
 def _is_sha(s):
     try:
         int(s, 16)
@@ -677,6 +798,12 @@ def _git_helper(project, cmd, extra_args, cwd, capture_stdout, check):
 
     stdout, _ = popen.communicate()
 
+    dbg_msg = "'{}' in {} finished with exit status {}" \
+              .format(cmd_str, cwd, popen.returncode)
+    if capture_stdout:
+        dbg_msg += " and wrote {} to stdout".format(stdout)
+    log.dbg(dbg_msg, level=log.VERBOSE_VERY)
+
     if check and popen.returncode:
         _die(project, "Command '{}' failed for (name-and-path)"
                       .format(cmd_str))
@@ -710,12 +837,6 @@ def _expand_shorthands(project, s):
             .replace('(clone-depth)', str(project.clone_depth))
 
 
-def _die(project, msg):
-    # Die with 'msg'. Supports the same (foo) shorthands as the git commands.
-
-    log.die(_expand_shorthands(project, msg))
-
-
 def _inf(project, msg):
     # Print '=== msg' (to clearly separate it from Git output). Supports the
     # same (foo) shorthands as the git commands.
@@ -730,6 +851,18 @@ def _wrn(project, msg):
     # Warn with 'msg'. Supports the same (foo) shorthands as the git commands.
 
     log.wrn(_expand_shorthands(project, msg))
+
+
+def _dbg(project, msg, level):
+    # Like _wrn(), for debug messages
+
+    log.dbg(_expand_shorthands(project, msg), level=level)
+
+
+def _die(project, msg):
+    # Like _wrn(), for dying
+
+    log.die(_expand_shorthands(project, msg))
 
 
 # subprocess.CompletedProcess-alike, used instead of the real deal for Python

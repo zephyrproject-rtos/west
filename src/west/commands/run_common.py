@@ -10,12 +10,12 @@ from os import getcwd, path
 from subprocess import CalledProcessError
 import textwrap
 
-from .. import cmake
-from .. import log
-from .. import util
-from ..runner import get_runner_cls, ZephyrBinaryRunner
-from ..runner.core import RunnerConfig
-from . import CommandContextError
+import cmake
+import log
+import util
+from runners import get_runner_cls, ZephyrBinaryRunner
+from runners.core import RunnerConfig
+from commands import CommandContextError
 
 # Context-sensitive help indentation.
 # Don't change this, or output from argparse won't match up.

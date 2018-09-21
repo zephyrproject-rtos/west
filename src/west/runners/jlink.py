@@ -7,8 +7,8 @@
 import os
 import tempfile
 
-from .. import log
-from .core import ZephyrBinaryRunner, RunnerCaps, BuildConfiguration
+import log
+from runners.core import ZephyrBinaryRunner, RunnerCaps, BuildConfiguration
 
 DEFAULT_JLINK_GDB_PORT = 2331
 

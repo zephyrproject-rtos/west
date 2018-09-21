@@ -6,8 +6,8 @@
 
 import os
 import sys
-from .core import ZephyrBinaryRunner, RunnerCaps, BuildConfiguration
-from .. import log
+from runners.core import ZephyrBinaryRunner, RunnerCaps, BuildConfiguration
+import log
 
 DEFAULT_PYOCD_GDB_PORT = 3333
 

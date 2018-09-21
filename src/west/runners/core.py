@@ -18,8 +18,8 @@ import platform
 import signal
 import subprocess
 
-from .. import log
-from ..util import quote_sh_list
+import log
+from util import quote_sh_list
 
 # Turn on to enable just printing the commands that would be run,
 # without actually running them. This can break runners that are expecting
