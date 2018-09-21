@@ -44,24 +44,8 @@ COMMANDS = (
 '''Built-in West commands.'''
 
 
-class InvalidWestContext(RuntimeError):
-    pass
-
-
 def command_handler(command, known_args, unknown_args):
     command.run(known_args, unknown_args)
-
-
-def validate_context(args, unknown):
-    '''Validate the run-time context expected by west.'''
-    if args.zephyr_base:
-        os.environ['ZEPHYR_BASE'] = args.zephyr_base
-    else:
-        if 'ZEPHYR_BASE' not in os.environ:
-            log.wrn('--zephyr-base missing and no ZEPHYR_BASE',
-                    'in the environment')
-        else:
-            args.zephyr_base = os.environ['ZEPHYR_BASE']
 
 
 def parse_args(argv):
@@ -89,12 +73,10 @@ def parse_args(argv):
     # work properly.
     log.set_verbosity(args.verbose)
 
-    try:
-        validate_context(args, unknown)
-    except InvalidWestContext as iwc:
-        log.err(*iwc.args, fatal=True)
-        west_parser.print_usage(file=sys.stderr)
-        sys.exit(1)
+    if args.zephyr_base:
+        os.environ['ZEPHYR_BASE'] = args.zephyr_base
+    elif 'ZEPHYR_BASE' not in os.environ:
+        log.wrn('--zephyr-base missing and no ZEPHYR_BASE in the environment')
 
     if 'handler' not in args:
         log.err('you must specify a command', fatal=True)
