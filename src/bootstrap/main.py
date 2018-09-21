@@ -68,7 +68,7 @@ def find_west_topdir(start):
     def is_west_dir(d):
         return os.path.isdir(d) and '.west_topdir' in os.listdir(d)
 
-    cur_dir = os.getcwd()
+    cur_dir = start
 
     while True:
         if is_west_dir(os.path.join(cur_dir, 'west')):
