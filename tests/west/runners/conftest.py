@@ -6,7 +6,7 @@
 
 import pytest
 
-from west.runner.core import RunnerConfig, ZephyrBinaryRunner
+from runners.core import RunnerConfig, ZephyrBinaryRunner
 
 RC_BUILD_DIR = '/test/build-dir'
 RC_BOARD_DIR = '/test/zephyr/boards/test-arch/test-board'
@@ -20,7 +20,7 @@ RC_OPENOCD_SEARCH = '/test/openocd/search'
 
 @pytest.fixture
 def runner_config():
-    '''Fixture which provides a west.runner.core.RunnerConfig.'''
+    '''Fixture which provides a runners.core.RunnerConfig.'''
     return RunnerConfig(RC_BUILD_DIR, RC_BOARD_DIR, RC_KERNEL_ELF,
                         RC_KERNEL_HEX, RC_KERNEL_BIN, gdb=RC_GDB,
                         openocd=RC_OPENOCD, openocd_search=RC_OPENOCD_SEARCH)

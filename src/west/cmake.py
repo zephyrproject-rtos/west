@@ -10,8 +10,8 @@ import re
 import subprocess
 import shutil
 
-from . import log
-from .util import quote_sh_list
+import log
+from util import quote_sh_list
 
 __all__ = ['run_cmake', 'run_build',
            'make_c_identifier',

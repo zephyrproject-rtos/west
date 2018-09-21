@@ -10,8 +10,8 @@ building Zephyr applications needed by multiple commands.
 See west.cmd.build for the build command itself.
 '''
 
-from . import cmake
-from . import log
+import cmake
+import log
 
 DEFAULT_BUILD_DIR = 'build'
 '''Name of the default Zephyr build directory.'''

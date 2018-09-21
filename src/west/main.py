@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # Copyright 2018 Open Source Foundries Limited.
 #
 # SPDX-License-Identifier: Apache-2.0
@@ -13,14 +15,15 @@ import os
 import sys
 from subprocess import CalledProcessError
 
-from . import log
-from .cmd import CommandContextError
-from .cmd.build import Build
-from .cmd.flash import Flash
-from .cmd.debug import Debug, DebugServer, Attach
-from .cmd.project import ListProjects, Fetch, Pull, Rebase, Branch, Checkout, \
-                         Diff, Status, ForAll
-from .util import quote_sh_list
+import log
+from commands import CommandContextError
+from commands.build import Build
+from commands.flash import Flash
+from commands.debug import Debug, DebugServer, Attach
+from commands.project import ListProjects, Fetch, Pull, Rebase, Branch, \
+                             Checkout, Diff, Status, Update, ForAll, \
+                             WestUpdated
+from util import quote_sh_list
 
 
 COMMANDS = (
@@ -39,6 +42,7 @@ COMMANDS = (
     Checkout(),
     Diff(),
     Status(),
+    Update(),
     ForAll(),
 )
 '''Built-in West commands.'''
@@ -65,6 +69,8 @@ def validate_context(args, unknown):
 
 
 def parse_args(argv):
+    # The prog='west' override avoids the absolute path of the main.py script
+    # showing up when West is run via the wrapper
     west_parser = argparse.ArgumentParser(
         prog='west', description='The Zephyr RTOS meta-tool.',
         epilog='Run "west <command> -h" for help on each command.')
@@ -117,6 +123,10 @@ def main(argv=None):
         args.command)
     try:
         args.handler(args, unknown)
+    except WestUpdated:
+        # West has been automatically updated. Restart ourselves to run the
+        # latest version, with the same arguments that we were given.
+        os.execv(sys.executable, [sys.executable] + sys.argv)
     except KeyboardInterrupt:
         sys.exit(0)
     except CalledProcessError as cpe:
@@ -135,3 +145,6 @@ def main(argv=None):
             raise
         else:
             log.inf(for_stack_trace)
+
+if __name__ == "__main__":
+    main()

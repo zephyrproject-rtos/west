@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-import west.cmd.project
+import commands.project
 
 # Path to the template manifest used to construct a real one when
 # running each test case.
@@ -19,15 +19,15 @@ NET_TOOLS_PATH = 'net-tools'
 KCONFIGLIB_PATH = 'sub/Kconfiglib'
 
 COMMAND_OBJECTS = (
-    west.cmd.project.ListProjects(),
-    west.cmd.project.Fetch(),
-    west.cmd.project.Pull(),
-    west.cmd.project.Rebase(),
-    west.cmd.project.Branch(),
-    west.cmd.project.Checkout(),
-    west.cmd.project.Diff(),
-    west.cmd.project.Status(),
-    west.cmd.project.ForAll(),
+    commands.project.ListProjects(),
+    commands.project.Fetch(),
+    commands.project.Pull(),
+    commands.project.Rebase(),
+    commands.project.Branch(),
+    commands.project.Checkout(),
+    commands.project.Diff(),
+    commands.project.Status(),
+    commands.project.ForAll(),
 )
 
 
@@ -110,7 +110,7 @@ def test_list_projects(clean_west_topdir):
 
 def test_fetch(clean_west_topdir):
     # Clone all projects
-    cmd('fetch')
+    cmd('fetch --no-update')
 
     # Check that they got cloned
     assert os.path.isdir(NET_TOOLS_PATH)
@@ -118,15 +118,15 @@ def test_fetch(clean_west_topdir):
 
     # Non-existent project
     with pytest.raises(SystemExit):
-        cmd('fetch non-existent')
+        cmd('fetch --no-update non-existent')
 
     # Update a specific project
-    cmd('fetch net-tools')
+    cmd('fetch --no-update net-tools')
 
 
 def test_pull(clean_west_topdir):
     # Clone all projects
-    cmd('pull')
+    cmd('pull --no-update')
 
     # Check that they got cloned
     assert os.path.isdir(NET_TOOLS_PATH)
@@ -134,15 +134,15 @@ def test_pull(clean_west_topdir):
 
     # Non-existent project
     with pytest.raises(SystemExit):
-        cmd('pull non-existent')
+        cmd('pull --no-update non-existent')
 
     # Update a specific project
-    cmd('pull net-tools')
+    cmd('pull --no-update net-tools')
 
 
 def test_rebase(clean_west_topdir):
     # Clone just one project
-    cmd('fetch net-tools')
+    cmd('fetch --no-update net-tools')
 
     # Piggyback a check that just that project got cloned
     assert not os.path.exists(KCONFIGLIB_PATH)
@@ -155,10 +155,10 @@ def test_rebase(clean_west_topdir):
 
     # Try rebasing a project that hasn't been cloned
     with pytest.raises(SystemExit):
-        cmd('pull rebase Kconfiglib')
+        cmd('pull --no-update rebase Kconfiglib')
 
     # Clone the other project
-    cmd('pull Kconfiglib')
+    cmd('pull --no-update Kconfiglib')
 
     # Will rebase both projects now
     cmd('rebase')
@@ -171,7 +171,7 @@ def test_branches(clean_west_topdir):
 
 
     # Clone just one project
-    cmd('fetch net-tools')
+    cmd('fetch --no-update net-tools')
 
     # Create a branch in the cloned project
     cmd('branch foo')
@@ -191,7 +191,7 @@ def test_branches(clean_west_topdir):
         cmd('checkout foo Kconfiglib')
 
     # Clone the other project
-    cmd('fetch Kconfiglib')
+    cmd('fetch --no-update Kconfiglib')
 
     # It still doesn't have the branch
     with pytest.raises(SystemExit):
@@ -222,10 +222,10 @@ def test_diff(clean_west_topdir):
 
     # Neither should it fail after fetching one or both projects
 
-    cmd('fetch net-tools')
+    cmd('fetch --no-update net-tools')
     cmd('diff')
 
-    cmd('fetch Kconfiglib')
+    cmd('fetch --no-update Kconfiglib')
     cmd('diff --cached')  # Pass a custom flag too
 
 
@@ -238,10 +238,10 @@ def test_status(clean_west_topdir):
 
     # Neither should it fail after fetching one or both projects
 
-    cmd('fetch net-tools')
+    cmd('fetch --no-update net-tools')
     cmd('status')
 
-    cmd('fetch Kconfiglib')
+    cmd('fetch --no-update Kconfiglib')
     cmd('status --long')  # Pass a custom flag too
 
 
@@ -255,8 +255,8 @@ def test_forall(clean_west_topdir):
 
     # Neither should it fail after fetching one or both projects
 
-    cmd('fetch net-tools')
+    cmd('fetch --no-update net-tools')
     cmd("forall -c 'echo *'")
 
-    cmd('fetch Kconfiglib')
+    cmd('fetch --no-update Kconfiglib')
     cmd("forall -c 'echo *'")
