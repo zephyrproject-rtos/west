@@ -37,7 +37,7 @@ WEST_REV_DEFAULT = 'master'
 # (The WEST_DIR name is not distinct enough to use when searching for
 # the top level; other directories named "west" may exist elsewhere,
 # e.g. zephyr/doc/west.)
-WEST_TOPDIR = '.west_topdir'
+WEST_MARKER = '.west_topdir'
 
 # Manifest repository directory under WEST_DIR.
 MANIFEST = 'manifest'
@@ -205,7 +205,7 @@ def init_bootstrap(directory, args):
 
     # Mark the top level installation.
 
-    with open(os.path.join(directory, WEST_DIR, WEST_TOPDIR), 'w') as f:
+    with open(os.path.join(directory, WEST_DIR, WEST_MARKER), 'w') as f:
         hide_file(f.name)
 
 
