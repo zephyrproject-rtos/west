@@ -11,6 +11,8 @@ import platform
 import subprocess
 import sys
 
+import west._bootstrap.version as version
+
 if sys.version_info < (3,):
     sys.exit('fatal error: you are running Python 2')
 
@@ -219,18 +221,39 @@ def init_reinit(directory, args):
 
 
 def wrap(argv):
+    printing_version = False
+
+    if argv and argv[0] in ('-V', '--version'):
+        print('West bootstrapper version:', 'v' + version.__version__)
+        printing_version = True
+
     start = os.getcwd()
     try:
         topdir = find_west_topdir(start)
     except WestNotFound:
-        sys.exit('Error: not a Zephyr directory (or any parent): {}\n'
-                 'Use "west init" to install Zephyr here'.format(start))
+        if printing_version:
+            sys.exit(0)         # run outside of an installation directory
+        else:
+            sys.exit('Error: not a Zephyr directory (or any parent): {}\n'
+                     'Use "west init" to install Zephyr here'.format(start))
+
+    west_git_repo = os.path.join(topdir, WEST_DIR, WEST)
+    if printing_version:
+        try:
+            git_describe = subprocess.check_output(
+                ['git', 'describe', '--tags'],
+                stderr=subprocess.DEVNULL,
+                cwd=west_git_repo).decode(sys.getdefaultencoding()).strip()
+            print('West repository version:', git_describe)
+        except subprocess.CalledProcessError:
+            print('West repository verison: unknown; no tags were found')
+        sys.exit(0)
 
     # Replace the wrapper process with the "real" west
 
     # sys.argv[1:] strips the argv[0] of the wrapper script itself
     argv = ([sys.executable,
-             os.path.join(topdir, WEST_DIR, WEST, 'src', 'west', 'main.py')] +
+             os.path.join(west_git_repo, 'src', 'west', 'main.py')] +
             argv)
 
     try:

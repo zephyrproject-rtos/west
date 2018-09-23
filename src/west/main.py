@@ -13,7 +13,11 @@ import colorama
 from functools import partial
 import os
 import sys
-from subprocess import CalledProcessError
+from subprocess import CalledProcessError, check_output, DEVNULL
+
+# HACK: the version is stored in the bootstrap package for now;
+# pull it out of there.
+from west._bootstrap import version
 
 import log
 from commands import CommandContextError
@@ -81,6 +85,7 @@ def parse_args(argv):
     west_parser.add_argument('-v', '--verbose', default=0, action='count',
                              help='''Display verbose output. May be given
                              multiple times to increase verbosity.''')
+    west_parser.add_argument('-V', '--version', action='store_true')
     subparser_gen = west_parser.add_subparsers(title='commands',
                                                dest='command')
 
@@ -89,6 +94,18 @@ def parse_args(argv):
         parser.set_defaults(handler=partial(command_handler, command))
 
     args, unknown = west_parser.parse_known_args(args=argv)
+
+    if args.version:
+        log.inf('West bootstrapper version:', version.__version__)
+        try:
+            git_describe = check_output(['git', 'describe', '--tags'],
+                                        stderr=DEVNULL,
+                                        cwd=os.path.dirname(__file__)).decode(
+                                            sys.getdefaultencoding()).strip()
+            print('West repository version:', git_describe)
+        except CalledProcessError as e:
+            print('West repository version: unknown, no tags found')
+        sys.exit(0)
 
     # Set up logging verbosity before doing anything else, so
     # e.g. verbose messages related to argument handling errors
