@@ -115,6 +115,8 @@ class Build(WestCommand):
                 colorize=True)
         if self.cmake_cache:
             board = self.cmake_cache.get('CACHED_BOARD')
+        elif self.args.board:
+            board = self.args.board
         else:
             board = 'UNKNOWN'   # shouldn't happen
         log.inf('BOARD:', board, colorize=True)
