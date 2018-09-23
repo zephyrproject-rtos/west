@@ -7,9 +7,12 @@ import setuptools
 with open('README.rst', 'r') as f:
     long_description = f.read()
 
+with open('src/west/_bootstrap/version.py', 'r') as f:
+    exec(f.read())
+
 setuptools.setup(
     name='west',
-    version='0.1.99',
+    version=__version__,
     author='Zephyr Project',
     author_email='devel@lists.zephyrproject.org',
     description='Zephyr RTOS Project meta-tool (wrapper and bootstrap)',
