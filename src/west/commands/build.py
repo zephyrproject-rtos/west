@@ -107,16 +107,17 @@ class Build(WestCommand):
         self._setup_source_dir()
         self._sanity_check()
 
-        log.inf('source directory: {}'.format(self.source_dir))
+        log.inf('source directory: {}'.format(self.source_dir), colorize=True)
         log.inf('build directory: {}{}'.
                 format(self.build_dir,
                        (' (created)' if self.created_build_dir
-                        else '')))
+                        else '')),
+                colorize=True)
         if self.cmake_cache:
             board = self.cmake_cache.get('CACHED_BOARD')
         else:
             board = 'UNKNOWN'   # shouldn't happen
-        log.inf('BOARD:', board)
+        log.inf('BOARD:', board, colorize=True)
 
         self._run_cmake(self.args.cmake_opts)
         self._sanity_check()
