@@ -8,7 +8,6 @@
 import argparse
 import os
 import platform
-import shlex
 import subprocess
 import sys
 
@@ -230,16 +229,14 @@ def wrap(argv):
     # Replace the wrapper process with the "real" west
 
     # sys.argv[1:] strips the argv[0] of the wrapper script itself
-    argv = [sys.executable,
-            os.path.join(topdir, WEST_DIR, WEST, 'src', 'west', 'main.py')] \
-           + argv
+    argv = ([sys.executable,
+             os.path.join(topdir, WEST_DIR, WEST, 'src', 'west', 'main.py')] +
+            argv)
 
     try:
-        os.execv(sys.executable, argv)
-    except OSError as e:
-        sys.exit('Error: Failed to run the main West script from the wrapper, '
-                 "via '{}': {}"
-                 .format(' '.join(shlex.quote(s) for s in argv), e))
+        subprocess.check_call(argv)
+    except subprocess.CalledProcessError as e:
+        sys.exit(1)
 
 
 #
