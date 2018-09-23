@@ -301,19 +301,24 @@ def _dump_context(command, args, runner_args, cached_runner_var):
     default_runner = cache.get(cached_runner_var)
     cfg = cached_runner_config(build_dir, cache)
 
-    log.inf('All Zephyr runners which support {}:'.format(command.name))
+    log.inf('All Zephyr runners which support {}:'.format(command.name),
+            colorize=True)
     for line in util.wrap(', '.join(all_cls.keys()), INDENT):
         log.inf(line)
-    log.inf('(Not all may work with this build, see available runners below.)')
+    log.inf('(Not all may work with this build, see available runners below.)',
+            colorize=True)
 
     if cache is None:
         log.warn('Missing or invalid CMake cache {}; there is no context.',
                  'Use --build-dir to specify the build directory.')
         return
 
-    log.inf('Build directory:', build_dir)
-    log.inf('Board:', board)
-    log.inf('CMake cache:', cache_file)
+    log.inf('Build directory:', colorize=True)
+    log.inf(INDENT + build_dir)
+    log.inf('Board:', colorize=True)
+    log.inf(INDENT + board)
+    log.inf('CMake cache:', colorize=True)
+    log.inf(INDENT + cache_file)
 
     if not available:
         # Bail with a message if no runners are available.
@@ -321,33 +326,39 @@ def _dump_context(command, args, runner_args, cached_runner_var):
                'Consult the documentation for instructions on how to run '
                'binaries on this target.').format(board)
         for line in util.wrap(msg, ''):
-            log.inf(line)
+            log.inf(line, colorize=True)
         return
 
-    log.inf('Available {} runners:'.format(command.name), ', '.join(available))
-    log.inf('Additional options for available', command.name, 'runners:')
+    log.inf('Available {} runners:'.format(command.name), colorize=True)
+    log.inf(INDENT + ', '.join(available))
+    log.inf('Additional options for available', command.name, 'runners:',
+            colorize=True)
     for runner in available:
         _dump_runner_opt_help(runner, all_cls[runner])
-    log.inf('Default {} runner: {}'.format(command.name, default_runner))
+    log.inf('Default {} runner:'.format(command.name), colorize=True)
+    log.inf(INDENT + default_runner)
     _dump_runner_config(cfg, '', INDENT)
-    log.inf('Runner-specific information:')
+    log.inf('Runner-specific information:', colorize=True)
     for runner in available:
-        log.inf('{}{}:'.format(INDENT, runner))
+        log.inf('{}{}:'.format(INDENT, runner), colorize=True)
         _dump_runner_cached_opts(cache, runner, INDENT * 2, INDENT * 3)
         _dump_runner_caps(available_cls[runner], INDENT * 2)
 
     if len(available) > 1:
-        log.inf('(Add -r RUNNER to just print information about one runner.)')
+        log.inf('(Add -r RUNNER to just print information about one runner.)',
+                colorize=True)
 
 
 def _dump_no_context_info(command, args):
     all_cls = {cls.name(): cls for cls in ZephyrBinaryRunner.get_runners() if
                command.name in cls.capabilities().commands}
-    log.inf('All Zephyr runners which support {}:'.format(command.name))
+    log.inf('All Zephyr runners which support {}:'.format(command.name),
+            colorize=True)
     for line in util.wrap(', '.join(all_cls.keys()), INDENT):
         log.inf(line)
     if not args.runner:
-        log.inf('Add -r RUNNER to print more information about any runner.')
+        log.inf('Add -r RUNNER to print more information about any runner.',
+                colorize=True)
 
 
 def _dump_one_runner_info(cache, args, build_dir, indent):
@@ -362,10 +373,14 @@ def _dump_one_runner_info(cache, args, build_dir, indent):
     available = runner in cache.get_list('ZEPHYR_RUNNERS')
     cfg = cached_runner_config(build_dir, cache)
 
-    log.inf('Build directory:', build_dir)
-    log.inf('Board:', cache['CACHED_BOARD'])
-    log.inf('CMake cache:', cache.cache_file)
-    log.inf(runner, 'is available:', 'yes' if available else 'no')
+    log.inf('Build directory:', colorize=True)
+    log.inf(INDENT + build_dir)
+    log.inf('Board:', colorize=True)
+    log.inf(INDENT + cache['CACHED_BOARD'])
+    log.inf('CMake cache:', colorize=True)
+    log.inf(INDENT + cache.cache_file)
+    log.inf(runner, 'is available:', 'yes' if available else 'no',
+            colorize=True)
     _dump_runner_opt_help(runner, cls)
     _dump_runner_config(cfg, '', indent)
     if available:
@@ -376,7 +391,7 @@ def _dump_one_runner_info(cache, args, build_dir, indent):
 
 
 def _dump_runner_caps(cls, base_indent):
-    log.inf('{}Capabilities:'.format(base_indent))
+    log.inf('{}Capabilities:'.format(base_indent), colorize=True)
     log.inf('{}{}'.format(base_indent + INDENT, cls.capabilities()))
 
 
@@ -393,15 +408,20 @@ def _dump_runner_opt_help(runner, cls):
         if len(actions) == 1 and actions[0].dest == 'command':
             # This is the lone positional argument. Skip it.
             continue
-        formatter.start_section('{} option help'.format(runner))
+        formatter.start_section('REMOVE ME')
         formatter.add_text(group.description)
         formatter.add_arguments(actions)
         formatter.end_section()
-    log.inf(formatter.format_help())
+    # Get the runner help, with the "REMOVE ME" string gone
+    runner_help = '\n'.join(formatter.format_help().splitlines()[1:])
+
+    log.inf('{} options:'.format(runner), colorize=True)
+    log.inf(runner_help)
 
 
 def _dump_runner_config(cfg, initial_indent, subsequent_indent):
-    log.inf('{}Cached common runner configuration:'.format(initial_indent))
+    log.inf('{}Cached common runner configuration:'.format(initial_indent),
+            colorize=True)
     for var in cfg.__slots__:
         log.inf('{}--{}={}'.format(subsequent_indent, var, getattr(cfg, var)))
 
@@ -411,8 +431,8 @@ def _dump_runner_cached_opts(cache, runner, initial_indent, subsequent_indent):
     if not runner_args:
         return
 
-    log.inf('{}Cached runner-specific options:'.format(
-        initial_indent))
+    log.inf('{}Cached runner-specific options:'.format(initial_indent),
+            colorize=True)
     for arg in runner_args:
         log.inf('{}{}'.format(subsequent_indent, arg))
 
