@@ -17,7 +17,7 @@ setuptools.setup(
     # http://docutils.sourceforge.net/FAQ.html#what-s-the-official-mime-type-for-restructuredtext-data
     long_description_content_type="text/x-rst",
     url='https://github.com/zephyrproject-rtos/west',
-    packages=setuptools.find_packages('src', include=('bootstrap',)),
+    packages=('west._bootstrap',),
     package_dir={'': 'src'},
     classifiers=[
         'Programming Language :: Python :: 3',
@@ -34,7 +34,7 @@ setuptools.setup(
     python_requires='>=3.4',
     entry_points={
         'console_scripts': (
-            'west = bootstrap.main:main',
+            'west = west._bootstrap.main:main',
             ),
         },
     )
