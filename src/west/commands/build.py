@@ -195,10 +195,17 @@ class Build(WestCommand):
                     'use --build-dir {} to specify a build directory'.
                     format(self.source_dir, self.build_dir))
 
+        srcrel = os.path.relpath(self.source_dir)
         if is_zephyr_build(self.source_dir):
             self._check_force('it looks like {srcrel} is a build directory: '
                               'did you mean -build-dir {srcrel} instead?'.
-                              format(srcrel=os.path.relpath(self.source_dir)))
+                              format(srcrel=srcrel))
+        elif 'CMakeLists.txt' not in os.listdir(self.source_dir):
+            self._check_force('source directory "{srcrel}" does not contain '
+                              'a CMakeLists.txt; is that really what you '
+                              'want to build? (Use -s SOURCE_DIR to specify '
+                              'the application source directory)'.
+                              format(srcrel=srcrel))
 
         if not is_zephyr_build(self.build_dir) and not self.args.board:
             self._check_force('this looks like a new or clean build, '
@@ -235,9 +242,12 @@ class Build(WestCommand):
                     'Board is missing or unknown, please provide --board')
         if self.args.board and cached_board and \
            self.args.board != cached_board:
-            self._check_force('Build directory targets board {}, '
-                              'but board {} was specified'.
-                              format(cached_board, self.args.board))
+            self._check_force('Build directory {} targets board {}, '
+                              'but board {} was specified. (Clean that '
+                              'directory or use --build-dir to specify '
+                              'a different one.)'.
+                              format(self.build_dir, cached_board,
+                                     self.args.board))
 
     def _check_force(self, msg):
         if not self.args.force:
