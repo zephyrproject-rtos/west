@@ -70,7 +70,7 @@ def find_west_topdir(start):
     cur_dir = start
 
     while True:
-        if os.path.isfile(os.path.join(cur_dir, WEST_DIR, WEST_TOPDIR)):
+        if os.path.isfile(os.path.join(cur_dir, WEST_DIR, WEST_MARKER)):
             return cur_dir
 
         parent_dir = os.path.dirname(cur_dir)
