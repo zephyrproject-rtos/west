@@ -33,6 +33,8 @@ except ModuleNotFoundError:
     BS_VERSION = None
     BS_INSTALL_DIR = None
 
+IN_MULTIREPO_INSTALL = in_multirepo_install(__file__)
+
 BUILD_FLASH_COMMANDS = [
     Build(),
     Flash(),
@@ -59,7 +61,7 @@ PROJECT_COMMANDS = [
 # project commands if this is a multirepo installation.
 COMMANDS = BUILD_FLASH_COMMANDS
 
-if in_multirepo_install(__file__):
+if IN_MULTIREPO_INSTALL:
     COMMANDS += PROJECT_COMMANDS
 
 
@@ -81,6 +83,29 @@ def validate_context(args, unknown):
                     'in the environment')
         else:
             args.zephyr_base = os.environ['ZEPHYR_BASE']
+
+
+def print_version_info():
+    # Bootstrapper
+    if BS_VERSION:
+        log.inf('West bootstrapper version: {} ({})'.
+                format('v' + BS_VERSION, BS_INSTALL_DIR))
+    else:
+        log.inf('West bootstrapper version: N/A, no bootstrapper found')
+
+    # The running west installation.
+    if IN_MULTIREPO_INSTALL:
+        try:
+            desc = check_output(['git', 'describe', '--tags'],
+                                stderr=DEVNULL,
+                                cwd=os.path.dirname(__file__))
+            west_version = desc.decode(sys.getdefaultencoding()).strip()
+        except CalledProcessError as e:
+            west_version = 'unknown'
+    else:
+        west_version = 'N/A, monorepo installation'
+    print('West repository version: {} ({})'.
+          format(west_version, os.path.dirname(__file__)))
 
 
 def parse_args(argv):
@@ -107,20 +132,7 @@ def parse_args(argv):
     args, unknown = west_parser.parse_known_args(args=argv)
 
     if args.version:
-        if BS_VERSION:
-            log.inf('West bootstrapper version: {} ({})'.
-                    format('v' + BS_VERSION, BS_INSTALL_DIR))
-        else:
-            log.inf('West bootstrapper version: N/A, no bootstrapper found')
-        try:
-            git_describe = check_output(['git', 'describe', '--tags'],
-                                        stderr=DEVNULL,
-                                        cwd=os.path.dirname(__file__)).decode(
-                                            sys.getdefaultencoding()).strip()
-            print('West repository version:{} ({})'.
-                  format(git_describe, os.path.dirname(__file__)))
-        except CalledProcessError as e:
-            print('West repository version: unknown, no tags found')
+        print_version_info()
         sys.exit(0)
 
     # Set up logging verbosity before doing anything else, so
