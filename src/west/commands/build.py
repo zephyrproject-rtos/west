@@ -217,18 +217,16 @@ class Build(WestCommand):
         cached_app = self.cmake_cache.get('APPLICATION_SOURCE_DIR')
         log.dbg('APPLICATION_SOURCE_DIR:', cached_app,
                 level=log.VERBOSE_EXTREME)
-        if self.args.source_dir:
-            source_abs = os.path.abspath(self.args.source_dir)
-        else:
-            source_abs = None
-        if cached_app and source_abs and source_abs != cached_app:
+        source_abs = (os.path.abspath(self.args.source_dir)
+                      if self.args.source_dir else None)
+        cached_abs = os.path.abspath(cached_app) if cached_app else None
+        if cached_abs and source_abs and source_abs != cached_abs:
             self._check_force('build directory "{}" is for application "{}", '
                               'but source directory "{}" was specified; '
                               'please clean it or use --build-dir to set '
                               'another build directory'.
-                              format(os.path.relpath(self.build_dir),
-                                     cached_app,
-                                     os.path.relpath(self.args.source_dir)))
+                              format(self.build_dir, cached_abs,
+                                     source_abs))
             self.run_cmake = True  # If they insist, we need to re-run cmake.
 
         cached_board = self.cmake_cache.get('CACHED_BOARD')
