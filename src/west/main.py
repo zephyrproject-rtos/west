@@ -15,10 +15,6 @@ import os
 import sys
 from subprocess import CalledProcessError, check_output, DEVNULL
 
-# HACK: the version is stored in the bootstrap package for now;
-# pull it out of there.
-from west._bootstrap import version
-
 import log
 from commands import CommandContextError
 from commands.build import Build
@@ -28,6 +24,14 @@ from commands.project import ListProjects, Fetch, Pull, Rebase, Branch, \
                              Checkout, Diff, Status, Update, ForAll, \
                              WestUpdated
 from util import quote_sh_list, in_multirepo_install
+
+try:
+    from west._bootstrap import version
+    BS_VERSION = version.__version__
+    BS_INSTALL_DIR = os.path.dirname(version.__file__)
+except ModuleNotFoundError:
+    BS_VERSION = None
+    BS_INSTALL_DIR = None
 
 BUILD_FLASH_COMMANDS = [
     Build(),
@@ -103,16 +107,18 @@ def parse_args(argv):
     args, unknown = west_parser.parse_known_args(args=argv)
 
     if args.version:
-        log.inf('West bootstrapper version: v{} ({})'.format(version.__version__,
-                                           os.path.dirname(version.___file__)))
-        log.inf('West bootstrapper version:', version.__version__)
+        if BS_VERSION:
+            log.inf('West bootstrapper version: {} ({})'.
+                    format('v' + BS_VERSION, BS_INSTALL_DIR))
+        else:
+            log.inf('West bootstrapper version: N/A, no bootstrapper found')
         try:
             git_describe = check_output(['git', 'describe', '--tags'],
                                         stderr=DEVNULL,
                                         cwd=os.path.dirname(__file__)).decode(
                                             sys.getdefaultencoding()).strip()
-            print('West repository version:{} ({})'.format(git_describe,
-                                                    os.path.dirname(__file__)))
+            print('West repository version:{} ({})'.
+                  format(git_describe, os.path.dirname(__file__)))
         except CalledProcessError as e:
             print('West repository version: unknown, no tags found')
         sys.exit(0)
