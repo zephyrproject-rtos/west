@@ -130,11 +130,13 @@ class Build(WestCommand):
 
     def _sanity_precheck(self):
         app = self.args.source_dir
-        if (app and (not os.path.isdir(app) or
-                     'CMakeLists.txt' not in os.listdir(app))):
-            self._check_force('{app} is not a directory with CMakeLists.txt; '
-                              'did you mean --build-dir {app}?'.
-                              format(app=app))
+        if app:
+            if not os.path.isdir(app):
+                self._check_force('source directory {} does not exist'.
+                                  format(app))
+            elif 'CMakeLists.txt' not in os.listdir(app):
+                self._check_force("{} doesn't contain a CMakeLists.txt".
+                                  format(app))
 
     def _update_cache(self):
         try:
