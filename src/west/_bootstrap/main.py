@@ -236,8 +236,8 @@ def wrap(argv):
                 ['git', 'describe', '--tags'],
                 stderr=subprocess.DEVNULL,
                 cwd=west_git_repo).decode(sys.getdefaultencoding()).strip()
-            print('West repository version:{} ({})'.format(git_describe,
-                                                           west_git_repo))
+            print('West repository version: {} ({})'.format(git_describe,
+                                                            west_git_repo))
         except subprocess.CalledProcessError:
             print('West repository verison: unknown; no tags were found')
         sys.exit(0)
