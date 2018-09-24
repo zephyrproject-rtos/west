@@ -96,13 +96,16 @@ def parse_args(argv):
     args, unknown = west_parser.parse_known_args(args=argv)
 
     if args.version:
+        log.inf('West bootstrapper version: v{} ({})'.format(version.__version__,
+                                           os.path.dirname(version.___file__)))
         log.inf('West bootstrapper version:', version.__version__)
         try:
             git_describe = check_output(['git', 'describe', '--tags'],
                                         stderr=DEVNULL,
                                         cwd=os.path.dirname(__file__)).decode(
                                             sys.getdefaultencoding()).strip()
-            print('West repository version:', git_describe)
+            print('West repository version:{} ({})'.format(git_describe,
+                                                    os.path.dirname(__file__)))
         except CalledProcessError as e:
             print('West repository version: unknown, no tags found')
         sys.exit(0)
