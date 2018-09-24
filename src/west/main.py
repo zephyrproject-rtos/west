@@ -27,17 +27,17 @@ from commands.debug import Debug, DebugServer, Attach
 from commands.project import ListProjects, Fetch, Pull, Rebase, Branch, \
                              Checkout, Diff, Status, Update, ForAll, \
                              WestUpdated
-from util import quote_sh_list
+from util import quote_sh_list, in_multirepo_install
 
-
-COMMANDS = (
+BUILD_FLASH_COMMANDS = [
     Build(),
     Flash(),
     Debug(),
     DebugServer(),
     Attach(),
+]
 
-    # Project-related commands
+PROJECT_COMMANDS = [
     ListProjects(),
     Fetch(),
     Pull(),
@@ -48,8 +48,15 @@ COMMANDS = (
     Status(),
     Update(),
     ForAll(),
-)
-'''Built-in West commands.'''
+]
+
+# Built-in commands in this West. For compatibility with monorepo
+# installations of West within the Zephyr tree, we only expose the
+# project commands if this is a multirepo installation.
+COMMANDS = BUILD_FLASH_COMMANDS
+
+if in_multirepo_install(__file__):
+    COMMANDS += PROJECT_COMMANDS
 
 
 class InvalidWestContext(RuntimeError):
