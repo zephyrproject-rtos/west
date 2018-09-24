@@ -215,7 +215,8 @@ def wrap(argv):
     printing_version = False
 
     if argv and argv[0] in ('-V', '--version'):
-        print('West bootstrapper version:', 'v' + version.__version__)
+        print('West bootstrapper version: v{} ({})'.format(version.__version__,
+                                                    os.path.dirname(__file__)))
         printing_version = True
 
     start = os.getcwd()
@@ -235,7 +236,8 @@ def wrap(argv):
                 ['git', 'describe', '--tags'],
                 stderr=subprocess.DEVNULL,
                 cwd=west_git_repo).decode(sys.getdefaultencoding()).strip()
-            print('West repository version:', git_describe)
+            print('West repository version:{} ({})'.format(git_describe,
+                                                           west_git_repo))
         except subprocess.CalledProcessError:
             print('West repository verison: unknown; no tags were found')
         sys.exit(0)
