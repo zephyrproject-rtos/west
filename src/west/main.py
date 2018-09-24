@@ -104,8 +104,10 @@ def print_version_info():
             west_version = 'unknown'
     else:
         west_version = 'N/A, monorepo installation'
+    west_src_west = os.path.dirname(__file__)
     print('West repository version: {} ({})'.
-          format(west_version, os.path.dirname(__file__)))
+          format(west_version,
+                 os.path.dirname(os.path.dirname(west_src_west))))
 
 
 def parse_args(argv):
