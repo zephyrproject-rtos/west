@@ -25,14 +25,6 @@ from commands.project import ListProjects, Fetch, Pull, Rebase, Branch, \
                              WestUpdated
 from util import quote_sh_list, in_multirepo_install
 
-try:
-    from west._bootstrap import version
-    BS_VERSION = version.__version__
-    BS_INSTALL_DIR = os.path.dirname(version.__file__)
-except ModuleNotFoundError:
-    BS_VERSION = None
-    BS_INSTALL_DIR = None
-
 IN_MULTIREPO_INSTALL = in_multirepo_install(__file__)
 
 BUILD_FLASH_COMMANDS = [
@@ -86,12 +78,16 @@ def validate_context(args, unknown):
 
 
 def print_version_info():
-    # Bootstrapper
-    if BS_VERSION:
-        log.inf('West bootstrapper version: {} ({})'.
-                format('v' + BS_VERSION, BS_INSTALL_DIR))
-    else:
-        log.inf('West bootstrapper version: N/A, no bootstrapper found')
+    # The bootstrapper will print its own version, as well as that of
+    # the west repository itself, then exit. So if this file is being
+    # asked to print the version, it's because it's being run
+    # directly, and not via the bootstrapper.
+    #
+    # Rather than play tricks like invoking "pip show west" (which
+    # assumes the bootstrapper was installed via pip, the common but
+    # not universal case), refuse the temptation to make guesses and
+    # print an honest answer.
+    log.inf('West bootstrapper version: N/A, not run via bootstrapper')
 
     # The running west installation.
     if IN_MULTIREPO_INSTALL:
