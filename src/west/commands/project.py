@@ -11,12 +11,10 @@ import shutil
 import subprocess
 import textwrap
 
-import pykwalify.core
-import yaml
-
 from west import log
 from west import util
 from west.commands import WestCommand
+from west.manifest import Project, manifest_projects, MalformedManifest
 
 
 # Branch that points to the revision specified in the manifest (which might be
@@ -388,13 +386,6 @@ project as of the most recent 'west fetch'/'west pull'.
 """.format(_MANIFEST_REV_BRANCH)[1:].replace("\n", " ")
 
 
-# Holds information about a project, taken from the manifest file (or
-# constructed manually for "special" projects)
-Project = collections.namedtuple(
-    'Project',
-    'name url revision path abspath clone_depth')
-
-
 def _cloned_projects(args):
     # Returns _projects(args, listed_must_be_cloned=True) if a list of projects
     # was given by the user (i.e., listed projects are required to be cloned).
@@ -460,70 +451,10 @@ def _all_projects(args):
     #
     # Before the manifest is parsed, it is validated against a pykwalify
     # schema. An error is raised on validation errors.
-
-    manifest_path = _manifest_path(args)
-
-    _validate_manifest(manifest_path)
-
-    with open(manifest_path) as f:
-        manifest = yaml.safe_load(f)['manifest']
-
-    projects = []
-    # Manifest "defaults" keys whose values get copied to each project
-    # that doesn't specify its own value.
-    project_defaults = ('remote', 'revision')
-
-    # mp = manifest project (dictionary with values parsed from the manifest)
-    for mp in manifest['projects']:
-        # Fill in any missing fields in 'mp' with values from the 'defaults'
-        # dictionary
-        if 'defaults' in manifest:
-            for key, val in manifest['defaults'].items():
-                if key in project_defaults:
-                    mp.setdefault(key, val)
-
-        # Add the repository URL to 'mp'
-        for remote in manifest['remotes']:
-            if remote['name'] == mp['remote']:
-                mp['url'] = remote['url'] + '/' + mp['name']
-                break
-        else:
-            log.die('Remote {} not defined in {}'
-                    .format(mp['remote'], manifest_path))
-
-        # If no clone path is specified, the project's name is used
-        clone_path = mp.get('path', mp['name'])
-
-        # Use named tuples to store project information. That gives nicer
-        # syntax compared to a dict (project.name instead of project['name'],
-        # etc.)
-        projects.append(Project(
-            mp['name'],
-            mp['url'],
-            # If no revision is specified, 'master' is used
-            mp.get('revision', 'master'),
-            clone_path,
-            # Absolute clone path
-            os.path.join(util.west_topdir(), clone_path),
-            # If no clone depth is specified, we fetch the entire history
-            mp.get('clone-depth', None)))
-
-    return projects
-
-
-def _validate_manifest(manifest_path):
-    # Validates the manifest with pykwalify. schema.yml holds the schema.
-
-    schema_path = os.path.join(os.path.dirname(__file__), "schema.yml")
-
     try:
-        pykwalify.core.Core(
-            source_file=manifest_path,
-            schema_files=[schema_path]
-        ).validate()
-    except pykwalify.errors.SchemaError as e:
-        log.die('{} malformed (schema: {}):\n{}'
-                .format(manifest_path, schema_path, e))
+        return manifest_projects(_manifest_path(args))
+    except MalformedManifest as m:
+        log.die(m.args[0])
 
 
 def _manifest_path(args):
