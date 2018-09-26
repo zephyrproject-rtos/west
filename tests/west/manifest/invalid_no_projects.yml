@@ -1,0 +1,4 @@
+manifest:
+  remotes:
+    - name: testremote
+      url: https://example.com

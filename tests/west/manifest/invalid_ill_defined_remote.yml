@@ -1,0 +1,7 @@
+manifest:
+  remotes:
+    - name: ill_defined_no_url
+
+  projects:
+    - name: foo
+      remote: ill_defined_no_url
