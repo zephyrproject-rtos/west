@@ -23,10 +23,7 @@ class MalformedManifest(RuntimeError):
 
 def manifest_projects(manifest_path):
     '''Return a list of Project instances for the given manifest path.'''
-    _validate_manifest(manifest_path)
-
-    with open(manifest_path) as f:
-        manifest = yaml.safe_load(f)['manifest']
+    manifest = _validated_manifest(manifest_path)
 
     projects = []
     # Manifest "defaults" keys whose values get copied to each project
@@ -71,12 +68,17 @@ def manifest_projects(manifest_path):
     return projects
 
 
-def _validate_manifest(manifest_path):
+def _validated_manifest(manifest_path):
     # Validates the manifest with pykwalify.
+    with open(manifest_path, 'r') as f:
+        manifest_data = yaml.safe_load(f.read())
+
+    if not manifest_data:
+        _malformed(manifest_path, 'No YAML content was found.')
 
     try:
         pykwalify.core.Core(
-            source_file=manifest_path,
+            source_data=manifest_data,
             schema_files=[_SCHEMA_PATH]
         ).validate()
     except pykwalify.errors.SchemaError as e:
