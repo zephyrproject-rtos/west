@@ -23,30 +23,36 @@ class MalformedManifest(RuntimeError):
 
 def manifest_projects(manifest_path):
     '''Return a list of Project instances for the given manifest path.'''
+    def _malformed_manifest(msg):
+        _malformed(manifest_path, msg)
+
     manifest = _validated_manifest(manifest_path)
 
     projects = []
-    # Manifest "defaults" keys whose values get copied to each project
-    # that doesn't specify its own value.
-    project_defaults = ('remote', 'revision')
+
+    # Get the defaults object out of the manifest, or provide one.
+    defaults = manifest.get('defaults', {'revision': 'master'})
+    default_rev = defaults.get('revision')
+    default_remote = defaults.get('remote')
+
+    # Map from each remote's name onto that remote's data in the manifest.
+    remote_dict = {r['name']: r for r in manifest['remotes']}
+
+    # The default remote, if specified, must be defined.
+    if default_remote is not None and default_remote not in remote_dict:
+        _malformed_manifest('default remote {} is not defined'.
+                            format(default_remote))
 
     # mp = manifest project (dictionary with values parsed from the manifest)
     for mp in manifest['projects']:
-        # Fill in any missing fields in 'mp' with values from the 'defaults'
-        # dictionary
-        if 'defaults' in manifest:
-            for key, val in manifest['defaults'].items():
-                if key in project_defaults:
-                    mp.setdefault(key, val)
-
-        # Add the repository URL to 'mp'
-        for remote in manifest['remotes']:
-            if remote['name'] == mp['remote']:
-                mp['url'] = remote['url'] + '/' + mp['name']
-                break
-        else:
-            log.die('Remote {} not defined in {}'
-                    .format(mp['remote'], manifest_path))
+        # Validate the project remote.
+        mpr = mp.get('remote') or defaults.get('remote')
+        if mpr is None:
+            _malformed_manifest('project {} does not specify a remote'.
+                                format(mp['name']))
+        if mpr not in remote_dict:
+            _malformed_manifest('project {} remote {} is not defined'.
+                                format(mp['name'], mp['remote']))
 
         # If no clone path is specified, the project's name is used
         clone_path = mp.get('path', mp['name'])
@@ -56,9 +62,12 @@ def manifest_projects(manifest_path):
         # etc.)
         projects.append(Project(
             mp['name'],
-            mp['url'],
-            # If no revision is specified, 'master' is used
-            mp.get('revision', 'master'),
+            # The project repository URL is formed by concatenating the
+            # remote URL with the project name.
+            remote_dict[mpr]['url'] + '/' + mp['name'],
+            # The project revision is defined in its entry or given by a
+            # default value.
+            mp.get('revision', default_rev),
             clone_path,
             # Absolute clone path
             os.path.join(util.west_topdir(), clone_path),
