@@ -14,7 +14,8 @@ import textwrap
 from west import log
 from west import util
 from west.commands import WestCommand
-from west.manifest import Project, manifest_projects, MalformedManifest
+from west.manifest import default_path, Remote, Project, \
+                          Manifest, MalformedManifest
 
 
 # Branch that points to the revision specified in the manifest (which might be
@@ -447,12 +448,13 @@ def _projects(args, listed_must_be_cloned=True):
 
 
 def _all_projects(args):
-    # Parses the manifest file, returning a list of Project instances.
+    # Get a list of project objects from the manifest.
     #
-    # Before the manifest is parsed, it is validated against a pykwalify
-    # schema. An error is raised on validation errors.
+    # If the manifest is malformed, a fatal error occurs and the
+    # command aborts.
+
     try:
-        return manifest_projects(_manifest_path(args))
+        return list(Manifest.from_file(_manifest_path(args)).projects)
     except MalformedManifest as m:
         log.die(m.args[0])
 
@@ -461,8 +463,7 @@ def _manifest_path(args):
     # Returns the path to the manifest file. Defaults to
     # .west/manifest/default.yml if the user didn't specify a manifest.
 
-    return args.manifest or os.path.join(util.west_dir(), 'manifest',
-                                         'default.yml')
+    return args.manifest or default_path()
 
 
 def _fetch(project):
@@ -594,15 +595,11 @@ def _checkout(project, branch):
 def _special_project(name):
     # Returns a Project instance for one of the special repositories in west/,
     # so that we can reuse the project-related functions for them
-
-    return Project(
-        name,
-        'dummy URL for {} repository'.format(name),
-        'master',
-        os.path.join('west', name.lower()),  # Path
-        os.path.join(util.west_dir(), name.lower()),  # Absolute path
-        None  # Clone depth
-    )
+    remote = Remote(name='dummy name for {} repository'.format(name),
+                    url='dummy URL for {} repository'.format(name))
+    return Project(name, remote, None,
+                   revision='master',  # FIXME this must be generalized!
+                   path=os.path.join('west', name.lower()))
 
 
 def _update(update_west, update_manifest):
