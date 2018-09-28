@@ -12,6 +12,7 @@ import argparse
 import colorama
 from functools import partial
 import os
+import platform
 import sys
 from subprocess import CalledProcessError, check_output, DEVNULL
 
@@ -23,6 +24,7 @@ from west.commands.debug import Debug, DebugServer, Attach
 from west.commands.project import ListProjects, Fetch, Pull, Rebase, Branch, \
                              Checkout, Diff, Status, Update, ForAll, \
                              WestUpdated
+from west.manifest import Manifest
 from west.util import quote_sh_list, in_multirepo_install
 
 IN_MULTIREPO_INSTALL = in_multirepo_install(__file__)
@@ -65,16 +67,55 @@ def command_handler(command, known_args, unknown_args):
     command.run(known_args, unknown_args)
 
 
-def validate_context(args, unknown):
-    '''Validate the run-time context expected by west.'''
+def set_zephyr_base(args):
+    '''Ensure ZEPHYR_BASE is set, emitting warnings if that's not
+    possible, or if the user is pointing it somewhere different than
+    what the manifest expects.'''
+    zb_env = os.environ.get('ZEPHYR_BASE')
+
     if args.zephyr_base:
-        os.environ['ZEPHYR_BASE'] = args.zephyr_base
+        # The command line --zephyr-base takes precedence over
+        # everything else.
+        zb = os.path.abspath(args.zephyr_base)
+        zb_origin = 'command line'
     else:
-        if 'ZEPHYR_BASE' not in os.environ:
-            log.wrn('--zephyr-base missing and no ZEPHYR_BASE',
-                    'in the environment')
+        # If the user doesn't specify it concretely, use the project
+        # with path 'zephyr' if that exists, or the ZEPHYR_BASE value
+        # in the calling environment.
+        #
+        # At some point, we need a more flexible way to set environment
+        # variables based on manifest contents, but this is good enough
+        # to get started with and to ask for wider testing.
+        manifest = Manifest.from_file()
+        for project in manifest.projects:
+            if project.path == 'zephyr':
+                zb = project.abspath
+                zb_origin = 'manifest file {}'.format(manifest.path)
+                break
         else:
-            args.zephyr_base = os.environ['ZEPHYR_BASE']
+            if zb_env is None:
+                log.wrn('no --zephyr-base given, ZEPHYR_BASE is unset,',
+                        'and no manifest project has path "zephyr"')
+                zb = None
+                zb_origin = None
+            else:
+                zb = zb_env
+                zb_origin = 'environment'
+
+    if zb_env and os.path.abspath(zb) != os.path.abspath(zb_env):
+        # The environment ZEPHYR_BASE takes precedence over either the
+        # command line or the manifest, but in normal multi-repo
+        # operation we shouldn't expect to need to set ZEPHYR_BASE to
+        # point to some random place. In practice, this is probably
+        # happening because zephyr-env.sh/cmd was run in some other
+        # zephyr installation, and the user forgot about that.
+        log.wrn('ZEPHYR_BASE={}'.format(zb_env),
+                'in the calling environment, but has been set to',
+                zb, 'instead by the', zb_origin)
+
+    os.environ['ZEPHYR_BASE'] = zb
+
+    log.dbg('ZEPHYR_BASE={} (origin: {})'.format(zb, zb_origin))
 
 
 def print_version_info():
@@ -138,12 +179,8 @@ def parse_args(argv):
     # work properly.
     log.set_verbosity(args.verbose)
 
-    try:
-        validate_context(args, unknown)
-    except InvalidWestContext as iwc:
-        log.err(*iwc.args, fatal=True)
-        west_parser.print_usage(file=sys.stderr)
-        sys.exit(1)
+    if IN_MULTIREPO_INSTALL:
+        set_zephyr_base(args)
 
     if 'handler' not in args:
         log.err('you must specify a command', fatal=True)
