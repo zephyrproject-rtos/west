@@ -10,13 +10,13 @@ from os import getcwd, path
 from subprocess import CalledProcessError
 import textwrap
 
-import cmake
-import log
-import util
-from build import DEFAULT_BUILD_DIR, is_zephyr_build
-from runners import get_runner_cls, ZephyrBinaryRunner
-from runners.core import RunnerConfig
-from commands import CommandContextError
+from west import cmake
+from west import log
+from west import util
+from west.build import DEFAULT_BUILD_DIR, is_zephyr_build
+from west.runners import get_runner_cls, ZephyrBinaryRunner
+from west.runners.core import RunnerConfig
+from west.commands import CommandContextError
 
 # Context-sensitive help indentation.
 # Don't change this, or output from argparse won't match up.

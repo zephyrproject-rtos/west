@@ -15,15 +15,15 @@ import os
 import sys
 from subprocess import CalledProcessError, check_output, DEVNULL
 
-import log
-from commands import CommandContextError
-from commands.build import Build
-from commands.flash import Flash
-from commands.debug import Debug, DebugServer, Attach
-from commands.project import ListProjects, Fetch, Pull, Rebase, Branch, \
+from west import log
+from west.commands import CommandContextError
+from west.commands.build import Build
+from west.commands.flash import Flash
+from west.commands.debug import Debug, DebugServer, Attach
+from west.commands.project import ListProjects, Fetch, Pull, Rebase, Branch, \
                              Checkout, Diff, Status, Update, ForAll, \
                              WestUpdated
-from util import quote_sh_list, in_multirepo_install
+from west.util import quote_sh_list, in_multirepo_install
 
 IN_MULTIREPO_INSTALL = in_multirepo_install(__file__)
 

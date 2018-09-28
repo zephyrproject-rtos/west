@@ -13,5 +13,5 @@ build:
     - pip install dist/west*.whl
     - pip install -r tests_requirements.txt
     - mkdir -p shippable/{testresults,codecoverage}
-    - PYTHONPATH=src/west pytest --junitxml=shippable/testresults/nosetests.xml tests
-    - PYTHONPATH=src/west pytest --cov=west --cov-report=xml:shippable/codecoverage/coverage.xml tests
+    - PYTHONPATH=src pytest --junitxml=shippable/testresults/nosetests.xml tests
+    - PYTHONPATH=src pytest --cov=west --cov-report=xml:shippable/codecoverage/coverage.xml tests
