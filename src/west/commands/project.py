@@ -14,9 +14,9 @@ import textwrap
 import pykwalify.core
 import yaml
 
-import log
-import util
-from commands import WestCommand
+from west import log
+from west import util
+from west.commands import WestCommand
 
 
 # Branch that points to the revision specified in the manifest (which might be

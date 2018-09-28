@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from runners.pyocd import PyOcdBinaryRunner
+from west.runners.pyocd import PyOcdBinaryRunner
 from conftest import RC_BUILD_DIR, RC_GDB, RC_KERNEL_BIN, RC_KERNEL_ELF
 
 
@@ -126,7 +126,7 @@ def pyocd(runner_config):
     (TEST_ALL_KWARGS, FLASH_ALL_EXPECTED_CALL),
     (TEST_DEF_KWARGS, FLASH_DEF_EXPECTED_CALL)
 ])
-@patch('runners.pyocd.PyOcdBinaryRunner.check_call')
+@patch('west.runners.pyocd.PyOcdBinaryRunner.check_call')
 def test_flash(cc, pyocd_args, expected, pyocd):
     pyocd(pyocd_args).run('flash')
     cc.assert_called_once_with(expected)
@@ -136,7 +136,7 @@ def test_flash(cc, pyocd_args, expected, pyocd):
     (TEST_ALL_KWARGS, (DEBUG_ALL_EXPECTED_SERVER, DEBUG_ALL_EXPECTED_CLIENT)),
     (TEST_DEF_KWARGS, (DEBUG_DEF_EXPECTED_SERVER, DEBUG_DEF_EXPECTED_CLIENT))
 ])
-@patch('runners.pyocd.PyOcdBinaryRunner.run_server_and_client')
+@patch('west.runners.pyocd.PyOcdBinaryRunner.run_server_and_client')
 def test_debug(rsc, pyocd_args, expectedv, pyocd):
     pyocd(pyocd_args).run('debug')
     rsc.assert_called_once_with(*expectedv)
@@ -146,7 +146,7 @@ def test_debug(rsc, pyocd_args, expectedv, pyocd):
     (TEST_ALL_KWARGS, DEBUGSERVER_ALL_EXPECTED_CALL),
     (TEST_DEF_KWARGS, DEBUGSERVER_DEF_EXPECTED_CALL)
     ])
-@patch('runners.pyocd.PyOcdBinaryRunner.check_call')
+@patch('west.runners.pyocd.PyOcdBinaryRunner.check_call')
 def test_debugserver(cc, pyocd_args, expected, pyocd):
     pyocd(pyocd_args).run('debugserver')
     cc.assert_called_once_with(expected)
@@ -163,8 +163,8 @@ def test_debugserver(cc, pyocd_args, expected, pyocd):
     (TEST_ALL_PARAMS, TEST_ADDR, FLASH_ALL_EXPECTED_CALL),
     (TEST_DEF_PARAMS, 0x0, FLASH_DEF_EXPECTED_CALL)
 ])
-@patch('runners.pyocd.BuildConfiguration')
-@patch('runners.pyocd.PyOcdBinaryRunner.check_call')
+@patch('west.runners.pyocd.BuildConfiguration')
+@patch('west.runners.pyocd.PyOcdBinaryRunner.check_call')
 def test_flash_args(cc, bc, pyocd_args, flash_addr, expected, pyocd):
     with patch.object(PyOcdBinaryRunner, 'get_flash_address',
                       return_value=flash_addr):
@@ -177,8 +177,8 @@ def test_flash_args(cc, bc, pyocd_args, flash_addr, expected, pyocd):
     (TEST_ALL_PARAMS, (DEBUG_ALL_EXPECTED_SERVER, DEBUG_ALL_EXPECTED_CLIENT)),
     (TEST_DEF_PARAMS, (DEBUG_DEF_EXPECTED_SERVER, DEBUG_DEF_EXPECTED_CLIENT)),
 ])
-@patch('runners.pyocd.BuildConfiguration')
-@patch('runners.pyocd.PyOcdBinaryRunner.run_server_and_client')
+@patch('west.runners.pyocd.BuildConfiguration')
+@patch('west.runners.pyocd.PyOcdBinaryRunner.run_server_and_client')
 def test_debug_args(rsc, bc, pyocd_args, expectedv, pyocd):
     pyocd(pyocd_args).run('debug')
     bc.assert_called_once_with(RC_BUILD_DIR)
@@ -189,8 +189,8 @@ def test_debug_args(rsc, bc, pyocd_args, expectedv, pyocd):
     (TEST_ALL_PARAMS, DEBUGSERVER_ALL_EXPECTED_CALL),
     (TEST_DEF_PARAMS, DEBUGSERVER_DEF_EXPECTED_CALL),
 ])
-@patch('runners.pyocd.BuildConfiguration')
-@patch('runners.pyocd.PyOcdBinaryRunner.check_call')
+@patch('west.runners.pyocd.BuildConfiguration')
+@patch('west.runners.pyocd.PyOcdBinaryRunner.check_call')
 def test_debugserver_args(cc, bc, pyocd_args, expected, pyocd):
     pyocd(pyocd_args).run('debugserver')
     bc.assert_called_once_with(RC_BUILD_DIR)

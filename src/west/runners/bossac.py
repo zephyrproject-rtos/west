@@ -6,7 +6,7 @@
 
 import platform
 
-from runners.core import ZephyrBinaryRunner, RunnerCaps
+from west.runners.core import ZephyrBinaryRunner, RunnerCaps
 
 DEFAULT_BOSSAC_PORT = '/dev/ttyACM0'
 

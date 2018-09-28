@@ -9,8 +9,8 @@ import os
 import sys
 import time
 
-import log
-from runners.core import ZephyrBinaryRunner, RunnerCaps, BuildConfiguration
+from west import log
+from west.runners.core import ZephyrBinaryRunner, RunnerCaps, BuildConfiguration
 
 
 DfuSeConfig = namedtuple('DfuSeConfig', ['address', 'options'])

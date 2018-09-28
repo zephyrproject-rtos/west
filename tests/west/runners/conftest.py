@@ -6,7 +6,7 @@
 
 import pytest
 
-from runners.core import RunnerConfig, ZephyrBinaryRunner
+from west.runners.core import RunnerConfig
 
 RC_BUILD_DIR = '/test/build-dir'
 RC_BOARD_DIR = '/test/zephyr/boards/test-arch/test-board'

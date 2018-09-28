@@ -1,4 +1,4 @@
-from runners.core import ZephyrBinaryRunner
+from west.runners.core import ZephyrBinaryRunner
 
 
 def test_runner_imports():

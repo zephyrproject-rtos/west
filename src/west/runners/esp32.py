@@ -6,8 +6,8 @@
 
 from os import path
 
-import log
-from runners.core import ZephyrBinaryRunner, RunnerCaps
+from west import log
+from west.runners.core import ZephyrBinaryRunner, RunnerCaps
 
 
 class Esp32BinaryRunner(ZephyrBinaryRunner):

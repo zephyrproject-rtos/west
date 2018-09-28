@@ -66,11 +66,11 @@ To run the test suite, run this from the west repository::
 
 Then, in a Bash shell::
 
-  PYTHONPATH=src/west py.test
+  PYTHONPATH=src py.test
 
 On Windows::
 
-  cmd /C "set PYTHONPATH=/path/to/west/src/west && py.test"
+  cmd /C "set PYTHONPATH=/path/to/west/src && py.test"
 
 Hacking on West
 ---------------

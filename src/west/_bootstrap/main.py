@@ -210,6 +210,10 @@ def init_reinit(directory, args):
 # Wrap a West command
 #
 
+def append_to_pythonpath(directory):
+    pp = os.environ.get('PYTHONPATH')
+    os.environ['PYTHONPATH'] = ':'.join(([pp] if pp else []) + [directory])
+
 
 def wrap(argv):
     printing_version = False
@@ -249,6 +253,7 @@ def wrap(argv):
              os.path.join(west_git_repo, 'src', 'west', 'main.py')] +
             argv)
 
+    append_to_pythonpath(os.path.join(west_git_repo, 'src'))
     try:
         subprocess.check_call(argv)
     except subprocess.CalledProcessError as e:

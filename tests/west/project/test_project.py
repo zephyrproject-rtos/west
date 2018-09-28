@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-import commands.project
+from west.commands import project
 
 # Path to the template manifest used to construct a real one when
 # running each test case.
@@ -19,15 +19,15 @@ NET_TOOLS_PATH = 'net-tools'
 KCONFIGLIB_PATH = 'sub/Kconfiglib'
 
 COMMAND_OBJECTS = (
-    commands.project.ListProjects(),
-    commands.project.Fetch(),
-    commands.project.Pull(),
-    commands.project.Rebase(),
-    commands.project.Branch(),
-    commands.project.Checkout(),
-    commands.project.Diff(),
-    commands.project.Status(),
-    commands.project.ForAll(),
+    project.ListProjects(),
+    project.Fetch(),
+    project.Pull(),
+    project.Rebase(),
+    project.Branch(),
+    project.Checkout(),
+    project.Diff(),
+    project.Status(),
+    project.ForAll(),
 )
 
 

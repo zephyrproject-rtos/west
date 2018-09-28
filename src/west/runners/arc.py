@@ -7,7 +7,7 @@
 
 from os import path
 
-from runners.core import ZephyrBinaryRunner
+from west.runners.core import ZephyrBinaryRunner
 
 DEFAULT_ARC_TCL_PORT = 6333
 DEFAULT_ARC_TELNET_PORT = 4444
