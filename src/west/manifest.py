@@ -134,6 +134,7 @@ class Manifest:
         # manifest data, which must be validated according to the schema.
 
         projects = []
+        project_abspaths = set()
 
         # Map from each remote's name onto that remote's data in the manifest.
         remotes = tuple(Remote(r['name'], r['url']) for r in
@@ -170,12 +171,24 @@ class Manifest:
             if remote_name not in remotes_dict:
                 self._malformed('project {} remote {} is not defined'.
                                 format(mp['name'], remote_name))
-            projects.append(Project(mp['name'],
-                                    remotes_dict[remote_name],
-                                    defaults,
-                                    path=mp.get('path'),
-                                    clone_depth=mp.get('clone-depth'),
-                                    revision=mp.get('revision')))
+            project = Project(mp['name'],
+                              remotes_dict[remote_name],
+                              defaults,
+                              path=mp.get('path'),
+                              clone_depth=mp.get('clone-depth'),
+                              revision=mp.get('revision'))
+
+            # Two projects cannot have the same path. We use absolute
+            # paths to check for collisions to ensure paths are
+            # normalized (e.g. for case-insensitive file systems or
+            # in cases like on Windows where / or \ may serve as a
+            # path component separator).
+            if project.abspath in project_abspaths:
+                self._malformed('project {} path {} is already in use'.
+                                format(project.name, project.path))
+
+            project_abspaths.add(project.abspath)
+            projects.append(project)
 
         self.defaults = defaults
         self.remotes = remotes
