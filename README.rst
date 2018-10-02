@@ -9,7 +9,7 @@ Installation
 
 Install west's bootstrapper with pip::
 
-  pip3 install west==0.2.0rc2
+  pip3 install west==0.2.0rc3
 
 (We are in the pre-release period for 0.2.0, so you must specifically
 ask for the prerelease version above.)
