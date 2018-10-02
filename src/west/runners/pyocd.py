@@ -32,6 +32,7 @@ class PyOcdBinaryRunner(ZephyrBinaryRunner):
         self.gdb_port = gdb_port
         self.tui_args = ['-tui'] if tui else []
         self.bin_name = cfg.kernel_bin
+        self.hex_name = cfg.kernel_hex
         self.elf_name = cfg.kernel_elf
 
         board_args = []
@@ -114,8 +115,14 @@ class PyOcdBinaryRunner(ZephyrBinaryRunner):
             self.debug_debugserver(command, **kwargs)
 
     def flash(self, **kwargs):
-        if self.bin_name is None:
-            raise ValueError('Cannot flash; bin_name is missing')
+        if os.path.isfile(self.hex_name):
+            fname = self.hex_name
+        elif os.path.isfile(self.bin_name):
+            fname = self.bin_name
+        else:
+            raise ValueError(
+                'Cannot flash; no hex ({}) or bin ({}) files'.format(
+                    self.hex_name, self.bin_name))
 
         cmd = ([self.flashtool] +
                self.flash_addr_args +
@@ -124,7 +131,7 @@ class PyOcdBinaryRunner(ZephyrBinaryRunner):
                self.board_args +
                self.frequency_args +
                self.flashtool_extra +
-               [self.bin_name])
+               [fname])
 
         log.inf('Flashing Target Device')
         self.check_call(cmd)

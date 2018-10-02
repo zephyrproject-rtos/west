@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from west.runners.pyocd import PyOcdBinaryRunner
-from conftest import RC_BUILD_DIR, RC_GDB, RC_KERNEL_BIN, RC_KERNEL_ELF
+from conftest import RC_BUILD_DIR, RC_GDB, RC_KERNEL_HEX, RC_KERNEL_ELF
 
 
 #
@@ -69,8 +69,8 @@ FLASH_ALL_EXPECTED_CALL = ([TEST_TOOL,
                             '-t', TEST_TARGET, '-b', TEST_BOARD_ID,
                             '-f', TEST_FREQUENCY] +
                            TEST_FLASHTOOL_OPTS +
-                           [RC_KERNEL_BIN])
-FLASH_DEF_EXPECTED_CALL = ['pyocd-flashtool', '-t', TEST_TARGET, RC_KERNEL_BIN]
+                           [RC_KERNEL_HEX])
+FLASH_DEF_EXPECTED_CALL = ['pyocd-flashtool', '-t', TEST_TARGET, RC_KERNEL_HEX]
 
 
 DEBUG_ALL_EXPECTED_SERVER = [TEST_SERVER,
@@ -108,12 +108,18 @@ DEBUGSERVER_DEF_EXPECTED_CALL = ['pyocd-gdbserver',
 #
 
 @pytest.fixture
-def pyocd(runner_config):
+def pyocd(runner_config, tmpdir):
     '''PyOcdBinaryRunner from constructor kwargs or command line parameters'''
     # This factory takes either a dict of kwargs to pass to the
     # constructor, or a list of command-line arguments to parse and
     # use with the create() method.
     def _factory(args):
+        # Ensure kernel binaries exist (as empty files, so commands
+        # which use them must be patched out).
+        tmpdir.ensure(RC_KERNEL_HEX)
+        tmpdir.ensure(RC_KERNEL_ELF)
+        tmpdir.chdir()
+
         if isinstance(args, dict):
             return PyOcdBinaryRunner(runner_config, TEST_TARGET, **args)
         elif isinstance(args, list):
