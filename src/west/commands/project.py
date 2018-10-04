@@ -486,11 +486,11 @@ def _fetch(project):
 
         # If 'clone-depth' is specified, fetch just the specified revision
         # (probably a branch). That will download the minimum amount of data,
-        # which is probably what's wanted whenever 'clone-depth is used. The
+        # which is probably what's wanted whenever 'clone-depth' is used. The
         # default 'git fetch' behavior is to do a shallow clone of all branches
         # on the remote.
         #
-        # Note: Many servers won't allow fetching arbitrary commits by SHA.
+        # Note: Most servers won't allow fetching arbitrary commits by SHA.
         # Combining --depth with an SHA will break for those.
 
         # Qualify branch names with refs/heads/, just to be safe. Just the
