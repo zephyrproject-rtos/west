@@ -24,10 +24,10 @@ from west.manifest import default_path, Remote, Project, \
 _MANIFEST_REV_BRANCH = 'manifest-rev'
 
 
-class ListProjects(WestCommand):
+class List(WestCommand):
     def __init__(self):
         super().__init__(
-            'list-projects',
+            'list',
             _wrap('''
             List projects.
 

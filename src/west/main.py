@@ -21,7 +21,7 @@ from west.commands import CommandContextError
 from west.commands.build import Build
 from west.commands.flash import Flash
 from west.commands.debug import Debug, DebugServer, Attach
-from west.commands.project import ListProjects, Fetch, Pull, Rebase, Branch, \
+from west.commands.project import List, Fetch, Pull, Rebase, Branch, \
                              Checkout, Diff, Status, Update, ForAll, \
                              WestUpdated
 from west.manifest import Manifest
@@ -38,7 +38,7 @@ BUILD_FLASH_COMMANDS = [
 ]
 
 PROJECT_COMMANDS = [
-    ListProjects(),
+    List(),
     Fetch(),
     Pull(),
     Rebase(),
