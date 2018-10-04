@@ -467,15 +467,15 @@ def _manifest_path(args):
 
 
 def _fetch(project):
-    # Fetches upstream changes for 'project' and updates the 'manifest-rev'
-    # branch to point to the revision specified in the manifest. If the
-    # project's repository does not already exist, it is created first.
+    # If 'project' has not been cloned, clones it. Otherwise, fetches upstream
+    # changes (without rebasing). In both cases, the 'manifest-rev' branch is
+    # created/updated to point to the revision specified in the manifest.
     #
     # Returns True if the project's repository already existed.
 
-    exists = _cloned(project)
+    cloned = _cloned(project)
 
-    if not exists:
+    if not cloned:
         _inf(project, 'Creating repository for (name-and-path)')
         _git_base(project, 'init (abspath)')
         _git(project, 'remote add origin (url)')
@@ -513,7 +513,7 @@ def _fetch(project):
              (project.revision if _is_sha(project.revision) else
                  'remotes/origin/' + project.revision))
 
-    if not exists:
+    if not cloned:
         # If we just initialized the repository, check out 'manifest-rev' in a
         # detached HEAD state.
         #
@@ -527,7 +527,7 @@ def _fetch(project):
         # spammy detached HEAD warning from Git.)
         _git(project, 'checkout --detach refs/heads/(manifest-rev-branch)')
 
-    return exists
+    return cloned
 
 
 def _rebase(project):
