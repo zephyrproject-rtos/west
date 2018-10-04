@@ -478,7 +478,7 @@ def _fetch(project):
     if not exists:
         _inf(project, 'Creating repository for (name-and-path)')
         _git_base(project, 'init (abspath)')
-        _git(project, 'remote add origin (url)')
+        _git(project, 'remote add origin -- (url)')
 
     if project.clone_depth:
         _inf(project,
