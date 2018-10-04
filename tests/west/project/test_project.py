@@ -19,7 +19,7 @@ NET_TOOLS_PATH = 'net-tools'
 KCONFIGLIB_PATH = 'sub/Kconfiglib'
 
 COMMAND_OBJECTS = (
-    project.ListProjects(),
+    project.List(),
     project.Fetch(),
     project.Pull(),
     project.Rebase(),
@@ -103,9 +103,9 @@ def clean_west_topdir(tmpdir):
     zephyrproject.chdir()
 
 
-def test_list_projects(clean_west_topdir):
+def test_list(clean_west_topdir):
     # TODO: Check output
-    cmd('list-projects')
+    cmd('list')
 
 
 def test_fetch(clean_west_topdir):
