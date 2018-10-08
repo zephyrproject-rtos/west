@@ -6,6 +6,7 @@
 '''
 
 import argparse
+import configparser
 import os
 import platform
 import subprocess
@@ -194,6 +195,14 @@ def init_bootstrap(directory, args):
 
     clone(args.manifest_url, args.manifest_rev,
           os.path.join(directory, WEST_DIR, MANIFEST))
+
+    # Create an initial configuration file
+
+    config = configparser.ConfigParser()
+    config['west'] = {'revision': args.west_rev}
+    config['manifest'] = {'revision': args.manifest_rev}
+    with open(os.path.join(directory, WEST_DIR, 'config'), 'w') as f:
+        config.write(f)
 
     # Create a dotfile to mark the installation. Hide it on Windows.
 

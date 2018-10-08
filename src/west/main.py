@@ -12,11 +12,11 @@ import argparse
 import colorama
 from functools import partial
 import os
-import platform
 import sys
 from subprocess import CalledProcessError, check_output, DEVNULL
 
 from west import log
+from west import config
 from west.commands import CommandContextError
 from west.commands.build import Build
 from west.commands.flash import Flash
@@ -198,6 +198,9 @@ def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
     args, unknown = parse_args(argv)
+
+    # Read the configuration files
+    config.read_config()
 
     for_stack_trace = 'run as "west -v ... {} ..." for a stack trace'.format(
         args.command)

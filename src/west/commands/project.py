@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import textwrap
 
+from west import config
 from west import log
 from west import util
 from west.commands import WestCommand
@@ -492,13 +493,7 @@ def _fetch(project):
         #
         # Note: Many servers won't allow fetching arbitrary commits by SHA.
         # Combining --depth with an SHA will break for those.
-
-        # Qualify branch names with refs/heads/, just to be safe. Just the
-        # branch name is likely to work as well though.
-        _git(project,
-             'fetch --depth=(clone-depth) origin ' +
-                 (project.revision if _is_sha(project.revision) else \
-                     'refs/heads/' + project.revision))
+        _git(project, 'fetch --depth=(clone-depth) origin (qual-rev)')
 
     else:
         _inf(project, 'Fetching changes for (name-and-path)')
@@ -509,10 +504,11 @@ def _fetch(project):
 
     # Create/update the 'manifest-rev' branch
     _git(project,
-         'update-ref refs/heads/(manifest-rev-branch) ' +
-             (project.revision if _is_sha(project.revision) else
-                 'remotes/origin/' + project.revision))
+         'update-ref (qual-manifest-rev-branch) (qual-remote-rev)')
 
+    # TODO: Check if the repository is in the post-'git init' state instead.
+    # That allows repositories to be properly initialized even if the initial
+    # 'west fetch' is aborted and then resumed.
     if not exists:
         # If we just initialized the repository, check out 'manifest-rev' in a
         # detached HEAD state.
@@ -525,14 +521,14 @@ def _fetch(project):
         # (The --detach flag is strictly redundant here, because the
         # refs/heads/<branch> form already detaches HEAD, but it avoids a
         # spammy detached HEAD warning from Git.)
-        _git(project, 'checkout --detach refs/heads/(manifest-rev-branch)')
+        _git(project, 'checkout --detach (qual-manifest-rev-branch)')
 
     return exists
 
 
 def _rebase(project):
     _inf(project, 'Rebasing (name-and-path) to (manifest-rev-branch)')
-    _git(project, 'rebase (manifest-rev-branch)')
+    _git(project, 'rebase (qual-manifest-rev-branch)')
 
 
 def _cloned(project):
@@ -578,7 +574,8 @@ def _create_branch(project, branch):
     else:
         _inf(project, "Creating branch '{}' in (name-and-path)"
                       .format(branch))
-        _git(project, 'branch --quiet --track {} (manifest-rev-branch)'
+
+        _git(project, 'branch --quiet --track {} (qual-manifest-rev-branch)'
                       .format(branch))
 
 
@@ -597,9 +594,12 @@ def _special_project(name):
     # so that we can reuse the project-related functions for them
     remote = Remote(name='dummy name for {} repository'.format(name),
                     url='dummy URL for {} repository'.format(name))
+
+    # 'revision' always exists and defaults to 'master'
     return Project(name, remote, None,
-                   revision='master',  # FIXME this must be generalized!
-                   path=os.path.join('west', name.lower()))
+                   revision=config.config.get(name, 'revision',
+                                              fallback='master'),
+                   path=os.path.join('west', name))
 
 
 def _update(update_west, update_manifest):
@@ -614,7 +614,7 @@ def _update(update_west, update_manifest):
 
     projects = []
     if update_west:
-        projects.append(_special_project('West'))
+        projects.append(_special_project('west'))
     if update_manifest:
         projects.append(_special_project('manifest'))
 
@@ -625,14 +625,14 @@ def _update(update_west, update_manifest):
         attempt(project, 'fetch')
 
         # Get the SHA of the last commit in common with the upstream branch
-        merge_base = attempt(project, 'merge-base HEAD remotes/origin/master')
+        merge_base = attempt(project, 'merge-base HEAD (qual-remote-rev)')
 
         # Get the current SHA of the upstream branch
-        head_sha = attempt(project, 'show-ref --hash remotes/origin/master')
+        head_sha = attempt(project, 'show-ref --hash (qual-remote-rev)')
 
         # If they differ, we need to rebase
         if merge_base != head_sha:
-            attempt(project, 'rebase remotes/origin/master')
+            attempt(project, 'rebase (qual-remote-rev)')
 
             _inf(project, 'Updated (rebased) (name-and-path) to the '
                           'latest version')
@@ -754,6 +754,24 @@ def _expand_shorthands(project, s):
     # Expands project-related shorthands in 's' to their values,
     # returning the expanded string
 
+    # Some of the trickier ones below. 'qual' stands for 'qualified', meaning
+    # the full path to the ref (e.g. refs/heads/master).
+    #
+    # qual-rev:
+    #   The qualified local branch for the revision from the manifest (e.g.
+    #   refs/heads/master), or an SHA if the revision is an SHA
+    #
+    # qual-remote-rev:
+    #   The qualified remote branch for the revision (e.g.
+    #   remotes/origin/master), or an SHA if the revision is an SHA
+    #
+    # manifest-rev-branch:
+    #   The name of the magic branch that points to the manifest revision
+    #
+    # qual-manifest-rev-branch:
+    #   A qualified reference to the magic manifest revision branch, e.g.
+    #   refs/heads/manifest-rev
+
     return s.replace('(name)', project.name) \
             .replace('(name-and-path)',
                      '{} ({})'.format(
@@ -761,8 +779,15 @@ def _expand_shorthands(project, s):
             .replace('(url)', project.url) \
             .replace('(path)', project.path) \
             .replace('(abspath)', project.abspath) \
-            .replace('(revision)', project.revision) \
+            .replace('(qual-rev)',
+                     project.revision if _is_sha(project.revision) else \
+                     'refs/heads/' + project.revision) \
+            .replace('(qual-remote-rev)',
+                     project.revision if _is_sha(project.revision) else \
+                     'remotes/origin/' + project.revision) \
             .replace('(manifest-rev-branch)', _MANIFEST_REV_BRANCH) \
+            .replace('(qual-manifest-rev-branch)',
+                     'refs/heads/' + _MANIFEST_REV_BRANCH) \
             .replace('(clone-depth)', str(project.clone_depth))
 
 
