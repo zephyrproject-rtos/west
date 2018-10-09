@@ -4,6 +4,7 @@
 
 import argparse
 import os
+from pathlib import Path
 
 from west import log
 from west import cmake
@@ -188,6 +189,20 @@ class Build(WestCommand):
             source_dir = os.getcwd()
         self.source_dir = os.path.abspath(source_dir)
 
+    def _get_available_boards_str(self):
+        path = Path(os.getenv("ZEPHYR_BASE"))
+        brds_paths = path.glob("**/Kconfig.board")
+        brds_db = {}
+        for brd in brds_paths:
+            try:
+                brds_db[brd.parent.parent.name].append(brd.parent.name)
+            except KeyError:
+                brds_db[brd.parent.parent.name] = [brd.parent.name, ]
+        brds_str = ""
+        for arch in brds_db.keys():
+            brds_str += "\r\n" + arch + ":\r\n\t\t" + "\r\n\t\t".join(brds_db[arch])
+        return brds_str
+
     def _sanity_check(self):
         # Sanity check the build configuration.
         # Side effect: may update cmake_cache attribute.
@@ -211,8 +226,10 @@ class Build(WestCommand):
                               format(srcrel=srcrel))
 
         if not is_zephyr_build(self.build_dir) and not self.args.board:
+            brds_str = self._get_available_boards_str()
             self._check_force('this looks like a new or clean build, '
-                              'please provide --board')
+                              'please provide --board'
+                              '\r\n\r\nSupported Boards:' + brds_str + "\r\n")
 
         if not self.cmake_cache:
             return          # That's all we can check without a cache.
