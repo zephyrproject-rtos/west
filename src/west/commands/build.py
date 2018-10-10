@@ -190,7 +190,7 @@ class Build(WestCommand):
         self.source_dir = os.path.abspath(source_dir)
 
     def _get_available_boards_str(self):
-        path = Path(os.getenv("ZEPHYR_BASE"))
+        path = Path(os.getenv("ZEPHYR_BASE")+"/boards")
         brds_paths = path.glob("**/Kconfig.board")
         brds_db = {}
         for brd in brds_paths:
