@@ -4,7 +4,7 @@
 
 import argparse
 import os
-from pathlib import Path
+import glob
 
 from west import log
 from west import cmake
@@ -190,17 +190,26 @@ class Build(WestCommand):
         self.source_dir = os.path.abspath(source_dir)
 
     def _get_available_boards_str(self):
-        path = Path(os.getenv("ZEPHYR_BASE")+"/boards")
-        brds_paths = path.glob("**/Kconfig.board")
+        brd_path = os.getenv("ZEPHYR_BASE") + "/boards"
+        # Creates list of available architectures but also includes folder like common
+        archs = [arch for arch in os.listdir(brd_path) if os.path.isdir(os.path.join(brd_path,arch))]
+        # Creates list of all board files
+        brd_files = glob.glob(brd_path + "/**/*.yaml", recursive=True)
+        # Lets create boards files database
         brds_db = {}
-        for brd in brds_paths:
-            try:
-                brds_db[brd.parent.parent.name].append(brd.parent.name)
-            except KeyError:
-                brds_db[brd.parent.parent.name] = [brd.parent.name, ]
+        for brd in brd_files:
+            for arch in archs:
+                if arch in brd:
+                    try:
+                        brds_db[arch].append(os.path.basename(brd)[:-5]) # Remove .yaml
+                    except KeyError:
+                        brds_db[arch] = [os.path.basename(brd)[:-5], ]
+                    break
+
         brds_str = ""
         for arch in brds_db.keys():
-            brds_str += "\r\n" + arch + ":\r\n\t\t" + "\r\n\t\t".join(brds_db[arch])
+            # In python3 "\n" is platform independent refer os.linesep
+            brds_str += "\n" + arch + ":\n\t\t" + "\n\t\t".join(brds_db[arch])
         return brds_str
 
     def _sanity_check(self):
