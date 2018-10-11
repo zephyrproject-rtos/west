@@ -190,11 +190,15 @@ class Build(WestCommand):
         self.source_dir = os.path.abspath(source_dir)
 
     def _get_available_boards_str(self):
+        """
+        Creates a string of available boards ready to pass via _check_force
+        :return: str
+        """
         brd_path = os.getenv("ZEPHYR_BASE") + "/boards"
         # Creates list of available architectures but also includes folder like common
         archs = [arch for arch in os.listdir(brd_path) if os.path.isdir(os.path.join(brd_path,arch))]
-        # Creates list of all board files
-        brd_files = glob.glob(brd_path + "/**/*.yaml", recursive=True)
+        # Creates list of all board files. The pattern "/**/*.yaml" not supported in python 3.4
+        brd_files = glob.iglob(brd_path + "/*/*/*.yaml") # /arch/soc/board.yaml
         # Lets create boards files database
         brds_db = {}
         for brd in brd_files:
