@@ -242,7 +242,7 @@ class Build(WestCommand):
             brds_str = self._get_available_boards_str()
             self._check_force('this looks like a new or clean build, '
                               'please provide --board'
-                              '\r\n\r\nSupported Boards:' + brds_str + "\r\n")
+                              '\n\nSupported Boards:' + brds_str + "\n")
 
         if not self.cmake_cache:
             return          # That's all we can check without a cache.
