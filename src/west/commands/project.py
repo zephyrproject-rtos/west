@@ -481,30 +481,22 @@ def _fetch(project):
         _git_base(project, 'init (abspath)')
         _git(project, 'remote add origin -- (url)')
 
+    # Fetch the revision specified in the manifest into the manifest-rev branch
+
+    msg = "Fetching changes for (name-and-path)"
     if project.clone_depth:
-        _inf(project,
-             'Fetching changes for (name-and-path) with --depth (clone-depth)')
-
-        # If 'clone-depth' is specified, fetch just the specified revision
-        # (probably a branch). That will download the minimum amount of data,
-        # which is probably what's wanted whenever 'clone-depth is used. The
-        # default 'git fetch' behavior is to do a shallow clone of all branches
-        # on the remote.
-        #
-        # Note: Many servers won't allow fetching arbitrary commits by SHA.
-        # Combining --depth with an SHA will break for those.
-        _git(project, 'fetch --depth=(clone-depth) origin (qual-rev)')
-
+        fetch_cmd = "fetch --depth=(clone-depth)"
+        msg += " with --depth (clone-depth)"
     else:
-        _inf(project, 'Fetching changes for (name-and-path)')
+        fetch_cmd = "fetch"
 
-        # If 'clone-depth' is not specified, fetch all branches on the
-        # remote. This gives a more usable repository.
-        _git(project, 'fetch origin')
-
-    # Create/update the 'manifest-rev' branch
-    _git(project,
-         'update-ref (qual-manifest-rev-branch) (qual-remote-rev)')
+    _inf(project, msg)
+    # This two-step approach avoids a "trying to write non-commit object" error
+    # when the revision is an annotated tag. ^{commit} type peeling isn't
+    # supported for the <src> in a <src>:<dst> refspec, so we have to do it
+    # separately.
+    _git(project, fetch_cmd + ' origin -- (revision)')
+    _git(project, 'update-ref (qual-manifest-rev-branch) FETCH_HEAD^{commit}')
 
     # TODO: Check if the repository is in the post-'git init' state instead.
     # That allows repositories to be properly initialized even if the initial
@@ -622,17 +614,15 @@ def _update(update_west, update_manifest):
         _dbg(project, 'Updating (name-and-path)', level=log.VERBOSE_NORMAL)
 
         # Fetch changes from upstream
-        attempt(project, 'fetch')
+        attempt(project, 'fetch --quiet origin -- (revision)')
 
-        # Get the SHA of the last commit in common with the upstream branch
-        merge_base = attempt(project, 'merge-base HEAD (qual-remote-rev)')
+        # Upstream SHA
+        upstream_sha = attempt(project, 'rev-parse FETCH_HEAD^{commit}')
 
-        # Get the current SHA of the upstream branch
-        head_sha = attempt(project, 'show-ref --hash (qual-remote-rev)')
-
-        # If they differ, we need to rebase
-        if merge_base != head_sha:
-            attempt(project, 'rebase (qual-remote-rev)')
+        # If the upstream commit isn't the latest commit in common between the
+        # upstream and HEAD, then there are new upstream changes
+        if upstream_sha != attempt(project, 'merge-base HEAD ' + upstream_sha):
+            attempt(project, 'rebase ' + upstream_sha)
 
             _inf(project, 'Updated (rebased) (name-and-path) to the '
                           'latest version')
@@ -652,15 +642,6 @@ updating the manifest and West for the duration of the command."""[1:]
 
 class WestUpdated(Exception):
     '''Raised after West has updated its own source code'''
-
-
-def _is_sha(s):
-    try:
-        int(s, 16)
-    except ValueError:
-        return False
-
-    return len(s) == 40
 
 
 def _git_base(project, cmd, *, extra_args=(), capture_stdout=False,
@@ -757,14 +738,6 @@ def _expand_shorthands(project, s):
     # Some of the trickier ones below. 'qual' stands for 'qualified', meaning
     # the full path to the ref (e.g. refs/heads/master).
     #
-    # qual-rev:
-    #   The qualified local branch for the revision from the manifest (e.g.
-    #   refs/heads/master), or an SHA if the revision is an SHA
-    #
-    # qual-remote-rev:
-    #   The qualified remote branch for the revision (e.g.
-    #   remotes/origin/master), or an SHA if the revision is an SHA
-    #
     # manifest-rev-branch:
     #   The name of the magic branch that points to the manifest revision
     #
@@ -779,12 +752,7 @@ def _expand_shorthands(project, s):
             .replace('(url)', project.url) \
             .replace('(path)', project.path) \
             .replace('(abspath)', project.abspath) \
-            .replace('(qual-rev)',
-                     project.revision if _is_sha(project.revision) else \
-                     'refs/heads/' + project.revision) \
-            .replace('(qual-remote-rev)',
-                     project.revision if _is_sha(project.revision) else \
-                     'remotes/origin/' + project.revision) \
+            .replace('(revision)', project.revision) \
             .replace('(manifest-rev-branch)', _MANIFEST_REV_BRANCH) \
             .replace('(qual-manifest-rev-branch)',
                      'refs/heads/' + _MANIFEST_REV_BRANCH) \
