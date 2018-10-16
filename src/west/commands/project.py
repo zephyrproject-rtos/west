@@ -479,7 +479,7 @@ def _fetch(project):
     if not exists:
         _inf(project, 'Creating repository for (name-and-path)')
         _git_base(project, 'init (abspath)')
-        _git(project, 'remote add -- (remote-name) (url)')
+        _git(project, 'remote add -- (remote) (url)')
 
     # Fetch the revision specified in the manifest into the manifest-rev branch
 
@@ -495,7 +495,7 @@ def _fetch(project):
     # when the revision is an annotated tag. ^{commit} type peeling isn't
     # supported for the <src> in a <src>:<dst> refspec, so we have to do it
     # separately.
-    _git(project, fetch_cmd + ' -- (remote-name) (revision)')
+    _git(project, fetch_cmd + ' -- (remote) (revision)')
     _git(project, 'update-ref (qual-manifest-rev-branch) FETCH_HEAD^{commit}')
 
     if not _ref_ok(project, 'HEAD'):
@@ -588,7 +588,7 @@ def _checkout(project, branch):
 def _special_project(name):
     # Returns a Project instance for one of the special repositories in west/,
     # so that we can reuse the project-related functions for them
-    remote = Remote(name='dummy name for {} repository'.format(name),
+    remote = Remote(name=config.get(name, 'remote', fallback='origin'),
                     url='dummy URL for {} repository'.format(name))
 
     # 'revision' always exists and defaults to 'master'
@@ -617,7 +617,7 @@ def _update(update_west, update_manifest):
         _dbg(project, 'Updating (name-and-path)', level=log.VERBOSE_NORMAL)
 
         # Fetch changes from upstream
-        attempt(project, 'fetch --quiet origin -- (revision)')
+        attempt(project, 'fetch --quiet (remote) -- (revision)')
 
         # Upstream SHA
         upstream_sha = attempt(project, 'rev-parse FETCH_HEAD^{commit}')
@@ -752,7 +752,7 @@ def _expand_shorthands(project, s):
             .replace('(name-and-path)',
                      '{} ({})'.format(
                          project.name, os.path.join(project.path, ""))) \
-            .replace('(remote-name)', project.remote.name) \
+            .replace('(remote)', project.remote.name) \
             .replace('(url)', project.url) \
             .replace('(path)', project.path) \
             .replace('(abspath)', project.abspath) \
