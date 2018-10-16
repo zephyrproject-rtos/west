@@ -498,21 +498,19 @@ def _fetch(project):
     _git(project, fetch_cmd + ' origin -- (revision)')
     _git(project, 'update-ref (qual-manifest-rev-branch) FETCH_HEAD^{commit}')
 
-    # TODO: Check if the repository is in the post-'git init' state instead.
-    # That allows repositories to be properly initialized even if the initial
-    # 'west fetch' is aborted and then resumed.
-    if not exists:
-        # If we just initialized the repository, check out 'manifest-rev' in a
-        # detached HEAD state.
+    if not _ref_ok(project, 'HEAD'):
+        # If nothing it checked out (which would usually only happen just after
+        # we initialize the repository), check out 'manifest-rev' in a detached
+        # HEAD state.
         #
         # Otherwise, the initial state would have nothing checked out, and HEAD
         # would point to a non-existent refs/heads/master branch (that would
         # get created if the user makes an initial commit). That state causes
         # e.g. 'west rebase' to fail, and might look confusing.
         #
-        # (The --detach flag is strictly redundant here, because the
+        # The --detach flag is strictly redundant here, because the
         # refs/heads/<branch> form already detaches HEAD, but it avoids a
-        # spammy detached HEAD warning from Git.)
+        # spammy detached HEAD warning from Git.
         _git(project, 'checkout --detach (qual-manifest-rev-branch)')
 
     return exists
@@ -572,8 +570,14 @@ def _create_branch(project, branch):
 
 
 def _has_branch(project, branch):
-    return _git(project, 'show-ref --quiet --verify refs/heads/' + branch,
-                check=False).returncode == 0
+    return _ref_ok(project, 'refs/heads/' + branch)
+
+
+def _ref_ok(project, ref):
+    # Returns True if the reference 'ref' exists and can be resolved to a
+    # commit
+    return _git(project, 'show-ref --quiet --verify ' + ref, check=False) \
+           .returncode == 0
 
 
 def _checkout(project, branch):
