@@ -50,7 +50,7 @@ def inf(*args, colorize=False):
       If True, the message is printed in bright green if stdout is a terminal.
     '''
 
-    if not config.colorize:
+    if not config.use_colors():
         colorize = False
 
     # This approach colorizes any sep= and end= text too, as expected.
@@ -69,26 +69,26 @@ def inf(*args, colorize=False):
 def wrn(*args):
     '''Print a warning.'''
 
-    if config.colorize:
+    if config.use_colors():
         print(colorama.Fore.LIGHTRED_EX, end='', file=sys.stderr)
 
     print('WARNING: ', end='', file=sys.stderr)
     print(*args, file=sys.stderr)
 
-    if config.colorize:
+    if config.use_colors():
         _reset_colors(sys.stderr)
 
 
 def err(*args, fatal=False):
     '''Print an error.'''
 
-    if config.colorize:
+    if config.use_colors():
         print(colorama.Fore.LIGHTRED_EX, end='', file=sys.stderr)
 
     print('FATAL ERROR: ' if fatal else 'ERROR: ', end='', file=sys.stderr)
     print(*args, file=sys.stderr)
 
-    if config.colorize:
+    if config.use_colors():
         _reset_colors(sys.stderr)
 
 
