@@ -42,9 +42,13 @@ def read_config():
     Configuration values from later configuration files override configuration
     from earlier ones. Instance-specific configuration values have the highest
     precedence, and system-wide the lowest.
+
+    A convenience boolean 'colorize' is exported by this module as well, set to
+    True if the output should be colorized, based on configuration settings.
     '''
 
     global config
+    global colorize
 
     # Gather (potential) configuration file paths
 
@@ -78,3 +82,14 @@ def read_config():
 
     config = configparser.ConfigParser()
     config.read(files, encoding='utf-8')
+
+    #
+    # Set convenience variables
+    #
+
+    colorize = config.getboolean('color', 'ui', fallback=True)
+
+
+# Value to use before the configuration file has been read. This also fixes
+# tests that run stuff without reading the configuration file first.
+colorize = False
