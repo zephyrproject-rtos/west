@@ -199,8 +199,17 @@ def init_bootstrap(directory, args):
     # Create an initial configuration file
 
     config = configparser.ConfigParser()
-    config['west'] = {'revision': args.west_rev}
-    config['manifest'] = {'revision': args.manifest_rev}
+
+    config['west'] = {
+        'remote': 'origin',
+        'revision': args.west_rev
+    }
+
+    config['manifest'] = {
+        'remote': 'origin',
+        'revision': args.manifest_rev
+    }
+
     with open(os.path.join(directory, WEST_DIR, 'config'), 'w') as f:
         config.write(f)
 
