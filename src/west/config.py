@@ -9,6 +9,15 @@ import platform
 from west.util import west_dir
 
 
+# Configuration values.
+#
+# Initially empty, populated in read_config(). Always having this available is
+# nice in case something checks configuration values before the configuration
+# file has been read (e.g. the log.py functions, to check color settings, and
+# tests).
+config = configparser.ConfigParser()
+
+
 def read_config():
     '''
     Reads all configuration files, making the configuration values available as
@@ -42,13 +51,7 @@ def read_config():
     Configuration values from later configuration files override configuration
     from earlier ones. Instance-specific configuration values have the highest
     precedence, and system-wide the lowest.
-
-    A convenience boolean 'colorize' is exported by this module as well, set to
-    True if the output should be colorized, based on configuration settings.
     '''
-
-    global config
-    global colorize
 
     # Gather (potential) configuration file paths
 
@@ -80,16 +83,9 @@ def read_config():
     # Parse all existing configuration files
     #
 
-    config = configparser.ConfigParser()
     config.read(files, encoding='utf-8')
 
-    #
-    # Set convenience variables
-    #
 
-    colorize = config.getboolean('color', 'ui', fallback=True)
-
-
-# Value to use before the configuration file has been read. This also fixes
-# tests that run stuff without reading the configuration file first.
-colorize = False
+def use_colors():
+    # Convenience function for reading the color.ui setting
+    return config.getboolean('color', 'ui', fallback=True)

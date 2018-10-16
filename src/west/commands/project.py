@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import textwrap
 
-from west import config
+from west.config import config
 from west import log
 from west import util
 from west.commands import WestCommand
@@ -593,8 +593,7 @@ def _special_project(name):
 
     # 'revision' always exists and defaults to 'master'
     return Project(name, remote, None,
-                   revision=config.config.get(name, 'revision',
-                                              fallback='master'),
+                   revision=config.get(name, 'revision', fallback='master'),
                    path=os.path.join('west', name))
 
 
