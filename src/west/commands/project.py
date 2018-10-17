@@ -74,7 +74,8 @@ class Fetch(WestCommand):
 
     def do_run(self, args, user_args):
         if args.update:
-            _update(True, True)
+            _update_west()
+            _update_manifest()
 
         for project in _projects(args, listed_must_be_cloned=False):
             log.dbg('fetching:', project, level=log.VERBOSE_VERY)
@@ -106,7 +107,8 @@ class Pull(WestCommand):
 
     def do_run(self, args, user_args):
         if args.update:
-            _update(True, True)
+            _update_west()
+            _update_manifest()
 
         for project in _projects(args, listed_must_be_cloned=False):
             _fetch(project)
@@ -289,10 +291,14 @@ class Update(WestCommand):
                  help='update the manifest repository'))
 
     def do_run(self, args, user_args):
-        if not args.update_west and not args.update_manifest:
-            _update(True, True)
+        if args.update_west or args.update_manifest:
+            if args.update_west:
+                _update_west()
+            if args.update_manifest:
+                _update_manifest()
         else:
-            _update(args.update_west, args.update_manifest)
+            _update_west()
+            _update_manifest()
 
 
 class ForAll(WestCommand):
@@ -614,31 +620,34 @@ def _special_project(name):
                    path=os.path.join('west', name))
 
 
-def _update(update_west, update_manifest):
-    projects = []
-    if update_west:
-        projects.append(_special_project('west'))
-    if update_manifest:
-        projects.append(_special_project('manifest'))
+def _update_west():
+    _update_special('west')
+
+
+def _update_manifest():
+    _update_special('manifest')
+
+
+def _update_special(name):
+    project = _special_project(name)
 
     with _error_context(_FAILED_UPDATE_MSG):
-        for project in projects:
-            _dbg(project, 'Updating (name-and-path)', level=log.VERBOSE_NORMAL)
+        _dbg(project, 'Updating (name-and-path)', level=log.VERBOSE_NORMAL)
 
-            # Fetch changes from upstream
-            _git(project, 'fetch --quiet (remote) -- (revision)')
+        # Fetch changes from upstream
+        _git(project, 'fetch --quiet (remote) -- (revision)')
 
-            if not _up_to_date_with(project, "FETCH_HEAD^{commit}"):
-                # New upstream changes
-                _git(project, 'rebase FETCH_HEAD^{commit}')
-                _inf(project, 'Updated (rebased) (name-and-path) to the '
-                              'latest version')
+        if not _up_to_date_with(project, "FETCH_HEAD^{commit}"):
+            # New upstream changes
+            _git(project, 'rebase FETCH_HEAD^{commit}')
+            _inf(project, 'Updated (rebased) (name-and-path) to the '
+                          'latest version')
 
-                if project.name == 'west':
-                    # Signal self-update, which will cause a restart. This is a
-                    # bit nicer than doing the restart here, as callers will
-                    # have a chance to flush file buffers, etc.
-                    raise WestUpdated()
+            if project.name == 'west':
+                # Signal self-update, which will cause a restart. This is a
+                # bit nicer than doing the restart here, as callers will
+                # have a chance to flush file buffers, etc.
+                raise WestUpdated()
 
 
 _FAILED_UPDATE_MSG = """
