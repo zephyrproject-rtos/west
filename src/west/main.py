@@ -219,12 +219,7 @@ def main(argv=None):
     except CommandContextError as cce:
         log.die('command', args.command, 'cannot be run in this context:',
                 *cce.args)
-    except Exception as exc:
-        log.err(*exc.args, fatal=True)
-        if args.verbose:
-            raise
-        else:
-            log.inf(for_stack_trace)
+
 
 if __name__ == "__main__":
     main()
