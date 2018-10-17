@@ -109,8 +109,8 @@ class Pull(WestCommand):
             _update(True, True)
 
         for project in _projects(args, listed_must_be_cloned=False):
-            if _fetch(project):
-                _rebase(project)
+            _fetch(project)
+            _rebase(project)
 
 
 class Rebase(WestCommand):
@@ -471,12 +471,8 @@ def _fetch(project):
     # Fetches upstream changes for 'project' and updates the 'manifest-rev'
     # branch to point to the revision specified in the manifest. If the
     # project's repository does not already exist, it is created first.
-    #
-    # Returns True if the project's repository already existed.
 
-    exists = _cloned(project)
-
-    if not exists:
+    if not _cloned(project):
         _inf(project, 'Creating repository for (name-and-path)')
         _git_base(project, 'init (abspath)')
         _git(project, 'remote add -- (remote) (url)')
@@ -513,12 +509,33 @@ def _fetch(project):
         # spammy detached HEAD warning from Git.
         _git(project, 'checkout --detach (qual-manifest-rev-branch)')
 
-    return exists
-
 
 def _rebase(project):
-    _inf(project, 'Rebasing (name-and-path) to (manifest-rev-branch)')
-    _git(project, 'rebase (qual-manifest-rev-branch)')
+    # Rebases the project against the manifest-rev branch
+
+    if _up_to_date_with(project, _MANIFEST_REV_BRANCH):
+        _inf(project,
+             '(name-and-path) is up-to-date with (manifest-rev-branch)')
+    else:
+        _inf(project, 'Rebasing (name-and-path) to (manifest-rev-branch)')
+        _git(project, 'rebase (qual-manifest-rev-branch)')
+
+
+def _up_to_date_with(project, revision):
+    # Returns True if all commits in 'revision' are also in HEAD. This is used
+    # to check if 'project' needs rebasing. 'revision' can be anything that
+    # resolves to a commit.
+
+    # SHA of the tip of 'revision'
+    revision_sha = _git(project, 'rev-parse ' + revision,
+                        capture_stdout=True).stdout
+
+    # SHA of the most recent commit shared between HEAD and 'revision'
+    merge_base = _git(project, 'merge-base HEAD ' + revision,
+                      capture_stdout=True).stdout
+
+    # If they're equal, HEAD has all the commits in 'revision'
+    return revision_sha == merge_base
 
 
 def _cloned(project):
@@ -598,15 +615,6 @@ def _special_project(name):
 
 
 def _update(update_west, update_manifest):
-    # 'try' is a keyword
-    def attempt(project, cmd):
-        res = _git(project, cmd, capture_stdout=True, check=False)
-        if res.returncode:
-            # The Git command's stderr isn't redirected and will also be
-            # available
-            _die(project, _FAILED_UPDATE_MSG.format(cmd))
-        return res.stdout
-
     projects = []
     if update_west:
         projects.append(_special_project('west'))
@@ -617,16 +625,11 @@ def _update(update_west, update_manifest):
         _dbg(project, 'Updating (name-and-path)', level=log.VERBOSE_NORMAL)
 
         # Fetch changes from upstream
-        attempt(project, 'fetch --quiet (remote) -- (revision)')
+        _git(project, 'fetch --quiet (remote) -- (revision)')
 
-        # Upstream SHA
-        upstream_sha = attempt(project, 'rev-parse FETCH_HEAD^{commit}')
-
-        # If the upstream commit isn't the latest commit in common between the
-        # upstream and HEAD, then there are new upstream changes
-        if upstream_sha != attempt(project, 'merge-base HEAD ' + upstream_sha):
-            attempt(project, 'rebase ' + upstream_sha)
-
+        if not _up_to_date_with(project, "FETCH_HEAD^{commit}"):
+            # New upstream changes
+            _git(project, 'rebase FETCH_HEAD^{commit}')
             _inf(project, 'Updated (rebased) (name-and-path) to the '
                           'latest version')
 
@@ -635,12 +638,6 @@ def _update(update_west, update_manifest):
                 # nicer than doing the restart here, as callers will have a
                 # chance to flush file buffers, etc.
                 raise WestUpdated()
-
-
-_FAILED_UPDATE_MSG = """
-Failed to update (name-and-path), while running command '{}'. Please fix the
-state of the repository, or pass --no-update to 'west fetch/pull' to skip
-updating the manifest and West for the duration of the command."""[1:]
 
 
 class WestUpdated(Exception):
