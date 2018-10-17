@@ -621,23 +621,30 @@ def _update(update_west, update_manifest):
     if update_manifest:
         projects.append(_special_project('manifest'))
 
-    for project in projects:
-        _dbg(project, 'Updating (name-and-path)', level=log.VERBOSE_NORMAL)
+    with _error_context(_FAILED_UPDATE_MSG):
+        for project in projects:
+            _dbg(project, 'Updating (name-and-path)', level=log.VERBOSE_NORMAL)
 
-        # Fetch changes from upstream
-        _git(project, 'fetch --quiet (remote) -- (revision)')
+            # Fetch changes from upstream
+            _git(project, 'fetch --quiet (remote) -- (revision)')
 
-        if not _up_to_date_with(project, "FETCH_HEAD^{commit}"):
-            # New upstream changes
-            _git(project, 'rebase FETCH_HEAD^{commit}')
-            _inf(project, 'Updated (rebased) (name-and-path) to the '
-                          'latest version')
+            if not _up_to_date_with(project, "FETCH_HEAD^{commit}"):
+                # New upstream changes
+                _git(project, 'rebase FETCH_HEAD^{commit}')
+                _inf(project, 'Updated (rebased) (name-and-path) to the '
+                              'latest version')
 
-            if project.name == 'west':
-                # Signal self-update, which will cause a restart. This is a bit
-                # nicer than doing the restart here, as callers will have a
-                # chance to flush file buffers, etc.
-                raise WestUpdated()
+                if project.name == 'west':
+                    # Signal self-update, which will cause a restart. This is a
+                    # bit nicer than doing the restart here, as callers will
+                    # have a chance to flush file buffers, etc.
+                    raise WestUpdated()
+
+
+_FAILED_UPDATE_MSG = """
+, while running automatic self-update. Please fix the state of the
+repository, or pass --no-update to 'west fetch/pull' to skip updating
+the manifest and West for the duration of the command."""[1:]
 
 
 class WestUpdated(Exception):
@@ -715,8 +722,10 @@ def _git_helper(project, cmd, extra_args, cwd, capture_stdout, check):
     log.dbg(dbg_msg, level=log.VERBOSE_VERY)
 
     if check and popen.returncode:
-        _die(project, "Command '{}' failed for (name-and-path)"
-                      .format(cmd_str))
+        msg = "Command '{}' failed for (name-and-path)".format(cmd_str)
+        if _error_context_msg:
+            msg += _error_context_msg.replace('\n', ' ')
+        _die(project, msg)
 
     if capture_stdout:
         # Manual UTF-8 decoding and universal newlines. Before Python 3.6,
@@ -729,6 +738,31 @@ def _git_helper(project, cmd, extra_args, cwd, capture_stdout, check):
         stdout = "\n".join(stdout.decode('utf-8').splitlines()).rstrip("\n")
 
     return CompletedProcess(popen.args, popen.returncode, stdout)
+
+
+# Some Python shenanigans to be able to set up a context with
+#
+#   with _error_context("Doing stuff"):
+#       Do the stuff
+#
+# A context is just some extra text that gets printed on Git errors.
+#
+# Note: If we ever need to support nested contexts, _error_context_msg could be
+# turned into a stack.
+
+_error_context_msg = None
+
+class _error_context:
+    def __init__(self, msg):
+        self.msg = msg
+
+    def __enter__(self):
+        global _error_context_msg
+        _error_context_msg = self.msg
+
+    def __exit__(self, *args):
+        global _error_context_msg
+        _error_context_msg = None
 
 
 def _expand_shorthands(project, s):
