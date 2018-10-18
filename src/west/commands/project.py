@@ -51,22 +51,75 @@ class List(WestCommand):
                 "(cloned)" if _cloned(project) else "(not cloned)"))
 
 
+class Clone(WestCommand):
+    def __init__(self):
+        super().__init__(
+            'clone',
+            _wrap('''
+            Clone projects.
+
+            Clones each of the specified projects (default: all projects) and
+            creates a branch in each. The branch is named after the project's
+            revision, and tracks the 'manifest-rev' branch (see below).
+
+            If the project's revision is an SHA, the branch will simply be
+            called 'work'.
+
+            This command is really just a shorthand for 'west fetch' +
+            'west checkout -b <branch name>'. If you clone a project with
+            'west fetch' instead, you will start in a detached HEAD state at
+            'manifest-rev'.
+
+            {}
+
+            {}'''.format(_NO_UPDATE_HELP, _MANIFEST_REV_HELP)))
+
+    def do_add_parser(self, parser_adder):
+        return _add_parser(
+            parser_adder, self,
+            _arg('-b',
+                 dest='branch',
+                 metavar='BRANCH_NAME',
+                 help='an alternative branch name to use, instead of one '
+                      'based on the revision'),
+            _no_update_arg,
+            _project_list_arg)
+
+    def do_run(self, args, user_args):
+        if args.update:
+            _update_west()
+            _update_manifest()
+
+        for project in _projects(args, listed_must_be_cloned=False):
+            if args.branch:
+                branch = args.branch
+            elif _is_sha(project.revision):
+                # Don't name the branch after an SHA
+                branch = 'work'
+            else:
+                # Use the last component of the revision, in case it is a
+                # qualified ref (refs/heads/foo and the like)
+                branch = project.revision.split('/')[-1]
+
+            _fetch(project)
+            _create_branch(project, branch)
+            _checkout(project, branch)
+
+
 class Fetch(WestCommand):
     def __init__(self):
         super().__init__(
             'fetch',
             _wrap('''
-            Clone/fetch projects.
+            Fetch projects.
 
             Fetches upstream changes in each of the specified projects
             (default: all projects). Repositories that do not already exist are
             cloned.
 
-            Unless --no-update is passed, the manifest and West source code
-            repositories are updated prior to fetching. See the 'update'
-            command.
+            {}
 
-            ''' + _MANIFEST_REV_HELP))
+            {}'''.format(_NO_UPDATE_HELP, _MANIFEST_REV_HELP)))
 
     def do_add_parser(self, parser_adder):
         return _add_parser(parser_adder, self, _no_update_arg,
@@ -78,7 +131,6 @@ class Fetch(WestCommand):
             _update_manifest()
 
         for project in _projects(args, listed_must_be_cloned=False):
-            log.dbg('fetching:', project, level=log.VERBOSE_VERY)
             _fetch(project)
 
 
@@ -95,11 +147,10 @@ class Pull(WestCommand):
             branch up to date. Repositories that do not already exist are
             cloned.
 
-            Unless --no-update is passed, the manifest and West source code
-            repositories are updated prior to pulling. See the 'update'
-            command.
+            {}
 
-            '''.format(_MANIFEST_REV_BRANCH) + _MANIFEST_REV_HELP))
+            {}'''.format(_MANIFEST_REV_BRANCH, _NO_UPDATE_HELP,
+                         _MANIFEST_REV_HELP)))
 
     def do_add_parser(self, parser_adder):
         return _add_parser(parser_adder, self, _no_update_arg,
@@ -388,6 +439,13 @@ def _wrap(s):
     return "\n\n".join(textwrap.fill(paragraph) for paragraph in paragraphs)
 
 
+_NO_UPDATE_HELP = """
+Unless --no-update is passed, the manifest and West source code repositories
+are updated prior to cloning. See the 'update' command.
+"""[1:].replace('\n', ' ')
+
+
+
 _MANIFEST_REV_HELP = """
 The '{}' branch points to the revision that the manifest specified for the
 project as of the most recent 'west fetch'/'west pull'.
@@ -588,7 +646,7 @@ def _create_branch(project, branch):
         _inf(project, "Creating branch '{}' in (name-and-path)"
                       .format(branch))
 
-        _git(project, 'branch --quiet --track {} (qual-manifest-rev-branch)'
+        _git(project, 'branch --quiet --track -- {} (qual-manifest-rev-branch)'
                       .format(branch))
 
 
@@ -658,6 +716,15 @@ the manifest and West for the duration of the command."""[1:]
 
 class WestUpdated(Exception):
     '''Raised after West has updated its own source code'''
+
+
+def _is_sha(s):
+    try:
+        int(s, 16)
+    except ValueError:
+        return False
+
+    return len(s) == 40
 
 
 def _git_base(project, cmd, *, extra_args=(), capture_stdout=False,
