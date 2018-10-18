@@ -82,13 +82,14 @@ def find_west_topdir(start):
         cur_dir = parent_dir
 
 
-def clone(url, rev, dest):
+def clone(desc, url, rev, dest):
     if os.path.exists(dest):
         raise WestError('refusing to clone into existing location ' + dest)
 
     if not url.startswith(('http:', 'https:', 'git:', 'git+shh:', 'file:')):
         raise WestError('Unknown URL scheme for repository: {}'.format(url))
 
+    print('=== Cloning {} from {}, rev. {} ==='.format(desc, url, rev))
     subprocess.check_call(('git', 'clone', '-b', rev, '--', url, dest))
 
 
@@ -190,10 +191,10 @@ def init_bootstrap(directory, args):
     # Clone the west source code and the manifest into west/. Git will create
     # the west/ directory if it does not exist.
 
-    clone(args.west_url, args.west_rev,
+    clone('west repository', args.west_url, args.west_rev,
           os.path.join(directory, WEST_DIR, WEST))
 
-    clone(args.manifest_url, args.manifest_rev,
+    clone('manifest repository', args.manifest_url, args.manifest_rev,
           os.path.join(directory, WEST_DIR, MANIFEST))
 
     # Create an initial configuration file
@@ -210,13 +211,19 @@ def init_bootstrap(directory, args):
         'revision': args.manifest_rev
     }
 
-    with open(os.path.join(directory, WEST_DIR, 'config'), 'w') as f:
+    config_path = os.path.join(directory, WEST_DIR, 'config')
+
+    with open(config_path, 'w') as f:
         config.write(f)
+
+    print('=== Initial configuration written to {} ==='.format(config_path))
 
     # Create a dotfile to mark the installation. Hide it on Windows.
 
     with open(os.path.join(directory, WEST_DIR, WEST_MARKER), 'w') as f:
         hide_file(f.name)
+
+    print('=== West initialized ===')
 
 
 def init_reinit(directory, args):
