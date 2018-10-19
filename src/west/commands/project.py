@@ -595,11 +595,23 @@ def _up_to_date_with(project, revision):
                         capture_stdout=True).stdout
 
     # SHA of the most recent commit shared between HEAD and 'revision'
-    merge_base = _git(project, 'merge-base HEAD ' + revision,
+    merge_base = _git(project, 'merge-base HEAD -- ' + revision,
                       capture_stdout=True).stdout
 
     # If they're equal, HEAD has all the commits in 'revision'
     return revision_sha == merge_base
+
+
+def _rebase_in_progress(project):
+    # Returns True if a rebase is currently in progress. Based on ideas from
+    # https://stackoverflow.com/questions/3921409/how-to-know-if-there-is-a-git-rebase-in-progress.
+
+    # _git() changes the working directory, so we need an absolute path
+    git_dir = _git(project, 'rev-parse --absolute-git-dir',
+                   capture_stdout=True).stdout
+
+    return os.path.isdir(os.path.join(git_dir, 'rebase-merge')) or \
+           os.path.isdir(os.path.join(git_dir, 'rebase-apply'))
 
 
 def _cloned(project):
@@ -697,15 +709,40 @@ def _update_special(name):
 
         if not _up_to_date_with(project, "FETCH_HEAD^{commit}"):
             # New upstream changes
-            _git(project, 'rebase FETCH_HEAD^{commit}')
-            _inf(project, 'Updated (rebased) (name-and-path) to the '
-                          'latest version')
 
-            if project.name == 'west':
-                # Signal self-update, which will cause a restart. This is a
-                # bit nicer than doing the restart here, as callers will
-                # have a chance to flush file buffers, etc.
-                raise WestUpdated()
+            # Check if the user is currently rebasing. That would cause the
+            # rebase below to fail, and we don't want to wipe out their work.
+            if _rebase_in_progress(project):
+                _wrn(project, "Couldn't auto-update (name-and-path), because "
+                              "it's in the middle of a rebase")
+
+            elif _git(project, 'rebase FETCH_HEAD^{commit}', check=False) \
+                 .returncode:
+
+                _wrn(project, 'Failed to auto-update (rebase) (name-and-path) '
+                              'to the latest version')
+
+                # A rebase can fail for many reasons, including uncommited
+                # changes
+                if _rebase_in_progress(project):
+                    # Looks like we have a failed rebase, caused by us. Try to
+                    # undo it, and keep going. This feels a bit iffy, but was
+                    # requested.
+                    _wrn(project,
+                         "Running 'git rebase --abort' to undo what looks "
+                         'like a failed auto-update (rebase) of '
+                         '(name-and-path)')
+                    _git(project, 'rebase --abort')
+
+            else:
+                _inf(project, 'Updated (rebased) (name-and-path) to the '
+                              'latest version')
+
+                if project.name == 'west':
+                    # Signal self-update, which will cause a restart. This is a
+                    # bit nicer than doing the restart here, as callers will
+                    # have a chance to flush file buffers, etc.
+                    raise WestUpdated()
 
 
 _FAILED_UPDATE_MSG = """
