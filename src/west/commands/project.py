@@ -585,21 +585,26 @@ def _rebase(project):
         _git(project, 'rebase (qual-manifest-rev-branch)')
 
 
-def _up_to_date_with(project, revision):
-    # Returns True if all commits in 'revision' are also in HEAD. This is used
-    # to check if 'project' needs rebasing. 'revision' can be anything that
+def _sha(project, rev):
+    # Returns the SHA of a revision (HEAD, v2.0.0, etc.), passed as a string in
+    # 'rev'
+
+    return _git(project, 'rev-parse ' + rev, capture_stdout=True).stdout
+
+
+def _merge_base(project, rev1, rev2):
+    # Returns the latest commit in common between 'rev1' and 'rev2'
+
+    return _git(project, 'merge-base -- {} {}'.format(rev1, rev2),
+                capture_stdout=True).stdout
+
+
+def _up_to_date_with(project, rev):
+    # Returns True if all commits in 'rev' are also in HEAD. This is used to
+    # check if 'project' needs rebasing. 'revision' can be anything that
     # resolves to a commit.
 
-    # SHA of the tip of 'revision'
-    revision_sha = _git(project, 'rev-parse ' + revision,
-                        capture_stdout=True).stdout
-
-    # SHA of the most recent commit shared between HEAD and 'revision'
-    merge_base = _git(project, 'merge-base HEAD ' + revision,
-                      capture_stdout=True).stdout
-
-    # If they're equal, HEAD has all the commits in 'revision'
-    return revision_sha == merge_base
+    return _sha(project, rev) == _merge_base(project, 'HEAD', rev)
 
 
 def _cloned(project):
@@ -687,19 +692,27 @@ def _update_manifest():
 
 
 def _update_special(name):
-    project = _special_project(name)
-
     with _error_context(_FAILED_UPDATE_MSG):
+        project = _special_project(name)
         _dbg(project, 'Updating (name-and-path)', level=log.VERBOSE_NORMAL)
 
-        # Fetch changes from upstream
-        _git(project, 'fetch --quiet (remote) -- (revision)')
+        old_sha = _sha(project, 'HEAD')
 
-        if not _up_to_date_with(project, "FETCH_HEAD^{commit}"):
-            # New upstream changes
-            _git(project, 'rebase FETCH_HEAD^{commit}')
-            _inf(project, 'Updated (rebased) (name-and-path) to the '
-                          'latest version')
+        # Only update special repositories if possible via fast-forward, as
+        # automatic rebasing is probably more annoying than useful when working
+        # directly on them. --rebase=false must be passed for --ff-only to be
+        # respected e.g. when pull.rebase is set.
+        if _git(project,
+                'pull --quiet --rebase=false --ff-only -- (remote) (revision)',
+                check=False).returncode:
+
+            _wrn(project, 'Skipping automatic update of (name-and-path). '
+                          "Can't be fast-forwarded to (revision) (from "
+                          '(remote)).')
+
+        elif old_sha != _sha(project, 'HEAD'):
+            _inf(project, 'Updated (name-and-path) to (revision) (from '
+                          '(remote)).')
 
             if project.name == 'west':
                 # Signal self-update, which will cause a restart. This is a
@@ -709,9 +722,8 @@ def _update_special(name):
 
 
 _FAILED_UPDATE_MSG = """
-, while running automatic self-update. Please fix the state of the
-repository, or pass --no-update to 'west fetch/pull' to skip updating
-the manifest and West for the duration of the command."""[1:]
+, while running automatic self-update. Pass --no-update to 'west fetch/pull' to
+skip updating the manifest and West for the duration of the command."""[1:]
 
 
 class WestUpdated(Exception):
