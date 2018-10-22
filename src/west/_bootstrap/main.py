@@ -207,12 +207,12 @@ def init_bootstrap(directory, args):
     config = configparser.ConfigParser()
 
     config['west'] = {
-        'remote': 'origin',
+        'remote': args.west_url,
         'revision': args.west_rev
     }
 
     config['manifest'] = {
-        'remote': 'origin',
+        'remote': args.manifest_url,
         'revision': args.manifest_rev
     }
 
@@ -261,7 +261,8 @@ def wrap(argv):
             sys.exit(0)         # run outside of an installation directory
         else:
             sys.exit('Error: not a Zephyr directory (or any parent): {}\n'
-                     'Use "west init" to install Zephyr here'.format(start))
+                     'Use "west init" to install Zephyr here'
+                     .format(os.getcwd()))
 
     west_git_repo = os.path.join(topdir, WEST_DIR, WEST)
     if printing_version:

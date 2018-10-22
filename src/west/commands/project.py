@@ -548,7 +548,9 @@ def _fetch(project):
     if not _cloned(project):
         _inf(project, 'Creating repository for (name-and-path)')
         _git_base(project, 'init (abspath)')
-        _git(project, 'remote add -- (remote) (url)')
+        # This remote is only added for the user's convenience. We always fetch
+        # directly from the URL specified in the manifest.
+        _git(project, 'remote add -- (remote-name) (url)')
 
     # Fetch the revision specified in the manifest into the manifest-rev branch
 
@@ -564,7 +566,7 @@ def _fetch(project):
     # when the revision is an annotated tag. ^{commit} type peeling isn't
     # supported for the <src> in a <src>:<dst> refspec, so we have to do it
     # separately.
-    _git(project, fetch_cmd + ' -- (remote) (revision)')
+    _git(project, fetch_cmd + ' -- (url) (revision)')
     _git(project, 'update-ref (qual-manifest-rev-branch) FETCH_HEAD^{commit}')
 
     if not _ref_ok(project, 'HEAD'):
@@ -683,13 +685,24 @@ def _checkout(project, branch):
 def _special_project(name):
     # Returns a Project instance for one of the special repositories in west/,
     # so that we can reuse the project-related functions for them
-    remote = Remote(name=config.get(name, 'remote', fallback='origin'),
+
+    # TODO: Maybe the Remote class could be replaced by a single
+    # project.remote_name field, now that we no longer use the Git remote
+    # mechanism and fetch directly from URLs
+
+    remote = Remote(name='dummy name for {} repository'.format(name),
                     url='dummy URL for {} repository'.format(name))
 
     # 'revision' always exists and defaults to 'master'
-    return Project(name, remote, None,
-                   revision=config.get(name, 'revision', fallback='master'),
-                   path=os.path.join('west', name))
+    project = Project(name, remote, None,
+                      revision=config.get(name, 'revision', fallback='master'),
+                      path=os.path.join('west', name))
+
+    # This could also be the name of a Git remote. The naming breaks a bit
+    # here.
+    project.url = config.get(name, 'remote', fallback='origin')
+
+    return project
 
 
 def _update_west():
@@ -712,16 +725,16 @@ def _update_special(name):
         # directly on them. --rebase=false must be passed for --ff-only to be
         # respected e.g. when pull.rebase is set.
         if _git(project,
-                'pull --quiet --rebase=false --ff-only -- (remote) (revision)',
+                'pull --quiet --rebase=false --ff-only -- (url) (revision)',
                 check=False).returncode:
 
             _wrn(project, 'Skipping automatic update of (name-and-path). '
                           "Can't be fast-forwarded to (revision) (from "
-                          '(remote)).')
+                          '(url)).')
 
         elif old_sha != _sha(project, 'HEAD'):
             _inf(project, 'Updated (name-and-path) to (revision) (from '
-                          '(remote)).')
+                          '(url)).')
 
             if project.name == 'west':
                 # Signal self-update, which will cause a restart. This is a
@@ -880,7 +893,7 @@ def _expand_shorthands(project, s):
             .replace('(name-and-path)',
                      '{} ({})'.format(
                          project.name, os.path.join(project.path, ""))) \
-            .replace('(remote)', project.remote.name) \
+            .replace('(remote-name)', project.remote.name) \
             .replace('(url)', project.url) \
             .replace('(path)', project.path) \
             .replace('(abspath)', project.abspath) \
