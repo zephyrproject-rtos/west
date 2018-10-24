@@ -384,7 +384,10 @@ class Update(WestCommand):
             'update',
             _wrap('''
             Updates the manifest repository and/or the West source code
-            repository.
+            repository. The remote to update from is taken from the
+            manifest.remote and manifest.remote configuration settings, and the
+            revision from manifest.revision and west.revision configuration
+            settings.
 
             There is normally no need to run this command manually, because
             'west fetch' and 'west pull' automatically update the West and
@@ -393,6 +396,10 @@ class Update(WestCommand):
 
             Pass --update-west or --update-manifest to update just that
             repository. With no arguments, both are updated.
+
+            Updates are skipped (with a warning) if they can't be done via
+            fast-forward, unless --reset-manifest, --reset-west, or
+            --reset-projects is given.
             '''))
 
     def do_add_parser(self, parser_adder):
@@ -401,21 +408,52 @@ class Update(WestCommand):
             _arg('--update-west',
                  dest='update_west',
                  action='store_true',
-                 help='update the West source code repository'),
+                 help='update the west source code repository'),
             _arg('--update-manifest',
                  dest='update_manifest',
                  action='store_true',
-                 help='update the manifest repository'))
+                 help='update the manifest repository'),
+            _arg('--reset-west',
+                 action='store_true',
+                 help='''Like --update-west, but run 'git reset --keep'
+                      afterwards to reset the west repository to the commit
+                      pointed at by the west.remote and west.revision
+                      configuration settings. This is used internally when
+                      changing west.remote or west.revision via
+                      'west init'.'''),
+            _arg('--reset-manifest',
+                 action='store_true',
+                 help='''like --reset-west, for the manifest repository, using
+                      manifest.remote and manifest.revision.'''),
+            _arg('--reset-projects',
+                 action='store_true',
+                 help='''Fetches upstream data in all projects, then runs 'git
+                      reset --keep' to reset them to the manifest revision.
+                      This is used internally when changing manifest.remote or
+                      manifest.revision via 'west init'.'''))
 
     def do_run(self, args, user_args):
-        if args.update_west or args.update_manifest:
-            if args.update_west:
-                _update_west()
-            if args.update_manifest:
-                _update_manifest()
-        else:
+        if not (args.update_manifest or args.reset_manifest or
+                args.update_west or args.reset_west or
+                args.reset_projects):
+
+            # No arguments is an alias for --update-west --update-manifest
             _update_west()
             _update_manifest()
+            return
+
+        if args.reset_manifest:
+            _update_and_reset_special('manifest')
+        elif args.update_manifest:
+            _update_manifest()
+
+        if args.reset_west:
+            _update_and_reset_special('west')
+        elif args.update_west:
+            _update_west()
+
+        if args.reset_projects:
+            _reset_projects(args)
 
 
 class ForAll(WestCommand):
@@ -817,10 +855,41 @@ def _update_special(name):
                           '(url)).')
 
             if project.name == 'west':
-                # Signal self-update, which will cause a restart. This is a
-                # bit nicer than doing the restart here, as callers will
-                # have a chance to flush file buffers, etc.
+                # Signal self-update, which will cause a restart. This is a bit
+                # nicer than doing the restart here, as callers will have a
+                # chance to flush file buffers, etc.
                 raise WestUpdated()
+
+
+def _update_and_reset_special(name):
+    # Updates one of the special repositories (the manifest and west) by
+    # resetting to the new revision after fetching it (with 'git reset --keep')
+
+    project = _special_project(name)
+    with _error_context(', while updating/resetting special project'):
+        _inf(project,
+             "Fetching and resetting (name-and-path) to '(revision)'")
+        _git(project, 'fetch -- (url) (revision)')
+        if _git(project, 'reset --keep FETCH_HEAD', check=False).returncode:
+            _wrn(project,
+                 'Failed to reset special project (name-and-path) to '
+                 "(revision) (with 'git reset --keep')")
+
+
+def _reset_projects(args):
+    # Fetches changes in all cloned projects and then resets them the manifest
+    # revision (with 'git reset --keep')
+
+    for project in _all_projects(args):
+        if _cloned(project):
+            _fetch(project)
+            _inf(project, 'Resetting (name-and-path) to (manifest-rev-branch)')
+            if _git(project, 'reset --keep (manifest-rev-branch)',
+                    check=False).returncode:
+
+                _wrn(project,
+                     'Failed to reset (name-and-path) to '
+                     "(manifest-rev-branch) (with 'git reset --keep')")
 
 
 _FAILED_UPDATE_MSG = """
