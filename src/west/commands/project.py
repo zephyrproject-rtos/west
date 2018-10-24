@@ -44,10 +44,11 @@ class List(WestCommand):
         log.inf("Manifest path: {}\n".format(_manifest_path(args)))
 
         for project in _all_projects(args):
-            log.inf('{:15} {:30} {:15} {}'.format(
+            log.inf('{:14}  {:18}  {:13}  {}  {}'.format(
                 project.name,
                 os.path.join(project.path, ''),  # Add final '/' if missing
                 project.revision,
+                project.url,
                 "(cloned)" if _cloned(project) else "(not cloned)"))
 
 
