@@ -30,7 +30,7 @@ WEST_DIR = 'west'
 # Subdirectory to check out the west source repository into.
 WEST = 'west'
 # Default west repository URL.
-WEST_DEFAULT = 'https://github.com/zephyrproject-rtos/west'
+WEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/west'
 # Default revision to check out of the west repository.
 WEST_REV_DEFAULT = 'master'
 # File inside of WEST_DIR which marks it as the top level of the
@@ -44,7 +44,7 @@ WEST_MARKER = '.west_topdir'
 # Manifest repository directory under WEST_DIR.
 MANIFEST = 'manifest'
 # Default manifest repository URL.
-MANIFEST_DEFAULT = 'https://github.com/zephyrproject-rtos/manifest'
+MANIFEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/manifest'
 # Default revision to check out of the manifest repository.
 MANIFEST_REV_DEFAULT = 'master'
 
@@ -62,13 +62,24 @@ class WestNotFound(WestError):
     '''Neither the current directory nor any parent has a West installation.'''
 
 
-def find_west_topdir(start):
-    '''Find the top-level installation directory, starting at ``start``.
+def west_dir(start=None):
+    '''
+    Returns the path to the west/ directory, searching ``start`` and its
+    parents.
 
-    If none is found, raises WestNotFound.'''
+    Raises WestNotFound if no west directory is found.
+    '''
+    return os.path.join(west_topdir(start), WEST_DIR)
+
+
+def west_topdir(start=None):
+    '''
+    Like west_dir(), but returns the path to the parent directory of the west/
+    directory instead, where project repositories are stored
+    '''
     # If you change this function, make sure to update west.util.west_topdir().
 
-    cur_dir = start
+    cur_dir = start or os.getcwd()
 
     while True:
         if os.path.isfile(os.path.join(cur_dir, WEST_DIR, WEST_MARKER)):
@@ -113,38 +124,141 @@ def init(argv):
         '-m', '--manifest-url',
         help='Zephyr manifest fetch URL, default ' + MANIFEST_DEFAULT)
     init_parser.add_argument(
-        '--mr', '--manifest-rev', default=MANIFEST_REV_DEFAULT,
-        dest='manifest_rev',
+        '--mr', '--manifest-rev', dest='manifest_rev',
         help='Manifest revision to fetch, default ' + MANIFEST_REV_DEFAULT)
     init_parser.add_argument(
         '-w', '--west-url',
-        help='West fetch URL, default ' + WEST_DEFAULT)
+        help='West fetch URL, default ' + WEST_URL_DEFAULT)
     init_parser.add_argument(
-        '--wr', '--west-rev', default=WEST_REV_DEFAULT, dest='west_rev',
+        '--wr', '--west-rev', dest='west_rev',
         help='West revision to fetch, default ' + WEST_REV_DEFAULT)
     init_parser.add_argument(
-        'directory', nargs='?', default=None,
+        'directory', nargs='?',
         help='Initializes in this directory, creating it if necessary')
 
     args = init_parser.parse_args(args=argv)
-    directory = args.directory or os.getcwd()
-
-    if args.base_url:
-        if args.manifest_url or args.west_url:
-            sys.exit('fatal error: -b is incompatible with -m and -w')
-        args.manifest_url = args.base_url.rstrip('/') + '/manifest'
-        args.west_url = args.base_url.rstrip('/') + '/west'
-    else:
-        if not args.manifest_url:
-            args.manifest_url = MANIFEST_DEFAULT
-        if not args.west_url:
-            args.west_url = WEST_DEFAULT
 
     try:
-        topdir = find_west_topdir(directory)
-        init_reinit(topdir, args)
+        reinit(os.path.join(west_dir(args.directory), 'config'), args)
     except WestNotFound:
-        init_bootstrap(directory, args)
+        bootstrap(args)
+
+
+def bootstrap(args):
+    '''Bootstrap a new manifest + West installation.'''
+
+    if args.base_url:
+        if args.west_url or args.manifest_url:
+            sys.exit('fatal error: -b is incompatible with -m and -w')
+        west_url = args.base_url.rstrip('/') + '/west'
+        manifest_url = args.base_url.rstrip('/') + '/manifest'
+    else:
+        west_url = args.west_url or WEST_URL_DEFAULT
+        manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
+
+    west_rev = args.west_rev or WEST_REV_DEFAULT
+    manifest_rev = args.manifest_rev or MANIFEST_REV_DEFAULT
+
+    directory = args.directory or os.getcwd()
+
+    if not os.path.isdir(directory):
+        try:
+            print('Initializing in new directory', directory)
+            os.makedirs(directory, exist_ok=False)
+        except PermissionError:
+            sys.exit('Cannot initialize in {}: permission denied'.format(
+                directory))
+        except FileExistsError:
+            sys.exit('Something else created {} concurrently; quitting'.format(
+                directory))
+        except Exception as e:
+            sys.exit("Can't create directory {}: {}".format(
+                directory, e.args))
+    else:
+        print('Initializing in', directory)
+
+    # Clone the west source code and the manifest into west/. Git will create
+    # the west/ directory if it does not exist.
+
+    clone('west repository', west_url, west_rev,
+          os.path.join(directory, WEST_DIR, WEST))
+
+    clone('manifest repository', manifest_url, manifest_rev,
+          os.path.join(directory, WEST_DIR, MANIFEST))
+
+    # Create an initial configuration file
+
+    config_path = os.path.join(directory, WEST_DIR, 'config')
+    update_conf(config_path, west_url, west_rev, manifest_url, manifest_rev)
+    print('=== Initial configuration written to {} ==='.format(config_path))
+
+    # Create a dotfile to mark the installation. Hide it on Windows.
+
+    with open(os.path.join(directory, WEST_DIR, WEST_MARKER), 'w') as f:
+        hide_file(f.name)
+
+    print('=== West initialized ===')
+
+
+def reinit(config_path, args):
+    '''
+    Reinitialize an existing installation.
+
+    Currently, this is just a shorthand for updating the west/config
+    configuration file.
+    '''
+    if args.base_url:
+        if args.west_url or args.manifest_url:
+            sys.exit('fatal error: -b is incompatible with -m and -w')
+        west_url = args.base_url.rstrip('/') + '/west'
+        manifest_url = args.base_url.rstrip('/') + '/manifest'
+    else:
+        west_url = args.west_url
+        manifest_url = args.manifest_url
+
+    if not (west_url or args.west_rev or manifest_url or args.manifest_rev):
+        sys.exit('West already initialized. Please pass any settings you '
+                 'want to change.')
+
+    update_conf(config_path,
+                west_url, args.west_rev, manifest_url, args.manifest_rev)
+
+    print('=== Updated configuration written to {} ==='.format(config_path))
+
+
+def update_conf(config_path, west_url, west_rev, manifest_url, manifest_rev):
+    '''
+    Creates or updates the configuration file at 'config_path' with the
+    specified values. Values that are None/empty are ignored.
+    '''
+    config = configparser.ConfigParser()
+
+    # This is a no-op if the file doesn't exist, so no need to check
+    config.read(config_path)
+
+    update_key(config, 'west', 'remote', west_url)
+    update_key(config, 'west', 'revision', west_rev)
+    update_key(config, 'manifest', 'remote', manifest_url)
+    update_key(config, 'manifest', 'revision', manifest_rev)
+
+    with open(config_path, 'w') as f:
+        config.write(f)
+
+
+def update_key(config, section, key, value):
+    '''
+    Updates 'key' in section 'section' in ConfigParser 'config', creating
+    'section' if it does not exist.
+
+    If value is None/empty, 'key' is left as-is.
+    '''
+    if not value:
+        return
+
+    if section not in config:
+        config[section] = {}
+
+    config[section][key] = value
 
 
 def hide_file(path):
@@ -170,67 +284,6 @@ def hide_file(path):
               .format(system, path), file=sys.stderr)
 
 
-def init_bootstrap(directory, args):
-    '''Bootstrap a new manifest + West installation in the given directory.'''
-    if not os.path.isdir(directory):
-        try:
-            print('Initializing in new directory', directory)
-            os.makedirs(directory, exist_ok=False)
-        except PermissionError:
-            sys.exit('Cannot initialize in {}: permission denied'.format(
-                directory))
-        except FileExistsError:
-            sys.exit('Something else created {} concurrently; quitting'.format(
-                directory))
-        except Exception as e:
-            sys.exit("Can't create directory {}: {}".format(
-                directory, e.args))
-    else:
-        print('Initializing in', directory)
-
-    # Clone the west source code and the manifest into west/. Git will create
-    # the west/ directory if it does not exist.
-
-    clone('west repository', args.west_url, args.west_rev,
-          os.path.join(directory, WEST_DIR, WEST))
-
-    clone('manifest repository', args.manifest_url, args.manifest_rev,
-          os.path.join(directory, WEST_DIR, MANIFEST))
-
-    # Create an initial configuration file
-
-    config = configparser.ConfigParser()
-
-    config['west'] = {
-        'remote': args.west_url,
-        'revision': args.west_rev
-    }
-
-    config['manifest'] = {
-        'remote': args.manifest_url,
-        'revision': args.manifest_rev
-    }
-
-    config_path = os.path.join(directory, WEST_DIR, 'config')
-
-    with open(config_path, 'w') as f:
-        config.write(f)
-
-    print('=== Initial configuration written to {} ==='.format(config_path))
-
-    # Create a dotfile to mark the installation. Hide it on Windows.
-
-    with open(os.path.join(directory, WEST_DIR, WEST_MARKER), 'w') as f:
-        hide_file(f.name)
-
-    print('=== West initialized ===')
-
-
-def init_reinit(directory, args):
-    # TODO
-    sys.exit('Re-initializing an existing installation is not yet supported.')
-
-
 #
 # Wrap a West command
 #
@@ -248,9 +301,8 @@ def wrap(argv):
                                                     os.path.dirname(__file__)))
         printing_version = True
 
-    start = os.getcwd()
     try:
-        topdir = find_west_topdir(start)
+        topdir = west_topdir()
     except WestNotFound:
         if printing_version:
             sys.exit(0)         # run outside of an installation directory
