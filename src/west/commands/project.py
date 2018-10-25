@@ -231,12 +231,20 @@ class Checkout(WestCommand):
         super().__init__(
             'checkout',
             _wrap('''
-            Check out topic branch.
+            Check out local branch.
 
-            Checks out the specified branch in each of the specified projects
+            Checks out a local branch in each of the specified projects
             (default: all cloned projects). Projects that do not have the
             branch are left alone.
-            '''))
+
+            Note: To check out remote branches, use ordinary Git commands
+            inside the repositories. This command is meant for switching
+            between work branches that span multiple repositories, without any
+            interference from whatever remote branches might exist.
+
+            If '-b BRANCH_NAME' is passed, the new branch will be set to track
+            '{}', like for 'west branch BRANCH_NAME'.
+            '''.format(_MANIFEST_REV_BRANCH)))
 
     def do_add_parser(self, parser_adder):
         return _add_parser(
