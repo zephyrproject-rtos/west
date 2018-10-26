@@ -104,7 +104,7 @@ instead of ``master``.
 To use another manifest repository (optionally with ``--mr
 some-manifest-branch``)::
 
-  west init -u https://example.com/your-manifest-repository.git
+  west init -m https://example.com/your-manifest-repository.git
 
 After ``init`` time, you can hack on the west tree in ``zephyrproject``.
 

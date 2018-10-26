@@ -108,9 +108,9 @@ def init(argv):
     init_parser.add_argument(
         '-b', '--base-url',
         help='''Base URL for both 'manifest' and 'zephyr' repositories; cannot
-        be given if either -u or -w are''')
+        be given if either -m or -w are''')
     init_parser.add_argument(
-        '-u', '--manifest-url',
+        '-m', '--manifest-url',
         help='Zephyr manifest fetch URL, default ' + MANIFEST_DEFAULT)
     init_parser.add_argument(
         '--mr', '--manifest-rev', default=MANIFEST_REV_DEFAULT,
@@ -131,7 +131,7 @@ def init(argv):
 
     if args.base_url:
         if args.manifest_url or args.west_url:
-            sys.exit('fatal error: -b is incompatible with -u and -w')
+            sys.exit('fatal error: -b is incompatible with -m and -w')
         args.manifest_url = args.base_url.rstrip('/') + '/manifest'
         args.west_url = args.base_url.rstrip('/') + '/west'
     else:
