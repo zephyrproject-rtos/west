@@ -115,26 +115,59 @@ def init(argv):
     This exits the program with a nonzero exit code if fatal errors occur.'''
     init_parser = argparse.ArgumentParser(
         prog='west init',
-        description='Bootstrap initialize a Zephyr installation')
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=
+'''
+Initializes a Zephyr installation.
+
+In more detail, does the following:
+
+  1. Clones the manifest repository to west/manifest, and the west repository
+     to west/west
+
+  2. Creates a marker file west/{}
+
+  3. Creates an initial configuration file west/config
+
+'west init' can be rerun on an already initialized West instance to update
+configuration settings. This is just an alternative to manually editing
+west/config. Only explicitly passed configuration values (e.g.
+--mr NEW_MANIFEST_REVISION) are updated.
+
+Note: If you update the west/manifest revision or URL, the change will take
+effect whenever the configuration setting is next read, e.g. in `west fetch`.
+'west init' only updates configuration settings.
+'''.format(WEST_MARKER))
+
     init_parser.add_argument(
         '-b', '--base-url',
-        help='''Base URL for both 'manifest' and 'zephyr' repositories; cannot
-        be given if either -m or -w are''')
+        help='''Base URL for the 'manifest' and 'west' repositories. Cannot
+             be given if either -m or -w are.''')
+
     init_parser.add_argument(
         '-m', '--manifest-url',
-        help='Zephyr manifest fetch URL, default ' + MANIFEST_DEFAULT)
+        help='Manifest repository URL (or remote name) (default: {})'
+             .format(MANIFEST_URL_DEFAULT))
+
     init_parser.add_argument(
         '--mr', '--manifest-rev', dest='manifest_rev',
-        help='Manifest revision to fetch, default ' + MANIFEST_REV_DEFAULT)
+        help='Manifest revision to fetch (default: {})'
+             .format(MANIFEST_REV_DEFAULT))
+
     init_parser.add_argument(
         '-w', '--west-url',
-        help='West fetch URL, default ' + WEST_URL_DEFAULT)
+        help='West repository URL (or remote name) (default: {})'
+             .format(WEST_URL_DEFAULT))
+
     init_parser.add_argument(
         '--wr', '--west-rev', dest='west_rev',
-        help='West revision to fetch, default ' + WEST_REV_DEFAULT)
+        help='West revision to fetch (default: {})'
+             .format(WEST_REV_DEFAULT))
+
     init_parser.add_argument(
         'directory', nargs='?',
-        help='Initializes in this directory, creating it if necessary')
+        help='''Directory to initialize West in. Missing directories will be
+             created automatically. (default: current directory)''')
 
     args = init_parser.parse_args(args=argv)
 
