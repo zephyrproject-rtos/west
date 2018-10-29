@@ -134,9 +134,10 @@ configuration settings. This is just an alternative to manually editing
 west/config. Only explicitly passed configuration values (e.g.
 --mr NEW_MANIFEST_REVISION) are updated.
 
-Note: If you update the west/manifest revision or URL, the change will take
-effect whenever the configuration setting is next read, e.g. in `west fetch`.
-'west init' only updates configuration settings.
+If the URL/revision of the manifest or west repositories is updated, then
+'west update' is automatically run afterwards to update the repositories. Note
+that this will fail if the new revision can't be fast-forwarded to. In that
+case, you will need to e.g. stash away your changes in a separate branch.
 '''.format(WEST_MARKER))
 
     init_parser.add_argument(
@@ -257,6 +258,15 @@ def reinit(config_path, args):
                 west_url, args.west_rev, manifest_url, args.manifest_rev)
 
     print('=== Updated configuration written to {} ==='.format(config_path))
+
+    cmd = ['update']
+    if west_url or args.west_rev:
+        cmd.append('--update-west')
+    if manifest_url or args.manifest_rev:
+        cmd.append('--update-manifest')
+    print("=== Running 'west {}' to update repositories ==="
+          .format(' '.join(cmd)))
+    wrap(cmd)
 
 
 def update_conf(config_path, west_url, west_rev, manifest_url, manifest_rev):
