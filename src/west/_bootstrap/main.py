@@ -103,6 +103,10 @@ def init(argv):
     '''Command line handler for ``west init`` invocations.
 
     This exits the program with a nonzero exit code if fatal errors occur.'''
+
+    # Remember to update scripts/west-completion.bash if you add or remove
+    # flags
+
     init_parser = argparse.ArgumentParser(
         prog='west init',
         description='Bootstrap initialize a Zephyr installation')

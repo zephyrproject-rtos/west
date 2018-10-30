@@ -39,6 +39,12 @@ What just happened:
 (For those familiar with it, this is similar to how Android's Repo
 tool works.)
 
+Command auto-completion for Bash
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``scripts/west-completion.bash`` script adds auto-completion for West
+subcommands and flags. See the top of file for installation instructions.
+
 Usage
 -----
 

@@ -154,14 +154,21 @@ def parse_args(argv):
     west_parser = argparse.ArgumentParser(
         prog='west', description='The Zephyr RTOS meta-tool.',
         epilog='Run "west <command> -h" for help on each command.')
+
+    # Remember to update scripts/west-completion.bash if you add or remove
+    # flags
+
     west_parser.add_argument('-z', '--zephyr-base', default=None,
                              help='''Path to the Zephyr base directory. If not
                              given, ZEPHYR_BASE must be defined in the
                              environment, and will be used instead.''')
+
     west_parser.add_argument('-v', '--verbose', default=0, action='count',
                              help='''Display verbose output. May be given
                              multiple times to increase verbosity.''')
+
     west_parser.add_argument('-V', '--version', action='store_true')
+
     subparser_gen = west_parser.add_subparsers(title='commands',
                                                dest='command')
 

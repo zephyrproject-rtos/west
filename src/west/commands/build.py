@@ -73,6 +73,9 @@ class Build(WestCommand):
             formatter_class=argparse.RawDescriptionHelpFormatter,
             description=self.description)
 
+        # Remember to update scripts/west-completion.bash if you add or remove
+        # flags
+
         parser.add_argument('-b', '--board',
                             help='''board to build for (must be given for the
                             first build, can be omitted later)''')
