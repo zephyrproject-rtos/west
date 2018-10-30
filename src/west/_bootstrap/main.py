@@ -86,7 +86,8 @@ def clone(desc, url, rev, dest):
     if os.path.exists(dest):
         raise WestError('refusing to clone into existing location ' + dest)
 
-    if not url.startswith(('http:', 'https:', 'git:', 'git+shh:', 'file:')):
+    if not url.startswith(('http:', 'https:', 'git:', 'git+ssh:', 'file:',
+                           'git@')):
         raise WestError('Unknown URL scheme for repository: {}'.format(url))
 
     print('=== Cloning {} from {}, rev. {} ==='.format(desc, url, rev))
