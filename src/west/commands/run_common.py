@@ -29,6 +29,9 @@ def add_parser_common(parser_adder, command):
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=command.description)
 
+    # Remember to update scripts/west-completion.bash if you add or remove
+    # flags
+
     parser.add_argument('-H', '--context', action='store_true',
                         help='''Rebuild application and print context-sensitive
                         help; this may be combined with --runner to restrict
