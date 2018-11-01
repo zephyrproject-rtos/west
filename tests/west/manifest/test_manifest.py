@@ -61,8 +61,8 @@ def test_no_defaults():
     # Check the projects are as expected.
     for p, e in zip(manifest.projects, expected):
         deep_eq_check(p, e)
-    assert all(p.abspath == '/west_top/' + p.path for p in manifest.projects)
-
+    assert all(p.abspath == os.path.normpath(os.path.join('/west_top', p.path))
+            for p in manifest.projects)
 
 def test_default_clone_depth():
     # Defaults and clone depth should work as in this example.
@@ -107,8 +107,8 @@ def test_default_clone_depth():
     # Check that the projects are as expected.
     for p, e in zip(manifest.projects, expected):
         deep_eq_check(p, e)
-    assert all(p.abspath == '/west_top/' + p.path for p in manifest.projects)
-
+    assert all(p.abspath == os.path.normpath(os.path.join('/west_top', p.path))
+            for p in manifest.projects)
 
 def test_path():
     # Projects must be able to override their default paths.
@@ -122,10 +122,10 @@ def test_path():
           remote: testremote
           path: sub/directory
     '''
-    with patch('west.util.west_topdir', return_value='/west_top'):
+    with patch('west.util.west_topdir', return_value=os.path.normpath('/west_top')):
         manifest = Manifest.from_data(yaml.safe_load(content))
     assert manifest.projects[0].path == 'sub/directory'
-    assert manifest.projects[0].abspath == '/west_top/sub/directory'
+    assert manifest.projects[0].abspath == os.path.normpath('/west_top/sub/directory')
 
 
 # Invalid manifests should raise MalformedManifest.
