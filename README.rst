@@ -9,10 +9,7 @@ Installation
 
 Install west's bootstrapper with pip::
 
-  pip3 install west
-
-(We are in the pre-release period for 0.2.0, so you must specifically
-ask for the prerelease version above.)
+  pip3 install west==0.3.0rc1
 
 Then install the rest of west and a Zephyr development environment in
 a directory of your choosing::
