@@ -566,7 +566,9 @@ def _fetch(project):
     # when the revision is an annotated tag. ^{commit} type peeling isn't
     # supported for the <src> in a <src>:<dst> refspec, so we have to do it
     # separately.
-    _git(project, fetch_cmd + ' -- (url) (revision)')
+    #
+    # --tags is required to get tags when the remote is specified as an URL.
+    _git(project, fetch_cmd + ' --tags -- (url) (revision)')
     _git(project, 'update-ref (qual-manifest-rev-branch) FETCH_HEAD^{commit}')
 
     if not _ref_ok(project, 'HEAD'):
@@ -724,8 +726,10 @@ def _update_special(name):
         # automatic rebasing is probably more annoying than useful when working
         # directly on them. --rebase=false must be passed for --ff-only to be
         # respected e.g. when pull.rebase is set.
+        #
+        # --tags is required to get tags when the remote is specified as an URL.
         if _git(project,
-                'pull --quiet --rebase=false --ff-only -- (url) (revision)',
+                'pull --quiet --tags --rebase=false --ff-only -- (url) (revision)',
                 check=False).returncode:
 
             _wrn(project, 'Skipping automatic update of (name-and-path). '
