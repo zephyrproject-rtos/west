@@ -3,6 +3,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -35,7 +36,9 @@ def cmd(cmd):
     # We assume the manifest is in ../manifest.yml when tests are run.
     manifest_path = os.path.abspath(os.path.join(os.path.dirname(os.getcwd()),
                                                  'manifest.yml'))
-    cmd += ' -m ' + manifest_path
+    # Add quotes so that we properly escape backslashes on Windows, which
+    # otherwise would be removed by shlex
+    cmd += ' -m "{}"'.format(manifest_path)
 
     # cmd() takes the command as a string, which is less clunky to work with.
     # Split it according to shell rules.
@@ -50,7 +53,7 @@ def cmd(cmd):
             command_object.do_add_parser(parser.add_subparsers())
 
             # Pass the parsed arguments and unknown arguments to run it
-            command_object.do_run(*parser.parse_known_args(shlex.split(cmd)))
+            command_object.do_run(*parser.parse_known_args(split_cmd))
             break
     else:
         assert False, "unknown command " + command_name
