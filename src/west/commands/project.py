@@ -38,12 +38,10 @@ class List(WestCommand):
             '''))
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(parser_adder, self)
+        return _add_parser(parser_adder, self, _project_list_arg)
 
     def do_run(self, args, user_args):
-        log.inf("Manifest path: {}\n".format(_manifest_path(args)))
-
-        for project in _all_projects(args):
+        for project in _projects(args):
             log.inf('{:14}  {:18}  {:13}  {}  {}'.format(
                 project.name,
                 project.path,
