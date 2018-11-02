@@ -46,7 +46,7 @@ class List(WestCommand):
         for project in _all_projects(args):
             log.inf('{:14}  {:18}  {:13}  {}  {}'.format(
                 project.name,
-                os.path.join(project.path, ''),  # Add final '/' if missing
+                project.path,
                 project.revision,
                 project.url,
                 "(cloned)" if _cloned(project) else "(not cloned)"))
