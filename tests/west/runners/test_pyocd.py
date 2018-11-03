@@ -81,15 +81,17 @@ DEBUG_ALL_EXPECTED_SERVER = [TEST_SERVER,
                              '-f', TEST_FREQUENCY]
 DEBUG_ALL_EXPECTED_CLIENT = [RC_GDB, RC_KERNEL_ELF,
                              '-ex', 'target remote :{}'.format(TEST_PORT),
-                             '-ex', 'load',
-                             '-ex', 'monitor reset halt']
+                             '-ex', 'monitor halt',
+                             '-ex', 'monitor reset',
+                             '-ex', 'load']
 DEBUG_DEF_EXPECTED_SERVER = ['pyocd-gdbserver',
                              '-p', '3333',
                              '-t', TEST_TARGET]
 DEBUG_DEF_EXPECTED_CLIENT = [RC_GDB, RC_KERNEL_ELF,
                              '-ex', 'target remote :3333',
-                             '-ex', 'load',
-                             '-ex', 'monitor reset halt']
+                             '-ex', 'monitor halt',
+                             '-ex', 'monitor reset',
+                             '-ex', 'load']
 
 
 DEBUGSERVER_ALL_EXPECTED_CALL = [TEST_SERVER,
