@@ -24,6 +24,9 @@ from west.manifest import default_path, Remote, Project, \
 # branch.
 _MANIFEST_REV_BRANCH = 'manifest-rev'
 
+# Names of the "meta" projects in the west directory.
+_META_NAMES = ['west', 'manifest']
+
 
 class List(WestCommand):
     def __init__(self):
@@ -32,22 +35,81 @@ class List(WestCommand):
             _wrap('''
             List projects.
 
-            Prints the path to the manifest file and lists all projects along
-            with their clone paths and manifest revisions. Also includes
-            information on which projects are currently cloned.
-            '''))
+            Individual projects can be specified by name.
+
+            By default, lists all project names in the manifest, along with
+            each project's path, revision, URL, and whether it has been cloned.
+
+            The west and manifest repositories in the top-level west directory
+            are not included by default. Use --all or the special project
+            names "west" and "manifest" to include them.'''))
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(parser_adder, self, _project_list_arg)
+        default_fmt = '{name:14} {path:18} {revision:13} {url} {cloned}'
+        return _add_parser(
+            parser_adder, self,
+            _arg('-a', '--all', action='store_true',
+                 help='''Do not ignore repositories in west/ (i.e. west and the
+                 manifest) in the output. Since these are not part of
+                 the manifest, some of their format values (like "revision")
+                 come from other sources. The behavior of this option is
+                 modeled after the Unix ls -a option.'''),
+            _arg('-f', '--format', default=default_fmt,
+                 help='''Format string to use to list each project; see
+                 FORMAT STRINGS below.'''),
+            _project_list_arg,
+            epilog=textwrap.dedent('''\
+            FORMAT STRINGS
+
+            Projects are listed using a Python 3 format string. Arguments
+            to the format string are accessed by name.
+
+            The default format string is:
+
+            "{}"
+
+            The following arguments are available:
+
+            - name: project name in the manifest
+            - url: full remote URL as specified by the manifest
+            - path: the relative path to the project from the top level,
+              as specified in the manifest where applicable
+            - abspath: absolute and normalized path to the project
+            - revision: project's manifest revision
+            - cloned: "(cloned)" if the project has been cloned, "(not cloned)"
+              otherwise
+            - clone_depth: project clone depth if specified, "None" otherwise
+            '''.format(default_fmt)))
 
     def do_run(self, args, user_args):
-        for project in _projects(args):
-            log.inf('{:14}  {:18}  {:13}  {}  {}'.format(
-                project.name,
-                project.path,
-                project.revision,
-                project.url,
-                "(cloned)" if _cloned(project) else "(not cloned)"))
+        # We should only list the meta projects if they were explicitly
+        # given by name, or --all was given.
+        list_meta = bool(args.projects) or args.all
+
+        for project in _projects(args, include_meta=True):
+            if project.name in _META_NAMES and not list_meta:
+                continue
+
+            # Spelling out the format keys explicitly here gives us
+            # future-proofing if the internal Project representation
+            # ever changes.
+            try:
+                result = args.format.format(
+                    name=project.name,
+                    url=project.url,
+                    path=project.path,
+                    abspath=project.abspath,
+                    revision=project.revision,
+                    cloned="(cloned)" if _cloned(project) else "(not cloned)",
+                    clone_depth=project.clone_depth or "None")
+            except KeyError as e:
+                # The raised KeyError seems to just put the first
+                # invalid argument in the args tuple, regardless of
+                # how many unrecognizable keys there were.
+                log.die('unknown key "{}" in format string "{}"'.
+                        format(e.args[0], args.format))
+
+            log.inf(result)
 
 
 class Clone(WestCommand):
@@ -423,16 +485,19 @@ _no_update_arg = _arg(
 _project_list_arg = _arg('projects', metavar='PROJECT', nargs='*')
 
 
-def _add_parser(parser_adder, cmd, *extra_args):
+def _add_parser(parser_adder, cmd, *extra_args, **kwargs):
     # Adds and returns a subparser for the project-related WestCommand 'cmd'.
     # All of these commands (currently) take the manifest path flag, so it's
-    # hardcoded here.
+    # provided by default here, but any defaults can be overridden with kwargs.
 
-    return parser_adder.add_parser(
-        cmd.name,
-        description=cmd.description,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        parents=(_manifest_arg,) + extra_args)
+    if 'description' not in kwargs:
+        kwargs['description'] = cmd.description
+    if 'formatter_class' not in kwargs:
+        kwargs['formatter_class'] = argparse.RawDescriptionHelpFormatter
+    if 'parents' not in kwargs:
+        kwargs['parents'] = (_manifest_arg,) + extra_args
+
+    return parser_adder.add_parser(cmd.name, **kwargs)
 
 
 def _wrap(s):
@@ -469,7 +534,7 @@ def _cloned_projects(args):
         [project for project in _all_projects(args) if _cloned(project)]
 
 
-def _projects(args, listed_must_be_cloned=True):
+def _projects(args, listed_must_be_cloned=True, include_meta=False):
     # Returns a list of project instances for the projects requested in 'args'
     # (the command-line arguments), in the same order that they were listed by
     # the user. If args.projects is empty, no projects were listed, and all
@@ -482,17 +547,25 @@ def _projects(args, listed_must_be_cloned=True):
     # listed_must_be_cloned (default: True):
     #   If True, an error is raised if an uncloned project was listed. This
     #   only applies to projects listed explicitly on the command line.
+    #
+    # include_meta (default: False):
+    #   If True, "meta" projects (i.e. west and the manifest) may be given
+    #   in args.projects without raising errors, and are also included in the
+    #   return value if args.projects is empty.
 
     projects = _all_projects(args)
+
+    if include_meta:
+        projects += [_special_project(name) for name in _META_NAMES]
 
     if not args.projects:
         # No projects specified. Return all projects.
         return projects
 
-    # Got a list of projects on the command line. First, check that they exist
-    # in the manifest.
+    # Got a list of projects on the command line. First, check that they exist.
 
-    project_names = [project.name for project in projects]
+    name_to_project = {project.name: project for project in projects}
+    project_names = name_to_project.keys()
     nonexistent = set(args.projects) - set(project_names)
     if nonexistent:
         log.die('Unknown project{} {} (available projects: {})'
@@ -501,20 +574,28 @@ def _projects(args, listed_must_be_cloned=True):
                         ', '.join(project_names)))
 
     # Return the projects in the order they were listed
-    res = []
-    for name in args.projects:
-        for project in projects:
-            if project.name == name:
-                res.append(project)
-                break
+    res = [name_to_project[name] for name in args.projects]
 
     # Check that all listed repositories are cloned, if requested
     if listed_must_be_cloned:
-        uncloned = [prj.name for prj in res if not _cloned(prj)]
+        # We could still get here with a missing manifest repository if the
+        # user gave a --manifest argument.
+        uncloned_meta = [prj.name for prj in res if not _cloned(prj)
+                         and prj.name in _META_NAMES]
+        if uncloned_meta:
+            log.die('Missing meta project{}: {}.'.
+                    format('s' if len(uncloned_meta) > 1 else '',
+                           ', '.join(uncloned_meta)),
+                    'The Zephyr installation has been corrupted.')
+
+        uncloned = [prj.name for prj in res
+                    if not _cloned(prj) and prj.name not in _META_NAMES]
         if uncloned:
-            log.die('The following projects are not cloned: {}. Please clone '
-                    "them first (with 'west fetch')."
-                    .format(", ".join(uncloned)))
+            log.die('Uncloned project{}: {}.'.
+                    format('s' if len(uncloned) > 1 else '',
+                           ", ".join(uncloned)),
+                    'Please run "west clone {}"'.format(' '.join(uncloned)),
+                    'to clone.')
 
     return res
 
