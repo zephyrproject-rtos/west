@@ -16,16 +16,13 @@ from west import log
 from west import util
 from west.commands import WestCommand
 from west.manifest import default_path, Remote, Project, \
-                          Manifest, MalformedManifest
+                          Manifest, MalformedManifest, META_NAMES
 
 
 # Branch that points to the revision specified in the manifest (which might be
 # an SHA). Local branches created with 'west branch' are set to track this
 # branch.
 _MANIFEST_REV_BRANCH = 'manifest-rev'
-
-# Names of the "meta" projects in the west directory.
-_META_NAMES = ['west', 'manifest']
 
 
 class List(WestCommand):
@@ -87,7 +84,7 @@ class List(WestCommand):
         list_meta = bool(args.projects) or args.all
 
         for project in _projects(args, include_meta=True):
-            if project.name in _META_NAMES and not list_meta:
+            if project.name in META_NAMES and not list_meta:
                 continue
 
             # Spelling out the format keys explicitly here gives us
@@ -556,7 +553,7 @@ def _projects(args, listed_must_be_cloned=True, include_meta=False):
     projects = _all_projects(args)
 
     if include_meta:
-        projects += [_special_project(name) for name in _META_NAMES]
+        projects += [_special_project(name) for name in META_NAMES]
 
     if not args.projects:
         # No projects specified. Return all projects.
@@ -581,7 +578,7 @@ def _projects(args, listed_must_be_cloned=True, include_meta=False):
         # We could still get here with a missing manifest repository if the
         # user gave a --manifest argument.
         uncloned_meta = [prj.name for prj in res if not _cloned(prj)
-                         and prj.name in _META_NAMES]
+                         and prj.name in META_NAMES]
         if uncloned_meta:
             log.die('Missing meta project{}: {}.'.
                     format('s' if len(uncloned_meta) > 1 else '',
@@ -589,7 +586,7 @@ def _projects(args, listed_must_be_cloned=True, include_meta=False):
                     'The Zephyr installation has been corrupted.')
 
         uncloned = [prj.name for prj in res
-                    if not _cloned(prj) and prj.name not in _META_NAMES]
+                    if not _cloned(prj) and prj.name not in META_NAMES]
         if uncloned:
             log.die('Uncloned project{}: {}.'.
                     format('s' if len(uncloned) > 1 else '',
