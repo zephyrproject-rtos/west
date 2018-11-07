@@ -559,19 +559,48 @@ def _projects(args, listed_must_be_cloned=True, include_meta=False):
         # No projects specified. Return all projects.
         return projects
 
-    # Got a list of projects on the command line. First, check that they exist.
+    # Sort the projects by the length of their absolute paths, with the longest
+    # path first. That way, projects within projects (e.g., for submodules) are
+    # tried before their parent projects, when projects are specified via their
+    # path.
+    projects.sort(key=lambda project: len(project.abspath), reverse=True)
 
-    name_to_project = {project.name: project for project in projects}
-    project_names = name_to_project.keys()
-    nonexistent = set(args.projects) - set(project_names)
-    if nonexistent:
-        log.die('Unknown project{} {} (available projects: {})'
-                .format('s' if len(nonexistent) > 1 else '',
-                        ', '.join(nonexistent),
-                        ', '.join(project_names)))
+    # Listed but missing projects. Used for error reporting.
+    missing_projects = []
 
-    # Return the projects in the order they were listed
-    res = [name_to_project[name] for name in args.projects]
+    def normalize(path):
+        # Returns a case-normalized canonical absolute version of 'path', for
+        # comparisons. The normcase() is a no-op on platforms on case-sensitive
+        # filesystems.
+        return os.path.normcase(os.path.realpath(path))
+
+    res = []
+    for project_arg in args.projects:
+        for project in projects:
+            if project.name == project_arg:
+                # The argument is a project name
+                res.append(project)
+                break
+        else:
+            # The argument is not a project name. See if it is a project
+            # (sub)path.
+            for project in projects:
+                # The startswith() means we also detect subdirectories of
+                # project repositories. Giving a plain file in the repo will
+                # work here too, but that probably doesn't hurt.
+                if normalize(project_arg).startswith(normalize(project.abspath)):
+                    res.append(project)
+                    break
+            else:
+                # Neither a project name nor a project path. We will report an
+                # error below.
+                missing_projects.append(project_arg)
+
+    if missing_projects:
+        log.die('Unknown project name{0}/path{0} {1} (available projects: {2})'
+                .format('s' if len(missing_projects) > 1 else '',
+                        ', '.join(missing_projects),
+                        ', '.join(project.name for project in projects)))
 
     # Check that all listed repositories are cloned, if requested
     if listed_must_be_cloned:
@@ -588,11 +617,9 @@ def _projects(args, listed_must_be_cloned=True, include_meta=False):
         uncloned = [prj.name for prj in res
                     if not _cloned(prj) and prj.name not in META_NAMES]
         if uncloned:
-            log.die('Uncloned project{}: {}.'.
-                    format('s' if len(uncloned) > 1 else '',
-                           ", ".join(uncloned)),
-                    'Please run "west clone {}"'.format(' '.join(uncloned)),
-                    'to clone.')
+            log.die('The following projects are not cloned: {}. Please clone '
+                    "them first with 'west clone'."
+                    .format(", ".join(uncloned)))
 
     return res
 

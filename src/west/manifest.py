@@ -290,7 +290,7 @@ class Project:
         self.remote = remote
         self.url = remote.url + '/' + name
         self.path = path or name
-        self.abspath = os.path.normpath(os.path.join(util.west_topdir(), self.path))
+        self.abspath = os.path.realpath(os.path.join(util.west_topdir(), self.path))
         self.clone_depth = clone_depth
         self.revision = revision or defaults.revision
 
