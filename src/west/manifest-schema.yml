@@ -82,7 +82,8 @@ mapping:
       # Each project is a map with the following keys:
       #
       # - name: Mandatory, the name of the git repository. The clone
-      #   URL is formed by remote + '/' + name
+      #   URL is formed by remote + '/' + name. The name cannot
+      #   be one of the reserved values "west" and "manifest".
       # - remote: Optional, the name of the remote to pull it from.
       #   If the remote is missing, the remote'key in the top-level
       #   defaults key is used instead. If both are missing, it's an error.

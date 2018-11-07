@@ -24,6 +24,11 @@ import yaml
 from west import util, log
 
 
+META_NAMES = ['west', 'manifest']
+'''Names of the special "meta-projects", which are reserved and cannot
+be used to name a project in the manifest file.'''
+
+
 def default_path():
     '''Return the path to the default manifest in the west directory.
 
@@ -163,15 +168,22 @@ class Manifest:
         # mp = manifest project (dictionary with values parsed from
         # the manifest)
         for mp in manifest['projects']:
+            # Validate the project name.
+            name = mp['name']
+            if name in META_NAMES:
+                self._malformed('the name "{}" is reserved and cannot '.
+                                format(name) +
+                                'be used to name a manifest project')
+
             # Validate the project remote.
             remote_name = mp.get('remote', default_remote_name)
             if remote_name is None:
                 self._malformed('project {} does not specify a remote'.
-                                format(mp['name']))
+                                format(name))
             if remote_name not in remotes_dict:
                 self._malformed('project {} remote {} is not defined'.
-                                format(mp['name'], remote_name))
-            project = Project(mp['name'],
+                                format(name, remote_name))
+            project = Project(name,
                               remotes_dict[remote_name],
                               defaults,
                               path=mp.get('path'),
