@@ -17,9 +17,9 @@ __comp_west()
 	--runner
 	--skip-rebuild
 	--board-dir
-	--kernel-elf
-	--kernel-hex
-	--kernel-bin
+	--elf-file
+	--hex-file
+	--bin-file
 	--gdb
 	--openocd
 	--openocd-search"

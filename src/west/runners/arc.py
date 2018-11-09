@@ -93,7 +93,7 @@ class EmStarterKitBinaryRunner(ZephyrBinaryRunner):
                    ['-ex', 'target remote :{}'.format(self.gdb_port),
                     '-ex', 'load'] +
                    continue_arg +
-                   [self.cfg.kernel_elf])
+                   [self.cfg.elf_file])
 
         self.run_server_and_client(server_cmd, gdb_cmd)
 

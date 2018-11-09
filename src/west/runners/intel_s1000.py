@@ -22,7 +22,7 @@ class IntelS1000BinaryRunner(ZephyrBinaryRunner):
                  gdb_port=DEFAULT_XT_GDB_PORT):
         super(IntelS1000BinaryRunner, self).__init__(cfg)
         self.board_dir = cfg.board_dir
-        self.elf_name = cfg.kernel_elf
+        self.elf_name = cfg.elf_file
         self.gdb_cmd = cfg.gdb
         self.xt_ocd_dir = xt_ocd_dir
         self.ocd_topology = ocd_topology
