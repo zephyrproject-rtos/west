@@ -31,9 +31,9 @@ class PyOcdBinaryRunner(ZephyrBinaryRunner):
         self.gdbserver = gdbserver
         self.gdb_port = gdb_port
         self.tui_args = ['-tui'] if tui else []
-        self.bin_name = cfg.kernel_bin
-        self.hex_name = cfg.kernel_hex
-        self.elf_name = cfg.kernel_elf
+        self.hex_name = cfg.hex_file
+        self.bin_name = cfg.bin_file
+        self.elf_name = cfg.elf_file
 
         board_args = []
         if board_id is not None:
