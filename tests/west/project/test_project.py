@@ -9,12 +9,6 @@ import pytest
 
 from west.commands import project
 
-# Path to the template manifest used to construct a real one when
-# running each test case.
-MANIFEST_TEMPLATE_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), 'manifest.yml')
-)
-
 # Where the projects are cloned to
 NET_TOOLS_PATH = 'net-tools'
 KCONFIGLIB_PATH = 'sub/Kconfiglib'
@@ -33,12 +27,8 @@ COMMAND_OBJECTS = (
 
 
 def cmd(cmd):
-    # We assume the manifest is in ../manifest.yml when tests are run.
-    manifest_path = os.path.abspath(os.path.join(os.path.dirname(os.getcwd()),
-                                                 'manifest.yml'))
-    # Add quotes so that we properly escape backslashes on Windows, which
-    # otherwise would be removed by shlex
-    cmd += ' -m "{}"'.format(manifest_path)
+    # We assume the manifest is in manifest.yml when tests are run.
+    cmd += ' -m manifest.yml'
 
     # cmd() takes the command as a string, which is less clunky to work with.
     # Split it according to shell rules.
@@ -61,12 +51,11 @@ def cmd(cmd):
 
 @pytest.fixture
 def clean_west_topdir(tmpdir):
-    # Initialize the repositories used for testing.
-    repos = tmpdir.join('repositories')
-    repos.mkdir()
+    # Initialize some repositories that we use as remotes, in repos/
+    remote_repos_dir = tmpdir.mkdir('repos')
     git = shutil.which('git')
     for path in ('net-tools', 'Kconfiglib'):
-        fullpath = str(repos.join(path))
+        fullpath = str(remote_repos_dir.join(path))
         subprocess.check_call([git, 'init', fullpath])
         # The repository gets user name and email set in case there is
         # no global default.
@@ -93,17 +82,28 @@ def clean_west_topdir(tmpdir):
         if path == 'Kconfiglib':
             subprocess.check_call([git, 'branch', 'zephyr'], cwd=fullpath)
 
-    # Create the per-tmpdir manifest file.
-    with open(MANIFEST_TEMPLATE_PATH, 'r') as src:
-        with open(str(tmpdir.join('manifest.yml')), 'w') as dst:
-            dst.write(src.read().format(tmpdir=str(repos)))
+    # Create west/.west_topdir, to mark this directory as a West installation,
+    # and a manifest.yml pointing to the repositories we created above
+    tmpdir.mkdir('west').join('.west_topdir').ensure()
+    tmpdir.join('manifest.yml').write('''
+manifest:
+  defaults:
+    remote: repos
+    revision: master
 
-    # Initialize and change to the installation directory.
-    zephyrproject = tmpdir.join('zephyrproject')
-    zephyrproject.mkdir()
-    zephyrproject.mkdir('west')
-    zephyrproject.join('west', '.west_topdir').ensure()
-    zephyrproject.chdir()
+  remotes:
+    - name: repos
+      url: file://{}
+
+  projects:
+    - name: net-tools
+    - name: Kconfiglib
+      revision: zephyr
+      path: sub/Kconfiglib
+'''.format(remote_repos_dir))
+
+    # Switch to the top-level West installation directory
+    tmpdir.chdir()
 
 
 def test_list(clean_west_topdir):
