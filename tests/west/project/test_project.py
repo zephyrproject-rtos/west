@@ -7,11 +7,15 @@ import sys
 
 import pytest
 
+from west import config
 from west.commands import project
+import west._bootstrap.main as bootstrap
 
 # Where the projects are cloned to
 NET_TOOLS_PATH = 'net-tools'
 KCONFIGLIB_PATH = 'sub/Kconfiglib'
+
+GIT = shutil.which('git')
 
 COMMAND_OBJECTS = (
     project.List(),
@@ -22,6 +26,7 @@ COMMAND_OBJECTS = (
     project.Checkout(),
     project.Diff(),
     project.Status(),
+    project.Update(),
     project.ForAll(),
 )
 
@@ -51,40 +56,18 @@ def cmd(cmd):
 
 @pytest.fixture
 def clean_west_topdir(tmpdir):
-    # Initialize some repositories that we use as remotes, in repos/
-    remote_repos_dir = tmpdir.mkdir('repos')
-    git = shutil.which('git')
-    for path in ('net-tools', 'Kconfiglib'):
-        fullpath = str(remote_repos_dir.join(path))
-        subprocess.check_call([git, 'init', fullpath])
-        # The repository gets user name and email set in case there is
-        # no global default.
-        #
-        # The extra '--no-xxx' flags are for convenience when testing
-        # on developer workstations, which may have global git
-        # configuration to sign commits, etc.
-        #
-        # We don't want any of that, as it could require user
-        # intervention or fail in environments where Git isn't
-        # configured.
-        subprocess.check_call([git, 'config', 'user.name', 'West Test'],
-                              cwd=fullpath)
-        subprocess.check_call([git, 'config', 'user.email',
-                               'west-test@example.com'],
-                              cwd=fullpath)
-        subprocess.check_call([git, 'commit',
-                               '--allow-empty',
-                               '-m', 'empty commit',
-                               '--no-verify',
-                               '--no-gpg-sign',
-                               '--no-post-rewrite'],
-                              cwd=fullpath)
-        if path == 'Kconfiglib':
-            subprocess.check_call([git, 'branch', 'zephyr'], cwd=fullpath)
+    # Initialize some placeholder upstream repositories, in remote-repos/
+    remote_repos_dir = tmpdir.mkdir('remote-repos')
+    for project in 'net-tools', 'Kconfiglib', 'manifest', 'west':
+        path = str(remote_repos_dir.join(project))
+        create_repo(path)
+        add_commit(path, 'initial')
+        if project == 'Kconfiglib':
+            subprocess.check_call([GIT, 'branch', 'zephyr'], cwd=path)
 
     # Create west/.west_topdir, to mark this directory as a West installation,
     # and a manifest.yml pointing to the repositories we created above
-    tmpdir.mkdir('west').join('.west_topdir').ensure()
+    tmpdir.join('west', '.west_topdir').ensure()
     tmpdir.join('manifest.yml').write('''
 manifest:
   defaults:
@@ -104,6 +87,37 @@ manifest:
 
     # Switch to the top-level West installation directory
     tmpdir.chdir()
+
+    return tmpdir
+
+
+def create_repo(path):
+    # Initializes a Git repository in 'path', and adds an initial commit to it
+
+    subprocess.check_call([GIT, 'init', path])
+    add_commit(path, 'initial')
+
+
+def add_commit(path, msg):
+    # Adds an empty commit with message 'msg' to the repo in 'path'
+
+    # Set name and email. This avoids a "Please tell me who you are" error when
+    # there's no global default.
+    subprocess.check_call([GIT, 'config', 'user.name', 'West Test'], cwd=path)
+    subprocess.check_call([GIT, 'config', 'user.email',
+                           'west-test@example.com'],
+                          cwd=path)
+
+    # The extra '--no-xxx' flags are for convenience when testing
+    # on developer workstations, which may have global git
+    # configuration to sign commits, etc.
+    #
+    # We don't want any of that, as it could require user
+    # intervention or fail in environments where Git isn't
+    # configured.
+    subprocess.check_call(
+        [GIT, 'commit', '--allow-empty', '-m', msg, '--no-verify',
+         '--no-gpg-sign', '--no-post-rewrite'], cwd=path)
 
 
 def test_list(clean_west_topdir):
@@ -263,3 +277,102 @@ def test_forall(clean_west_topdir):
 
     cmd('fetch --no-update Kconfiglib')
     cmd("forall -c 'echo *'")
+
+
+def test_update(clean_west_topdir):
+    # Test the 'west update' command. It calls through to the same backend
+    # functions that are used for automatic updates and 'west init'
+    # reinitialization.
+
+    # Create placeholder local repos
+    create_repo('west/manifest')
+    create_repo('west/west')
+
+    # Create a simple configuration file. Git requires absolute paths for local
+    # repositories.
+    clean_west_topdir.join('west/config').write('''
+[manifest]
+remote = {0}/remote-repos/manifest
+revision = master
+
+[west]
+remote = {0}/remote-repos/west
+revision = master
+'''.format(clean_west_topdir))
+
+    config.read_config()
+
+    # Fetch the net-tools repository
+    cmd('fetch --no-update net-tools')
+
+    # Add commits to the local repos
+    for path in 'west/manifest', 'west/west', NET_TOOLS_PATH:
+        add_commit(path, 'local')
+
+    # Check that resetting the manifest repository removes the local commit
+    cmd('update --reset-manifest')
+    assert head_subject('west/manifest') == 'initial'
+    assert head_subject('west/west') == 'local'     # Unaffected
+    assert head_subject(NET_TOOLS_PATH) == 'local'  # Unaffected
+
+    # Check that resetting the west repository removes the local commit
+    cmd('update --reset-west')
+    assert head_subject('west/west') == 'initial'
+    assert head_subject(NET_TOOLS_PATH) == 'local'  # Unaffected
+
+    # Check that resetting projects removes the local commit
+    cmd('update --reset-projects')
+    assert head_subject(NET_TOOLS_PATH) == 'initial'
+
+    # Add commits to the upstream special repos
+    for path in 'remote-repos/manifest', 'remote-repos/west':
+        add_commit(path, 'upstream')
+
+    # Check that updating the manifest repository gets the upstream commit
+    cmd('update --update-manifest')
+    assert head_subject('west/manifest') == 'upstream'
+    assert head_subject('west/west') == 'initial'  # Unaffected
+
+    # Check that updating the West repository triggers a restart
+    with pytest.raises(project.WestUpdated):
+        cmd('update --update-west')
+
+
+def head_subject(path):
+    # Returns the subject of the HEAD commit in the repository at 'path'
+
+    return subprocess.check_output([GIT, 'log', '-n1', '--format=%s'],
+                                   cwd=path).decode().rstrip()
+
+
+def test_bootstrap_reinit(clean_west_topdir, monkeypatch):
+    # Test that the bootstrap script calls 'west' with the expected --reset-*
+    # flags flags when reinitializing
+
+    def save_wrap_args(args):
+        # Saves bootstrap.wrap() arguments into wrap_args
+        nonlocal wrap_args
+        wrap_args = args
+
+    monkeypatch.setattr(bootstrap, 'wrap', save_wrap_args)
+
+    with pytest.raises(SystemExit):
+        bootstrap.init([])  # West already initialized
+
+    for init_args, west_args in (
+        (['-m',   'foo'], ['update', '--reset-manifest', '--reset-projects']),
+        (['--mr', 'foo'], ['update', '--reset-manifest', '--reset-projects']),
+        (['-w',   'foo'], ['update', '--reset-west']),
+        (['--wr', 'foo'], ['update', '--reset-west']),
+        (['--wr', 'foo'], ['update', '--reset-west']),
+        (['-m',   'foo', '-w', 'foo'],
+         ['update', '--reset-manifest', '--reset-projects', '--reset-west']),
+        (['-b',   'foo'],
+         ['update', '--reset-manifest', '--reset-projects', '--reset-west']),
+        (['-b',   'foo', '--no-reset'], [])):
+
+        # Reset wrap_args before each test so that it ends up as [] if wrap()
+        # isn't called (for the --no-reset case)
+        wrap_args = []
+        bootstrap.init(init_args)
+        assert wrap_args == west_args
