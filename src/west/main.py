@@ -25,7 +25,7 @@ from west.commands.project import List, Clone, Fetch, Pull, Rebase, Branch, \
                              Checkout, Diff, Status, Update, ForAll, \
                              WestUpdated
 from west.manifest import Manifest
-from west.util import quote_sh_list, in_multirepo_install
+from west.util import quote_sh_list, in_multirepo_install, west_dir
 
 IN_MULTIREPO_INSTALL = in_multirepo_install(__file__)
 
@@ -191,8 +191,10 @@ def parse_args(argv):
         set_zephyr_base(args)
 
     if 'handler' not in args:
-        log.err('you must specify a command', fatal=True)
-        west_parser.print_usage(file=sys.stderr)
+        log.err('west installation found (in {}), but no command given'.
+                format(west_dir()),
+                fatal=True)
+        west_parser.print_help(file=sys.stderr)
         sys.exit(1)
 
     return args, unknown

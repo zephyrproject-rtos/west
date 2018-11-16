@@ -123,7 +123,8 @@ def init(argv):
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=
 '''
-Initializes a Zephyr installation.
+Initializes a Zephyr installation. Use "west clone" afterwards to fetch the
+sources.
 
 In more detail, does the following:
 
@@ -182,7 +183,7 @@ to handle any resetting yourself.
              installation to update the manifest or west URL/revision''')
 
     init_parser.add_argument(
-        'directory', nargs='?',
+        'directory', nargs='?', default=None,
         help='''Directory to initialize West in. Missing directories will be
              created automatically. (default: current directory)''')
 
@@ -247,7 +248,8 @@ def bootstrap(args):
     with open(os.path.join(directory, WEST_DIR, WEST_MARKER), 'w') as f:
         hide_file(f.name)
 
-    print('=== West initialized ===')
+    print('=== West initialized. Now run "west clone" in {}. ==='.
+          format(directory))
 
 
 def reinit(config_path, args):
@@ -355,21 +357,41 @@ def append_to_pythonpath(directory):
 
 def wrap(argv):
     printing_version = False
+    printing_help_only = False
 
-    if argv and argv[0] in ('-V', '--version'):
-        print('West bootstrapper version: v{} ({})'.format(version.__version__,
-                                                    os.path.dirname(__file__)))
-        printing_version = True
+    if argv:
+        if argv[0] in ('-V', '--version'):
+            print('West bootstrapper version: v{} ({})'.
+                  format(version.__version__, os.path.dirname(__file__)))
+            printing_version = True
+        elif len(argv) == 1 and argv[0] in ('-h', '--help'):
+            # This only matters if we're called outside of an
+            # installation directory. We delegate to the main help if
+            # called from within one, because it includes a list of
+            # available commands, etc.
+            printing_help_only = True
 
+    start = os.getcwd()
     try:
-        topdir = west_topdir()
+        topdir = west_topdir(start)
     except WestNotFound:
         if printing_version:
             sys.exit(0)         # run outside of an installation directory
+        elif printing_help_only:
+            # We call print multiple times here and below instead of using
+            # \n to be newline agnostic.
+            print('To set up a Zephyr installation here, run "west init".')
+            print('Run "west init -h" for additional information.')
+            sys.exit(0)
         else:
-            sys.exit('Error: not a Zephyr directory (or any parent): {}\n'
-                     'Use "west init" to install Zephyr here'
-                     .format(os.getcwd()))
+            print('Error: "{}" is not a Zephyr installation directory.'.
+                  format(start), file=sys.stderr)
+            print('Things to try:', file=sys.stderr)
+            print(' - Run "west init" to set up an installation here.',
+                  file=sys.stderr)
+            print(' - Run "west init -h" for additional information.',
+                  file=sys.stderr)
+            sys.exit(1)
 
     west_git_repo = os.path.join(topdir, WEST_DIR, WEST)
     if printing_version:
