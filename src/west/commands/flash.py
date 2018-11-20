@@ -14,7 +14,7 @@ class Flash(WestCommand):
     def __init__(self):
         super(Flash, self).__init__(
             'flash',
-            'Flash and run a binary onto a board.\n\n' +
+            'Flash and run a binary on a board.\n\n' +
             desc_common('flash'),
             accepts_unknown_args=True)
 
