@@ -23,8 +23,8 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
                  gdbserver='JLinkGDBServer', gdb_port=DEFAULT_JLINK_GDB_PORT,
                  tui=False):
         super(JLinkBinaryRunner, self).__init__(cfg)
-        self.bin_name = cfg.bin_file
-        self.elf_name = cfg.elf_file
+        self.bin_name = cfg.kernel_bin
+        self.elf_name = cfg.kernel_elf
         self.gdb_cmd = [cfg.gdb] if cfg.gdb else None
         self.device = device
         self.commander = commander

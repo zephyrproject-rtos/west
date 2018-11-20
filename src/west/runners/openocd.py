@@ -30,7 +30,7 @@ class OpenOcdBinaryRunner(ZephyrBinaryRunner):
         if cfg.openocd_search is not None:
             search_args = ['-s', cfg.openocd_search]
         self.openocd_cmd = [cfg.openocd] + search_args
-        self.elf_name = cfg.elf_file
+        self.elf_name = cfg.kernel_elf
         self.load_cmd = load_cmd
         self.verify_cmd = verify_cmd
         self.pre_cmd = pre_cmd

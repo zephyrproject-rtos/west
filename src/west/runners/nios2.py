@@ -19,8 +19,8 @@ class Nios2BinaryRunner(ZephyrBinaryRunner):
 
     def __init__(self, cfg, quartus_py=None, cpu_sof=None, tui=False):
         super(Nios2BinaryRunner, self).__init__(cfg)
-        self.hex_name = cfg.hex_file
-        self.elf_name = cfg.elf_file
+        self.hex_name = cfg.kernel_hex
+        self.elf_name = cfg.kernel_elf
         self.cpu_sof = cpu_sof
         self.quartus_py = quartus_py
         self.gdb_cmd = [cfg.gdb] if cfg.gdb else None
