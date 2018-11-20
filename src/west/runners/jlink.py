@@ -127,6 +127,9 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
         lines.append('g') # Start the CPU
         lines.append('q') # Close the connection and quit
 
+        log.dbg('JLink commander script:')
+        log.dbg('\n'.join(lines))
+
         # Don't use NamedTemporaryFile: the resulting file can't be
         # opened again on Windows.
         with tempfile.TemporaryDirectory(suffix='jlink') as d:
