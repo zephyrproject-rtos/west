@@ -159,9 +159,9 @@ def parse_args(argv):
     # flags
 
     west_parser.add_argument('-z', '--zephyr-base', default=None,
-                             help='''Path to the Zephyr base directory. If not
-                             given, ZEPHYR_BASE must be defined in the
-                             environment, and will be used instead.''')
+                             help='''Override the Zephyr base directory. The
+                             default is the manifest project with path
+                             "zephyr".''')
 
     west_parser.add_argument('-v', '--verbose', default=0, action='count',
                              help='''Display verbose output. May be given
