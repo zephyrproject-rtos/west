@@ -865,12 +865,21 @@ def _update_special(name):
 
         # Only update special repositories if possible via fast-forward, as
         # automatic rebasing is probably more annoying than useful when working
-        # directly on them. --rebase=false must be passed for --ff-only to be
-        # respected e.g. when pull.rebase is set.
+        # directly on them.
         #
         # --tags is required to get tags when the remote is specified as an URL.
+        # --ff-only is required to ensure that the merge only takes place if it
+        # can be fast-forwarded.
         if _git(project,
-                'pull --quiet --tags --rebase=false --ff-only -- (url) (revision)',
+                'fetch --quiet --tags -- (url) (revision)',
+                check=False).returncode:
+
+            _wrn(project, 'Skipping automatic update of (name-and-path). '
+                          "(revision) cannot be fetched (from "
+                          '(url)).')
+
+        elif _git(project,
+                'merge --quiet --ff-only FETCH_HEAD',
                 check=False).returncode:
 
             _wrn(project, 'Skipping automatic update of (name-and-path). '
