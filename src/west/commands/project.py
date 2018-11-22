@@ -145,8 +145,8 @@ class Clone(WestCommand):
 
     def do_run(self, args, user_args):
         if args.update:
-            _update_west()
-            _update_manifest()
+            _update_manifest(args)
+            _update_west(args)
 
         for project in _projects(args, listed_must_be_cloned=False):
             if args.branch:
@@ -185,8 +185,8 @@ class Fetch(WestCommand):
 
     def do_run(self, args, user_args):
         if args.update:
-            _update_west()
-            _update_manifest()
+            _update_manifest(args)
+            _update_west(args)
 
         for project in _projects(args, listed_must_be_cloned=False):
             _fetch(project)
@@ -216,8 +216,8 @@ class Pull(WestCommand):
 
     def do_run(self, args, user_args):
         if args.update:
-            _update_west()
-            _update_manifest()
+            _update_manifest(args)
+            _update_west(args)
 
         for project in _projects(args, listed_must_be_cloned=False):
             _fetch(project)
@@ -438,19 +438,19 @@ class Update(WestCommand):
                 args.reset_projects):
 
             # No arguments is an alias for --update-west --update-manifest
-            _update_west()
-            _update_manifest()
+            _update_manifest(args)
+            _update_west(args)
             return
 
         if args.reset_manifest:
-            _update_and_reset_special('manifest')
+            _update_and_reset_special(args, 'manifest')
         elif args.update_manifest:
-            _update_manifest()
+            _update_manifest(args)
 
         if args.reset_west:
-            _update_and_reset_special('west')
+            _update_and_reset_special(args, 'west')
         elif args.update_west:
-            _update_west()
+            _update_west(args)
 
         if args.reset_projects:
             _reset_projects(args)
@@ -591,7 +591,7 @@ def _projects(args, listed_must_be_cloned=True, include_meta=False):
     projects = _all_projects(args)
 
     if include_meta:
-        projects += [_special_project(name) for name in META_NAMES]
+        projects += [_special_project(args, name) for name in META_NAMES]
 
     if not args.projects:
         # No projects specified. Return all projects.
@@ -669,7 +669,8 @@ def _all_projects(args):
     # command aborts.
 
     try:
-        return list(Manifest.from_file(_manifest_path(args)).projects)
+        return list(Manifest.from_file(_manifest_path(args),
+                                       'manifest').projects)
     except MalformedManifest as m:
         log.die(m.args[0])
 
@@ -825,7 +826,7 @@ def _checkout(project, branch):
     _git(project, 'checkout ' + branch)
 
 
-def _special_project(name):
+def _special_project(args, name):
     # Returns a Project instance for one of the special repositories in west/,
     # so that we can reuse the project-related functions for them
 
@@ -836,29 +837,36 @@ def _special_project(name):
     remote = Remote(name='dummy name for {} repository'.format(name),
                     url='dummy URL for {} repository'.format(name))
 
+    if name == 'manifest':
+        url = config.get(name, 'remote', fallback='origin')
+        revision = config.get(name, 'revision', fallback='master')
+    elif name == 'west':
+        westmeta = Manifest.from_file(_manifest_path(args), 'west').westmeta
+        url = westmeta.url
+        revision = westmeta.revision
+
     # 'revision' always exists and defaults to 'master'
-    project = Project(name, remote, None,
-                      revision=config.get(name, 'revision', fallback='master'),
+    project = Project(name, remote, None, revision=revision,
                       path=os.path.join('west', name))
 
     # This could also be the name of a Git remote. The naming breaks a bit
     # here.
-    project.url = config.get(name, 'remote', fallback='origin')
+    project.url = url
 
     return project
 
 
-def _update_west():
-    _update_special('west')
+def _update_west(args):
+    _update_special(args, 'west')
 
 
-def _update_manifest():
-    _update_special('manifest')
+def _update_manifest(args):
+    _update_special(args, 'manifest')
 
 
-def _update_special(name):
+def _update_special(args, name):
     with _error_context(_FAILED_UPDATE_MSG):
-        project = _special_project(name)
+        project = _special_project(args, name)
         _dbg(project, 'Updating (name-and-path)', level=log.VERBOSE_NORMAL)
 
         old_sha = _sha(project, 'HEAD')
@@ -897,11 +905,11 @@ def _update_special(name):
                 raise WestUpdated()
 
 
-def _update_and_reset_special(name):
+def _update_and_reset_special(args, name):
     # Updates one of the special repositories (the manifest and west) by
     # resetting to the new revision after fetching it (with 'git reset --keep')
 
-    project = _special_project(name)
+    project = _special_project(args, name)
     with _error_context(', while updating/resetting special project'):
         _inf(project,
              "Fetching and resetting (name-and-path) to '(revision)'")
