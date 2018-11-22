@@ -23,10 +23,18 @@ import yaml
 
 from west import util, log
 
+# Todo: take from _bootstrap?
+# Default west repository URL.
+WEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/west'
+# Default revision to check out of the west repository.
+WEST_REV_DEFAULT = 'master'
 
 META_NAMES = ['west', 'manifest']
 '''Names of the special "meta-projects", which are reserved and cannot
 be used to name a project in the manifest file.'''
+
+MANIFEST_SECTIONS = ['manifest', 'west']
+'''Sections in the manifest file'''
 
 
 def default_path():
@@ -43,10 +51,12 @@ class Manifest:
     from_file and from_data helper methods.'''
 
     @staticmethod
-    def from_file(source_file=None):
+    def from_file(source_file=None, sections=MANIFEST_SECTIONS):
         '''Create and return a new Manifest object given a source YAML file.
 
         :param source_file: Path to a YAML file containing the manifest.
+        :param sections: Only parse specified sections from YAML file, 
+                         default: all sections are parsed.
 
         If source_file is None, the value returned by default_path()
         is used.
@@ -54,22 +64,26 @@ class Manifest:
         Raises MalformedManifest in case of validation errors.'''
         if source_file is None:
             source_file = default_path()
-        return Manifest(source_file=source_file)
+        return Manifest(source_file=source_file, sections=sections)
 
     @staticmethod
-    def from_data(source_data):
+    def from_data(source_data, sections=MANIFEST_SECTIONS):
         '''Create and return a new Manifest object given parsed YAML data.
 
         :param source_data: Parsed YAML data as a Python object.
+        :param sections: Only parse specified sections from YAML data, 
+                         default: all sections are parsed.
 
         Raises MalformedManifest in case of validation errors.'''
-        return Manifest(source_data=source_data)
+        return Manifest(source_data=source_data, sections=sections)
 
-    def __init__(self, source_file=None, source_data=None):
+    def __init__(self, source_file=None, source_data=None, sections=MANIFEST_SECTIONS):
         '''Create a new Manifest object.
 
         :param source_file: Path to a YAML file containing the manifest.
         :param source_data: Parsed YAML data as a Python object.
+        :param sections: Only parse specified sections from YAML file, 
+                         default: all sections are parsed.
 
         Normally, it is more convenient to use the `from_file` and
         `from_data` convenience factories than calling the constructor
@@ -97,13 +111,18 @@ class Manifest:
         if not self._data:
             self._malformed('manifest contains no data')
 
-        try:
-            pykwalify.core.Core(
-                source_data=self._data,
-                schema_files=[_SCHEMA_PATH]
-            ).validate()
-        except pykwalify.errors.SchemaError as e:
-            self._malformed(e)
+        if 'manifest' not in self._data:
+            self._malformed('manifest contains no manifest element')
+
+        for key in self._data:
+            if key in sections:
+                try:
+                    pykwalify.core.Core(
+                        source_data=self._data[key],
+                        schema_files=[_SCHEMA_PATH[key]]
+                    ).validate()
+                except pykwalify.errors.SchemaError as e:
+                    self._malformed(e, key)
 
         self.defaults = None
         '''west.manifest.Defaults object representing default values
@@ -122,24 +141,38 @@ class Manifest:
 
         # Set up the public attributes documented above, as well as
         # any internal attributes needed to implement the public API.
-        self._load(self._data['manifest'])
+        self._load(self._data, sections)
 
     def get_remote(self, name):
         '''Get a manifest Remote, given its name.'''
         return self._remotes_dict[name]
 
-    def _malformed(self, complaint):
+    def _malformed(self, complaint, section='manifest'):
         context = (' file {} '.format(self.path) if self.path
                    else ' data:\n{}\n'.format(self._data))
         raise MalformedManifest('Malformed manifest{}(schema: {}):\n{}'
-                                .format(context, _SCHEMA_PATH, complaint))
+                                .format(context, _SCHEMA_PATH[section], complaint))
 
-    def _load(self, manifest):
+    def _load(self, data, sections):
+
+        if 'west' in sections:
+            # Parse the west section first, if available
+            west = data.get('west', {})
+            westmeta = WestMeta(url=west.get('url'),
+                                revision=west.get('revision'))
+            self.westmeta = westmeta
+
+        # Next is the manifest section
+        if 'manifest' not in sections:
+            return
+
         # Initialize this instance's fields from values given in the
         # manifest data, which must be validated according to the schema.
 
         projects = []
         project_abspaths = set()
+
+        manifest = data.get('manifest')
 
         # Map from each remote's name onto that remote's data in the manifest.
         remotes = tuple(Remote(r['name'], r['url']) for r in
@@ -214,6 +247,16 @@ class MalformedManifest(Exception):
 
 
 # Definitions for Manifest attribute types.
+
+class WestMeta:
+
+    def __init__(self, url=None, revision=None):
+        self.url = url or WEST_URL_DEFAULT
+        self.revision = revision or WEST_REV_DEFAULT
+
+    def __repr__(self):
+        return 'WestMeta(url={}, revision={})'.format(repr(self.url),
+                                                      repr(self.revision))
 
 class Defaults:
     '''Represents default values in a manifest, either specified by the
@@ -310,4 +353,5 @@ def _wrn_if_not_remote(remote):
         log.wrn('Remote', remote, 'is not a Remote instance')
 
 
-_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
+_SCHEMA_PATH = {'manifest': os.path.join(os.path.dirname(__file__), "manifest-schema.yml"),
+                'west': os.path.join(os.path.dirname(__file__), "_bootstrap", "west-schema.yml")}
