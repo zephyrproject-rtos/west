@@ -97,12 +97,8 @@ This somewhat unusual arrangement is because:
 Using a Custom "Main" West
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To initialize west from a non-default location::
-
-  west init -w https://example.com/your-west-repository.git
-
-You can also add ``--west-rev some-branch`` to use ``some-branch``
-instead of ``master``.
+To initialize west from a non-default location add a section ``west`` in the
+manifest ``.yml`` file that points to a ``url`` and ``revision`` of your choice.
 
 To use another manifest repository (optionally with ``--mr
 some-manifest-branch``)::

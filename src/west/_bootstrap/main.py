@@ -9,8 +9,10 @@ import argparse
 import configparser
 import os
 import platform
+import pykwalify.core
 import subprocess
 import sys
+import yaml
 
 import west._bootstrap.version as version
 
@@ -48,6 +50,7 @@ MANIFEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/manifest'
 # Default revision to check out of the manifest repository.
 MANIFEST_REV_DEFAULT = 'master'
 
+_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "west-schema.yml")
 
 #
 # Helpers shared between init and wrapper mode
@@ -71,6 +74,14 @@ def west_dir(start=None):
     '''
     return os.path.join(west_topdir(start), WEST_DIR)
 
+def manifest_dir(start=None):
+    '''
+    Returns the path to the manifest/ directory, searching ``start`` and its
+    parents.
+
+    Raises WestNotFound if no west directory is found.
+    '''
+    return os.path.join(west_topdir(start), MANIFEST)
 
 def west_topdir(start=None):
     '''
@@ -152,11 +163,6 @@ to handle any resetting yourself.
 '''.format(WEST_MARKER))
 
     init_parser.add_argument(
-        '-b', '--base-url',
-        help='''Base URL for both 'manifest' and 'zephyr' repositories. Cannot
-             be given if either -m or -w are.''')
-
-    init_parser.add_argument(
         '-m', '--manifest-url',
         help='Manifest repository URL (default: {})'
              .format(MANIFEST_URL_DEFAULT))
@@ -165,16 +171,6 @@ to handle any resetting yourself.
         '--mr', '--manifest-rev', dest='manifest_rev',
         help='Manifest revision to fetch (default: {})'
              .format(MANIFEST_REV_DEFAULT))
-
-    init_parser.add_argument(
-        '-w', '--west-url',
-        help='West repository URL (default: {})'
-             .format(WEST_URL_DEFAULT))
-
-    init_parser.add_argument(
-        '--wr', '--west-rev', dest='west_rev',
-        help='West revision to fetch (default: {})'
-             .format(WEST_REV_DEFAULT))
 
     init_parser.add_argument(
         '--nr', '--no-reset', dest='reset', action='store_false',
@@ -198,16 +194,10 @@ to handle any resetting yourself.
 def bootstrap(args):
     '''Bootstrap a new manifest + West installation.'''
 
-    if args.base_url:
-        if args.west_url or args.manifest_url:
-            sys.exit('fatal error: -b is incompatible with -m and -w')
-        west_url = args.base_url.rstrip('/') + '/west'
-        manifest_url = args.base_url.rstrip('/') + '/manifest'
-    else:
-        west_url = args.west_url or WEST_URL_DEFAULT
-        manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
+    west_url = WEST_URL_DEFAULT
+    manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
 
-    west_rev = args.west_rev or WEST_REV_DEFAULT
+    west_rev = WEST_REV_DEFAULT
     manifest_rev = args.manifest_rev or MANIFEST_REV_DEFAULT
 
     directory = args.directory or os.getcwd()
@@ -231,16 +221,38 @@ def bootstrap(args):
     # Clone the west source code and the manifest into west/. Git will create
     # the west/ directory if it does not exist.
 
-    clone('west repository', west_url, west_rev,
-          os.path.join(directory, WEST_DIR, WEST))
-
     clone('manifest repository', manifest_url, manifest_rev,
           os.path.join(directory, WEST_DIR, MANIFEST))
+
+    # Parse the manifest and look for a section named "west"
+    manifest_file = os.path.join(directory, WEST_DIR, MANIFEST, 'default.yml')
+    with open(manifest_file, 'r') as f:
+        data = yaml.safe_load(f.read())
+
+    if 'west' in data:
+        wdata = data['west']
+        try:
+            pykwalify.core.Core(
+                source_data=wdata,
+                schema_files=[_SCHEMA_PATH]
+            ).validate()
+        except pykwalify.errors.SchemaError as e:
+            sys.exit("Error: Failed to parse manifest file '{}': {}"
+                      .format(manifest_file, e))
+
+        if 'url' in wdata:
+            west_url = wdata['url']
+        if 'revision' in wdata:
+            west_rev = wdata['revision']
+
+    print("cloning {} at revision {}".format(west_url, west_rev))
+    clone('west repository', west_url, west_rev,
+          os.path.join(directory, WEST_DIR, WEST))
 
     # Create an initial configuration file
 
     config_path = os.path.join(directory, WEST_DIR, 'config')
-    update_conf(config_path, west_url, west_rev, manifest_url, manifest_rev)
+    update_conf(config_path, manifest_url, manifest_rev)
     print('=== Initial configuration written to {} ==='.format(config_path))
 
     # Create a dotfile to mark the installation. Hide it on Windows.
@@ -259,36 +271,24 @@ def reinit(config_path, args):
     This updates the west/config configuration file, and optionally resets the
     manifest, west, and project repositories to the new revision.
     '''
-    if args.base_url:
-        if args.west_url or args.manifest_url:
-            sys.exit('fatal error: -b is incompatible with -m and -w')
-        west_url = args.base_url.rstrip('/') + '/west'
-        manifest_url = args.base_url.rstrip('/') + '/manifest'
-    else:
-        west_url = args.west_url
-        manifest_url = args.manifest_url
+    manifest_url = args.manifest_url
 
-    if not (west_url or args.west_rev or manifest_url or args.manifest_rev):
+    if not (manifest_url or args.manifest_rev):
         sys.exit('West already initialized. Please pass any settings you '
                  'want to change.')
 
-    update_conf(config_path, west_url, args.west_rev, manifest_url,
-                args.manifest_rev)
+    update_conf(config_path, manifest_url, args.manifest_rev)
 
     print('=== Updated configuration written to {} ==='.format(config_path))
 
     if args.reset:
-        cmd = ['update']
-        if manifest_url or args.manifest_rev:
-            cmd += ['--reset-manifest', '--reset-projects']
-        if west_url or args.west_rev:
-            cmd.append('--reset-west')
+        cmd = ['update', '--reset-manifest', '--reset-projects', '--reset-west']
         print("=== Running 'west {}' to update repositories ==="
               .format(' '.join(cmd)))
         wrap(cmd)
 
 
-def update_conf(config_path, west_url, west_rev, manifest_url, manifest_rev):
+def update_conf(config_path, manifest_url, manifest_rev):
     '''
     Creates or updates the configuration file at 'config_path' with the
     specified values. Values that are None/empty are ignored.
@@ -298,8 +298,6 @@ def update_conf(config_path, west_url, west_rev, manifest_url, manifest_rev):
     # This is a no-op if the file doesn't exist, so no need to check
     config.read(config_path)
 
-    update_key(config, 'west', 'remote', west_url)
-    update_key(config, 'west', 'revision', west_rev)
     update_key(config, 'manifest', 'remote', manifest_url)
     update_key(config, 'manifest', 'revision', manifest_rev)
 
