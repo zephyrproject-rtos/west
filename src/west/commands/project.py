@@ -15,7 +15,7 @@ from west.config import config
 from west import log
 from west import util
 from west.commands import WestCommand
-from west.manifest import default_path, Remote, Project, \
+from west.manifest import default_path, Remote, Project, SpecialProject, \
                           Manifest, MalformedManifest, META_NAMES
 
 
@@ -830,31 +830,13 @@ def _special_project(args, name):
     # Returns a Project instance for one of the special repositories in west/,
     # so that we can reuse the project-related functions for them
 
-    # TODO: Maybe the Remote class could be replaced by a single
-    # project.remote_name field, now that we no longer use the Git remote
-    # mechanism and fetch directly from URLs
-
-    remote = Remote(name='dummy name for {} repository'.format(name),
-                    url='dummy URL for {} repository'.format(name))
-
     if name == 'manifest':
         url = config.get(name, 'remote', fallback='origin')
         revision = config.get(name, 'revision', fallback='master')
-    elif name == 'west':
-        westmeta = Manifest.from_file(_manifest_path(args), 'west').westmeta
-        url = westmeta.url
-        revision = westmeta.revision
+        return SpecialProject(name, revision=revision,
+                       path=os.path.join('west', name), url=url)
 
-    # 'revision' always exists and defaults to 'master'
-    project = Project(name, remote, None, revision=revision,
-                      path=os.path.join('west', name))
-
-    # This could also be the name of a Git remote. The naming breaks a bit
-    # here.
-    project.url = url
-
-    return project
-
+    return Manifest.from_file(_manifest_path(args), name).west_project
 
 def _update_west(args):
     _update_special(args, 'west')
@@ -1086,7 +1068,8 @@ def _expand_shorthands(project, s):
             .replace('(name-and-path)',
                      '{} ({})'.format(
                          project.name, os.path.join(project.path, ""))) \
-            .replace('(remote-name)', project.remote.name) \
+            .replace('(remote-name)', 'None' if project.remote is None
+                                             else project.remote.name) \
             .replace('(url)', project.url) \
             .replace('(path)', project.path) \
             .replace('(abspath)', project.abspath) \

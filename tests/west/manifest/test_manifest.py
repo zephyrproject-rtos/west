@@ -164,8 +164,8 @@ def test_sections():
     with patch('west.util.west_topdir', return_value=os.path.realpath('/west_top')):
         # Parsing west section only, no exception raised
         manifest = Manifest.from_data(yaml.safe_load(content_wrong_manifest), 'west')
-    assert manifest.westmeta.url == 'https://example.com'
-    assert manifest.westmeta.revision == 'abranch'
+    assert manifest.west_project.url == 'https://example.com'
+    assert manifest.west_project.revision == 'abranch'
 
 # Invalid manifests should raise MalformedManifest.
 @pytest.mark.parametrize('invalid',

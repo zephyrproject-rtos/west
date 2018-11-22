@@ -139,6 +139,11 @@ class Manifest:
         Each element's values are fully initialized; there is no need
         to consult the defaults field to supply missing values.'''
 
+
+        self.west_project = None
+        '''west.manifest.SpecialProject object representing the west meta
+        project.'''
+
         # Set up the public attributes documented above, as well as
         # any internal attributes needed to implement the public API.
         self._load(self._data, sections)
@@ -153,21 +158,24 @@ class Manifest:
         raise MalformedManifest('Malformed manifest{}(schema: {}):\n{}'
                                 .format(context, _SCHEMA_PATH[section], complaint))
 
-    def _load(self, data, sections):
 
+    def _load(self, data, sections):
+        # Initialize this instance's fields from values given in the
+        # manifest data, which must be validated according to the schema.
         if 'west' in sections:
-            # Parse the west section first, if available
             west = data.get('west', {})
-            westmeta = WestMeta(url=west.get('url'),
-                                revision=west.get('revision'))
-            self.westmeta = westmeta
+
+            url = west.get('url') or WEST_URL_DEFAULT
+            revision = west.get('revision') or WEST_REV_DEFAULT
+
+            self.west_project = SpecialProject('west',
+                                               url=url,
+                                               revision=revision,
+                                               path=os.path.join('west', 'west'))
 
         # Next is the manifest section
         if 'manifest' not in sections:
             return
-
-        # Initialize this instance's fields from values given in the
-        # manifest data, which must be validated according to the schema.
 
         projects = []
         project_abspaths = set()
@@ -248,16 +256,6 @@ class MalformedManifest(Exception):
 
 # Definitions for Manifest attribute types.
 
-class WestMeta:
-
-    def __init__(self, url=None, revision=None):
-        self.url = url or WEST_URL_DEFAULT
-        self.revision = revision or WEST_REV_DEFAULT
-
-    def __repr__(self):
-        return 'WestMeta(url={}, revision={})'.format(repr(self.url),
-                                                      repr(self.revision))
-
 class Defaults:
     '''Represents default values in a manifest, either specified by the
     user or by west itself.
@@ -314,7 +312,7 @@ class Project:
     __slots__ = 'name remote url path abspath clone_depth revision'.split()
 
     def __init__(self, name, remote, defaults, path=None, clone_depth=None,
-                 revision=None):
+                 revision=None, url=None):
         '''Specify a Project by name, Remote, and optional information.
 
         :param name: Project's user-defined name in the manifest
@@ -326,7 +324,7 @@ class Project:
         :param revision: Project revision as given in the manifest, if present.
         '''
         if remote is None:
-            raise ValueError('remote may not be None')
+            raise ValueError('remote or url must be given')
         _wrn_if_not_remote(remote)
 
         self.name = name
@@ -346,6 +344,28 @@ class Project:
                   self.abspath, self.clone_depth, self.revision)]
         return ('Project(name={}, remote={}, url={}, path={}, abspath={}, '
                 'clone_depth={}, revision={})').format(*reprs)
+
+class SpecialProject(Project):
+    '''Represents a special project, e.g. the west or manifest project.
+
+    Projects are neither comparable nor hashable.'''
+
+    def __init__(self, name, path=None, revision=None, url=None):
+        '''Specify a Special Project by name, and url, and optional information.
+
+        :param name: Special Project's user-defined name in the manifest
+        :param path: Relative path to the project in the west
+                     installation, if present in the manifest. If None,
+                     the project's ``name`` is used.
+        :param revision: Project revision as given in the manifest, if present.
+        '''
+        self.name = name
+        self.url = url
+        self.path = path or name
+        self.abspath = os.path.realpath(os.path.join(util.west_topdir(), self.path))
+        self.revision = revision
+        self.remote = None 
+        self.clone_depth = None 
 
 
 def _wrn_if_not_remote(remote):
