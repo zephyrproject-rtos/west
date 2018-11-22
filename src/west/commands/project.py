@@ -712,7 +712,7 @@ def _fetch(project):
     _git(project, fetch_cmd + ' --tags -- (url) (revision)')
     _git(project, 'update-ref (qual-manifest-rev-branch) FETCH_HEAD^{commit}')
 
-    if not _ref_ok(project, 'HEAD'):
+    if not _head_ok(project):
         # If nothing it checked out (which would usually only happen just after
         # we initialize the repository), check out 'manifest-rev' in a detached
         # HEAD state.
@@ -819,6 +819,20 @@ def _ref_ok(project, ref):
     return _git(project, 'show-ref --quiet --verify ' + ref, check=False) \
            .returncode == 0
 
+def _head_ok(project):
+    # Returns True if the reference 'HEAD' exists and is not a tag or remote
+    # ref (e.g. refs/remotes/origin/HEAD).
+    # Some versions of git will report 1, when doing
+    # 'git show-ref --verify HEAD' even if HEAD is valid, see #119.
+    # 'git show-ref --head <reference>' will always return 0 if HEAD or
+    # <reference> is valid.
+    # We are only interested in HEAD, thus we must avoid <reference> being
+    # valid. '/' can never point to valid reference, thus 'show-ref --head /'
+    # will return:
+    # - 0 if HEAD is present
+    # - 1 otherwise
+    return _git(project, 'show-ref --quiet --head /', check=False) \
+           .returncode == 0
 
 def _checkout(project, branch):
     _inf(project, "Checking out branch '{}' in (name-and-path)".format(branch))
