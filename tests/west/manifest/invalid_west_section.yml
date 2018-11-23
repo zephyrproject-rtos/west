@@ -1,0 +1,20 @@
+# The default West manifest file to be used for Zephyr.
+#
+
+west:
+  url: https://example.com
+  revision: arevision
+  invalidfield: thisfieldisinvalid
+
+manifest:
+  defaults:
+    remote: upstream
+    revision: master
+
+  remotes:
+    - name: upstream
+      url: https://example.com
+
+  projects:
+    - name: zephyr
+      revision: abranch

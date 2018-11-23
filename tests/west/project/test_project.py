@@ -294,13 +294,16 @@ def test_update(clean_west_topdir):
 [manifest]
 remote = {0}/remote-repos/manifest
 revision = master
-
-[west]
-remote = {0}/remote-repos/west
-revision = master
 '''.format(clean_west_topdir))
 
     config.read_config()
+
+    # modify the manifest to point to another west
+    clean_west_topdir.join('manifest.yml').write('''
+west:
+  url: file://{}/remote-repos/west
+  revision: master
+'''.format(clean_west_topdir), 'a')
 
     # Fetch the net-tools repository
     cmd('fetch --no-update net-tools')
@@ -360,16 +363,10 @@ def test_bootstrap_reinit(clean_west_topdir, monkeypatch):
         bootstrap.init([])  # West already initialized
 
     for init_args, west_args in (
-        (['-m',   'foo'], ['update', '--reset-manifest', '--reset-projects']),
-        (['--mr', 'foo'], ['update', '--reset-manifest', '--reset-projects']),
-        (['-w',   'foo'], ['update', '--reset-west']),
-        (['--wr', 'foo'], ['update', '--reset-west']),
-        (['--wr', 'foo'], ['update', '--reset-west']),
-        (['-m',   'foo', '-w', 'foo'],
-         ['update', '--reset-manifest', '--reset-projects', '--reset-west']),
-        (['-b',   'foo'],
-         ['update', '--reset-manifest', '--reset-projects', '--reset-west']),
-        (['-b',   'foo', '--no-reset'], [])):
+        (['-m',   'foo'], ['update', '--reset-manifest', '--reset-projects',
+                           '--reset-west']),
+        (['--mr', 'foo'], ['update', '--reset-manifest', '--reset-projects',
+                           '--reset-west'])):
 
         # Reset wrap_args before each test so that it ends up as [] if wrap()
         # isn't called (for the --no-reset case)

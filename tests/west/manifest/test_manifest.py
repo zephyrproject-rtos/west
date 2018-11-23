@@ -127,6 +127,45 @@ def test_path():
     assert manifest.projects[0].path == 'sub/directory'
     assert manifest.projects[0].abspath == os.path.realpath('/west_top/sub/directory')
 
+def test_sections():
+    # Projects must be able to override their default paths.
+    content_wrong_west = '''\
+    west:
+      url: https://example.com
+      revision: abranch
+      wrongfield: avalue
+    manifest:
+      remotes:
+        - name: testremote
+          url: https://example.com
+      projects:
+        - name: testproject
+          remote: testremote
+          path: sub/directory
+    '''
+    with patch('west.util.west_topdir', return_value=os.path.realpath('/west_top')):
+        # Parsing manifest only, no exception raised
+        manifest = Manifest.from_data(yaml.safe_load(content_wrong_west), 'manifest')
+    assert manifest.projects[0].path == 'sub/directory'
+    assert manifest.projects[0].abspath == os.path.realpath('/west_top/sub/directory')
+    content_wrong_manifest = '''\
+    west:
+      url: https://example.com
+      revision: abranch
+    manifest:
+      remotes:
+        - name: testremote
+          url: https://example.com
+      projects:
+        - name: testproject
+          remote: testremote
+          path: sub/directory
+    '''
+    with patch('west.util.west_topdir', return_value=os.path.realpath('/west_top')):
+        # Parsing west section only, no exception raised
+        manifest = Manifest.from_data(yaml.safe_load(content_wrong_manifest), 'west')
+    assert manifest.westmeta.url == 'https://example.com'
+    assert manifest.westmeta.revision == 'abranch'
 
 # Invalid manifests should raise MalformedManifest.
 @pytest.mark.parametrize('invalid',
