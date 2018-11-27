@@ -54,9 +54,9 @@ mapping:
   #
   #   remotes:
   #     - name: zephyrproject-rtos
-  #       url: https://github.com/zephyrproject-rtos
+  #       url-base: https://github.com/zephyrproject-rtos
   #     - name: developer-fork
-  #       url: https://github.com/a-developer
+  #       url-base: https://github.com/a-developer
   remotes:
     required: true
     type: seq
@@ -66,7 +66,7 @@ mapping:
           name:
             required: true
             type: str
-          url:
+          url-base:
             required: true
             type: str
 
@@ -78,7 +78,7 @@ mapping:
   # Each project is a map with the following keys:
   #
   # - name: Mandatory, the name of the git repository. The clone
-  #   URL is formed by remote + '/' + name. The name cannot
+  #   URL is formed by remote url-base + '/' + name. The name cannot
   #   be one of the reserved values "west" and "manifest".
   # - remote: Optional, the name of the remote to pull it from.
   #   If the remote is missing, the remote'key in the top-level

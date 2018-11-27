@@ -13,7 +13,7 @@ manifest:
 
   remotes:
     - name: upstream
-      url: https://example.com
+      url-base: https://example.com
 
   projects:
     - name: zephyr

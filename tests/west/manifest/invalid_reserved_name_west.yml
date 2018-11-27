@@ -1,7 +1,7 @@
 manifest:
   remotes:
     - name: testremote
-      url: https://example.com
+      url-base: https://example.com
 
   projects:
     - name: west

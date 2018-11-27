@@ -183,7 +183,7 @@ class Manifest:
         manifest = data.get('manifest')
 
         # Map from each remote's name onto that remote's data in the manifest.
-        remotes = tuple(Remote(r['name'], r['url']) for r in
+        remotes = tuple(Remote(r['name'], r['url-base']) for r in
                         manifest['remotes'])
         remotes_dict = {r.name: r for r in remotes}
 

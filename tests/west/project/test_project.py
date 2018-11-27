@@ -76,7 +76,7 @@ manifest:
 
   remotes:
     - name: repos
-      url: file://{}
+      url-base: file://{}
 
   projects:
     - name: net-tools
