@@ -33,9 +33,9 @@ def test_no_defaults():
     manifest:
       remotes:
         - name: testremote1
-          url: https://example1.com
+          url-base: https://example1.com
         - name: testremote2
-          url: https://example2.com
+          url-base: https://example2.com
 
       projects:
         - name: testproject1
@@ -74,9 +74,9 @@ def test_default_clone_depth():
 
       remotes:
         - name: testremote1
-          url: https://example1.com
+          url-base: https://example1.com
         - name: testremote2
-          url: https://example2.com
+          url-base: https://example2.com
 
       projects:
         - name: testproject1
@@ -116,7 +116,7 @@ def test_path():
     manifest:
       remotes:
         - name: testremote
-          url: https://example.com
+          url-base: https://example.com
       projects:
         - name: testproject
           remote: testremote
@@ -137,7 +137,7 @@ def test_sections():
     manifest:
       remotes:
         - name: testremote
-          url: https://example.com
+          url-base: https://example.com
       projects:
         - name: testproject
           remote: testremote
@@ -155,7 +155,7 @@ def test_sections():
     manifest:
       remotes:
         - name: testremote
-          url: https://example.com
+          url-base: https://example.com
       projects:
         - name: testproject
           remote: testremote

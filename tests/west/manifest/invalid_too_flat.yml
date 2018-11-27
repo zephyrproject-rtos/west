@@ -1,7 +1,7 @@
 # This invalid manifest is too flat.
 remotes:
   - name: testremote
-    url: https://example.com
+    url-base: https://example.com
 projects:
   - name: testproject
     remote: testremote
