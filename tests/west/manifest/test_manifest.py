@@ -127,6 +127,29 @@ def test_path():
     assert manifest.projects[0].path == 'sub/directory'
     assert manifest.projects[0].abspath == os.path.realpath('/west_top/sub/directory')
 
+def test_restricted_path():
+    # Projects are restricted from west/ folder, but folders containing west as
+    # part of path name, e.g. west-ext arte still allowed.
+    content = '''\
+    manifest:
+      remotes:
+        - name: testremote
+          url-base: https://example.com
+      projects:
+        - name: testproject
+          remote: testremote
+          path: west-ext
+        - name: testsubproject
+          remote: testremote
+          path: west-ext/sub
+    '''
+    with patch('west.util.west_topdir', return_value=os.path.realpath('/west_top')):
+        manifest = Manifest.from_data(yaml.safe_load(content))
+    assert manifest.projects[0].path == 'west-ext'
+    assert manifest.projects[0].abspath == os.path.realpath('/west_top/west-ext')
+    assert manifest.projects[1].path == 'west-ext/sub'
+    assert manifest.projects[1].abspath == os.path.realpath('/west_top/west-ext/sub')
+
 def test_sections():
     # Projects must be able to override their default paths.
     content_wrong_west = '''\

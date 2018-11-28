@@ -33,6 +33,9 @@ META_NAMES = ['west', 'manifest']
 '''Names of the special "meta-projects", which are reserved and cannot
 be used to name a project in the manifest file.'''
 
+WEST_RESTRICTED_FOLDERS = ['west']
+'''Restricted folders that are used by "west" itself for "meta-projects"'''
+
 MANIFEST_SECTIONS = ['manifest', 'west']
 '''Sections in the manifest file'''
 
@@ -216,6 +219,18 @@ class Manifest:
                                 format(name) +
                                 'be used to name a manifest project')
 
+            path = mp.get('path')
+            if path is not None:
+                path = os.path.normpath(path)
+                for restricted_path in WEST_RESTRICTED_FOLDERS:
+                    # Appending os.path.sep to ensure that eg. restricted path 'west/' and
+                    # 'west-ext/' common prefix does not match on the restricted path 'west/'
+                    restricted_path += os.path.sep
+                    if os.path.commonprefix([restricted_path, path + os.path.sep]) is restricted_path:
+                        self._malformed('the folder "{}" is restricted and '.
+                                        format(restricted_path) +
+                                        'cannot be used for local projects')
+
             # Validate the project remote.
             remote_name = mp.get('remote', default_remote_name)
             if remote_name is None:
@@ -227,7 +242,7 @@ class Manifest:
             project = Project(name,
                               remotes_dict[remote_name],
                               defaults,
-                              path=mp.get('path'),
+                              path=path,
                               clone_depth=mp.get('clone-depth'),
                               revision=mp.get('revision'))
 
