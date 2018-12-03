@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright 2018 Open Source Foundries Limited.
 #
 # SPDX-License-Identifier: Apache-2.0
@@ -14,7 +15,12 @@ import subprocess
 import sys
 import yaml
 
-import west._bootstrap.version as version
+try:
+    import west._bootstrap.version as version
+except ImportError:
+    # To allow wget of the bootstrapper, importing version may fail.
+    # Main issue is that version information is now located in two places.
+    version = type('version', (object,), {'__version__' : '0.4.0'})
 
 if sys.version_info < (3,):
     sys.exit('fatal error: you are running Python 2')
@@ -50,7 +56,25 @@ MANIFEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/manifest'
 # Default revision to check out of the manifest repository.
 MANIFEST_REV_DEFAULT = 'master'
 
-_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "west-schema.yml")
+WEST_SCHEMA = '''\
+## A pykwalify schema for basic validation of the structure of a
+## west YAML file.  (Full validation would require additional work,
+## e.g. to validate that remote URLs obey the URL format specified in
+## rfc1738.)
+##
+
+# The top-level west yaml is a map. The only top-level element is
+# 'west'. All other elements are contained within it. This allows
+# us a bit of future-proofing.
+type: map
+mapping:
+  url:
+    required: false
+    type: str
+  revision:
+    required: false
+    type: str
+'''
 
 #
 # Helpers shared between init and wrapper mode
@@ -234,7 +258,7 @@ def bootstrap(args):
         try:
             pykwalify.core.Core(
                 source_data=wdata,
-                schema_files=[_SCHEMA_PATH]
+                schema_data=yaml.safe_load(WEST_SCHEMA)
             ).validate()
         except pykwalify.errors.SchemaError as e:
             sys.exit("Error: Failed to parse manifest file '{}': {}"

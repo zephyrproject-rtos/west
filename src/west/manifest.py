@@ -22,6 +22,7 @@ import pykwalify.core
 import yaml
 
 from west import util, log
+from west._bootstrap import main
 
 # Todo: take from _bootstrap?
 # Default west repository URL.
@@ -116,10 +117,16 @@ class Manifest:
 
         for key in self._data:
             if key in sections:
+                schema_data = _SCHEMA_PATH[key].get('data')
+                if schema_data is None:
+                    with open(_SCHEMA_PATH[key].get('file'), 'r') as f:
+                        schema_data = f.read()
+                schema_dict = yaml.safe_load(schema_data)
+
                 try:
                     pykwalify.core.Core(
                         source_data=self._data[key],
-                        schema_files=[_SCHEMA_PATH[key]]
+                        schema_data=schema_dict
                     ).validate()
                 except pykwalify.errors.SchemaError as e:
                     self._malformed(e, key)
@@ -373,5 +380,5 @@ def _wrn_if_not_remote(remote):
         log.wrn('Remote', remote, 'is not a Remote instance')
 
 
-_SCHEMA_PATH = {'manifest': os.path.join(os.path.dirname(__file__), "manifest-schema.yml"),
-                'west': os.path.join(os.path.dirname(__file__), "_bootstrap", "west-schema.yml")}
+_SCHEMA_PATH = {'manifest': { 'file': os.path.join(os.path.dirname(__file__), "manifest-schema.yml")},
+                'west': { 'data': main.WEST_SCHEMA }}
