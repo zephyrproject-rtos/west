@@ -23,6 +23,7 @@ from west.runners import pyocd
 from west.runners import qemu
 from west.runners import xtensa
 from west.runners import intel_s1000
+from west.runners import blackmagicprobe
 
 def get_runner_cls(runner):
     '''Get a runner's class object, given its name.'''
