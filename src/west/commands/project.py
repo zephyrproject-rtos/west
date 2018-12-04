@@ -16,14 +16,65 @@ from west import log
 from west import util
 from west.commands import WestCommand
 from west.manifest import default_path, Remote, Project, SpecialProject, \
-                          Manifest, MalformedManifest, META_NAMES
-
+                          MalformedManifest, META_NAMES
+from west.manifest import Manifest as WestManifest
 
 # Branch that points to the revision specified in the manifest (which might be
 # an SHA). Local branches created with 'west branch' are set to track this
 # branch.
 _MANIFEST_REV_BRANCH = 'manifest-rev'
 
+class Manifest(WestCommand):
+    def __init__(self):
+        super().__init__(
+            'manifest',
+            _wrap('''
+            Display or save the manifest file.
+
+            By default, displays the current manifest on stdout.
+            With additional options it can generate manifest variants based
+            on the state of the different projects and the options
+            provided.'''))
+
+    def do_add_parser(self, parser_adder):
+        return _add_parser(
+            parser_adder, self,
+            _arg('-f', '--freeze', action='store_true',
+                 help='''Freeze the current state of the different projects
+                 by generating and printing a manifest that refers to the
+                 specific SHAs currently being pointed to by each project's
+                 HEAD.'''),
+            _arg('-w', '--west', action='store_true',
+                 help='''Include west itself when freezing a manifest. Requires
+                 \'-f\'.'''),
+                )
+
+    def do_run(self, args, user_args):
+        mp = _manifest_path(args)
+
+        # this command does not allow specifying a project subset
+        args.projects = None
+
+        if not args.freeze:
+            if args.west:
+                log.die("-f required with -w")
+            with open(mp, 'r') as f:
+                print(f.read())
+                return
+
+        manifest = WestManifest.from_file(mp, ['west', 'manifest'])
+        manifest.projects = _projects(args, include_meta=False)
+        for project in manifest.projects:
+            project.revision = _sha(project, 'HEAD')
+
+        sections = ['manifest']
+        if args.west:
+            west = _special_project(args, 'west')
+            west.revision = _sha(west, 'HEAD')
+            manifest.west_project = west
+            sections.append('west')
+
+        print(manifest.dump(sections))
 
 class List(WestCommand):
     def __init__(self):
@@ -669,8 +720,8 @@ def _all_projects(args):
     # command aborts.
 
     try:
-        return list(Manifest.from_file(_manifest_path(args),
-                                       'manifest').projects)
+        return list(WestManifest.from_file(_manifest_path(args),
+                                           'manifest').projects)
     except MalformedManifest as m:
         log.die(m.args[0])
 
@@ -850,7 +901,7 @@ def _special_project(args, name):
         return SpecialProject(name, revision=revision,
                        path=os.path.join('west', name), url=url)
 
-    return Manifest.from_file(_manifest_path(args), name).west_project
+    return WestManifest.from_file(_manifest_path(args), name).west_project
 
 def _update_west(args):
     _update_special(args, 'west')

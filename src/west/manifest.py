@@ -248,6 +248,45 @@ class Manifest:
         self._remotes_dict = remotes_dict
         self.projects = tuple(projects)
 
+    def dump(self, sections):
+        data = {}
+        if 'west' in sections:
+            w = {'url' : self.west_project.url,
+                 'revision' : self.west_project.revision}
+            data['west'] = w
+        if 'manifest' in sections:
+            m = {}
+            sm = self._data['manifest']
+            # Add the optional defaults section only if present in the
+            # original manifest. It is not overridable so just use the
+            # original data if required.
+            if 'defaults' in sm:
+                m['defaults'] = sm['defaults']
+
+            r = []
+            for remote in self.remotes:
+                r.append({'name' : remote.name, 'url' : remote.url})
+            m['remotes'] = r
+
+            p = []
+            for project in self.projects:
+                lp = {}
+                sp = [i for i in sm['projects'] if i['name'] == project.name][0]
+                lp['name'] = project.name
+                if sp.get('remote') or (project.remote.name != self.defaults.remote.name):
+                    lp['remote'] = project.remote.name
+                if sp.get('revision') or (project.revision != self.defaults.revision):
+                    lp['revision'] = project.revision
+                if sp.get('path'):
+                    lp['path'] = project.path
+                if sp.get('clone_depth'):
+                    lp['clone_depth'] = project.clone_depth
+
+                p.append(lp)
+            m['projects'] = p
+
+        data['manifest'] = m
+        return yaml.dump(data, default_flow_style=False)
 
 class MalformedManifest(Exception):
     '''Exception indicating that west manifest parsing failed due to a

@@ -23,8 +23,8 @@ from west.commands.flash import Flash
 from west.commands.debug import Debug, DebugServer, Attach
 from west.commands.project import List, Clone, Fetch, Pull, Rebase, Branch, \
                              Checkout, Diff, Status, Update, ForAll, \
-                             WestUpdated
-from west.manifest import Manifest
+                             WestUpdated, Manifest
+from west.manifest import Manifest as WestManifest
 from west.util import quote_sh_list, in_multirepo_install, west_dir
 
 IN_MULTIREPO_INSTALL = in_multirepo_install(__file__)
@@ -38,6 +38,7 @@ BUILD_FLASH_COMMANDS = [
 ]
 
 PROJECT_COMMANDS = [
+    Manifest(),
     List(),
     Clone(),
     Fetch(),
@@ -87,7 +88,7 @@ def set_zephyr_base(args):
         # At some point, we need a more flexible way to set environment
         # variables based on manifest contents, but this is good enough
         # to get started with and to ask for wider testing.
-        manifest = Manifest.from_file()
+        manifest = WestManifest.from_file()
         for project in manifest.projects:
             if project.path == 'zephyr':
                 zb = project.abspath
