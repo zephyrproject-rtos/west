@@ -89,7 +89,7 @@ class NrfJprogBinaryRunner(ZephyrBinaryRunner):
         else:
             board_snr = self.snr.lstrip("0")
         program_cmd = ['nrfjprog', '--program', self.hex_, '-f', self.family,
-                       '--snr', board_snr]
+                       '--snr', board_snr, '--verify']
 
         print('Flashing file: {}'.format(self.hex_))
         if self.erase:
