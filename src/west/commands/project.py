@@ -710,8 +710,13 @@ def _fetch(project):
     # separately.
     #
     # --tags is required to get tags when the remote is specified as an URL.
-    _git(project, fetch_cmd + ' --tags -- (url) (revision)')
-    _git(project, 'update-ref (qual-manifest-rev-branch) FETCH_HEAD^{commit}')
+    if _is_sha(project.revision):
+        # Don't fetch a SHA directly, as server may restrict from doing so.
+        _git(project, fetch_cmd + ' --tags -- (url)')
+        _git(project, 'update-ref (qual-manifest-rev-branch) (revision)')
+    else:
+        _git(project, fetch_cmd + ' --tags -- (url) (revision)')
+        _git(project, 'update-ref (qual-manifest-rev-branch) FETCH_HEAD^{commit}')
 
     if not _head_ok(project):
         # If nothing it checked out (which would usually only happen just after
