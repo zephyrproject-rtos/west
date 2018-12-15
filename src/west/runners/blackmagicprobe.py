@@ -9,13 +9,14 @@ import sys
 
 from west.runners.core import ZephyrBinaryRunner, RunnerCaps
 
+
 class BlackMagicProbeRunner(ZephyrBinaryRunner):
     '''Runner front-end for Black Magic probe.'''
 
     def __init__(self, cfg, gdb_serial):
         super(BlackMagicProbeRunner, self).__init__(cfg)
         self.gdb = [cfg.gdb] if cfg.gdb else None
-        self.kernel_elf = cfg.kernel_elf
+        self.elf_file = cfg.elf_file
         self.gdb_serial = gdb_serial
 
     @classmethod
@@ -36,34 +37,51 @@ class BlackMagicProbeRunner(ZephyrBinaryRunner):
                             help='GDB serial port')
 
     def bmp_flash(self, command, **kwargs):
+        if self.gdb is None:
+            raise ValueError('Cannot flash; gdb is missing')
+        if self.elf_file is None:
+            raise ValueError('Cannot debug; elf file is missing')
         command = (self.gdb +
             ['-ex', "set confirm off",
-            '-ex', "target extended-remote {}".format(self.gdb_serial),
-            '-ex', "monitor swdp_scan",
-            '-ex', "attach 1",
-            '-ex', "load {}".format(self.kernel_elf),
-            '-ex', "kill",
-            '-ex', "quit",
-            '-silent'])
+                '-ex', "target extended-remote {}".format(self.gdb_serial),
+                '-ex', "monitor swdp_scan",
+                '-ex', "attach 1",
+                '-ex', "load {}".format(self.elf_file),
+                '-ex', "kill",
+                '-ex', "quit",
+                '-silent'])
         self.check_call(command)
 
     def bmp_attach(self, command, **kwargs):
-        command = (self.gdb +
-            ['-ex', "set confirm off",
-            '-ex', "target extended-remote {}".format(self.gdb_serial),
-            '-ex', "monitor swdp_scan",
-            '-ex', "attach 1",
-            '-ex', "file {}".format(self.kernel_elf)])
+        if self.gdb is None:
+            raise ValueError('Cannot attach; gdb is missing')
+        if self.elf_file is None:
+            command = (self.gdb +
+                ['-ex', "set confirm off",
+                    '-ex', "target extended-remote {}".format(self.gdb_serial),
+                    '-ex', "monitor swdp_scan",
+                    '-ex', "attach 1"])
+        else:
+            command = (self.gdb +
+                ['-ex', "set confirm off",
+                    '-ex', "target extended-remote {}".format(self.gdb_serial),
+                    '-ex', "monitor swdp_scan",
+                    '-ex', "attach 1",
+                    '-ex', "file {}".format(self.elf_file)])
         self.check_call(command)
 
     def bmp_debug(self, command, **kwargs):
+        if self.gdb is None:
+            raise ValueError('Cannot debug; gdb is missing')
+        if self.elf_file is None:
+            raise ValueError('Cannot debug; elf file is missing')
         command = (self.gdb +
             ['-ex', "set confirm off",
-            '-ex', "target extended-remote {}".format(self.gdb_serial),
-            '-ex', "monitor swdp_scan",
-            '-ex', "attach 1",
-            '-ex', "file {}".format(self.kernel_elf),
-            '-ex', "load {}".format(self.kernel_elf)])
+                '-ex', "target extended-remote {}".format(self.gdb_serial),
+                '-ex', "monitor swdp_scan",
+                '-ex', "attach 1",
+                '-ex', "file {}".format(self.elf_file),
+                '-ex', "load {}".format(self.elf_file)])
         self.check_call(command)
 
     def do_run(self, command, **kwargs):
