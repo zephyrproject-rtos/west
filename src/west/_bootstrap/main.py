@@ -74,6 +74,7 @@ def west_dir(start=None):
     '''
     return os.path.join(west_topdir(start), WEST_DIR)
 
+
 def manifest_dir(start=None):
     '''
     Returns the path to the manifest/ directory, searching ``start`` and its
@@ -82,6 +83,7 @@ def manifest_dir(start=None):
     Raises WestNotFound if no west directory is found.
     '''
     return os.path.join(west_topdir(start), MANIFEST)
+
 
 def west_topdir(start=None):
     '''
@@ -132,8 +134,7 @@ def init(argv):
     init_parser = argparse.ArgumentParser(
         prog='west init',
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=
-'''
+        description='''
 Initializes a Zephyr installation. Use "west clone" afterwards to fetch the
 sources.
 
@@ -238,7 +239,7 @@ def bootstrap(args):
             ).validate()
         except pykwalify.errors.SchemaError as e:
             sys.exit("Error: Failed to parse manifest file '{}': {}"
-                      .format(manifest_file, e))
+                     .format(manifest_file, e))
 
         if 'url' in wdata:
             west_url = wdata['url']
@@ -282,7 +283,8 @@ def reinit(config_path, args):
     print('=== Updated configuration written to {} ==='.format(config_path))
 
     if args.reset:
-        cmd = ['update', '--reset-manifest', '--reset-projects', '--reset-west']
+        cmd = ['update', '--reset-manifest', '--reset-projects',
+               '--reset-west']
         print("=== Running 'west {}' to update repositories ==="
               .format(' '.join(cmd)))
         wrap(cmd)
@@ -401,7 +403,7 @@ def wrap(argv):
             print('West repository version: {} ({})'.format(git_describe,
                                                             west_git_repo))
         except subprocess.CalledProcessError:
-            print('West repository verison: unknown; no tags were found')
+            print('West repository version: unknown; no tags were found')
         sys.exit(0)
 
     # Replace the wrapper process with the "real" west
