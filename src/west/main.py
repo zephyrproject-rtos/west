@@ -23,7 +23,7 @@ from west.commands.flash import Flash
 from west.commands.debug import Debug, DebugServer, Attach
 from west.commands.project import List, Clone, Fetch, Pull, Rebase, Branch, \
                              Checkout, Diff, Status, Update, ForAll, \
-                             WestUpdated
+                             WestUpdated, Reset
 from west.manifest import Manifest
 from west.util import quote_sh_list, in_multirepo_install, west_dir
 
@@ -38,6 +38,7 @@ BUILD_FLASH_COMMANDS = [
 ]
 
 PROJECT_COMMANDS = [
+    Reset(),
     List(),
     Clone(),
     Fetch(),

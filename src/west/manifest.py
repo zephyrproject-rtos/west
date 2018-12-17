@@ -55,7 +55,7 @@ class Manifest:
         '''Create and return a new Manifest object given a source YAML file.
 
         :param source_file: Path to a YAML file containing the manifest.
-        :param sections: Only parse specified sections from YAML file, 
+        :param sections: Only parse specified sections from YAML file,
                          default: all sections are parsed.
 
         If source_file is None, the value returned by default_path()
@@ -71,10 +71,22 @@ class Manifest:
         '''Create and return a new Manifest object given parsed YAML data.
 
         :param source_data: Parsed YAML data as a Python object.
-        :param sections: Only parse specified sections from YAML data, 
+        :param sections: Only parse specified sections from YAML data,
                          default: all sections are parsed.
 
         Raises MalformedManifest in case of validation errors.'''
+        return Manifest(source_data=source_data, sections=sections)
+
+    @staticmethod
+    def from_string(string_data, sections=MANIFEST_SECTIONS):
+        '''Create and return a new Manifest object given text string.
+
+        :param string_data: String containing data to parse.
+        :param sections: Only parse specified sections from YAML data,
+                         default: all sections are parsed.
+
+        Raises MalformedManifest in case of validation errors.'''
+        source_data = yaml.safe_load(string_data)
         return Manifest(source_data=source_data, sections=sections)
 
     def __init__(self, source_file=None, source_data=None, sections=MANIFEST_SECTIONS):
@@ -82,7 +94,7 @@ class Manifest:
 
         :param source_file: Path to a YAML file containing the manifest.
         :param source_data: Parsed YAML data as a Python object.
-        :param sections: Only parse specified sections from YAML file, 
+        :param sections: Only parse specified sections from YAML file,
                          default: all sections are parsed.
 
         Normally, it is more convenient to use the `from_file` and
@@ -364,8 +376,8 @@ class SpecialProject(Project):
         self.path = path or name
         self.abspath = os.path.realpath(os.path.join(util.west_topdir(), self.path))
         self.revision = revision
-        self.remote = None 
-        self.clone_depth = None 
+        self.remote = None
+        self.clone_depth = None
 
 
 def _wrn_if_not_remote(remote):

@@ -24,6 +24,77 @@ from west.manifest import default_path, Remote, Project, SpecialProject, \
 # branch.
 _MANIFEST_REV_BRANCH = 'manifest-rev'
 
+class Reset(WestCommand):
+    def __init__(self):
+        super().__init__(
+            'reset',
+            _wrap('''
+            Reset the repositories to a specific revision for the project given.
+            Also reset other remote repositories to the related revision found in
+            the manifest file.
+            Additional git arguments, such as --hard can be provided using
+            --git-args.'''))
+
+    def do_add_parser(self, parser_adder):
+        return _add_parser(
+            parser_adder, self,
+            _arg('-r', '--revision',
+                 dest='revision',
+                 metavar='REVISION',
+                 required=True,
+                 help='''ToBeWritten'''),
+            _arg('-g', '--git-args',
+                 dest='gitargs',
+                 metavar='GIT_ARGS',
+                 default='',
+                 required=False,
+                 help='''Additional git arguments to be passed with 'git reset,'
+                         e.g '--hard' '''),
+            _arg('projects', metavar='PROJECT', nargs='?', default='zephyr')
+            )
+
+    def do_run(self, args, user_args):
+        # Arg parse, if project not given, use 'zephyr'
+        # Only one project can be given.
+        #
+        # ToDo: Check SHA is valid ?
+        n=0
+        project = _projects(args)[0]
+        manifest = _special_project(args, 'manifest')
+        reset_projects = _all_projects(args)
+
+        while True:
+            n += 1
+
+            rev_list = _git(project,
+                   'rev-list --topo-order (revision) ^{}'.format(args.revision),
+                   capture_stdout=True).stdout
+            if not rev_list:
+                # Empty string, thus we are ahead of last manifest commit.
+                # Reset other repos to their revision.
+                break
+            else:
+                manifest_content = _git(manifest,
+                   'show HEAD~{}:default.yml'.format(n),
+                   capture_stdout=True).stdout
+
+                try:
+                    reset_projects = Manifest.from_string(manifest_content).projects
+                    for proj in reset_projects:
+                        if proj.name in args.projects:
+                            project = proj
+                except MalformedManifest as m:
+                    # We are so far back in time, that manifest file style wasi
+                    # not supported.
+                    log.die('revision "{}" points too long back in time.\r\n'
+                            "Manifest at {} revision:HEAD~{} is not "
+                            "supported by current west".
+                            format(args.revision, manifest.url, n))
+        for proj in reset_projects:
+            rev_list = _git(proj,
+                   'reset {} {}'.format(args.gitargs, args.revision),
+                   capture_stdout=False)
+
 
 class List(WestCommand):
     def __init__(self):
@@ -711,7 +782,7 @@ def _fetch(project):
     #
     # --tags is required to get tags when the remote is specified as an URL.
     if _is_sha(project.revision):
-        # Don't fetch a SHA directly, as server may restrict from doing so.
+        # Don't fetch a SHA directly, as server mey restrict from doing so.
         _git(project, fetch_cmd + ' --tags -- (url)')
         _git(project, 'update-ref (qual-manifest-rev-branch) (revision)')
     else:
