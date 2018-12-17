@@ -406,18 +406,17 @@ def wrap(argv):
             print('West repository version: unknown; no tags were found')
         sys.exit(0)
 
-    # Replace the wrapper process with the "real" west
-
-    # sys.argv[1:] strips the argv[0] of the wrapper script itself
-    argv = ([sys.executable,
-             os.path.join(west_git_repo, 'src', 'west', 'main.py')] +
-            argv)
-
-    append_to_pythonpath(os.path.join(west_git_repo, 'src'))
-    try:
-        subprocess.check_call(argv)
-    except subprocess.CalledProcessError as e:
-        sys.exit(1)
+    # Import the west package from the installation and run its main
+    # function with the given command-line arguments.
+    #
+    # This can't be done as a subprocess: that would break the
+    # runners' debug handling for GDB, which needs to block the usual
+    # control-C signal handling. GDB uses Ctrl-C to halt the debug
+    # target. So we really do need to import west and delegate within
+    # this bootstrap process.
+    sys.path.append(os.path.join(west_git_repo, 'src'))
+    import west.main
+    west.main.main(argv)
 
 
 #
