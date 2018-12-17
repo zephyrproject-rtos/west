@@ -130,3 +130,7 @@ mapping:
           clone-depth:
             required: false
             type: int
+          sha:
+            required: false
+            type: text        # SHAs could be only numbers
+

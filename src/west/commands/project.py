@@ -56,9 +56,9 @@ class Reset(WestCommand):
     def do_run(self, args, user_args):
         # Arg parse, if project not given, use 'zephyr'
         # Only one project can be given.
-        #
         # ToDo: Check SHA is valid ?
         n=0
+        args.projects = [args.projects]
         project = _projects(args)[0]
         manifest = _special_project(args, 'manifest')
         reset_projects = _all_projects(args)
@@ -66,8 +66,9 @@ class Reset(WestCommand):
         while True:
             n += 1
 
+            sha = project.sha or project.revision
             rev_list = _git(project,
-                   'rev-list --topo-order (revision) ^{}'.format(args.revision),
+                   'rev-list --topo-order {} ^{}'.format(sha, args.revision),
                    capture_stdout=True).stdout
             if not rev_list:
                 # Empty string, thus we are ahead of last manifest commit.
@@ -91,9 +92,14 @@ class Reset(WestCommand):
                             "supported by current west".
                             format(args.revision, manifest.url, n))
         for proj in reset_projects:
-            rev_list = _git(proj,
-                   'reset {} {}'.format(args.gitargs, args.revision),
-                   capture_stdout=False)
+            if proj.name in args.projects:
+                _git(proj,
+                    'reset {} {}'.format(args.gitargs, args.revision),
+                    capture_stdout=False)
+            else:
+                _git(proj,
+                    'reset {} {}'.format(args.gitargs, proj.sha or proj.revision),
+                    capture_stdout=False)
 
 
 class List(WestCommand):

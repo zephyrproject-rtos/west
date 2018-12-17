@@ -241,7 +241,8 @@ class Manifest:
                               defaults,
                               path=mp.get('path'),
                               clone_depth=mp.get('clone-depth'),
-                              revision=mp.get('revision'))
+                              revision=mp.get('revision'),
+                              sha=mp.get('sha'))
 
             # Two projects cannot have the same path. We use absolute
             # paths to check for collisions to ensure paths are
@@ -321,10 +322,10 @@ class Project:
 
     Projects are neither comparable nor hashable.'''
 
-    __slots__ = 'name remote url path abspath clone_depth revision'.split()
+    __slots__ = 'name remote url path abspath clone_depth revision sha'.split()
 
     def __init__(self, name, remote, defaults, path=None, clone_depth=None,
-                 revision=None, url=None):
+                 revision=None, url=None, sha=None):
         '''Specify a Project by name, Remote, and optional information.
 
         :param name: Project's user-defined name in the manifest
@@ -346,6 +347,7 @@ class Project:
         self.abspath = os.path.realpath(os.path.join(util.west_topdir(), self.path))
         self.clone_depth = clone_depth
         self.revision = revision or defaults.revision
+        self.sha = sha
 
     def __eq__(self, other):
         raise NotImplemented
@@ -353,9 +355,9 @@ class Project:
     def __repr__(self):
         reprs = [repr(x) for x in
                  (self.name, self.remote, self.url, self.path,
-                  self.abspath, self.clone_depth, self.revision)]
+                  self.abspath, self.clone_depth, self.revision, self.sha)]
         return ('Project(name={}, remote={}, url={}, path={}, abspath={}, '
-                'clone_depth={}, revision={})').format(*reprs)
+                'clone_depth={}, revision={}, sha={})').format(*reprs)
 
 class SpecialProject(Project):
     '''Represents a special project, e.g. the west or manifest project.
@@ -378,6 +380,7 @@ class SpecialProject(Project):
         self.revision = revision
         self.remote = None
         self.clone_depth = None
+        self.sha = None
 
 
 def _wrn_if_not_remote(remote):
