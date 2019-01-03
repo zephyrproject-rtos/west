@@ -355,7 +355,7 @@ class Diff(WestCommand):
         for project in _cloned_projects(args):
             # Use paths that are relative to the base directory to make it
             # easier to see where the changes are
-            _git(project, 'diff --src-prefix=(path)/ --dst-prefix=(path)/',
+            _git(project, 'diff --src-prefix={path}/ --dst-prefix={path}/',
                  extra_args=user_args)
 
 
@@ -374,7 +374,7 @@ class Status(WestCommand):
 
     def do_run(self, args, user_args):
         for project in _cloned_projects(args):
-            _inf(project, 'status of (name-and-path)')
+            _inf(project, 'status of {name_and_path}')
             _git(project, 'status', extra_args=user_args)
 
 
@@ -487,7 +487,7 @@ class ForAll(WestCommand):
 
     def do_run(self, args, user_args):
         for project in _cloned_projects(args):
-            _inf(project, "Running '{}' in (name-and-path)"
+            _inf(project, "Running '{}' in {{name_and_path}}"
                           .format(args.command))
 
             subprocess.Popen(args.command, shell=True, cwd=project.abspath) \
@@ -688,18 +688,18 @@ def _fetch(project):
     # project's repository does not already exist, it is created first.
 
     if not _cloned(project):
-        _inf(project, 'Creating repository for (name-and-path)')
-        _git_base(project, 'init (abspath)')
+        _inf(project, 'Creating repository for {name_and_path}')
+        _git_base(project, 'init {abspath}')
         # This remote is only added for the user's convenience. We always fetch
         # directly from the URL specified in the manifest.
-        _git(project, 'remote add -- (remote-name) (url)')
+        _git(project, 'remote add -- {remote_name} {url}')
 
     # Fetch the revision specified in the manifest into the manifest-rev branch
 
-    msg = "Fetching changes for (name-and-path)"
+    msg = "Fetching changes for {name_and_path}"
     if project.clone_depth:
-        fetch_cmd = "fetch --depth=(clone-depth)"
-        msg += " with --depth (clone-depth)"
+        fetch_cmd = "fetch --depth={clone_depth}"
+        msg += " with --depth {clone_depth}"
     else:
         fetch_cmd = "fetch"
 
@@ -712,12 +712,12 @@ def _fetch(project):
     # --tags is required to get tags when the remote is specified as an URL.
     if _is_sha(project.revision):
         # Don't fetch a SHA directly, as server may restrict from doing so.
-        _git(project, fetch_cmd + ' --tags -- (url)')
-        _git(project, 'update-ref (qual-manifest-rev-branch) (revision)')
+        _git(project, fetch_cmd + ' --tags -- {url}')
+        _git(project, 'update-ref {qual_manifest_rev_branch} {revision}')
     else:
-        _git(project, fetch_cmd + ' --tags -- (url) (revision)')
+        _git(project, fetch_cmd + ' --tags -- {url} {revision}')
         _git(project,
-             'update-ref (qual-manifest-rev-branch) FETCH_HEAD^{commit}')
+             'update-ref {qual_manifest_rev_branch} FETCH_HEAD^{{commit}}')
 
     if not _head_ok(project):
         # If nothing it checked out (which would usually only happen just after
@@ -732,7 +732,7 @@ def _fetch(project):
         # The --detach flag is strictly redundant here, because the
         # refs/heads/<branch> form already detaches HEAD, but it avoids a
         # spammy detached HEAD warning from Git.
-        _git(project, 'checkout --detach (qual-manifest-rev-branch)')
+        _git(project, 'checkout --detach {qual_manifest_rev_branch}')
 
 
 def _rebase(project):
@@ -740,10 +740,10 @@ def _rebase(project):
 
     if _up_to_date_with(project, _MANIFEST_REV_BRANCH):
         _inf(project,
-             '(name-and-path) is up-to-date with (manifest-rev-branch)')
+             '{name_and_path} is up-to-date with {manifest_rev_branch}')
     else:
-        _inf(project, 'Rebasing (name-and-path) to (manifest-rev-branch)')
-        _git(project, 'rebase (qual-manifest-rev-branch)')
+        _inf(project, 'Rebasing {name_and_path} to {manifest_rev_branch}')
+        _git(project, 'rebase {qual_manifest_rev_branch}')
 
 
 def _sha(project, rev):
@@ -806,14 +806,15 @@ def _branches(project):
 
 def _create_branch(project, branch):
     if _has_branch(project, branch):
-        _inf(project, "Branch '{}' already exists in (name-and-path)"
+        _inf(project, "Branch '{}' already exists in {{name_and_path}}"
                       .format(branch))
     else:
-        _inf(project, "Creating branch '{}' in (name-and-path)"
+        _inf(project, "Creating branch '{}' in {{name_and_path}}"
                       .format(branch))
 
-        _git(project, 'branch --quiet --track -- {} (qual-manifest-rev-branch)'
-                      .format(branch))
+        _git(project,
+             'branch --quiet --track -- {} {{qual_manifest_rev_branch}}'
+             .format(branch))
 
 
 def _has_branch(project, branch):
@@ -844,7 +845,8 @@ def _head_ok(project):
 
 
 def _checkout(project, branch):
-    _inf(project, "Checking out branch '{}' in (name-and-path)".format(branch))
+    _inf(project,
+         "Checking out branch '{}' in {{name_and_path}}".format(branch))
     _git(project, 'checkout ' + branch)
 
 
@@ -872,7 +874,7 @@ def _update_manifest(args):
 def _update_special(args, name):
     with _error_context(_FAILED_UPDATE_MSG):
         project = _special_project(args, name)
-        _dbg(project, 'Updating (name-and-path)', level=log.VERBOSE_NORMAL)
+        _dbg(project, 'Updating {name_and_path}', level=log.VERBOSE_NORMAL)
 
         old_sha = _sha(project, 'HEAD')
 
@@ -884,24 +886,24 @@ def _update_special(args, name):
         # --ff-only is required to ensure that the merge only takes place if it
         # can be fast-forwarded.
         if _git(project,
-                'fetch --quiet --tags -- (url) (revision)',
+                'fetch --quiet --tags -- {url} {revision}',
                 check=False).returncode:
 
-            _wrn(project, 'Skipping automatic update of (name-and-path). '
-                          "(revision) cannot be fetched (from "
-                          '(url)).')
+            _wrn(project,
+                 'Skipping automatic update of {name_and_path}. '
+                 "{revision} cannot be fetched (from {url}).")
 
         elif _git(project,
                   'merge --quiet --ff-only FETCH_HEAD',
                   check=False).returncode:
 
-            _wrn(project, 'Skipping automatic update of (name-and-path). '
-                          "Can't be fast-forwarded to (revision) (from "
-                          '(url)).')
+            _wrn(project,
+                 'Skipping automatic update of {name_and_path}. '
+                 "Can't be fast-forwarded to {revision} (from {url}).")
 
         elif old_sha != _sha(project, 'HEAD'):
-            _inf(project, 'Updated (name-and-path) to (revision) (from '
-                          '(url)).')
+            _inf(project,
+                 'Updated {name_and_path} to {revision} (from {url}).')
 
             if project.name == 'west':
                 # Signal self-update, which will cause a restart. This is a bit
@@ -917,12 +919,12 @@ def _update_and_reset_special(args, name):
     project = _special_project(args, name)
     with _error_context(', while updating/resetting special project'):
         _inf(project,
-             "Fetching and resetting (name-and-path) to '(revision)'")
-        _git(project, 'fetch -- (url) (revision)')
+             "Fetching and resetting {name_and_path} to '{revision}'")
+        _git(project, 'fetch -- {url} {revision}')
         if _git(project, 'reset --keep FETCH_HEAD', check=False).returncode:
             _wrn(project,
-                 'Failed to reset special project (name-and-path) to '
-                 "(revision) (with 'git reset --keep')")
+                 'Failed to reset special project {name_and_path} to '
+                 "{revision} (with 'git reset --keep')")
 
 
 def _reset_projects(args):
@@ -932,13 +934,13 @@ def _reset_projects(args):
     for project in _all_projects(args):
         if _cloned(project):
             _fetch(project)
-            _inf(project, 'Resetting (name-and-path) to (manifest-rev-branch)')
-            if _git(project, 'reset --keep (manifest-rev-branch)',
+            _inf(project, 'Resetting {name_and_path} to {manifest_rev_branch}')
+            if _git(project, 'reset --keep {manifest_rev_branch}',
                     check=False).returncode:
 
                 _wrn(project,
-                     'Failed to reset (name-and-path) to '
-                     "(manifest-rev-branch) (with 'git reset --keep')")
+                     'Failed to reset {name_and_path} to '
+                     "{manifest_rev_branch} (with 'git reset --keep')")
 
 
 _FAILED_UPDATE_MSG = """
@@ -1030,7 +1032,7 @@ def _git_helper(project, cmd, extra_args, cwd, capture_stdout, check):
     log.dbg(dbg_msg, level=log.VERBOSE_VERY)
 
     if check and popen.returncode:
-        msg = "Command '{}' failed for (name-and-path)".format(cmd_str)
+        msg = "Command '{}' failed for {{name_and_path}}".format(cmd_str)
         if _error_context_msg:
             msg += _error_context_msg.replace('\n', ' ')
         _die(project, msg)
@@ -1088,20 +1090,19 @@ def _expand_shorthands(project, s):
     #   A qualified reference to the magic manifest revision branch, e.g.
     #   refs/heads/manifest-rev
 
-    return s.replace('(name)', project.name) \
-            .replace('(name-and-path)',
-                     '{} ({})'.format(
-                         project.name, os.path.join(project.path, ""))) \
-            .replace('(remote-name)', 'None' if project.remote is None
-                                             else project.remote.name) \
-            .replace('(url)', project.url) \
-            .replace('(path)', project.path) \
-            .replace('(abspath)', project.abspath) \
-            .replace('(revision)', project.revision) \
-            .replace('(manifest-rev-branch)', _MANIFEST_REV_BRANCH) \
-            .replace('(qual-manifest-rev-branch)',
-                     'refs/heads/' + _MANIFEST_REV_BRANCH) \
-            .replace('(clone-depth)', str(project.clone_depth))
+    return s.format(name=project.name,
+                    name_and_path='{} ({})'.format(
+                        project.name, os.path.join(project.path, "")),
+                    remote_name=('None' if project.remote is None
+                                 else project.remote.name),
+                    url=project.url,
+                    path=project.path,
+                    abspath=project.abspath,
+                    revision=project.revision,
+                    manifest_rev_branch=_MANIFEST_REV_BRANCH,
+                    qual_manifest_rev_branch=('refs/heads/' +
+                                              _MANIFEST_REV_BRANCH),
+                    clone_depth=str(project.clone_depth))
 
 
 def _inf(project, msg):
