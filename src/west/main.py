@@ -191,9 +191,11 @@ def parse_args(argv):
         set_zephyr_base(args)
 
     if 'handler' not in args:
-        log.err('west installation found (in {}), but no command given'.
-                format(west_dir()),
-                fatal=True)
+        if IN_MULTIREPO_INSTALL:
+            log.err('west installation found (in {}), but no command given'.
+                    format(west_dir()))
+        else:
+            log.err('no west command given')
         west_parser.print_help(file=sys.stderr)
         sys.exit(1)
 
@@ -209,8 +211,9 @@ def main(argv=None):
         argv = sys.argv[1:]
     args, unknown = parse_args(argv)
 
-    # Read the configuration files
-    config.read_config()
+    if IN_MULTIREPO_INSTALL:
+        # Read the configuration files
+        config.read_config()
 
     for_stack_trace = 'run as "west -v ... {} ..." for a stack trace'.format(
         args.command)
