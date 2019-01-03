@@ -55,7 +55,7 @@ class Manifest:
         '''Create and return a new Manifest object given a source YAML file.
 
         :param source_file: Path to a YAML file containing the manifest.
-        :param sections: Only parse specified sections from YAML file, 
+        :param sections: Only parse specified sections from YAML file,
                          default: all sections are parsed.
 
         If source_file is None, the value returned by default_path()
@@ -71,18 +71,19 @@ class Manifest:
         '''Create and return a new Manifest object given parsed YAML data.
 
         :param source_data: Parsed YAML data as a Python object.
-        :param sections: Only parse specified sections from YAML data, 
+        :param sections: Only parse specified sections from YAML data,
                          default: all sections are parsed.
 
         Raises MalformedManifest in case of validation errors.'''
         return Manifest(source_data=source_data, sections=sections)
 
-    def __init__(self, source_file=None, source_data=None, sections=MANIFEST_SECTIONS):
+    def __init__(self, source_file=None, source_data=None,
+                 sections=MANIFEST_SECTIONS):
         '''Create a new Manifest object.
 
         :param source_file: Path to a YAML file containing the manifest.
         :param source_data: Parsed YAML data as a Python object.
-        :param sections: Only parse specified sections from YAML file, 
+        :param sections: Only parse specified sections from YAML file,
                          default: all sections are parsed.
 
         Normally, it is more convenient to use the `from_file` and
@@ -139,7 +140,6 @@ class Manifest:
         Each element's values are fully initialized; there is no need
         to consult the defaults field to supply missing values.'''
 
-
         self.west_project = None
         '''west.manifest.SpecialProject object representing the west meta
         project.'''
@@ -156,8 +156,8 @@ class Manifest:
         context = (' file {} '.format(self.path) if self.path
                    else ' data:\n{}\n'.format(self._data))
         raise MalformedManifest('Malformed manifest{}(schema: {}):\n{}'
-                                .format(context, _SCHEMA_PATH[section], complaint))
-
+                                .format(context, _SCHEMA_PATH[section],
+                                        complaint))
 
     def _load(self, data, sections):
         # Initialize this instance's fields from values given in the
@@ -171,7 +171,8 @@ class Manifest:
             self.west_project = SpecialProject('west',
                                                url=url,
                                                revision=revision,
-                                               path=os.path.join('west', 'west'))
+                                               path=os.path.join('west',
+                                                                 'west'))
 
         # Next is the manifest section
         if 'manifest' not in sections:
@@ -331,7 +332,8 @@ class Project:
         self.remote = remote
         self.url = remote.url + '/' + name
         self.path = path or name
-        self.abspath = os.path.realpath(os.path.join(util.west_topdir(), self.path))
+        self.abspath = os.path.realpath(os.path.join(util.west_topdir(),
+                                                     self.path))
         self.clone_depth = clone_depth
         self.revision = revision or defaults.revision
 
@@ -344,6 +346,7 @@ class Project:
                   self.abspath, self.clone_depth, self.revision)]
         return ('Project(name={}, remote={}, url={}, path={}, abspath={}, '
                 'clone_depth={}, revision={})').format(*reprs)
+
 
 class SpecialProject(Project):
     '''Represents a special project, e.g. the west or manifest project.
@@ -362,10 +365,11 @@ class SpecialProject(Project):
         self.name = name
         self.url = url
         self.path = path or name
-        self.abspath = os.path.realpath(os.path.join(util.west_topdir(), self.path))
+        self.abspath = os.path.realpath(os.path.join(util.west_topdir(),
+                                                     self.path))
         self.revision = revision
-        self.remote = None 
-        self.clone_depth = None 
+        self.remote = None
+        self.clone_depth = None
 
 
 def _wrn_if_not_remote(remote):
@@ -373,5 +377,8 @@ def _wrn_if_not_remote(remote):
         log.wrn('Remote', remote, 'is not a Remote instance')
 
 
-_SCHEMA_PATH = {'manifest': os.path.join(os.path.dirname(__file__), "manifest-schema.yml"),
-                'west': os.path.join(os.path.dirname(__file__), "_bootstrap", "west-schema.yml")}
+_SCHEMA_PATH = {'manifest': os.path.join(os.path.dirname(__file__),
+                                         "manifest-schema.yml"),
+                'west': os.path.join(os.path.dirname(__file__),
+                                     "_bootstrap",
+                                     "west-schema.yml")}

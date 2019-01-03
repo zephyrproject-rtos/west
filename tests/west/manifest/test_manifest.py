@@ -62,7 +62,8 @@ def test_no_defaults():
     for p, e in zip(manifest.projects, expected):
         deep_eq_check(p, e)
     assert all(p.abspath == os.path.realpath(os.path.join('/west_top', p.path))
-            for p in manifest.projects)
+               for p in manifest.projects)
+
 
 def test_default_clone_depth():
     # Defaults and clone depth should work as in this example.
@@ -108,7 +109,8 @@ def test_default_clone_depth():
     for p, e in zip(manifest.projects, expected):
         deep_eq_check(p, e)
     assert all(p.abspath == os.path.realpath(os.path.join('/west_top', p.path))
-            for p in manifest.projects)
+               for p in manifest.projects)
+
 
 def test_path():
     # Projects must be able to override their default paths.
@@ -122,10 +124,13 @@ def test_path():
           remote: testremote
           path: sub/directory
     '''
-    with patch('west.util.west_topdir', return_value=os.path.realpath('/west_top')):
+    with patch('west.util.west_topdir',
+               return_value=os.path.realpath('/west_top')):
         manifest = Manifest.from_data(yaml.safe_load(content))
     assert manifest.projects[0].path == 'sub/directory'
-    assert manifest.projects[0].abspath == os.path.realpath('/west_top/sub/directory')
+    assert manifest.projects[0].abspath == \
+        os.path.realpath('/west_top/sub/directory')
+
 
 def test_sections():
     # Projects must be able to override their default paths.
@@ -143,11 +148,14 @@ def test_sections():
           remote: testremote
           path: sub/directory
     '''
-    with patch('west.util.west_topdir', return_value=os.path.realpath('/west_top')):
+    with patch('west.util.west_topdir',
+               return_value=os.path.realpath('/west_top')):
         # Parsing manifest only, no exception raised
-        manifest = Manifest.from_data(yaml.safe_load(content_wrong_west), 'manifest')
+        manifest = Manifest.from_data(yaml.safe_load(content_wrong_west),
+                                      'manifest')
     assert manifest.projects[0].path == 'sub/directory'
-    assert manifest.projects[0].abspath == os.path.realpath('/west_top/sub/directory')
+    assert manifest.projects[0].abspath == \
+        os.path.realpath('/west_top/sub/directory')
     content_wrong_manifest = '''\
     west:
       url: https://example.com
@@ -161,11 +169,14 @@ def test_sections():
           remote: testremote
           path: sub/directory
     '''
-    with patch('west.util.west_topdir', return_value=os.path.realpath('/west_top')):
+    with patch('west.util.west_topdir',
+               return_value=os.path.realpath('/west_top')):
         # Parsing west section only, no exception raised
-        manifest = Manifest.from_data(yaml.safe_load(content_wrong_manifest), 'west')
+        manifest = Manifest.from_data(yaml.safe_load(content_wrong_manifest),
+                                      'west')
     assert manifest.west_project.url == 'https://example.com'
     assert manifest.west_project.revision == 'abranch'
+
 
 # Invalid manifests should raise MalformedManifest.
 @pytest.mark.parametrize('invalid',
