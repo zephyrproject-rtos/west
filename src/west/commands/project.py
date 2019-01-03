@@ -15,7 +15,7 @@ from west.config import config
 from west import log
 from west import util
 from west.commands import WestCommand
-from west.manifest import default_path, Remote, Project, SpecialProject, \
+from west.manifest import default_path, SpecialProject, \
                           Manifest, MalformedManifest, META_NAMES
 
 
@@ -552,7 +552,6 @@ are updated prior to cloning. See the 'update' command.
 """[1:].replace('\n', ' ')
 
 
-
 _MANIFEST_REV_HELP = """
 The '{}' branch points to the revision that the manifest specified for the
 project as of the most recent 'west fetch'/'west pull'.
@@ -626,7 +625,8 @@ def _projects(args, listed_must_be_cloned=True, include_meta=False):
                 # The startswith() means we also detect subdirectories of
                 # project repositories. Giving a plain file in the repo will
                 # work here too, but that probably doesn't hurt.
-                if normalize(project_arg).startswith(normalize(project.abspath)):
+                if normalize(project_arg).startswith(
+                        normalize(project.abspath)):
                     res.append(project)
                     break
             else:
@@ -716,7 +716,8 @@ def _fetch(project):
         _git(project, 'update-ref (qual-manifest-rev-branch) (revision)')
     else:
         _git(project, fetch_cmd + ' --tags -- (url) (revision)')
-        _git(project, 'update-ref (qual-manifest-rev-branch) FETCH_HEAD^{commit}')
+        _git(project,
+             'update-ref (qual-manifest-rev-branch) FETCH_HEAD^{commit}')
 
     if not _head_ok(project):
         # If nothing it checked out (which would usually only happen just after
@@ -825,6 +826,7 @@ def _ref_ok(project, ref):
     return _git(project, 'show-ref --quiet --verify ' + ref, check=False) \
            .returncode == 0
 
+
 def _head_ok(project):
     # Returns True if the reference 'HEAD' exists and is not a tag or remote
     # ref (e.g. refs/remotes/origin/HEAD).
@@ -840,6 +842,7 @@ def _head_ok(project):
     return _git(project, 'show-ref --quiet --head /', check=False) \
            .returncode == 0
 
+
 def _checkout(project, branch):
     _inf(project, "Checking out branch '{}' in (name-and-path)".format(branch))
     _git(project, 'checkout ' + branch)
@@ -853,9 +856,10 @@ def _special_project(args, name):
         url = config.get(name, 'remote', fallback='origin')
         revision = config.get(name, 'revision', fallback='master')
         return SpecialProject(name, revision=revision,
-                       path=os.path.join('west', name), url=url)
+                              path=os.path.join('west', name), url=url)
 
     return Manifest.from_file(_manifest_path(args), name).west_project
+
 
 def _update_west(args):
     _update_special(args, 'west')
@@ -876,7 +880,7 @@ def _update_special(args, name):
         # automatic rebasing is probably more annoying than useful when working
         # directly on them.
         #
-        # --tags is required to get tags when the remote is specified as an URL.
+        # --tags is required to get tags when the remote is specified as a URL.
         # --ff-only is required to ensure that the merge only takes place if it
         # can be fast-forwarded.
         if _git(project,
@@ -888,8 +892,8 @@ def _update_special(args, name):
                           '(url)).')
 
         elif _git(project,
-                'merge --quiet --ff-only FETCH_HEAD',
-                check=False).returncode:
+                  'merge --quiet --ff-only FETCH_HEAD',
+                  check=False).returncode:
 
             _wrn(project, 'Skipping automatic update of (name-and-path). '
                           "Can't be fast-forwarded to (revision) (from "
@@ -1055,6 +1059,7 @@ def _git_helper(project, cmd, extra_args, cwd, capture_stdout, check):
 # turned into a stack.
 
 _error_context_msg = None
+
 
 class _error_context:
     def __init__(self, msg):
