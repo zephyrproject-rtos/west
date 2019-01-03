@@ -1,6 +1,3 @@
-# The default West manifest file to be used for Zephyr.
-#
-
 west:
   url: https://example.com
   revision: arevision
