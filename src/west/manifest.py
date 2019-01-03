@@ -266,6 +266,12 @@ class Defaults:
     __slots__ = 'remote revision'.split()
 
     def __init__(self, remote=None, revision=None):
+        '''Initialize a defaults value from manifest data.
+
+        :param remote: Remote instance corresponding to the default remote,
+                       or None (an actual Remote object, not the name of
+                       a remote as a string).
+        :param revision: Default Git revision; 'master' if not given.'''
         if remote is not None:
             _wrn_if_not_remote(remote)
         if revision is None:
@@ -275,7 +281,7 @@ class Defaults:
         self.revision = revision
 
     def __eq__(self, other):
-        raise NotImplemented
+        return NotImplemented
 
     def __repr__(self):
         return 'Defaults(remote={}, revision={})'.format(repr(self.remote),
@@ -287,22 +293,27 @@ class Remote:
 
     Remotes may be compared for equality, but are not hashable.'''
 
-    __slots__ = 'name url'.split()
+    __slots__ = 'name url_base'.split()
 
-    def __init__(self, name, url):
-        if url.endswith('/'):
-            log.wrn('Remote', name, 'URL', url, 'ends with a slash ("/");',
-                    'these are automatically appended by West')
+    def __init__(self, name, url_base):
+        '''Initialize a remote from manifest data.
+
+        :param name: remote's name
+        :param url_base: remote's URL base.'''
+        if url_base.endswith('/'):
+            log.wrn('Remote', name, 'URL base', url_base,
+                    'ends with a slash ("/"); these are automatically',
+                    'appended by West')
 
         self.name = name
-        self.url = url
+        self.url_base = url_base
 
     def __eq__(self, other):
-        return self.name == other.name and self.url == other.url
+        return self.name == other.name and self.url_base == other.url_base
 
     def __repr__(self):
-        return 'Remote(name={}, url={})'.format(repr(self.name),
-                                                repr(self.url))
+        return 'Remote(name={}, url_base={})'.format(repr(self.name),
+                                                     repr(self.url_base))
 
 
 class Project:
@@ -313,32 +324,36 @@ class Project:
     __slots__ = 'name remote url path abspath clone_depth revision'.split()
 
     def __init__(self, name, remote, defaults, path=None, clone_depth=None,
-                 revision=None, url=None):
+                 revision=None):
         '''Specify a Project by name, Remote, and optional information.
 
-        :param name: Project's user-defined name in the manifest
-        :param remote: Remote instance corresponding to this Project's remote.
-                       This may not be None.
+        :param name: Project's user-defined name in the manifest.
+        :param remote: Remote instance corresponding to this Project as
+                       specified in the manifest. This is used to build
+                       the project's URL, and is also stored as an attribute.
+        :param defaults: If the revision parameter is not given, the project's
+                         revision is set to defaults.revision.
         :param path: Relative path to the project in the west
-                     installation, if present in the manifest. If None,
+                     installation, if present in the manifest. If not given,
                      the project's ``name`` is used.
+        :param clone_depth: Nonnegative integer clone depth if present in
+                            the manifest.
         :param revision: Project revision as given in the manifest, if present.
+                         If not given, defaults.revision is used instead.
         '''
-        if remote is None:
-            raise ValueError('remote or url must be given')
         _wrn_if_not_remote(remote)
 
         self.name = name
         self.remote = remote
-        self.url = remote.url + '/' + name
-        self.path = path or name
+        self.url = remote.url_base + '/' + name
+        self.path = os.path.normpath(path or name)
         self.abspath = os.path.realpath(os.path.join(util.west_topdir(),
                                                      self.path))
         self.clone_depth = clone_depth
         self.revision = revision or defaults.revision
 
     def __eq__(self, other):
-        raise NotImplemented
+        return NotImplemented
 
     def __repr__(self):
         reprs = [repr(x) for x in
@@ -361,6 +376,7 @@ class SpecialProject(Project):
                      installation, if present in the manifest. If None,
                      the project's ``name`` is used.
         :param revision: Project revision as given in the manifest, if present.
+        :param url: Complete URL for special project.
         '''
         self.name = name
         self.url = url
