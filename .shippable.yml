@@ -9,9 +9,6 @@ python:
 
 build:
   ci:
-    - python setup.py bdist_wheel
-    - pip install dist/west*.whl
-    - pip install -r tests_requirements.txt
+    - pip install tox
     - mkdir -p shippable/{testresults,codecoverage}
-    - PYTHONPATH=src pytest --junitxml=shippable/testresults/nosetests.xml tests
-    - PYTHONPATH=src pytest --cov=west --cov-report=xml:shippable/codecoverage/coverage.xml tests
+    - tox -- --junitxml=$PWD/shippable/testresults/nosetests.xml --cov=west --cov-report=xml:$PWD/shippable/codecoverage/coverage.xml tests
