@@ -16,7 +16,7 @@ a directory of your choosing::
 
   mkdir zephyrproject && cd zephyrproject
   west init
-  west fetch
+  west clone
 
 What just happened:
 
@@ -27,9 +27,9 @@ What just happened:
   one supported by the bootstrapper itself; all other commands are
   implemented in the west source repository it clones.
 
-- ``west fetch`` clones the repositories in the manifest, creating
+- ``west clone`` clones the repositories in the manifest, creating
   working trees in the installation directory. In this case, the
-  bootstrapper notices the command (``fetch``) is not ``init``, and
+  bootstrapper notices the command (``clone``) is not ``init``, and
   delegates handling to the "main" west implementation in the source
   repository it cloned in the previous step.
 
@@ -63,17 +63,19 @@ command with ``west <command> -h``. For example::
 Test Suite
 ----------
 
-To run the test suite, run this from the west repository::
+Before running tests, install tox::
 
-  pip3 install -r tests_requirements.txt
+  # macOS, Windows
+  pip3 install tox
 
-Then, in a Bash shell::
+  # Linux
+  pip3 install --user tox
 
-  PYTHONPATH=src py.test
+Then, to run the test suite locally::
 
-On Windows::
+  tox
 
-  cmd /C "set PYTHONPATH=/path/to/west/src && py.test"
+See the tox configuration file, tox.ini, for more details.
 
 Hacking on West
 ---------------
