@@ -27,7 +27,7 @@ from west.commands.project import List, Clone, Fetch, Pull, Rebase, Branch, \
 from west.manifest import Manifest
 from west.util import quote_sh_list, in_multirepo_install, west_dir
 
-IN_MULTIREPO_INSTALL = in_multirepo_install(__file__)
+IN_MULTIREPO_INSTALL = in_multirepo_install(os.path.dirname(__file__))
 
 BUILD_FLASH_COMMANDS = [
     Build(),
