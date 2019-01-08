@@ -22,6 +22,7 @@ setuptools.setup(
     url='https://github.com/zephyrproject-rtos/west',
     packages=('west._bootstrap',),
     package_dir={'': 'src'},
+    include_package_data=True,
     classifiers=[
         'Programming Language :: Python :: 3',
         'License :: OSI Approved :: Apache Software License',
