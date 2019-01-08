@@ -6,7 +6,6 @@
 '''Runner for debugging and flashing Intel S1000 CRB'''
 from os import path
 import time
-import subprocess
 import signal
 from west import log
 from west.runners.core import ZephyrBinaryRunner

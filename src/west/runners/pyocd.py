@@ -5,9 +5,9 @@
 '''Runner for pyOCD .'''
 
 import os
-import sys
 
-from west.runners.core import ZephyrBinaryRunner, RunnerCaps, BuildConfiguration
+from west.runners.core import ZephyrBinaryRunner, RunnerCaps, \
+    BuildConfiguration
 from west import log
 
 DEFAULT_PYOCD_GDB_PORT = 3333
@@ -103,7 +103,8 @@ class PyOcdBinaryRunner(ZephyrBinaryRunner):
             cfg, args.target, flashtool=args.flashtool,
             flash_addr=flash_addr, flashtool_opts=args.flashtool_opt,
             gdbserver=args.gdbserver, gdb_port=args.gdb_port, tui=args.tui,
-            board_id=args.board_id, daparg=args.daparg, frequency=args.frequency)
+            board_id=args.board_id, daparg=args.daparg,
+            frequency=args.frequency)
 
     def port_args(self):
         return ['-p', str(self.gdb_port)]
@@ -144,7 +145,7 @@ class PyOcdBinaryRunner(ZephyrBinaryRunner):
                       self.daparg_args +
                       self.port_args() +
                       self.target_args +
-                      self.board_args  +
+                      self.board_args +
                       self.frequency_args)
 
         if command == 'debugserver':

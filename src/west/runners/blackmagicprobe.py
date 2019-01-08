@@ -5,8 +5,6 @@
 '''Runner for flashing with Black Magic Probe.'''
 # https://github.com/blacksphere/blackmagic/wiki
 
-import sys
-
 from west.runners.core import ZephyrBinaryRunner, RunnerCaps
 
 
@@ -42,14 +40,14 @@ class BlackMagicProbeRunner(ZephyrBinaryRunner):
         if self.elf_file is None:
             raise ValueError('Cannot debug; elf file is missing')
         command = (self.gdb +
-            ['-ex', "set confirm off",
-                '-ex', "target extended-remote {}".format(self.gdb_serial),
-                '-ex', "monitor swdp_scan",
-                '-ex', "attach 1",
-                '-ex', "load {}".format(self.elf_file),
-                '-ex', "kill",
-                '-ex', "quit",
-                '-silent'])
+                   ['-ex', "set confirm off",
+                    '-ex', "target extended-remote {}".format(self.gdb_serial),
+                    '-ex', "monitor swdp_scan",
+                    '-ex', "attach 1",
+                    '-ex', "load {}".format(self.elf_file),
+                    '-ex', "kill",
+                    '-ex', "quit",
+                    '-silent'])
         self.check_call(command)
 
     def bmp_attach(self, command, **kwargs):
@@ -57,17 +55,19 @@ class BlackMagicProbeRunner(ZephyrBinaryRunner):
             raise ValueError('Cannot attach; gdb is missing')
         if self.elf_file is None:
             command = (self.gdb +
-                ['-ex', "set confirm off",
-                    '-ex', "target extended-remote {}".format(self.gdb_serial),
-                    '-ex', "monitor swdp_scan",
-                    '-ex', "attach 1"])
+                       ['-ex', "set confirm off",
+                        '-ex', "target extended-remote {}".format(
+                            self.gdb_serial),
+                        '-ex', "monitor swdp_scan",
+                        '-ex', "attach 1"])
         else:
             command = (self.gdb +
-                ['-ex', "set confirm off",
-                    '-ex', "target extended-remote {}".format(self.gdb_serial),
-                    '-ex', "monitor swdp_scan",
-                    '-ex', "attach 1",
-                    '-ex', "file {}".format(self.elf_file)])
+                       ['-ex', "set confirm off",
+                        '-ex', "target extended-remote {}".format(
+                            self.gdb_serial),
+                        '-ex', "monitor swdp_scan",
+                        '-ex', "attach 1",
+                        '-ex', "file {}".format(self.elf_file)])
         self.check_call(command)
 
     def bmp_debug(self, command, **kwargs):
@@ -76,12 +76,12 @@ class BlackMagicProbeRunner(ZephyrBinaryRunner):
         if self.elf_file is None:
             raise ValueError('Cannot debug; elf file is missing')
         command = (self.gdb +
-            ['-ex', "set confirm off",
-                '-ex', "target extended-remote {}".format(self.gdb_serial),
-                '-ex', "monitor swdp_scan",
-                '-ex', "attach 1",
-                '-ex', "file {}".format(self.elf_file),
-                '-ex', "load {}".format(self.elf_file)])
+                   ['-ex', "set confirm off",
+                    '-ex', "target extended-remote {}".format(self.gdb_serial),
+                    '-ex', "monitor swdp_scan",
+                    '-ex', "attach 1",
+                    '-ex', "file {}".format(self.elf_file),
+                    '-ex', "load {}".format(self.elf_file)])
         self.check_call(command)
 
     def do_run(self, command, **kwargs):

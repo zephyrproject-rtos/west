@@ -9,7 +9,8 @@ import tempfile
 import sys
 
 from west import log
-from west.runners.core import ZephyrBinaryRunner, RunnerCaps, BuildConfiguration
+from west.runners.core import ZephyrBinaryRunner, RunnerCaps, \
+    BuildConfiguration
 
 DEFAULT_JLINK_EXE = 'JLink.exe' if sys.platform == 'win32' else 'JLinkExe'
 DEFAULT_JLINK_GDB_PORT = 2331

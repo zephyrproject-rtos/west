@@ -644,8 +644,8 @@ def _projects(args, listed_must_be_cloned=True, include_meta=False):
     if listed_must_be_cloned:
         # We could still get here with a missing manifest repository if the
         # user gave a --manifest argument.
-        uncloned_meta = [prj.name for prj in res if not _cloned(prj)
-                         and prj.name in META_NAMES]
+        uncloned_meta = [prj.name for prj in res if not _cloned(prj) and
+                         prj.name in META_NAMES]
         if uncloned_meta:
             log.die('Missing meta project{}: {}.'.
                     format('s' if len(uncloned_meta) > 1 else '',
