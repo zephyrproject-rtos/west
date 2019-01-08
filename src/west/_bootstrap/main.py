@@ -410,7 +410,10 @@ def wrap(argv):
     # control-C signal handling. GDB uses Ctrl-C to halt the debug
     # target. So we really do need to import west and delegate within
     # this bootstrap process.
-    sys.path.append(os.path.join(west_git_repo, 'src'))
+    #
+    # Put this at position 1 to make sure it comes before random stuff
+    # that might be on a developer's PYTHONPATH in the import order.
+    sys.path.insert(1, os.path.join(west_git_repo, 'src'))
     import west.main
     west.main.main(argv)
 
