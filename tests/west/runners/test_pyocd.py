@@ -35,8 +35,8 @@ TEST_ALL_KWARGS = {
     'tui': False,
     'board_id': TEST_BOARD_ID,
     'frequency': TEST_FREQUENCY,
-    'daparg': TEST_DAPARG
-    }
+    'daparg': TEST_DAPARG,
+}
 
 TEST_DEF_KWARGS = {}
 
@@ -159,7 +159,7 @@ def test_debug(rsc, pyocd_args, expectedv, pyocd):
 @pytest.mark.parametrize('pyocd_args,expected', [
     (TEST_ALL_KWARGS, DEBUGSERVER_ALL_EXPECTED_CALL),
     (TEST_DEF_KWARGS, DEBUGSERVER_DEF_EXPECTED_CALL)
-    ])
+])
 @patch('west.runners.pyocd.PyOcdBinaryRunner.check_call')
 def test_debugserver(cc, pyocd_args, expected, pyocd):
     pyocd(pyocd_args).run('debugserver')

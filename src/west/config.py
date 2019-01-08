@@ -34,7 +34,7 @@ def read_config():
 
         Linux:   /etc/westconfig
         Mac OS:  /usr/local/etc/westconfig
-        Windows: %PROGRAMDATA%\west\config
+        Windows: %PROGRAMDATA%\\west\\config
 
     User-specific:
 

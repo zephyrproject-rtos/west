@@ -1,3 +1,4 @@
 setuptools-scm
 pytest
 pytest-cov
+flake8
