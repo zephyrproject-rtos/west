@@ -23,7 +23,7 @@ from west.commands.flash import Flash
 from west.commands.debug import Debug, DebugServer, Attach
 from west.commands.project import List, Clone, Fetch, Pull, Rebase, Branch, \
                              Checkout, Diff, Status, Update, ForAll, \
-                             WestUpdated, Init
+                             WestUpdated, PostInit
 from west.manifest import Manifest, MalformedConfig
 from west.util import quote_sh_list, in_multirepo_install, west_dir
 
@@ -38,7 +38,7 @@ BUILD_FLASH_COMMANDS = [
 ]
 
 PROJECT_COMMANDS = [
-    Init(),
+    PostInit(),
     List(),
     Clone(),
     Fetch(),
@@ -174,7 +174,7 @@ def parse_args(argv):
 
     west_parser.add_argument('-V', '--version', action='store_true')
 
-    subparser_gen = west_parser.add_subparsers(title='commands',
+    subparser_gen = west_parser.add_subparsers(metavar='<command>',
                                                dest='command')
 
     for command in COMMANDS:
