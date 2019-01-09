@@ -1,4 +1,5 @@
 # Copyright (c) 2018 Open Source Foundries Limited.
+# Copyright 2019 Foundries.io
 #
 # SPDX-License-Identifier: Apache-2.0
 
@@ -16,6 +17,7 @@ class Debug(WestCommand):
     def __init__(self):
         super(Debug, self).__init__(
             'debug',
+            'flash and interactively debug a Zephyr application',
             dedent('''
             Connect to the board, program the flash, and start a
             debugging session.\n\n''') +
@@ -35,8 +37,10 @@ class DebugServer(WestCommand):
     def __init__(self):
         super(DebugServer, self).__init__(
             'debugserver',
+            'connect to board and launch a debug server',
             dedent('''
-            Connect to the board and accept debug networking connections.
+            Connect to the board and launch a debug server which accepts
+            incoming connections for debugging the connected board.
 
             The debug server binds to a known port, and allows client software
             started elsewhere to connect to it and debug the running
@@ -56,9 +60,10 @@ class Attach(WestCommand):
     def __init__(self):
         super(Attach, self).__init__(
             'attach',
+            'interactively debug a board',
             dedent('''
-            Connect to the board without programming the flash, and
-            start a debugging session.\n\n''') +
+            Like 'debug', this connects to the board and starts a debugging
+            session, but it doesn't reflash the program on the board.\n\n''') +
             desc_common('attach'),
             accepts_unknown_args=True)
 

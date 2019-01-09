@@ -11,7 +11,7 @@ from west.build import DEFAULT_BUILD_DIR, DEFAULT_CMAKE_GENERATOR, \
     is_zephyr_build
 from west.commands import WestCommand
 
-BUILD_HELP = '''\
+BUILD_DESCRIPTION = '''\
 Convenience wrapper for building Zephyr applications.
 
 This command attempts to do what you mean when run from a Zephyr
@@ -45,7 +45,8 @@ class Build(WestCommand):
     def __init__(self):
         super(Build, self).__init__(
             'build',
-            BUILD_HELP,
+            'compile a Zephyr application',
+            BUILD_DESCRIPTION,
             accepts_unknown_args=False)
 
         self.source_dir = None
@@ -70,6 +71,7 @@ class Build(WestCommand):
     def do_add_parser(self, parser_adder):
         parser = parser_adder.add_parser(
             self.name,
+            help=self.help,
             formatter_class=argparse.RawDescriptionHelpFormatter,
             description=self.description)
 

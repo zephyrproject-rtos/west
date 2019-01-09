@@ -1,4 +1,5 @@
 # Copyright (c) 2018, Nordic Semiconductor ASA
+# Copyright 2018, 2019 Foundries.io
 #
 # SPDX-License-Identifier: Apache-2.0
 
@@ -23,15 +24,16 @@ from west.manifest import Manifest, MalformedManifest, MANIFEST_PROJECT_INDEX
 # branch.
 _MANIFEST_REV_BRANCH = 'manifest-rev'
 
-class Init(WestCommand):
+class PostInit(WestCommand):
     def __init__(self):
         super().__init__(
-            'init',
+            'post-init',
+            'finish init tasks (do not use)',
             _wrap('''
-            Initialize projects.
+            Finish initializing projects.
 
             Continue the initialization of the project containing the manifest
-            file.
+            file. You should never need to call this.
             '''))
 
     def do_add_parser(self, parser_adder):
@@ -81,6 +83,7 @@ class List(WestCommand):
     def __init__(self):
         super().__init__(
             'list',
+            'print information about projects in the west manifest',
             _wrap('''
             List projects.
 
@@ -163,6 +166,7 @@ class Clone(WestCommand):
     def __init__(self):
         super().__init__(
             'clone',
+            'clone remote projects into local installation',
             _wrap('''
             Clone projects.
 
@@ -217,6 +221,7 @@ class Fetch(WestCommand):
     def __init__(self):
         super().__init__(
             'fetch',
+            '"git fetch" changes from project remotes',
             _wrap('''
             Fetch projects.
 
@@ -244,6 +249,7 @@ class Pull(WestCommand):
     def __init__(self):
         super().__init__(
             'pull',
+            '"git pull" changes from project remotes',
             _wrap('''
             Clone/fetch and rebase projects.
 
@@ -275,6 +281,7 @@ class Rebase(WestCommand):
     def __init__(self):
         super().__init__(
             'rebase',
+            '"git rebase" local projects onto manifest versions',
             _wrap('''
             Rebase projects.
 
@@ -296,6 +303,7 @@ class Branch(WestCommand):
     def __init__(self):
         super().__init__(
             'branch',
+            'create a branch in one or more local projects',
             _wrap('''
             Create a branch or list branches, in multiple projects.
 
@@ -335,6 +343,7 @@ class Checkout(WestCommand):
     def __init__(self):
         super().__init__(
             'checkout',
+            'check out a branch in one or more local projects',
             _wrap('''
             Check out local branch.
 
@@ -385,6 +394,7 @@ class Diff(WestCommand):
     def __init__(self):
         super().__init__(
             'diff',
+            '"git diff" for one or more projects',
             _wrap('''
             'git diff' projects.
 
@@ -410,6 +420,7 @@ class Status(WestCommand):
     def __init__(self):
         super().__init__(
             'status',
+            '"git status" for one or more projects',
             _wrap('''
             Runs 'git status' for each of the specified projects (default: all
             cloned projects). Extra arguments are passed as-is to 'git status'.
@@ -429,6 +440,7 @@ class Update(WestCommand):
     def __init__(self):
         super().__init__(
             'update',
+            'update the manifest and west repositories',
             _wrap('''
             Updates the manifest repository and/or the West source code
             repository. The remote to update from is taken from the
@@ -491,6 +503,7 @@ class ForAll(WestCommand):
     def __init__(self):
         super().__init__(
             'forall',
+            'run a command in one or more local projects',
             _wrap('''
             Runs a shell (Linux) or batch (Windows) command within the
             repository of each of the specified projects (default: all cloned
@@ -551,6 +564,8 @@ def _add_parser(parser_adder, cmd, *extra_args, **kwargs):
     # Adds and returns a subparser for the project-related WestCommand 'cmd'.
     # Any defaults can be overridden with kwargs.
 
+    if 'help' not in kwargs:
+        kwargs['help'] = cmd.help
     if 'description' not in kwargs:
         kwargs['description'] = cmd.description
     if 'formatter_class' not in kwargs:

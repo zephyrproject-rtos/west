@@ -244,13 +244,13 @@ def bootstrap(args):
         print('=== Initial configuration written to {} ==='
               .format(config_path))
 
-        # Wrap west init with --cached:
-        # i.e. `west init <options> --use-cache `
+        # Call `west post-init <options> --use-cache <tempdir>` to finish up.
+        #
         # Note: main west will try to discover zephyr base and fail, as it is
         # not fully initialized at this time.
         # Thus a dummy zephyr_base is provided.
         os.chdir(directory)
-        cmd = ['--zephyr-base', directory, 'init', '--manifest-url',
+        cmd = ['--zephyr-base', directory, 'post-init', '--manifest-url',
                manifest_url, '--manifest-rev', manifest_rev, '--use-cache',
                tempdir]
         wrap(cmd)
