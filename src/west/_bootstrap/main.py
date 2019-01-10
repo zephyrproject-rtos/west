@@ -222,7 +222,7 @@ def bootstrap(args):
           os.path.join(directory, WEST_DIR, MANIFEST))
 
     # Parse the manifest and look for a section named "west"
-    manifest_file = os.path.join(directory, WEST_DIR, MANIFEST, 'default.yml')
+    manifest_file = os.path.join(directory, WEST_DIR, MANIFEST, 'west.yml')
     with open(manifest_file, 'r') as f:
         data = yaml.safe_load(f.read())
 

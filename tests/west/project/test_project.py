@@ -38,7 +38,7 @@ def repos_tmpdir(tmpdir):
     ├── west (branch: master)
     │   └── (contains this west's worktree contents)
     ├── manifest (branch: master)
-    │   └── default.yml
+    │   └── west.yml
     ├── Kconfiglib (branch: zephyr)
     │   └── kconfiglib.py
     ├── net-tools (branch: master)
@@ -51,7 +51,7 @@ def repos_tmpdir(tmpdir):
             └── bluetooth
                 └── code.c
 
-    The contents of default.yml are:
+    The contents of west.yml are:
 
     west:
       url: file://<tmpdir>/west
@@ -86,7 +86,7 @@ def repos_tmpdir(tmpdir):
 
     # Initialize the manifest repository.
     add_commit(rp['manifest'], 'test manifest',
-               files={'default.yml': textwrap.dedent('''\
+               files={'west.yml': textwrap.dedent('''\
                       west:
                         url: file://{west}
                       manifest:
