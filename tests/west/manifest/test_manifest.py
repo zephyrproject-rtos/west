@@ -9,11 +9,27 @@ from unittest.mock import patch
 import pytest
 import yaml
 
+from west import config
 from west.manifest import Manifest, Defaults, Remote, Project, \
-    MalformedManifest
+    SpecialProject, MalformedManifest
 
 THIS_DIRECTORY = os.path.dirname(__file__)
 
+@pytest.fixture
+def config_file_project_setup(tmpdir):
+    tmpdir.join('.west/.west_topdir').ensure()
+    tmpdir.join('.west/config').write('''
+[manifest]
+remote = https://example0.com/manifestproject
+revision = master
+''')
+
+    # Switch to the top-level West installation directory
+    tmpdir.chdir()
+
+    config.read_config()
+
+    return tmpdir
 
 def deep_eq_check(actual, expected):
     # Check equality of all project fields (projects themselves are
@@ -27,7 +43,7 @@ def deep_eq_check(actual, expected):
     assert actual.revision == expected.revision
 
 
-def test_no_defaults():
+def test_no_defaults(config_file_project_setup):
     # Manifests with no defaults should work.
     content = '''\
     manifest:
@@ -50,7 +66,10 @@ def test_no_defaults():
     with patch('west.util.west_topdir', return_value='/west_top'):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
-        expected = [Project('testproject1', r1, None, path='testproject1',
+        expected = [SpecialProject('manifestproject', path='manifestproject',
+                                   revision='master',
+                                   url='https://example0.com/manifestproject'),
+                    Project('testproject1', r1, None, path='testproject1',
                             clone_depth=None, revision='rev1'),
                     Project('testproject2', r2, None, path='testproject2',
                             clone_depth=None, revision='master')]
@@ -64,8 +83,50 @@ def test_no_defaults():
     assert all(p.abspath == os.path.realpath(os.path.join('/west_top', p.path))
                for p in manifest.projects)
 
+def test_self_tag(config_file_project_setup):
+    # Manifests with self tag reference.
+    content = '''\
+    manifest:
+      remotes:
+        - name: testremote1
+          url-base: https://example1.com
+        - name: testremote2
+          url-base: https://example2.com
 
-def test_default_clone_depth():
+      projects:
+        - name: testproject1
+          remote: testremote1
+          revision: rev1
+        - name: testproject2
+          remote: testremote2
+
+      self:
+        path: mainproject
+    '''
+    r1 = Remote('testremote1', 'https://example1.com')
+    r2 = Remote('testremote2', 'https://example2.com')
+
+    with patch('west.util.west_topdir', return_value='/west_top'):
+        manifest = Manifest.from_data(yaml.safe_load(content))
+
+        expected = [SpecialProject('manifestproject', path='mainproject',
+                                   revision='master',
+                                   url='https://example0.com/manifestproject'),
+                    Project('testproject1', r1, None, path='testproject1',
+                            clone_depth=None, revision='rev1'),
+                    Project('testproject2', r2, None, path='testproject2',
+                            clone_depth=None, revision='master')]
+
+    # Check the remotes are as expected.
+    assert list(manifest.remotes) == [r1, r2]
+
+    # Check the projects are as expected.
+    for p, e in zip(manifest.projects, expected):
+        deep_eq_check(p, e)
+    assert all(p.abspath == os.path.realpath(os.path.join('/west_top', p.path))
+               for p in manifest.projects)
+
+def test_default_clone_depth(config_file_project_setup):
     # Defaults and clone depth should work as in this example.
     content = '''\
     manifest:
@@ -93,7 +154,10 @@ def test_default_clone_depth():
     with patch('west.util.west_topdir', return_value='/west_top'):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
-        expected = [Project('testproject1', r1, d, path='testproject1',
+        expected = [SpecialProject('manifestproject', path='manifestproject',
+                                   revision='master',
+                                   url='https://example0.com/manifestproject'),
+                    Project('testproject1', r1, d, path='testproject1',
                             clone_depth=None, revision=d.revision),
                     Project('testproject2', r2, d, path='testproject2',
                             clone_depth=1, revision='rev')]
@@ -127,8 +191,8 @@ def test_path():
     with patch('west.util.west_topdir',
                return_value=os.path.realpath('/west_top')):
         manifest = Manifest.from_data(yaml.safe_load(content))
-    assert manifest.projects[0].path == 'sub/directory'
-    assert manifest.projects[0].abspath == \
+    assert manifest.projects[1].path == 'sub/directory'
+    assert manifest.projects[1].abspath == \
         os.path.realpath('/west_top/sub/directory')
 
 
@@ -153,8 +217,8 @@ def test_sections():
         # Parsing manifest only, no exception raised
         manifest = Manifest.from_data(yaml.safe_load(content_wrong_west),
                                       'manifest')
-    assert manifest.projects[0].path == 'sub/directory'
-    assert manifest.projects[0].abspath == \
+    assert manifest.projects[1].path == 'sub/directory'
+    assert manifest.projects[1].abspath == \
         os.path.realpath('/west_top/sub/directory')
     content_wrong_manifest = '''\
     west:

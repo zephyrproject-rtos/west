@@ -46,7 +46,7 @@ WEST_MARKER = '.west_topdir'
 # Manifest repository directory under WEST_DIR.
 MANIFEST = 'manifest'
 # Default manifest repository URL.
-MANIFEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/manifest'
+MANIFEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/zephyr'
 # Default revision to check out of the manifest repository.
 MANIFEST_REV_DEFAULT = 'master'
 
@@ -73,16 +73,6 @@ def west_dir(start=None):
     Raises WestNotFound if no west directory is found.
     '''
     return os.path.join(west_topdir(start), WEST_DIR)
-
-
-def manifest_dir(start=None):
-    '''
-    Returns the path to the manifest/ directory, searching ``start`` and its
-    parents.
-
-    Raises WestNotFound if no west directory is found.
-    '''
-    return os.path.join(west_topdir(start), MANIFEST)
 
 
 def west_topdir(start=None):
@@ -149,8 +139,8 @@ explicitly passed configuration values (e.g. --mr MANIFEST_REVISION) are
 updated.
 
 Updating the manifest URL or revision via 'west init' automatically runs 'west
-update --reset-manifest --reset-projects' afterwards to reset the manifest to
-the new revision, and all projects to their new manifest revisions.
+update --reset-projects' afterwards to reset all projects to their new manifest
+revisions.
 
 Updating the west URL or revision also runs 'west update --reset-west'.
 
@@ -219,10 +209,10 @@ def bootstrap(args):
     # the west/ directory if it does not exist.
 
     clone('manifest repository', manifest_url, manifest_rev,
-          os.path.join(directory, WEST_DIR, MANIFEST))
+          os.path.join(directory, MANIFEST))
 
     # Parse the manifest and look for a section named "west"
-    manifest_file = os.path.join(directory, WEST_DIR, MANIFEST, 'west.yml')
+    manifest_file = os.path.join(directory, MANIFEST, 'west.yml')
     with open(manifest_file, 'r') as f:
         data = yaml.safe_load(f.read())
 
@@ -279,7 +269,7 @@ def reinit(config_path, args):
     print('=== Updated configuration written to {} ==='.format(config_path))
 
     if args.reset:
-        cmd = ['update', '--reset-manifest', '--reset-projects',
+        cmd = ['update', '--reset-projects',
                '--reset-west']
         print("=== Running 'west {}' to update repositories ==="
               .format(' '.join(cmd)))

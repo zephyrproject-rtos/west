@@ -20,8 +20,12 @@ import os
 
 import pykwalify.core
 import yaml
+from urllib.parse import urlparse
+import posixpath
 
 from west import util, log
+from west.config import config
+
 
 # Todo: take from _bootstrap?
 # Default west repository URL.
@@ -29,7 +33,7 @@ WEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/west'
 # Default revision to check out of the west repository.
 WEST_REV_DEFAULT = 'master'
 
-META_NAMES = ['west', 'manifest']
+META_NAMES = ['west']
 '''Names of the special "meta-projects", which are reserved and cannot
 be used to name a project in the manifest file.'''
 
@@ -41,7 +45,9 @@ def default_path():
     '''Return the path to the default manifest in the west directory.
 
     Raises WestNotFound if called from outside of a west working directory.'''
-    return os.path.join(util.west_dir(), 'manifest', 'west.yml')
+    return os.path.join(util.west_topdir(),
+                        config.get('manifest', 'path', fallback='manifest'),
+                        'west.yml')
 
 
 class Manifest:
@@ -182,6 +188,18 @@ class Manifest:
         project_abspaths = set()
 
         manifest = data.get('manifest')
+
+        url = config.get('manifest', 'remote')
+        name = posixpath.basename(urlparse(url).path)
+        revision = config.get('manifest', 'revision')
+        path = name
+
+        self_tag = manifest.get('self')
+        if self_tag and self_tag.get('path'):
+            path = self_tag.get('path')
+
+        project = SpecialProject(name, revision=revision, path=path, url=url)
+        projects.append(project)
 
         # Map from each remote's name onto that remote's data in the manifest.
         remotes = tuple(Remote(r['name'], r['url-base']) for r in

@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 import pytest
 
+from west import config
+
 import west._bootstrap.main
 
 GIT = shutil.which('git')
@@ -68,7 +70,8 @@ def repos_tmpdir(tmpdir):
         - name: net-tools
           clone_depth: 1
         - name: zephyr
-
+      self:
+        path: manifest
     '''
     rr = tmpdir.mkdir('repos')  # "remote" repositories
     rp = {}                     # individual repository paths under rr
@@ -103,6 +106,8 @@ def repos_tmpdir(tmpdir):
                             path: subdir/Kconfiglib
                           - name: net-tools
                           - name: zephyr
+                        self:
+                          path: manifest
                       '''.format(west=rp['west'], rr=str(rr)))})
 
     # Initialize the Kconfiglib repository.
@@ -124,6 +129,8 @@ def repos_tmpdir(tmpdir):
     # Switch to and return the top-level temporary directory.
     #
     # This can be used to populate a west installation alongside.
+
+    # Switch to the top-level West installation directory
     tmpdir.chdir()
     return tmpdir
 
@@ -146,6 +153,7 @@ def west_init_tmpdir(repos_tmpdir):
     cmd('init -m "{}" "{}"'.format(str(repos_tmpdir.join('repos', 'manifest')),
                                    str(west_tmpdir)))
     west_tmpdir.chdir()
+    config.read_config()
     return west_tmpdir
 
 
@@ -185,7 +193,8 @@ def test_list(west_clone_tmpdir):
     # Projects shall be listed in the order they appear in the manifest.
     # Check the behavior for some format arguments of interest as well.
     actual = cmd('list -f "{name} {revision} {path} {cloned} {clone_depth}"')
-    expected = ['Kconfiglib zephyr {} (cloned) None'.format(
+    expected = ['manifest master manifest (cloned) None',
+                'Kconfiglib zephyr {} (cloned) None'.format(
                     os.path.join('subdir', 'Kconfiglib')),
                 'net-tools master net-tools (cloned) None',
                 'zephyr master zephyr (cloned) None']
@@ -248,7 +257,8 @@ def test_fetch_one_init(west_init_tmpdir):
     # have cloned the one that was explicitly fetched.
     cmd('fetch net-tools')
     actual = cmd('list -f "{name} {cloned}"')
-    expected = ['Kconfiglib (not cloned)',
+    expected = ['manifest (cloned)',
+                'Kconfiglib (not cloned)',
                 'net-tools (cloned)',
                 'zephyr (not cloned)']
     assert actual.splitlines() == expected
@@ -259,7 +269,8 @@ def test_fetch_all_init(west_init_tmpdir):
     # from a directory which has only had init run on it.
     cmd('fetch')
     actual = cmd('list -f "{name} {cloned}"')
-    expected = ['Kconfiglib (cloned)',
+    expected = ['manifest (cloned)',
+                'Kconfiglib (cloned)',
                 'net-tools (cloned)',
                 'zephyr (cloned)']
     assert actual.splitlines() == expected
@@ -317,7 +328,8 @@ def test_pull_one_init(west_init_tmpdir):
     # have cloned the one that was explicitly pulled.
     cmd('pull net-tools')
     actual = cmd('list -f "{name} {cloned}"')
-    expected = ['Kconfiglib (not cloned)',
+    expected = ['manifest (cloned)',
+                'Kconfiglib (not cloned)',
                 'net-tools (cloned)',
                 'zephyr (not cloned)']
     assert actual.splitlines() == expected
@@ -328,7 +340,8 @@ def test_pull_all_init(west_init_tmpdir):
     # from a directory which has only had init run on it.
     cmd('pull')
     actual = cmd('list -f "{name} {cloned}"')
-    expected = ['Kconfiglib (cloned)',
+    expected = ['manifest (cloned)',
+                'Kconfiglib (cloned)',
                 'net-tools (cloned)',
                 'zephyr (cloned)']
     assert actual.splitlines() == expected
@@ -477,38 +490,22 @@ def test_update(west_init_tmpdir):
 
     net_tools_prev = head_subject('net-tools')
     west_prev = head_subject('.west/west')
-    manifest_prev = head_subject('.west/manifest')
 
     # Add commits to the local repos. We need to reconfigure
     # explicitly as these are clones, and west doesn't handle that for
     # us.
-    for path in '.west/manifest', '.west/west', 'net-tools':
+    for path in 'manifest', '.west/west', 'net-tools':
         add_commit(path, 'test-update-local', reconfigure=True)
-
-    # Check that resetting the manifest repository removes the local commit
-    cmd('update --reset-manifest')
-    assert head_subject('.west/manifest') == manifest_prev
-    assert head_subject('.west/west') == 'test-update-local'  # Unaffected
-    assert head_subject('net-tools') == 'test-update-local'  # Unaffected
 
     # Check that resetting the west repository removes the local commit
     cmd('update --reset-west')
+    assert head_subject('manifest') == 'test-update-local'  # Unaffected
     assert head_subject('.west/west') == west_prev
     assert head_subject('net-tools') == 'test-update-local'  # Unaffected
 
     # Check that resetting projects removes the local commit
     cmd('update --reset-projects')
     assert head_subject('net-tools') == net_tools_prev
-
-    # Add commits to the upstream special repos
-    remotes = west_init_tmpdir.join('..', 'repos')
-    for r in remotes.join('manifest'), remotes.join('west'):
-        add_commit(str(r), 'test-update-upstream')
-
-    # Check that updating the manifest repository gets the upstream commit
-    cmd('update --update-manifest')
-    assert head_subject('.west/manifest') == 'test-update-upstream'
-    assert head_subject('.west/west') == west_prev  # Unaffected
 
 
 def test_init_again(west_init_tmpdir):
@@ -571,6 +568,7 @@ def add_commit(repo, msg, files=None, reconfigure=True):
     #
     # If 'reconfigure' is True, the user.name and user.email git
     # configuration variables will be set in 'repo' using config_repo().
+    repo = str(repo)
 
     if reconfigure:
         config_repo(repo)
