@@ -36,12 +36,12 @@ def west_dir(start=None):
 
     Raises WestNotFound if no west top-level directory is found.
     '''
-    return os.path.join(west_topdir(start), 'west')
+    return os.path.join(west_topdir(start), '.west')
 
 
 def west_topdir(start=None):
     '''
-    Like west_dir(), but returns the path to the parent directory of the west/
+    Like west_dir(), but returns the path to the parent directory of the .west/
     directory instead, where project repositories are stored
     '''
     # If you change this function, make sure to update the bootstrap
@@ -53,7 +53,7 @@ def west_topdir(start=None):
         cur_dir = start
 
     while True:
-        if os.path.isfile(os.path.join(cur_dir, 'west', '.west_topdir')):
+        if os.path.isfile(os.path.join(cur_dir, '.west', '.west_topdir')):
             return cur_dir
 
         parent_dir = os.path.dirname(cur_dir)

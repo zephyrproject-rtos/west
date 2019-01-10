@@ -50,7 +50,7 @@ def read_config():
 
     Instance-specific:
 
-        <West base directory>/west/config
+        <West base directory>/.west/config
 
     Configuration values from later configuration files override configuration
     from earlier ones. Instance-specific configuration values have the highest
@@ -86,7 +86,6 @@ def read_config():
     #
     # Parse all existing configuration files
     #
-
     config.read(files, encoding='utf-8')
 
 

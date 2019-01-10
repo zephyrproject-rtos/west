@@ -171,7 +171,7 @@ class Manifest:
             self.west_project = SpecialProject('west',
                                                url=url,
                                                revision=revision,
-                                               path=os.path.join('west',
+                                               path=os.path.join('.west',
                                                                  'west'))
 
         # Next is the manifest section
