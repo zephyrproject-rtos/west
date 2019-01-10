@@ -13,6 +13,8 @@ import pykwalify.core
 import subprocess
 import sys
 import yaml
+import tempfile
+import shutil
 
 import west._bootstrap.version as version
 
@@ -96,11 +98,12 @@ def west_topdir(start=None):
         cur_dir = parent_dir
 
 
-def clone(desc, url, rev, dest):
-    if os.path.exists(dest):
+def clone(desc, url, rev, dest, exist_ok=False):
+    if not exist_ok and os.path.exists(dest):
         raise WestError('refusing to clone into existing location ' + dest)
 
-    print('=== Cloning {} from {}, rev. {} ==='.format(desc, url, rev))
+    print('=== Cloning {} from {}, rev. {} into {} ==='.format(desc, url, rev,
+                                                               dest))
     subprocess.check_call(('git', 'clone', '-b', rev, '--', url, dest))
 
 
@@ -126,12 +129,15 @@ sources.
 
 In more detail, does the following:
 
-  1. Clones the manifest repository to west/manifest, and the west repository
-     to west/west
+  1. Clones the manifest repository to a temporary folder, and the west
+     repository to .west/west
 
-  2. Creates a marker file west/{}
+  2. Creates a marker file .west/{}
 
-  3. Creates an initial configuration file west/config
+  3. Creates an initial configuration file .west/config
+
+  4. Continues the initialization process through west.main.main() with 'init'
+     as command and '--use-cache' pointing to temporary folder as parameter
 
 As an alternative to manually editing west/config, 'west init' can be rerun on
 an already initialized West instance to update configuration settings. Only
@@ -207,45 +213,59 @@ def bootstrap(args):
 
     # Clone the west source code and the manifest into west/. Git will create
     # the west/ directory if it does not exist.
+    tempdir = tempfile.mkdtemp(prefix='manifest_')
+    try:
+        clone('manifest repository', manifest_url, manifest_rev, tempdir,
+              exist_ok=True)
+        # Parse the manifest and look for a section named "west"
+        manifest_file = os.path.join(tempdir, 'west.yml')
+        with open(manifest_file, 'r') as f:
+            data = yaml.safe_load(f.read())
 
-    clone('manifest repository', manifest_url, manifest_rev,
-          os.path.join(directory, MANIFEST))
+        if 'west' in data:
+            wdata = data['west']
+            try:
+                pykwalify.core.Core(
+                    source_data=wdata,
+                    schema_files=[_SCHEMA_PATH]
+                ).validate()
+            except pykwalify.errors.SchemaError as e:
+                sys.exit("Error: Failed to parse manifest file '{}': {}"
+                         .format(manifest_file, e))
 
-    # Parse the manifest and look for a section named "west"
-    manifest_file = os.path.join(directory, MANIFEST, 'west.yml')
-    with open(manifest_file, 'r') as f:
-        data = yaml.safe_load(f.read())
+            if 'url' in wdata:
+                west_url = wdata['url']
+            if 'revision' in wdata:
+                west_rev = wdata['revision']
 
-    if 'west' in data:
-        wdata = data['west']
-        try:
-            pykwalify.core.Core(
-                source_data=wdata,
-                schema_files=[_SCHEMA_PATH]
-            ).validate()
-        except pykwalify.errors.SchemaError as e:
-            sys.exit("Error: Failed to parse manifest file '{}': {}"
-                     .format(manifest_file, e))
+        print("cloning {} at revision {}".format(west_url, west_rev))
+        clone('west repository', west_url, west_rev,
+              os.path.join(directory, WEST_DIR, WEST))
 
-        if 'url' in wdata:
-            west_url = wdata['url']
-        if 'revision' in wdata:
-            west_rev = wdata['revision']
+        # Create an initial configuration file
 
-    print("cloning {} at revision {}".format(west_url, west_rev))
-    clone('west repository', west_url, west_rev,
-          os.path.join(directory, WEST_DIR, WEST))
+        config_path = os.path.join(directory, WEST_DIR, 'config')
+        update_conf(config_path, manifest_url, manifest_rev)
+        print('=== Initial configuration written to {} ==='
+              .format(config_path))
 
-    # Create an initial configuration file
+        # Create a dotfile to mark the installation. Hide it on Windows.
 
-    config_path = os.path.join(directory, WEST_DIR, 'config')
-    update_conf(config_path, manifest_url, manifest_rev)
-    print('=== Initial configuration written to {} ==='.format(config_path))
+        with open(os.path.join(directory, WEST_DIR, WEST_MARKER), 'w') as f:
+            hide_file(f.name)
 
-    # Create a dotfile to mark the installation. Hide it on Windows.
-
-    with open(os.path.join(directory, WEST_DIR, WEST_MARKER), 'w') as f:
-        hide_file(f.name)
+        # Wrap west init with --cached:
+        # i.e. `west init <options> --use-cache `
+        # Note: main west will try to discover zephyr base and fail, as it is
+        # not fully initialized at this time.
+        # Thus a dummy zephyr_base is provided.
+        os.chdir(directory)
+        cmd = ['--zephyr-base', directory, 'init', '--manifest-url',
+               manifest_url, '--manifest-rev', manifest_rev, '--use-cache',
+               tempdir]
+        wrap(cmd)
+    finally:
+        shutil.rmtree(tempdir)
 
     print('=== West initialized. Now run "west clone" in {}. ==='.
           format(directory))

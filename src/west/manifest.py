@@ -40,13 +40,16 @@ be used to name a project in the manifest file.'''
 MANIFEST_SECTIONS = ['manifest', 'west']
 '''Sections in the manifest file'''
 
+MANIFEST_PROJECT_INDEX = 0
+'''Index in projects where the project with contains project manifest file is
+located.'''
 
 def default_path():
     '''Return the path to the default manifest in the west directory.
 
     Raises WestNotFound if called from outside of a west working directory.'''
     return os.path.join(util.west_topdir(),
-                        config.get('manifest', 'path', fallback='manifest'),
+                        config.get('manifest', 'path'),
                         'west.yml')
 
 
@@ -144,7 +147,10 @@ class Manifest:
         projects.
 
         Each element's values are fully initialized; there is no need
-        to consult the defaults field to supply missing values.'''
+        to consult the defaults field to supply missing values.
+
+        Note: The index MANIFEST_PROJECT_INDEX in sequence will hold the
+        project which contains the project manifest file.'''
 
         self.west_project = None
         '''west.manifest.SpecialProject object representing the west meta
@@ -199,7 +205,7 @@ class Manifest:
             path = self_tag.get('path')
 
         project = SpecialProject(name, revision=revision, path=path, url=url)
-        projects.append(project)
+        projects.insert(MANIFEST_PROJECT_INDEX, project)
 
         # Map from each remote's name onto that remote's data in the manifest.
         remotes = tuple(Remote(r['name'], r['url-base']) for r in

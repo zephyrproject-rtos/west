@@ -47,6 +47,7 @@ def repos_tmpdir(tmpdir):
     │   └── qemu-script.sh
     └── zephyr (branch: master)
         ├── CODEOWNERS
+        ├── west.yml
         ├── include
         │   └── header.h
         └── subsys
@@ -69,9 +70,8 @@ def repos_tmpdir(tmpdir):
           path: subdir/Kconfiglib
         - name: net-tools
           clone_depth: 1
-        - name: zephyr
       self:
-        path: manifest
+        path: zephyr
     '''
     rr = tmpdir.mkdir('repos')  # "remote" repositories
     rp = {}                     # individual repository paths under rr
@@ -82,13 +82,13 @@ def repos_tmpdir(tmpdir):
     rp['west'] = str(wdst)
 
     # Create the other repositories.
-    for repo in 'manifest', 'net-tools', 'Kconfiglib', 'zephyr':
+    for repo in 'net-tools', 'Kconfiglib', 'zephyr':
         path = str(rr.join(repo))
         rp[repo] = path
         create_repo(path)
 
     # Initialize the manifest repository.
-    add_commit(rp['manifest'], 'test manifest',
+    add_commit(rp['zephyr'], 'test manifest',
                files={'west.yml': textwrap.dedent('''\
                       west:
                         url: file://{west}
@@ -105,9 +105,8 @@ def repos_tmpdir(tmpdir):
                             revision: zephyr
                             path: subdir/Kconfiglib
                           - name: net-tools
-                          - name: zephyr
                         self:
-                          path: manifest
+                          path: zephyr
                       '''.format(west=rp['west'], rr=str(rr)))})
 
     # Initialize the Kconfiglib repository.
@@ -150,7 +149,7 @@ def west_init_tmpdir(repos_tmpdir):
     The directory that 'west init' created is returned as a
     py.path.local, with the current working directory set there.'''
     west_tmpdir = repos_tmpdir.join('west_installation')
-    cmd('init -m "{}" "{}"'.format(str(repos_tmpdir.join('repos', 'manifest')),
+    cmd('init -m "{}" "{}"'.format(str(repos_tmpdir.join('repos', 'zephyr')),
                                    str(west_tmpdir)))
     west_tmpdir.chdir()
     config.read_config()
@@ -193,11 +192,10 @@ def test_list(west_clone_tmpdir):
     # Projects shall be listed in the order they appear in the manifest.
     # Check the behavior for some format arguments of interest as well.
     actual = cmd('list -f "{name} {revision} {path} {cloned} {clone_depth}"')
-    expected = ['manifest master manifest (cloned) None',
+    expected = ['zephyr master zephyr (cloned) None',
                 'Kconfiglib zephyr {} (cloned) None'.format(
                     os.path.join('subdir', 'Kconfiglib')),
-                'net-tools master net-tools (cloned) None',
-                'zephyr master zephyr (cloned) None']
+                'net-tools master net-tools (cloned) None']
     assert actual.splitlines() == expected
 
 
@@ -257,10 +255,9 @@ def test_fetch_one_init(west_init_tmpdir):
     # have cloned the one that was explicitly fetched.
     cmd('fetch net-tools')
     actual = cmd('list -f "{name} {cloned}"')
-    expected = ['manifest (cloned)',
+    expected = ['zephyr (cloned)',
                 'Kconfiglib (not cloned)',
-                'net-tools (cloned)',
-                'zephyr (not cloned)']
+                'net-tools (cloned)']
     assert actual.splitlines() == expected
 
 
@@ -269,10 +266,9 @@ def test_fetch_all_init(west_init_tmpdir):
     # from a directory which has only had init run on it.
     cmd('fetch')
     actual = cmd('list -f "{name} {cloned}"')
-    expected = ['manifest (cloned)',
+    expected = ['zephyr (cloned)',
                 'Kconfiglib (cloned)',
-                'net-tools (cloned)',
-                'zephyr (cloned)']
+                'net-tools (cloned)']
     assert actual.splitlines() == expected
 
 
@@ -328,10 +324,9 @@ def test_pull_one_init(west_init_tmpdir):
     # have cloned the one that was explicitly pulled.
     cmd('pull net-tools')
     actual = cmd('list -f "{name} {cloned}"')
-    expected = ['manifest (cloned)',
+    expected = ['zephyr (cloned)',
                 'Kconfiglib (not cloned)',
-                'net-tools (cloned)',
-                'zephyr (not cloned)']
+                'net-tools (cloned)']
     assert actual.splitlines() == expected
 
 
@@ -340,10 +335,9 @@ def test_pull_all_init(west_init_tmpdir):
     # from a directory which has only had init run on it.
     cmd('pull')
     actual = cmd('list -f "{name} {cloned}"')
-    expected = ['manifest (cloned)',
+    expected = ['zephyr (cloned)',
                 'Kconfiglib (cloned)',
-                'net-tools (cloned)',
-                'zephyr (cloned)']
+                'net-tools (cloned)']
     assert actual.splitlines() == expected
 
 
@@ -494,12 +488,12 @@ def test_update(west_init_tmpdir):
     # Add commits to the local repos. We need to reconfigure
     # explicitly as these are clones, and west doesn't handle that for
     # us.
-    for path in 'manifest', '.west/west', 'net-tools':
+    for path in 'zephyr', '.west/west', 'net-tools':
         add_commit(path, 'test-update-local', reconfigure=True)
 
     # Check that resetting the west repository removes the local commit
     cmd('update --reset-west')
-    assert head_subject('manifest') == 'test-update-local'  # Unaffected
+    assert head_subject('zephyr') == 'test-update-local'  # Unaffected
     assert head_subject('.west/west') == west_prev
     assert head_subject('net-tools') == 'test-update-local'  # Unaffected
 

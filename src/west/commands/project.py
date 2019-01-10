@@ -15,14 +15,67 @@ from west.config import config
 from west import log
 from west import util
 from west.commands import WestCommand
-from west.manifest import default_path, SpecialProject, \
-                          Manifest, MalformedManifest, META_NAMES
+from west.manifest import default_path, Manifest, MalformedManifest, \
+                          META_NAMES, MANIFEST_PROJECT_INDEX
 
 
 # Branch that points to the revision specified in the manifest (which might be
 # an SHA). Local branches created with 'west branch' are set to track this
 # branch.
 _MANIFEST_REV_BRANCH = 'manifest-rev'
+
+class Init(WestCommand):
+    def __init__(self):
+        super().__init__(
+            'init',
+            _wrap('''
+            Initialize projects.
+
+            Continue the initialization of the project containing the manifest
+            file.
+            '''))
+
+    def do_add_parser(self, parser_adder):
+        return _add_parser(
+            parser_adder, self,
+            _arg('--manifest-url',
+                 metavar='URL',
+                 help='Manifest repository URL'),
+            _arg('--manifest-rev',
+                 metavar='REVISION',
+                 help='Manifest revision to fetch'),
+            _arg('--use-cache',
+                 dest='cache',
+                 metavar='CACHE',
+                 required=True,
+                 help='''Use cached repo at location CACHE'''),
+            _project_list_arg)
+
+    def do_run(self, args, user_args):
+        project = Manifest.from_file(os.path.join(args.cache, 'west.yml'))\
+                  .projects[MANIFEST_PROJECT_INDEX]
+
+        _inf(project, 'Creating repository for {name_and_path}')
+        _git_base(project, 'init {abspath}')
+
+        # This remote is only added for the user's convenience. We always fetch
+        # directly from the URL specified in the manifest.
+        _git(project, 'remote add -- {remote_name} {url}')
+        if _is_sha(project.revision):
+            # Don't name the branch after an SHA
+            branch = 'work'
+        else:
+            # Use the last component of the revision, in case it is a
+            # qualified ref (refs/heads/foo and the like)
+            branch = project.revision.split('/')[-1]
+
+        _fetch(project)
+        _create_branch(project, branch)
+        _checkout(project, branch)
+
+        config.set('manifest', 'path', project.path)
+        with open(os.path.join(util.west_dir(), 'config'), 'w') as f:
+            config.write(f)
 
 
 class List(WestCommand):
@@ -187,8 +240,7 @@ class Fetch(WestCommand):
             _update_west(args)
 
         for project in _projects(args, listed_must_be_cloned=False):
-            if project.name != 'manifest':
-                _fetch(project)
+            _fetch(project)
 
 
 class Pull(WestCommand):
@@ -218,9 +270,8 @@ class Pull(WestCommand):
             _update_west(args)
 
         for project in _projects(args, listed_must_be_cloned=False):
-            if project.name != 'manifest':
-                _fetch(project)
-                _rebase(project)
+            _fetch(project)
+            _rebase(project)
 
 
 class Rebase(WestCommand):
@@ -241,8 +292,7 @@ class Rebase(WestCommand):
 
     def do_run(self, args, user_args):
         for project in _cloned_projects(args):
-            if project.name != 'manifest':
-                _rebase(project)
+            _rebase(project)
 
 
 class Branch(WestCommand):
@@ -270,8 +320,7 @@ class Branch(WestCommand):
         if args.branch:
             # Create a branch in the specified projects
             for project in _cloned_projects(args):
-                if project.name != 'manifest':
-                    _create_branch(project, args.branch)
+                _create_branch(project, args.branch)
         else:
             # No arguments. List local branches from all cloned projects along
             # with the projects they appear in.
