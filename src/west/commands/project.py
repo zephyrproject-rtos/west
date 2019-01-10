@@ -145,7 +145,6 @@ class Clone(WestCommand):
 
     def do_run(self, args, user_args):
         if args.update:
-            _update_manifest(args)
             _update_west(args)
 
         for project in _projects(args, listed_must_be_cloned=False):
@@ -185,11 +184,11 @@ class Fetch(WestCommand):
 
     def do_run(self, args, user_args):
         if args.update:
-            _update_manifest(args)
             _update_west(args)
 
         for project in _projects(args, listed_must_be_cloned=False):
-            _fetch(project)
+            if project.name != 'manifest':
+                _fetch(project)
 
 
 class Pull(WestCommand):
@@ -216,12 +215,12 @@ class Pull(WestCommand):
 
     def do_run(self, args, user_args):
         if args.update:
-            _update_manifest(args)
             _update_west(args)
 
         for project in _projects(args, listed_must_be_cloned=False):
-            _fetch(project)
-            _rebase(project)
+            if project.name != 'manifest':
+                _fetch(project)
+                _rebase(project)
 
 
 class Rebase(WestCommand):
@@ -242,7 +241,8 @@ class Rebase(WestCommand):
 
     def do_run(self, args, user_args):
         for project in _cloned_projects(args):
-            _rebase(project)
+            if project.name != 'manifest':
+                _rebase(project)
 
 
 class Branch(WestCommand):
@@ -270,7 +270,8 @@ class Branch(WestCommand):
         if args.branch:
             # Create a branch in the specified projects
             for project in _cloned_projects(args):
-                _create_branch(project, args.branch)
+                if project.name != 'manifest':
+                    _create_branch(project, args.branch)
         else:
             # No arguments. List local branches from all cloned projects along
             # with the projects they appear in.
@@ -398,8 +399,7 @@ class Update(WestCommand):
             repository. With no arguments, both are updated.
 
             Updates are skipped (with a warning) if they can't be done via
-            fast-forward, unless --reset-manifest, --reset-west, or
-            --reset-projects is given.
+            fast-forward, unless --reset-west, or --reset-projects is given.
             '''))
 
     def do_add_parser(self, parser_adder):
@@ -409,10 +409,6 @@ class Update(WestCommand):
                  dest='update_west',
                  action='store_true',
                  help='update the west source code repository'),
-            _arg('--update-manifest',
-                 dest='update_manifest',
-                 action='store_true',
-                 help='update the manifest repository'),
             _arg('--reset-west',
                  action='store_true',
                  help='''Like --update-west, but run 'git reset --keep'
@@ -421,10 +417,6 @@ class Update(WestCommand):
                       configuration settings. This is used internally when
                       changing west.remote or west.revision via
                       'west init'.'''),
-            _arg('--reset-manifest',
-                 action='store_true',
-                 help='''like --reset-west, for the manifest repository, using
-                      manifest.remote and manifest.revision.'''),
             _arg('--reset-projects',
                  action='store_true',
                  help='''Fetches upstream data in all projects, then runs 'git
@@ -433,19 +425,12 @@ class Update(WestCommand):
                       manifest.revision via 'west init'.'''))
 
     def do_run(self, args, user_args):
-        if not (args.update_manifest or args.reset_manifest or
-                args.update_west or args.reset_west or
+        if not (args.update_west or args.reset_west or
                 args.reset_projects):
 
-            # No arguments is an alias for --update-west --update-manifest
-            _update_manifest(args)
+            # No arguments is an alias for --update-west
             _update_west(args)
             return
-
-        if args.reset_manifest:
-            _update_and_reset_special(args, 'manifest')
-        elif args.update_manifest:
-            _update_manifest(args)
 
         if args.reset_west:
             _update_and_reset_special(args, 'west')
@@ -853,22 +838,11 @@ def _checkout(project, branch):
 def _special_project(args, name):
     # Returns a Project instance for one of the special repositories in west/,
     # so that we can reuse the project-related functions for them
-
-    if name == 'manifest':
-        url = config.get(name, 'remote', fallback='origin')
-        revision = config.get(name, 'revision', fallback='master')
-        return SpecialProject(name, revision=revision,
-                              path=os.path.join('.west', name), url=url)
-
     return Manifest.from_file(_manifest_path(args), name).west_project
 
 
 def _update_west(args):
     _update_special(args, 'west')
-
-
-def _update_manifest(args):
-    _update_special(args, 'manifest')
 
 
 def _update_special(args, name):

@@ -207,13 +207,13 @@ def main(argv=None):
     # stdout/stderr isn't a terminal
     colorama.init()
 
-    if argv is None:
-        argv = sys.argv[1:]
-    args, unknown = parse_args(argv)
-
     if IN_MULTIREPO_INSTALL:
         # Read the configuration files
         config.read_config()
+
+    if argv is None:
+        argv = sys.argv[1:]
+    args, unknown = parse_args(argv)
 
     for_stack_trace = 'run as "west -v ... {} ..." for a stack trace'.format(
         args.command)

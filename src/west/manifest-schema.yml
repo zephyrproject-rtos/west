@@ -130,3 +130,28 @@ mapping:
           clone-depth:
             required: false
             type: int
+
+  # The "self" key specifies values for the project containing the manifest
+  # file.
+  #
+  # The path key specifies the local directory to clone this repository into,
+  # in the same way projects can specify their paths. For example, the
+  # following would cause the manifest repository to be checked out into local
+  # path "project-path":
+  #
+  # Example:
+  #
+  #   self:
+  #     path: project-path
+  #
+  # If the path key is missing, the basename of the path component in the
+  # manifest repository URL will be used by default.
+  # For example, if the URL is https://example.com/project-repo, the
+  # manifest repository would be cloned to the directory "project-repo".
+  self:
+    required: false
+    type: map
+    mapping:
+      path:
+        required: false
+        type: str
