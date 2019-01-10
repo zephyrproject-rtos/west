@@ -41,7 +41,7 @@ def default_path():
     '''Return the path to the default manifest in the west directory.
 
     Raises WestNotFound if called from outside of a west working directory.'''
-    return os.path.join(util.west_dir(), 'manifest', 'default.yml')
+    return os.path.join(util.west_dir(), 'manifest', 'west.yml')
 
 
 class Manifest:

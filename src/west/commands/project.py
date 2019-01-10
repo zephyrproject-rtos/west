@@ -507,7 +507,7 @@ def _arg(*args, **kwargs):
 
 _manifest_arg = _arg(
     '-m', '--manifest',
-    help='path to manifest file (default: west/manifest/default.yml)')
+    help='path to manifest file (default: west/manifest/west.yml)')
 
 # For 'fetch' and 'pull'
 _no_update_arg = _arg(
@@ -677,7 +677,7 @@ def _all_projects(args):
 
 def _manifest_path(args):
     # Returns the path to the manifest file. Defaults to
-    # .west/manifest/default.yml if the user didn't specify a manifest.
+    # .west/manifest/west.yml if the user didn't specify a manifest.
 
     return args.manifest or default_path()
 
