@@ -858,7 +858,7 @@ def _special_project(args, name):
         url = config.get(name, 'remote', fallback='origin')
         revision = config.get(name, 'revision', fallback='master')
         return SpecialProject(name, revision=revision,
-                              path=os.path.join('west', name), url=url)
+                              path=os.path.join('.west', name), url=url)
 
     return Manifest.from_file(_manifest_path(args), name).west_project
 

@@ -28,7 +28,7 @@ if sys.version_info < (3,):
 #
 
 # Top-level west directory, containing west itself and the manifest.
-WEST_DIR = 'west'
+WEST_DIR = '.west'
 # Subdirectory to check out the west source repository into.
 WEST = 'west'
 # Default west repository URL.

@@ -476,24 +476,24 @@ def test_update(west_init_tmpdir):
     cmd('clone net-tools')
 
     net_tools_prev = head_subject('net-tools')
-    west_prev = head_subject('west/west')
-    manifest_prev = head_subject('west/manifest')
+    west_prev = head_subject('.west/west')
+    manifest_prev = head_subject('.west/manifest')
 
     # Add commits to the local repos. We need to reconfigure
     # explicitly as these are clones, and west doesn't handle that for
     # us.
-    for path in 'west/manifest', 'west/west', 'net-tools':
+    for path in '.west/manifest', '.west/west', 'net-tools':
         add_commit(path, 'test-update-local', reconfigure=True)
 
     # Check that resetting the manifest repository removes the local commit
     cmd('update --reset-manifest')
-    assert head_subject('west/manifest') == manifest_prev
-    assert head_subject('west/west') == 'test-update-local'  # Unaffected
+    assert head_subject('.west/manifest') == manifest_prev
+    assert head_subject('.west/west') == 'test-update-local'  # Unaffected
     assert head_subject('net-tools') == 'test-update-local'  # Unaffected
 
     # Check that resetting the west repository removes the local commit
     cmd('update --reset-west')
-    assert head_subject('west/west') == west_prev
+    assert head_subject('.west/west') == west_prev
     assert head_subject('net-tools') == 'test-update-local'  # Unaffected
 
     # Check that resetting projects removes the local commit
@@ -507,8 +507,8 @@ def test_update(west_init_tmpdir):
 
     # Check that updating the manifest repository gets the upstream commit
     cmd('update --update-manifest')
-    assert head_subject('west/manifest') == 'test-update-upstream'
-    assert head_subject('west/west') == west_prev  # Unaffected
+    assert head_subject('.west/manifest') == 'test-update-upstream'
+    assert head_subject('.west/west') == west_prev  # Unaffected
 
 
 def test_init_again(west_init_tmpdir):
