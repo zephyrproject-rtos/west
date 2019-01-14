@@ -37,13 +37,6 @@ WEST = 'west'
 WEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/west'
 # Default revision to check out of the west repository.
 WEST_REV_DEFAULT = 'master'
-# File inside of WEST_DIR which marks it as the top level of the
-# Zephyr project installation.
-#
-# (The WEST_DIR name is not distinct enough to use when searching for
-# the top level; other directories named "west" may exist elsewhere,
-# e.g. zephyr/doc/west.)
-WEST_MARKER = '.west_topdir'
 
 # Manifest repository directory under WEST_DIR.
 MANIFEST = 'manifest'
@@ -87,7 +80,7 @@ def west_topdir(start=None):
     cur_dir = start or os.getcwd()
 
     while True:
-        if os.path.isfile(os.path.join(cur_dir, WEST_DIR, WEST_MARKER)):
+        if os.path.isdir(os.path.join(cur_dir, WEST_DIR)):
             return cur_dir
 
         parent_dir = os.path.dirname(cur_dir)
@@ -132,11 +125,9 @@ In more detail, does the following:
   1. Clones the manifest repository to a temporary folder, and the west
      repository to .west/west
 
-  2. Creates a marker file .west/{}
+  2. Creates an initial configuration file .west/config
 
-  3. Creates an initial configuration file .west/config
-
-  4. Continues the initialization process through west.main.main() with 'init'
+  3. Continues the initialization process through west.main.main() with 'init'
      as command and '--use-cache' pointing to temporary folder as parameter
 
 As an alternative to manually editing west/config, 'west init' can be rerun on
@@ -153,7 +144,7 @@ Updating the west URL or revision also runs 'west update --reset-west'.
 To suppress the reset of the manifest, west, and projects, pass --no-reset.
 With --no-reset, only the configuration file will be updated, and you will have
 to handle any resetting yourself.
-'''.format(WEST_MARKER))
+''')
 
     init_parser.add_argument(
         '-m', '--manifest-url',
@@ -248,11 +239,6 @@ def bootstrap(args):
         update_conf(config_path, manifest_url, manifest_rev)
         print('=== Initial configuration written to {} ==='
               .format(config_path))
-
-        # Create a dotfile to mark the installation. Hide it on Windows.
-
-        with open(os.path.join(directory, WEST_DIR, WEST_MARKER), 'w') as f:
-            hide_file(f.name)
 
         # Wrap west init with --cached:
         # i.e. `west init <options> --use-cache `

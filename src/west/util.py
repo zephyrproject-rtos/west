@@ -53,7 +53,7 @@ def west_topdir(start=None):
         cur_dir = start
 
     while True:
-        if os.path.isfile(os.path.join(cur_dir, '.west', '.west_topdir')):
+        if os.path.isdir(os.path.join(cur_dir, '.west')):
             return cur_dir
 
         parent_dir = os.path.dirname(cur_dir)
