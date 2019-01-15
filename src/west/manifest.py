@@ -18,6 +18,7 @@ if they are not present in the manifest data.'''
 
 import os
 
+import configparser
 import pykwalify.core
 import yaml
 from urllib.parse import urlparse
@@ -48,9 +49,13 @@ def default_path():
     '''Return the path to the default manifest in the west directory.
 
     Raises WestNotFound if called from outside of a west working directory.'''
-    return os.path.join(util.west_topdir(),
-                        config.get('manifest', 'path'),
-                        'west.yml')
+    try:
+        return os.path.join(util.west_topdir(),
+                            config.get('manifest', 'path'),
+                            'west.yml')
+    except configparser.NoOptionError as e:
+        raise MalformedConfig('missing key: \'{}\' in west config file'
+                              .format(e.args[0])) from e
 
 
 class Manifest:
@@ -70,7 +75,8 @@ class Manifest:
         If source_file is None, the value returned by default_path()
         is used.
 
-        Raises MalformedManifest in case of validation errors.'''
+        Raises MalformedManifest in case of validation errors.
+        Raises MalformedConfig in case of missing configuration settings.'''
         if source_file is None:
             source_file = default_path()
         return Manifest(source_file=source_file, sections=sections)
@@ -83,7 +89,8 @@ class Manifest:
         :param sections: Only parse specified sections from YAML data,
                          default: all sections are parsed.
 
-        Raises MalformedManifest in case of validation errors.'''
+        Raises MalformedManifest in case of validation errors.
+        Raises MalformedConfig in case of missing configuration settings.'''
         return Manifest(source_data=source_data, sections=sections)
 
     def __init__(self, source_file=None, source_data=None,
@@ -102,7 +109,8 @@ class Manifest:
         Exactly one of the source_file and source_data parameters must
         be given.
 
-        Raises MalformedManifest in case of validation errors.'''
+        Raises MalformedManifest in case of validation errors.
+        Raises MalformedConfig in case of missing configuration settings.'''
         if source_file and source_data:
             raise ValueError('both source_file and source_data were given')
 
@@ -195,9 +203,14 @@ class Manifest:
 
         manifest = data.get('manifest')
 
-        url = config.get('manifest', 'remote')
+        try:
+            url = config.get('manifest', 'remote')
+            revision = config.get('manifest', 'revision')
+        except configparser.NoOptionError as e:
+            raise MalformedConfig('missing key: \'{}\' in west config file'
+                                  .format(e.args[0])) from e
+
         name = posixpath.basename(urlparse(url).path)
-        revision = config.get('manifest', 'revision')
         path = name
 
         self_tag = manifest.get('self')
@@ -277,6 +290,11 @@ class Manifest:
 class MalformedManifest(Exception):
     '''Exception indicating that west manifest parsing failed due to a
     malformed value.'''
+
+
+class MalformedConfig(Exception):
+    '''Exception indicating that west config is malformed and thus causing west
+       manifest parsing to fail.'''
 
 
 # Definitions for Manifest attribute types.
