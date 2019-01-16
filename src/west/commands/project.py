@@ -16,7 +16,7 @@ from west import log
 from west import util
 from west.commands import WestCommand
 from west.manifest import default_path, Manifest, MalformedManifest, \
-                          META_NAMES, MANIFEST_PROJECT_INDEX
+                          MANIFEST_PROJECT_INDEX
 
 
 # Branch that points to the revision specified in the manifest (which might be
@@ -90,9 +90,8 @@ class List(WestCommand):
             By default, lists all project names in the manifest, along with
             each project's path, revision, URL, and whether it has been cloned.
 
-            The west and manifest repositories in the top-level west directory
-            are not included by default. Use --all or the special project
-            names "west" and "manifest" to include them.'''))
+            The west repository in the top-level west directory is not included
+            by default. Use --all or the name "west" to include it.'''))
 
     def do_add_parser(self, parser_adder):
         default_fmt = '{name:14} {path:18} {revision:13} {url} {cloned}'
@@ -132,12 +131,11 @@ class List(WestCommand):
             '''.format(default_fmt)))
 
     def do_run(self, args, user_args):
-        # We should only list the meta projects if they were explicitly
-        # given by name, or --all was given.
-        list_meta = bool(args.projects) or args.all
+        # Only list west if it was given by name, or --all was given.
+        list_west = bool(args.projects) or args.all
 
-        for project in _projects(args, include_meta=True):
-            if project.name in META_NAMES and not list_meta:
+        for project in _projects(args, include_west=True):
+            if project.name == 'west' and not list_west:
                 continue
 
             # Spelling out the format keys explicitly here gives us
@@ -482,7 +480,7 @@ class Update(WestCommand):
             return
 
         if args.reset_west:
-            _update_and_reset_special(args, 'west')
+            _update_and_reset_west(args)
         elif args.update_west:
             _update_west(args)
 
@@ -602,7 +600,7 @@ def _cloned_projects(args):
         [project for project in _all_projects(args) if _cloned(project)]
 
 
-def _projects(args, listed_must_be_cloned=True, include_meta=False):
+def _projects(args, listed_must_be_cloned=True, include_west=False):
     # Returns a list of project instances for the projects requested in 'args'
     # (the command-line arguments), in the same order that they were listed by
     # the user. If args.projects is empty, no projects were listed, and all
@@ -616,15 +614,15 @@ def _projects(args, listed_must_be_cloned=True, include_meta=False):
     #   If True, an error is raised if an uncloned project was listed. This
     #   only applies to projects listed explicitly on the command line.
     #
-    # include_meta (default: False):
-    #   If True, "meta" projects (i.e. west and the manifest) may be given
-    #   in args.projects without raising errors, and are also included in the
-    #   return value if args.projects is empty.
+    # include_west (default: False):
+    #   If True, west may be given in args.projects without raising errors.
+    #   It will be included in the return value if args.projects is empty.
 
     projects = _all_projects(args)
+    west_project = _west_project(args)
 
-    if include_meta:
-        projects += [_special_project(args, name) for name in META_NAMES]
+    if include_west:
+        projects.append(west_project)
 
     if not args.projects:
         # No projects specified. Return all projects.
@@ -646,11 +644,14 @@ def _projects(args, listed_must_be_cloned=True, include_meta=False):
         return os.path.normcase(os.path.realpath(path))
 
     res = []
+    uncloned = []
     for project_arg in args.projects:
         for project in projects:
             if project.name == project_arg:
                 # The argument is a project name
                 res.append(project)
+                if listed_must_be_cloned and not _cloned(project):
+                    uncloned.append(project.name)
                 break
         else:
             # The argument is not a project name. See if it is a project
@@ -674,24 +675,11 @@ def _projects(args, listed_must_be_cloned=True, include_meta=False):
                         ', '.join(missing_projects),
                         ', '.join(project.name for project in projects)))
 
-    # Check that all listed repositories are cloned, if requested
-    if listed_must_be_cloned:
-        # We could still get here with a missing manifest repository if the
-        # user gave a --manifest argument.
-        uncloned_meta = [prj.name for prj in res if not _cloned(prj) and
-                         prj.name in META_NAMES]
-        if uncloned_meta:
-            log.die('Missing meta project{}: {}.'.
-                    format('s' if len(uncloned_meta) > 1 else '',
-                           ', '.join(uncloned_meta)),
-                    'The Zephyr installation has been corrupted.')
-
-        uncloned = [prj.name for prj in res
-                    if not _cloned(prj) and prj.name not in META_NAMES]
-        if uncloned:
-            log.die('The following projects are not cloned: {}. Please clone '
-                    "them first with 'west clone'."
-                    .format(", ".join(uncloned)))
+    # Check that all listed repositories are cloned, if requested.
+    if listed_must_be_cloned and uncloned:
+        log.die('The following projects are not cloned: {}. Please clone '
+                "them first with 'west clone'."
+                .format(", ".join(uncloned)))
 
     return res
 
@@ -884,26 +872,21 @@ def _checkout(project, branch):
     _git(project, 'checkout ' + branch)
 
 
-def _special_project(args, name):
-    # Returns a Project instance for one of the special repositories in west/,
-    # so that we can reuse the project-related functions for them
-    return Manifest.from_file(_manifest_path(args), name).west_project
+def _west_project(args):
+    # Returns a Project instance for west.
+    return Manifest.from_file(_manifest_path(args),
+                              sections=['west']).west_project
 
 
 def _update_west(args):
-    _update_special(args, 'west')
-
-
-def _update_special(args, name):
     with _error_context(_FAILED_UPDATE_MSG):
-        project = _special_project(args, name)
+        project = _west_project(args)
         _dbg(project, 'Updating {name_and_path}', level=log.VERBOSE_NORMAL)
 
         old_sha = _sha(project, 'HEAD')
 
-        # Only update special repositories if possible via fast-forward, as
-        # automatic rebasing is probably more annoying than useful when working
-        # directly on them.
+        # Only update west via fast-forward, as automatic rebasing is
+        # probably more annoying than useful when working directly on it.
         #
         # --tags is required to get tags when the remote is specified as a URL.
         # --ff-only is required to ensure that the merge only takes place if it
@@ -928,26 +911,25 @@ def _update_special(args, name):
             _inf(project,
                  'Updated {name_and_path} to {revision} (from {url}).')
 
-            if project.name == 'west':
-                # Signal self-update, which will cause a restart. This is a bit
-                # nicer than doing the restart here, as callers will have a
-                # chance to flush file buffers, etc.
-                raise WestUpdated()
+            # Signal self-update, which will cause a restart. This is a bit
+            # nicer than doing the restart here, as callers will have a
+            # chance to flush file buffers, etc.
+            raise WestUpdated()
 
 
-def _update_and_reset_special(args, name):
-    # Updates one of the special repositories (the manifest and west) by
-    # resetting to the new revision after fetching it (with 'git reset --keep')
+def _update_and_reset_west(args):
+    # Updates west by resetting to the new revision after fetching it
+    # (with 'git reset --keep').
 
-    project = _special_project(args, name)
-    with _error_context(', while updating/resetting special project'):
+    project = _west_project(args)
+    with _error_context(', while updating/resetting west'):
         _inf(project,
              "Fetching and resetting {name_and_path} to '{revision}'")
         _git(project, 'fetch -- {url} {revision}')
         if _git(project, 'reset --keep FETCH_HEAD', check=False).returncode:
             _wrn(project,
-                 'Failed to reset special project {name_and_path} to '
-                 "{revision} (with 'git reset --keep')")
+                 'Failed to reset west to "{revision}" '
+                 "(with 'git reset --keep')")
 
 
 def _reset_projects(args):
