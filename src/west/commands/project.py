@@ -15,8 +15,7 @@ from west.config import config
 from west import log
 from west import util
 from west.commands import WestCommand
-from west.manifest import default_path, Manifest, MalformedManifest, \
-                          MANIFEST_PROJECT_INDEX
+from west.manifest import Manifest, MalformedManifest, MANIFEST_PROJECT_INDEX
 
 
 # Branch that points to the revision specified in the manifest (which might be
@@ -196,7 +195,7 @@ class Clone(WestCommand):
 
     def do_run(self, args, user_args):
         if args.update:
-            _update_west(args)
+            _update_west()
 
         for project in _projects(args, listed_must_be_cloned=False):
             if args.branch:
@@ -235,7 +234,7 @@ class Fetch(WestCommand):
 
     def do_run(self, args, user_args):
         if args.update:
-            _update_west(args)
+            _update_west()
 
         for project in _projects(args, listed_must_be_cloned=False):
             _fetch(project)
@@ -265,7 +264,7 @@ class Pull(WestCommand):
 
     def do_run(self, args, user_args):
         if args.update:
-            _update_west(args)
+            _update_west()
 
         for project in _projects(args, listed_must_be_cloned=False):
             _fetch(project)
@@ -476,16 +475,16 @@ class Update(WestCommand):
                 args.reset_projects):
 
             # No arguments is an alias for --update-west
-            _update_west(args)
+            _update_west()
             return
 
         if args.reset_west:
-            _update_and_reset_west(args)
+            _update_and_reset_west()
         elif args.update_west:
-            _update_west(args)
+            _update_west()
 
         if args.reset_projects:
-            _reset_projects(args)
+            _reset_projects()
 
 
 class ForAll(WestCommand):
@@ -537,10 +536,6 @@ def _arg(*args, **kwargs):
 
 # Arguments shared between more than one command
 
-_manifest_arg = _arg(
-    '-m', '--manifest',
-    help='path to manifest file (default: west/manifest/west.yml)')
-
 # For 'fetch' and 'pull'
 _no_update_arg = _arg(
     '--no-update',
@@ -554,15 +549,14 @@ _project_list_arg = _arg('projects', metavar='PROJECT', nargs='*')
 
 def _add_parser(parser_adder, cmd, *extra_args, **kwargs):
     # Adds and returns a subparser for the project-related WestCommand 'cmd'.
-    # All of these commands (currently) take the manifest path flag, so it's
-    # provided by default here, but any defaults can be overridden with kwargs.
+    # Any defaults can be overridden with kwargs.
 
     if 'description' not in kwargs:
         kwargs['description'] = cmd.description
     if 'formatter_class' not in kwargs:
         kwargs['formatter_class'] = argparse.RawDescriptionHelpFormatter
     if 'parents' not in kwargs:
-        kwargs['parents'] = (_manifest_arg,) + extra_args
+        kwargs['parents'] = extra_args
 
     return parser_adder.add_parser(cmd.name, **kwargs)
 
@@ -597,7 +591,7 @@ def _cloned_projects(args):
 
     # This approach avoids redundant _cloned() checks
     return _projects(args) if args.projects else \
-        [project for project in _all_projects(args) if _cloned(project)]
+        [project for project in _all_projects() if _cloned(project)]
 
 
 def _projects(args, listed_must_be_cloned=True, include_west=False):
@@ -618,8 +612,8 @@ def _projects(args, listed_must_be_cloned=True, include_west=False):
     #   If True, west may be given in args.projects without raising errors.
     #   It will be included in the return value if args.projects is empty.
 
-    projects = _all_projects(args)
-    west_project = _west_project(args)
+    projects = _all_projects()
+    west_project = _west_project()
 
     if include_west:
         projects.append(west_project)
@@ -684,24 +678,16 @@ def _projects(args, listed_must_be_cloned=True, include_west=False):
     return res
 
 
-def _all_projects(args):
+def _all_projects():
     # Get a list of project objects from the manifest.
     #
     # If the manifest is malformed, a fatal error occurs and the
     # command aborts.
 
     try:
-        return list(Manifest.from_file(_manifest_path(args),
-                                       'manifest').projects)
+        return list(Manifest.from_file(sections=['manifest']).projects)
     except MalformedManifest as m:
         log.die(m.args[0])
-
-
-def _manifest_path(args):
-    # Returns the path to the manifest file. Defaults to
-    # .west/manifest/west.yml if the user didn't specify a manifest.
-
-    return args.manifest or default_path()
 
 
 def _fetch(project):
@@ -872,15 +858,14 @@ def _checkout(project, branch):
     _git(project, 'checkout ' + branch)
 
 
-def _west_project(args):
+def _west_project():
     # Returns a Project instance for west.
-    return Manifest.from_file(_manifest_path(args),
-                              sections=['west']).west_project
+    return Manifest.from_file(sections=['west']).west_project
 
 
-def _update_west(args):
+def _update_west():
     with _error_context(_FAILED_UPDATE_MSG):
-        project = _west_project(args)
+        project = _west_project()
         _dbg(project, 'Updating {name_and_path}', level=log.VERBOSE_NORMAL)
 
         old_sha = _sha(project, 'HEAD')
@@ -917,11 +902,11 @@ def _update_west(args):
             raise WestUpdated()
 
 
-def _update_and_reset_west(args):
+def _update_and_reset_west():
     # Updates west by resetting to the new revision after fetching it
     # (with 'git reset --keep').
 
-    project = _west_project(args)
+    project = _west_project()
     with _error_context(', while updating/resetting west'):
         _inf(project,
              "Fetching and resetting {name_and_path} to '{revision}'")
@@ -932,11 +917,11 @@ def _update_and_reset_west(args):
                  "(with 'git reset --keep')")
 
 
-def _reset_projects(args):
+def _reset_projects():
     # Fetches changes in all cloned projects and then resets them the manifest
     # revision (with 'git reset --keep')
 
-    for project in _all_projects(args):
+    for project in _all_projects():
         if _cloned(project):
             _fetch(project)
             _inf(project, 'Resetting {name_and_path} to {manifest_rev_branch}')

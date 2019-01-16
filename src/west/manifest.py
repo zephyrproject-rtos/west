@@ -41,8 +41,8 @@ MANIFEST_PROJECT_INDEX = 0
 '''Index in projects where the project with contains project manifest file is
 located.'''
 
-def default_path():
-    '''Return the path to the default manifest in the west directory.
+def manifest_path():
+    '''Return the path to the manifest file.
 
     Raises WestNotFound if called from outside of a west working directory.'''
     try:
@@ -68,13 +68,13 @@ class Manifest:
         :param sections: Only parse specified sections from YAML file,
                          default: all sections are parsed.
 
-        If source_file is None, the value returned by default_path()
+        If source_file is None, the value returned by manifest_path()
         is used.
 
         Raises MalformedManifest in case of validation errors.
         Raises MalformedConfig in case of missing configuration settings.'''
         if source_file is None:
-            source_file = default_path()
+            source_file = manifest_path()
         return Manifest(source_file=source_file, sections=sections)
 
     @staticmethod
@@ -117,6 +117,10 @@ class Manifest:
         else:
             self._data = source_data
             path = None
+
+        for section in sections:
+            if section not in MANIFEST_SECTIONS:
+                raise ValueError('invalid section {}'.format(section))
 
         self.path = path
         '''Path to the file containing the manifest, or None if created
