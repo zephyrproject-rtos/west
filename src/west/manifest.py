@@ -34,10 +34,6 @@ WEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/west'
 # Default revision to check out of the west repository.
 WEST_REV_DEFAULT = 'master'
 
-META_NAMES = ['west']
-'''Names of the special "meta-projects", which are reserved and cannot
-be used to name a project in the manifest file.'''
-
 MANIFEST_SECTIONS = ['manifest', 'west']
 '''Sections in the manifest file'''
 
@@ -249,9 +245,8 @@ class Manifest:
         for mp in manifest['projects']:
             # Validate the project name.
             name = mp['name']
-            if name in META_NAMES:
-                self._malformed('the name "{}" is reserved and cannot '.
-                                format(name) +
+            if name == 'west':
+                self._malformed('the name "west" is reserved and cannot '
                                 'be used to name a manifest project')
 
             # Validate the project remote.
