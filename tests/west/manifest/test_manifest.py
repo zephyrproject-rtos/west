@@ -41,6 +41,7 @@ def deep_eq_check(actual, expected):
     assert actual.abspath == expected.abspath
     assert actual.clone_depth == expected.clone_depth
     assert actual.revision == expected.revision
+    assert actual.west_commands == expected.west_commands
 
 
 def test_no_defaults(config_file_project_setup):

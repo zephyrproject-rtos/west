@@ -211,13 +211,13 @@ class Manifest:
                                   .format(e.args[0])) from e
 
         name = posixpath.basename(urlparse(url).path)
-        path = name
 
         self_tag = manifest.get('self')
-        if self_tag and self_tag.get('path'):
-            path = self_tag.get('path')
+        path = self_tag.get('path') if self_tag else name
+        west_commands = self_tag.get('west-commands') if self_tag else None
 
-        project = SpecialProject(name, revision=revision, path=path, url=url)
+        project = SpecialProject(name, revision=revision, path=path, url=url,
+                                 west_commands=west_commands)
         projects.insert(MANIFEST_PROJECT_INDEX, project)
 
         # Map from each remote's name onto that remote's data in the manifest.
@@ -261,12 +261,15 @@ class Manifest:
             if remote_name not in remotes_dict:
                 self._malformed('project {} remote {} is not defined'.
                                 format(name, remote_name))
+
+            # Create the project instance for final checking.
             project = Project(name,
                               remotes_dict[remote_name],
                               defaults,
                               path=mp.get('path'),
                               clone_depth=mp.get('clone-depth'),
-                              revision=mp.get('revision'))
+                              revision=mp.get('revision'),
+                              west_commands=mp.get('west-commands'))
 
             # Two projects cannot have the same path. We use absolute
             # paths to check for collisions to ensure paths are
@@ -362,10 +365,11 @@ class Project:
 
     Projects are neither comparable nor hashable.'''
 
-    __slots__ = 'name remote url path abspath clone_depth revision'.split()
+    __slots__ = ('name remote url path abspath clone_depth '
+                 'revision west_commands').split()
 
     def __init__(self, name, remote, defaults, path=None, clone_depth=None,
-                 revision=None):
+                 revision=None, west_commands=None):
         '''Specify a Project by name, Remote, and optional information.
 
         :param name: Project's user-defined name in the manifest.
@@ -381,6 +385,9 @@ class Project:
                             the manifest.
         :param revision: Project revision as given in the manifest, if present.
                          If not given, defaults.revision is used instead.
+        :param west_commands: path to a YAML file in the project containing
+                              a description of external west commands provided
+                              by the project, if given.
         '''
         _wrn_if_not_remote(remote)
 
@@ -392,6 +399,7 @@ class Project:
                                                      self.path))
         self.clone_depth = clone_depth
         self.revision = revision or defaults.revision
+        self.west_commands = west_commands
 
     def __eq__(self, other):
         return NotImplemented
@@ -409,7 +417,8 @@ class SpecialProject(Project):
 
     Projects are neither comparable nor hashable.'''
 
-    def __init__(self, name, path=None, revision=None, url=None):
+    def __init__(self, name, path=None, revision=None, url=None,
+                 west_commands=None):
         '''Specify a Special Project by name, and url, and optional information.
 
         :param name: Special Project's user-defined name in the manifest
@@ -418,7 +427,14 @@ class SpecialProject(Project):
                      the project's ``name`` is used.
         :param revision: Project revision as given in the manifest, if present.
         :param url: Complete URL for special project.
+        :param west_commands: path to a YAML file in the project containing
+                              a description of external west commands provided
+                              by the project, if given. This obviously only
+                              makes sense for the manifest project, not west.
         '''
+        if name == 'west' and west_commands:
+            raise ValueError('setting west_commands on west is forbidden')
+
         self.name = name
         self.url = url
         self.path = path or name
@@ -427,7 +443,7 @@ class SpecialProject(Project):
         self.revision = revision
         self.remote = None
         self.clone_depth = None
-
+        self.west_commands = west_commands
 
 def _wrn_if_not_remote(remote):
     if not isinstance(remote, Remote):

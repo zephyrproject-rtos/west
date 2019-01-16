@@ -91,6 +91,11 @@ mapping:
   # - clone-depth: if given, it is a number which creates a shallow
   #   history in the cloned repository limited to the given number
   #   of commits.
+  # - west-commands: if given, it is a relative path to a YAML file
+  #   within the project which describes additional west commands
+  #   provided by that project. See west-commands-schema.yml for
+  #   details on the format. By convention, this file should be named
+  #   west-commands.yml.
   #
   # Example, using default and non-default remotes:
   #
@@ -130,9 +135,12 @@ mapping:
           clone-depth:
             required: false
             type: int
+          west-commands:
+            required: false
+            type: str
 
   # The "self" key specifies values for the project containing the manifest
-  # file.
+  # file (the "manifest repository").
   #
   # The path key specifies the local directory to clone this repository into,
   # in the same way projects can specify their paths. For example, the
@@ -153,5 +161,10 @@ mapping:
     type: map
     mapping:
       path:
+        required: false
+        type: str
+      # The manifest repository may also contain additional west
+      # commands. See the above comment for details.
+      west-commands:
         required: false
         type: str
