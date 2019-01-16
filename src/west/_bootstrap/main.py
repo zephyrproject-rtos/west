@@ -251,7 +251,7 @@ def bootstrap(args):
                tempdir]
         wrap(cmd)
     finally:
-        shutil.rmtree(tempdir)
+        shutil.rmtree(tempdir, ignore_errors=True)
 
     print('=== West initialized. Now run "west clone" in {}. ==='.
           format(directory))
