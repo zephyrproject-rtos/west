@@ -171,7 +171,11 @@ to handle any resetting yourself.
 
     try:
         reinit(os.path.join(west_dir(args.directory), 'config'), args)
+        bootstrapping = False
     except WestNotFound:
+        bootstrapping = True
+
+    if bootstrapping:
         bootstrap(args)
 
 
