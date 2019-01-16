@@ -243,6 +243,28 @@ def test_sections():
     assert manifest.west_project.revision == 'abranch'
 
 
+def test_west_commands():
+    # Projects may specify subdirectories containing west commands.
+    content = '''\
+    manifest:
+      remotes:
+        - name: testremote
+          url-base: https://example.com
+
+      projects:
+        - name: zephyr
+          remote: testremote
+          west-commands: some-path/west-commands.yml
+    '''
+    with patch('west.util.west_topdir',
+               return_value=os.path.realpath('/west_top')):
+        # Parsing manifest only, no exception raised
+        manifest = Manifest.from_data(yaml.safe_load(content),
+                                      sections=['manifest'])
+    assert len(manifest.projects) == 2
+    assert manifest.projects[-1].west_commands == 'some-path/west-commands.yml'
+
+
 # Invalid manifests should raise MalformedManifest.
 @pytest.mark.parametrize('invalid',
                          glob(os.path.join(THIS_DIRECTORY, 'invalid_*.yml')))
