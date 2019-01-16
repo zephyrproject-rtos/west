@@ -22,7 +22,7 @@ import textwrap
 
 from west import log
 from west import config
-from west.commands import CommandContextError
+from west.commands import CommandContextError, external_commands
 from west.commands.build import Build
 from west.commands.flash import Flash
 from west.commands.debug import Debug, DebugServer, Attach
@@ -66,11 +66,16 @@ HIDDEN_COMMANDS = {None: [PostInit()]}
 # Built-in commands in this West. For compatibility with monorepo
 # installations of West within the Zephyr tree, we only expose the
 # project commands if this is a multirepo installation.
-COMMANDS = dict(RUNNER_COMMANDS)
+BUILTIN_COMMANDS = dict(RUNNER_COMMANDS)
 
 if IN_MULTIREPO_INSTALL:
-    COMMANDS.update(PROJECT_COMMANDS)
-    COMMANDS.update(HIDDEN_COMMANDS)
+    BUILTIN_COMMANDS.update(PROJECT_COMMANDS)
+    BUILTIN_COMMANDS.update(HIDDEN_COMMANDS)
+
+
+BUILTIN_COMMAND_NAMES = set()
+for group, commands in BUILTIN_COMMANDS.items():
+    BUILTIN_COMMAND_NAMES.add(c.name for c in commands)
 
 
 class InvalidWestContext(RuntimeError):
@@ -106,6 +111,7 @@ class WestArgumentParser(argparse.ArgumentParser):
         # The super constructor calls add_argument(), so this has to
         # come first as our override of that method relies on it.
         self.west_optionals = []
+        self.west_externals = None
 
         super(WestArgumentParser, self).__init__(*args, **kwargs)
 
@@ -148,8 +154,8 @@ class WestArgumentParser(argparse.ArgumentParser):
                 self.format_west_optional(append, wo, width)
 
             append('',
-                   'west commands used in various situations:')
-            for group, commands in COMMANDS.items():
+                   'built-in west commands used in various situations:')
+            for group, commands in BUILTIN_COMMANDS.items():
                 if group is None:
                     # Skip hidden commands.
                     continue
@@ -158,6 +164,14 @@ class WestArgumentParser(argparse.ArgumentParser):
                 for command in commands:
                     self.format_command(append, command, width)
                 append('')
+
+            if self.west_externals:
+                for path, specs in self.west_externals.items():
+                    append('external commands from project {} at path "{}":'.
+                           format(specs[0].project.name, path))
+                    for spec in specs:
+                        self.format_external_spec(append, spec, width)
+                    append('')
 
             append(self.epilog)
 
@@ -182,6 +196,9 @@ class WestArgumentParser(argparse.ArgumentParser):
     def format_command(self, append, command, width):
         thing = '     {}:'.format(command.name)
         self.format_thing_and_help(append, thing, command.help, width)
+
+    def format_external_spec(self, append, spec, width):
+        self.format_thing_and_help(append, '  ' + spec.name, None, width)
 
     def format_thing_and_help(self, append, thing, help, width):
         # Format help for some "thing" (arbitrary text) and its
@@ -239,9 +256,38 @@ class WestArgumentParser(argparse.ArgumentParser):
         # Let argparse handle the actual argument.
         super(WestArgumentParser, self).add_argument(*args, **kwargs)
 
+    def set_externals(self, externals):
+        self.west_externals = externals
+
 
 def command_handler(command, known_args, unknown_args):
     command.run(known_args, unknown_args)
+
+
+def add_ext_command_parser(subparser_gen, spec):
+    # This subparser exists only to register the name. The real parser
+    # will be added dynamically as needed later if the command is
+    # invoked. We prevent help from being added because the default
+    # help printer calls sys.exit(), which is not what we want.
+    parser = subparser_gen.add_parser(spec.name, add_help=False)
+    return parser
+
+
+def ext_command_handler(subparser_gen, spec, argv, *ignored):
+    # Deferred creation, argument parsing registration, and handling
+    # for external commands. We go to the extra effort because we
+    # don't want to import any extern classes until the user has
+    # specifically requested an external command.
+    #
+    # 'ignored' is just the known and unknown args as parsed by the
+    # 'dummy' parser added by add_ext_command_parser().
+    #
+    # The purpose of this handler is to override that parser with the
+    # one provided by `command`, then parse the original argv.
+    command = spec.factory()
+    parser = command.add_parser(subparser_gen)
+    args, unknown = parser.parse_known_args()
+    command_handler(command, args, unknown)
 
 
 def set_zephyr_base(args):
@@ -328,7 +374,7 @@ def print_version_info():
                  os.path.dirname(os.path.dirname(west_src_west))))
 
 
-def parse_args(argv):
+def parse_args(argv, externals):
     # The prog='west' override avoids the absolute path of the main.py script
     # showing up when West is run via the wrapper
     west_parser = WestArgumentParser(
@@ -357,19 +403,34 @@ def parse_args(argv):
     subparser_gen = west_parser.add_subparsers(metavar='<command>',
                                                dest='command')
 
-    for command in itertools.chain(*COMMANDS.values()):
+    # Add handlers for the built-in commands.
+    for command in itertools.chain(*BUILTIN_COMMANDS.values()):
         parser = command.add_parser(subparser_gen)
         parser.set_defaults(handler=partial(command_handler, command))
 
+    # Add handlers for external commands, and finalize the list with
+    # our parser.
+    if externals:
+        for path, specs in externals.items():
+            for spec in specs:
+                parser = add_ext_command_parser(subparser_gen, spec)
+                parser.set_defaults(handler=partial(ext_command_handler,
+                                                    subparser_gen, spec, argv))
+    west_parser.set_externals(externals)
+
+    # Parse arguments.
     args, unknown = west_parser.parse_known_args(args=argv)
 
     if args.version:
         print_version_info()
         sys.exit(0)
 
-    # Set up logging verbosity before doing anything else, so
-    # e.g. verbose messages related to argument handling errors
-    # work properly.
+    # Set up logging verbosity before running the command, so
+    # e.g. verbose messages related to argument handling errors work
+    # properly. This works even for external commands that haven't
+    # been instantiated yet, because --verbose is an option to the top
+    # level parser, and the command run() method doesn't get called
+    # until later.
     log.set_verbosity(args.verbose)
 
     if IN_MULTIREPO_INSTALL:
@@ -382,6 +443,27 @@ def parse_args(argv):
     return args, unknown
 
 
+def get_external_commands():
+    if not config.config.get('commands', 'allow_external', fallback=True):
+        return {}
+
+    externals = external_commands()
+
+    filtered = []
+    for path, specs in externals.items():
+        # Filter out attempts to shadow built-in commands.
+        for spec in specs:
+            if spec.name in BUILTIN_COMMAND_NAMES:
+                log.wrn('ignoring project {} external command {};'.
+                        format(spec.project.name, spec.name),
+                        'this is a built in command')
+                continue
+            filtered.append(spec)
+        externals[path] = filtered
+
+    return externals
+
+
 def main(argv=None):
     # Makes ANSI color escapes work on Windows, and strips them when
     # stdout/stderr isn't a terminal
@@ -391,9 +473,19 @@ def main(argv=None):
         # Read the configuration files
         config.read_config()
 
+        # Load any external command specs. If the config file isn't
+        # fully set up yet, ignore the error. This allows west init to
+        # work properly.
+        try:
+            externals = get_external_commands()
+        except MalformedConfig:
+            externals = {}
+    else:
+        externals = {}
+
     if argv is None:
         argv = sys.argv[1:]
-    args, unknown = parse_args(argv)
+    args, unknown = parse_args(argv, externals)
 
     for_stack_trace = 'run as "west -v ... {} ..." for a stack trace'.format(
         args.command)
