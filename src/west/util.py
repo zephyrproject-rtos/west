@@ -6,8 +6,29 @@
 '''
 
 import os
+import pathlib
 import shlex
 import textwrap
+
+
+def escapes_directory(path, directory):
+    '''Returns True if `path` escapes parent directory `directory`.
+
+    :param path: path to check is inside `directory`
+    :param directory: parent directory to check
+
+    Verifies `path` is inside of `directory`, after computing
+    normalized real paths for both.'''
+    # It turns out not to be easy to implement this without using
+    # pathlib.
+    p = pathlib.Path(os.path.normcase(os.path.realpath(path)))
+    d = pathlib.Path(os.path.normcase(os.path.realpath(directory)))
+    try:
+        p.relative_to(d)
+        ret = False
+    except ValueError:
+        ret = True
+    return ret
 
 
 def quote_sh_list(cmd):
