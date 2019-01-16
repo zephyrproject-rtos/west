@@ -216,7 +216,7 @@ def test_sections():
                return_value=os.path.realpath('/west_top')):
         # Parsing manifest only, no exception raised
         manifest = Manifest.from_data(yaml.safe_load(content_wrong_west),
-                                      'manifest')
+                                      sections=['manifest'])
     assert manifest.projects[1].path == 'sub/directory'
     assert manifest.projects[1].abspath == \
         os.path.realpath('/west_top/sub/directory')
@@ -237,7 +237,7 @@ def test_sections():
                return_value=os.path.realpath('/west_top')):
         # Parsing west section only, no exception raised
         manifest = Manifest.from_data(yaml.safe_load(content_wrong_manifest),
-                                      'west')
+                                      sections=['west'])
     assert manifest.west_project.url == 'https://example.com'
     assert manifest.west_project.revision == 'abranch'
 
