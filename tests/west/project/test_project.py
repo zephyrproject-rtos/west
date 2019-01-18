@@ -474,15 +474,14 @@ def test_forall(west_init_tmpdir):
     cmd("forall -c 'echo *'")
 
 
-def test_update(west_init_tmpdir):
-    # Test the 'west update' command. It calls through to the same backend
+def test_update_west(west_init_tmpdir):
+    # Test the 'west selfupdate' command. It calls through to the same backend
     # functions that are used for automatic updates and 'west init'
     # reinitialization.
 
     # Clone the net-tools repository
     cmd('clone net-tools')
 
-    net_tools_prev = head_subject('net-tools')
     west_prev = head_subject('.west/west')
 
     # Add commits to the local repos. We need to reconfigure
@@ -492,14 +491,10 @@ def test_update(west_init_tmpdir):
         add_commit(path, 'test-update-local', reconfigure=True)
 
     # Check that resetting the west repository removes the local commit
-    cmd('update --reset-west')
+    cmd('selfupdate --reset-west')
     assert head_subject('zephyr') == 'test-update-local'  # Unaffected
     assert head_subject('.west/west') == west_prev
     assert head_subject('net-tools') == 'test-update-local'  # Unaffected
-
-    # Check that resetting projects removes the local commit
-    cmd('update --reset-projects')
-    assert head_subject('net-tools') == net_tools_prev
 
 
 def test_init_again(west_init_tmpdir):
@@ -520,11 +515,9 @@ def test_reinit(west_init_tmpdir):
     # Test that the bootstrap script reinits with the expected
     # --reset-* flags.
     wrap = west._bootstrap.main.wrap
-    for init_args, wrap_args in (
-        (['-m', 'foo'], ['update', '--reset-manifest', '--reset-projects',
-                         '--reset-west']),
-        (['--mr', 'foo'], ['update', '--reset-manifest', '--reset-projects',
-                           '--reset-west'])):
+    for init_args, wrap_args in ((['-m', 'foo'], ['update', '--reset-west']),
+                                 (['--mr', 'foo'],
+                                  ['update', '--reset-west'])):
 
         west._bootstrap.main.init(init_args)
         assert wrap.called_once_with(*wrap_args)
