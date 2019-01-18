@@ -26,8 +26,7 @@ from west.commands import CommandContextError, external_commands
 from west.commands.build import Build
 from west.commands.flash import Flash
 from west.commands.debug import Debug, DebugServer, Attach
-from west.commands.project import List, Clone, Fetch, Pull, Rebase, Branch, \
-                             Checkout, Diff, Status, SelfUpdate, ForAll, \
+from west.commands.project import List, Diff, Status, SelfUpdate, ForAll, \
                              WestUpdated, PostInit
 from west.manifest import Manifest, MalformedConfig
 from west.util import quote_sh_list, in_multirepo_install
@@ -47,12 +46,6 @@ RUNNER_COMMANDS = {
 PROJECT_COMMANDS = {
     'managing multiple repositories in the installation': [
         List(),
-        Clone(),
-        Fetch(),
-        Pull(),
-        Rebase(),
-        Branch(),
-        Checkout(),
         Diff(),
         Status(),
         SelfUpdate(),
