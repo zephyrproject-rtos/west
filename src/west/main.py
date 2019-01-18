@@ -27,7 +27,7 @@ from west.commands.build import Build
 from west.commands.flash import Flash
 from west.commands.debug import Debug, DebugServer, Attach
 from west.commands.project import List, Diff, Status, SelfUpdate, ForAll, \
-                             WestUpdated, PostInit
+                             WestUpdated, PostInit, Update
 from west.manifest import Manifest, MalformedConfig
 from west.util import quote_sh_list, in_multirepo_install
 
@@ -48,6 +48,7 @@ PROJECT_COMMANDS = {
         List(),
         Diff(),
         Status(),
+        Update(),
         SelfUpdate(),
         ForAll()
     ]

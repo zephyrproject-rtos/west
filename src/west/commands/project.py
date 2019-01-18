@@ -57,22 +57,7 @@ class PostInit(WestCommand):
                   .projects[MANIFEST_PROJECT_INDEX]
 
         _inf(project, 'Creating repository for {name_and_path}')
-        _git_base(project, 'init {abspath}')
-
-        # This remote is only added for the user's convenience. We always fetch
-        # directly from the URL specified in the manifest.
-        _git(project, 'remote add -- {remote_name} {url}')
-        if _is_sha(project.revision):
-            # Don't name the branch after an SHA
-            branch = 'work'
-        else:
-            # Use the last component of the revision, in case it is a
-            # qualified ref (refs/heads/foo and the like)
-            branch = project.revision.split('/')[-1]
-
-        _fetch(project)
-        _create_branch(project, branch)
-        _checkout(project, branch)
+        shutil.move(args.cache, project.abspath)
 
         config.set('manifest', 'path', project.path)
         with open(os.path.join(util.west_dir(), 'config'), 'w') as f:
@@ -206,6 +191,49 @@ class Status(WestCommand):
         for project in _cloned_projects(args):
             _inf(project, 'status of {name_and_path}')
             _git(project, 'status', extra_args=user_args)
+
+
+class Update(WestCommand):
+    # Commit comment
+    def __init__(self):
+        super().__init__(
+            'update',
+            'Update projects descibed in west.yml',
+            _wrap('''
+            Updates all projects according to the manifest file, `west.yml`,
+            in the manifest repository.
+            All projects will be checked out in detached HEAD and the local
+            manifest-rev branch will be reset hard to same HEAD.
+
+            Any local branches will not be altered by this command.
+
+            This command will not touch the manifest repository.
+            '''))
+
+    def do_add_parser(self, parser_adder):
+        return _add_parser(parser_adder, self, _no_update_arg,
+                           _project_list_arg)
+
+    def do_run(self, args, user_args):
+        if args.update:
+            _update_west()
+
+        for project in _projects(args, listed_must_be_cloned=False,
+                                 exclude_manifest=True):
+            branch = _current_branch(project)
+
+            _fetch(project)
+            _checkout_detach(project, _MANIFEST_REV_BRANCH)
+            sha = _sha(project, 'HEAD')
+
+            if branch is not None:
+                _inf(project,
+                     '{name} has been updated and is in detached HEAD.')
+                _inf(project,
+                     'To checkout and rebase \'{}\' onto \'{}\', run:'
+                     .format(branch, sha))
+                _inf(project,
+                     '`git rebase {} {}`'.format(sha, branch))
 
 
 class SelfUpdate(WestCommand):
@@ -362,7 +390,8 @@ def _cloned_projects(args):
         [project for project in _all_projects() if _cloned(project)]
 
 
-def _projects(args, listed_must_be_cloned=True, include_west=False):
+def _projects(args, listed_must_be_cloned=True, include_west=False,
+              exclude_manifest=False):
     # Returns a list of project instances for the projects requested in 'args'
     # (the command-line arguments), in the same order that they were listed by
     # the user. If args.projects is empty, no projects were listed, and all
@@ -379,12 +408,19 @@ def _projects(args, listed_must_be_cloned=True, include_west=False):
     # include_west (default: False):
     #   If True, west may be given in args.projects without raising errors.
     #   It will be included in the return value if args.projects is empty.
+    #
+    # exclude_manifest (default: False):
+    #   If True, the manifest project will not be included in the returned
+    #   list.
 
     projects = _all_projects()
     west_project = _west_project()
 
     if include_west:
         projects.append(west_project)
+
+    if exclude_manifest:
+        projects.pop(MANIFEST_PROJECT_INDEX)
 
     if not args.projects:
         # No projects specified. Return all projects.
@@ -593,6 +629,20 @@ def _create_branch(project, branch):
              .format(branch))
 
 
+def _current_branch(project):
+    # Determine if project is currently on a branch
+    if not _cloned(project):
+        return None
+
+    branch = _git(project, 'rev-parse --abbrev-ref HEAD',
+                  capture_stdout=True).stdout
+
+    if branch == 'HEAD':
+        return None
+    else:
+        return branch
+
+
 def _has_branch(project, branch):
     return _ref_ok(project, 'refs/heads/' + branch)
 
@@ -620,10 +670,22 @@ def _head_ok(project):
            .returncode == 0
 
 
-def _checkout(project, branch):
+def _checkout(project, revision):
     _inf(project,
-         "Checking out branch '{}' in {{name_and_path}}".format(branch))
-    _git(project, 'checkout ' + branch)
+         "Checking out revision '{}' in {{name_and_path}}".format(revision))
+    _git(project, 'checkout ' + revision)
+
+
+def _checkout_detach(project, revision):
+    _inf(project,
+         "Checking out revision '{}' as detached HEAD in {{name_and_path}}"
+         .format(_sha(project, revision)))
+    _git(project, 'checkout --detach --quiet ' + revision)
+    # The checkout above was quiet to avoid multi line spamming when checking
+    # out in detached HEAD in each project.
+    # However the final line 'HEAD is now at ....' is still desired to print.
+    print('HEAD is now at ' + _git(project, 'log --oneline -1',
+                                   capture_stdout=True).stdout)
 
 
 def _west_project():

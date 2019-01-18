@@ -258,7 +258,7 @@ def bootstrap(args):
     finally:
         shutil.rmtree(tempdir, ignore_errors=True)
 
-    print('=== West initialized. Now run "west clone" in {}. ==='.
+    print('=== West initialized. Now run "west update" in {}. ==='.
           format(directory))
 
 

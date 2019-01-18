@@ -157,9 +157,9 @@ def west_init_tmpdir(repos_tmpdir):
 
 
 @pytest.fixture
-def west_clone_tmpdir(west_init_tmpdir):
-    '''Like west_init_tmpdir, but also runs west clone.'''
-    cmd('clone', cwd=str(west_init_tmpdir))
+def west_update_tmpdir(west_init_tmpdir):
+    '''Like west_init_tmpdir, but also runs west update.'''
+    cmd('update', cwd=str(west_init_tmpdir))
     return west_init_tmpdir
 
 
@@ -167,13 +167,13 @@ def west_clone_tmpdir(west_init_tmpdir):
 # Test cases
 #
 
-def test_installation(west_clone_tmpdir):
-    # Basic test that west_clone_tmpdir bootstrapped correctly. This
-    # is a basic test of west init and west clone.
+def test_installation(west_update_tmpdir):
+    # Basic test that west_update_tmpdir bootstrapped correctly. This
+    # is a basic test of west init and west update.
 
     # Make sure the expected files and directories exist in the right
     # places.
-    wct = west_clone_tmpdir
+    wct = west_update_tmpdir
     assert wct.check(dir=1)
     assert wct.join('subdir', 'Kconfiglib').check(dir=1)
     assert wct.join('subdir', 'Kconfiglib', '.git').check(dir=1)
@@ -188,7 +188,7 @@ def test_installation(west_clone_tmpdir):
     assert wct.join('zephyr', 'subsys', 'bluetooth', 'code.c').check(file=1)
 
 
-def test_list(west_clone_tmpdir):
+def test_list(west_update_tmpdir):
     # Projects shall be listed in the order they appear in the manifest.
     # Check the behavior for some format arguments of interest as well.
     actual = cmd('list -f "{name} {revision} {path} {cloned} {clone_depth}"')
@@ -208,10 +208,10 @@ def test_diff(west_init_tmpdir):
 
     # Neither should it fail after fetching one or both projects
 
-    cmd('clone net-tools')
+    cmd('update net-tools')
     cmd('diff')
 
-    cmd('clone Kconfiglib')
+    cmd('update Kconfiglib')
     cmd('diff --cached')  # Pass a custom flag too
 
 
@@ -224,10 +224,10 @@ def test_status(west_init_tmpdir):
 
     # Neither should it fail after fetching one or both projects
 
-    cmd('clone net-tools')
+    cmd('update net-tools')
     cmd('status')
 
-    cmd('clone Kconfiglib')
+    cmd('update Kconfiglib')
     cmd('status --long')  # Pass a custom flag too
 
 
@@ -241,10 +241,10 @@ def test_forall(west_init_tmpdir):
 
     # Neither should it fail after cloning one or both projects
 
-    cmd('clone net-tools')
+    cmd('update net-tools')
     cmd("forall -c 'echo *'")
 
-    cmd('clone Kconfiglib')
+    cmd('update Kconfiglib')
     cmd("forall -c 'echo *'")
 
 
@@ -253,8 +253,8 @@ def test_update_west(west_init_tmpdir):
     # functions that are used for automatic updates and 'west init'
     # reinitialization.
 
-    # Clone the net-tools repository
-    cmd('clone net-tools')
+    # update the net-tools repository
+    cmd('update net-tools')
 
     west_prev = head_subject('.west/west')
 
@@ -269,6 +269,69 @@ def test_update_west(west_init_tmpdir):
     assert head_subject('zephyr') == 'test-update-local'  # Unaffected
     assert head_subject('.west/west') == west_prev
     assert head_subject('net-tools') == 'test-update-local'  # Unaffected
+
+
+def test_update_projects(west_init_tmpdir):
+    # Test the 'west update' command. It calls through to the same backend
+    # functions that are used for automatic updates and 'west init'
+    # reinitialization.
+
+    # update all repositories
+    cmd('update')
+
+    # Add commits to the local repos. We need to reconfigure
+    # explicitly as these are clones, and west doesn't handle that for
+    # us.
+    (nt_mr_0, nt_mr_1,
+     nt_head_0, nt_head_1,
+     kl_mr_0, kl_mr_1,
+     kl_head_0, kl_head_1) = update_helper(west_init_tmpdir, 'update')
+
+    assert nt_mr_0 != nt_mr_1, 'failed to update net-tools manifest-rev'
+    assert nt_head_0 != nt_head_1, 'failed to update net-tools HEAD'
+    assert kl_mr_0 != kl_mr_1, 'failed to update kconfiglib manifest-rev'
+    assert kl_head_0 != kl_head_1, 'failed to update kconfiglib HEAD'
+
+
+def test_update_projects_local_branch_commits(west_init_tmpdir):
+    # Test the 'west update' command when working on local branch with local
+    # commits and then updating project to upstream commit.
+    # It calls through to the same backend functions that are used for
+    # automatic updates and 'west init' reinitialization.
+
+    # update all repositories
+    cmd('update')
+
+    # Create a local branch and add commits
+    checkout_branch('net-tools', 'local_net_tools_test_branch', create=True)
+    checkout_branch('subdir/Kconfiglib', 'local_kconfig_test_branch',
+                    create=True)
+    add_commit('net-tools', 'test local branch commit', reconfigure=True)
+    add_commit('subdir/Kconfiglib', 'test local branch commit',
+               reconfigure=True)
+    net_tools_prev = head_subject('net-tools')
+    kconfiglib_prev = head_subject('subdir/Kconfiglib')
+
+    # Add commits to the upstream repos. We need to reconfigure
+    # explicitly as these are clones, and west doesn't handle that for
+    # us.
+    (nt_mr_0, nt_mr_1,
+     nt_head_0, nt_head_1,
+     kl_mr_0, kl_mr_1,
+     kl_head_0, kl_head_1) = update_helper(west_init_tmpdir, 'update')
+
+    assert nt_mr_0 != nt_mr_1, 'failed to update net-tools manifest-rev'
+    assert nt_head_0 != nt_head_1, 'failed to update net-tools HEAD'
+    assert kl_mr_0 != kl_mr_1, 'failed to update kconfiglib manifest-rev'
+    assert kl_head_0 != kl_head_1, 'failed to update kconfiglib HEAD'
+
+    # Verify local branch is still present and untouched
+    assert net_tools_prev != head_subject('net-tools')
+    assert kconfiglib_prev != head_subject('subdir/Kconfiglib')
+    checkout_branch('net-tools', 'local_net_tools_test_branch')
+    checkout_branch('subdir/Kconfiglib', 'local_kconfig_test_branch')
+    assert net_tools_prev == head_subject('net-tools')
+    assert kconfiglib_prev == head_subject('subdir/Kconfiglib')
 
 
 def test_init_again(west_init_tmpdir):
@@ -357,6 +420,17 @@ def add_commit(repo, msg, files=None, reconfigure=True):
     subprocess.check_call(
         [GIT, 'commit', '-a', '--allow-empty', '-m', msg, '--no-verify',
          '--no-gpg-sign', '--no-post-rewrite'], cwd=repo)
+
+
+def checkout_branch(repo, branch, create=False):
+    # Creates a new branch.
+    repo = str(repo)
+
+    # Edit any files as specified by the user and add them to the index.
+    if create:
+        subprocess.check_call([GIT, 'checkout', '-b', branch], cwd=repo)
+    else:
+        subprocess.check_call([GIT, 'checkout', branch], cwd=repo)
 
 
 def check_output(*args, **kwargs):
