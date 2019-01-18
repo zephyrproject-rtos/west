@@ -436,11 +436,11 @@ class Status(WestCommand):
             _git(project, 'status', extra_args=user_args)
 
 
-class Update(WestCommand):
+class SelfUpdate(WestCommand):
     def __init__(self):
         super().__init__(
-            'update',
-            'update the manifest and west repositories',
+            'selfupdate',
+            'selfupdate the west repository',
             _wrap('''
             Updates the manifest repository and/or the West source code
             repository. The remote to update from is taken from the
@@ -463,10 +463,6 @@ class Update(WestCommand):
     def do_add_parser(self, parser_adder):
         return _add_parser(
             parser_adder, self,
-            _arg('--update-west',
-                 dest='update_west',
-                 action='store_true',
-                 help='update the west source code repository'),
             _arg('--reset-west',
                  action='store_true',
                  help='''Like --update-west, but run 'git reset --keep'
@@ -475,28 +471,13 @@ class Update(WestCommand):
                       configuration settings. This is used internally when
                       changing west.remote or west.revision via
                       'west init'.'''),
-            _arg('--reset-projects',
-                 action='store_true',
-                 help='''Fetches upstream data in all projects, then runs 'git
-                      reset --keep' to reset them to the manifest revision.
-                      This is used internally when changing manifest.remote or
-                      manifest.revision via 'west init'.'''))
+                      )
 
     def do_run(self, args, user_args):
-        if not (args.update_west or args.reset_west or
-                args.reset_projects):
-
-            # No arguments is an alias for --update-west
-            _update_west()
-            return
-
         if args.reset_west:
             _update_and_reset_west()
-        elif args.update_west:
+        else:
             _update_west()
-
-        if args.reset_projects:
-            _reset_projects()
 
 
 class ForAll(WestCommand):

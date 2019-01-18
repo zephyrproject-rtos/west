@@ -1,4 +1,5 @@
 # Copyright 2018 Open Source Foundries Limited.
+# Copyright (c) 2019, Nordic Semiconductor ASA
 #
 # SPDX-License-Identifier: Apache-2.0
 
@@ -279,8 +280,7 @@ def reinit(config_path, args):
     print('=== Updated configuration written to {} ==='.format(config_path))
 
     if args.reset:
-        cmd = ['update', '--reset-projects',
-               '--reset-west']
+        cmd = ['update', '--reset-west']
         print("=== Running 'west {}' to update repositories ==="
               .format(' '.join(cmd)))
         wrap(cmd)
