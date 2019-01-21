@@ -7,7 +7,6 @@
 '''
 
 import argparse
-import configparser
 import os
 import platform
 import pykwalify.core
@@ -168,10 +167,9 @@ to handle any resetting yourself.
         west_dir(args.directory)
         sys.exit('West already initialized. Aborting.')
     except WestNotFound:
-        bootstrapping = True
+        pass
 
-    if bootstrapping:
-        bootstrap(args)
+    bootstrap(args)
 
 
 def bootstrap(args):
@@ -232,13 +230,6 @@ def bootstrap(args):
         clone('west repository', west_url, west_rev,
               os.path.join(directory, WEST_DIR, WEST))
 
-        # Create an initial configuration file
-
-        config_path = os.path.join(directory, WEST_DIR, 'config')
-        update_conf(config_path, manifest_url, manifest_rev)
-        print('=== Initial configuration written to {} ==='
-              .format(config_path))
-
         # Call `west post-init <options> --use-cache <tempdir>` to finish up.
         #
         # Note: main west will try to discover zephyr base and fail, as it is
@@ -254,39 +245,6 @@ def bootstrap(args):
 
     print('=== West initialized. Now run "west update" in {}. ==='.
           format(directory))
-
-
-def update_conf(config_path, manifest_url, manifest_rev):
-    '''
-    Creates or updates the configuration file at 'config_path' with the
-    specified values. Values that are None/empty are ignored.
-    '''
-    config = configparser.ConfigParser()
-
-    # This is a no-op if the file doesn't exist, so no need to check
-    config.read(config_path)
-
-    update_key(config, 'manifest', 'remote', manifest_url)
-    update_key(config, 'manifest', 'revision', manifest_rev)
-
-    with open(config_path, 'w') as f:
-        config.write(f)
-
-
-def update_key(config, section, key, value):
-    '''
-    Updates 'key' in section 'section' in ConfigParser 'config', creating
-    'section' if it does not exist.
-
-    If value is None/empty, 'key' is left as-is.
-    '''
-    if not value:
-        return
-
-    if section not in config:
-        config[section] = {}
-
-    config[section][key] = value
 
 
 def hide_file(path):

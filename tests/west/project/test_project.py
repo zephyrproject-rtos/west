@@ -189,7 +189,7 @@ def test_list(west_update_tmpdir):
     # Projects shall be listed in the order they appear in the manifest.
     # Check the behavior for some format arguments of interest as well.
     actual = cmd('list -f "{name} {revision} {path} {cloned} {clone_depth}"')
-    expected = ['zephyr master zephyr (cloned) None',
+    expected = ['zephyr (not set) zephyr (cloned) None',
                 'Kconfiglib zephyr {} (cloned) None'.format(
                     os.path.join('subdir', 'Kconfiglib')),
                 'net-tools master net-tools (cloned) None']
@@ -337,16 +337,6 @@ def test_init_again(west_init_tmpdir):
     with pytest.raises(subprocess.CalledProcessError):
         cmd('init')
 
-
-def test_reinit(west_init_tmpdir):
-    # Basic test of how reinit works in the bootstrapper.
-    #
-    # FIXME: actually verify the intended reinit operation, e.g. by
-    # changing remote manifest branch, reiniting, and checking the
-    # local repositories.
-
-    # Test that the bootstrap script reinits with the expected
-    # --reset-* flags.
     with pytest.raises(subprocess.CalledProcessError):
         cmd('init -m foo')
 

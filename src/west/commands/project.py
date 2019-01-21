@@ -17,6 +17,8 @@ from west import log
 from west import util
 from west.commands import WestCommand
 from west.manifest import Manifest, MalformedManifest, MANIFEST_PROJECT_INDEX
+from urllib.parse import urlparse
+import posixpath
 
 
 # Branch that points to the revision specified in the manifest (which might be
@@ -56,12 +58,15 @@ class PostInit(WestCommand):
         project = Manifest.from_file(os.path.join(args.cache, 'west.yml'))\
                   .projects[MANIFEST_PROJECT_INDEX]
 
+        if project.path is None:
+            project.path = posixpath.basename(urlparse(args.manifest_url).path)
+            project.name = project.path
+        project.revision = args.manifest_rev
+
         _inf(project, 'Creating repository for {name_and_path}')
         shutil.move(args.cache, project.abspath)
 
-        config.set('manifest', 'path', project.path)
-        with open(os.path.join(util.west_dir(), 'config'), 'w') as f:
-            config.write(f)
+        _update_key(config, 'manifest', 'path', project.path)
 
 
 class List(WestCommand):
@@ -868,6 +873,25 @@ def _git_helper(project, cmd, extra_args, cwd, capture_stdout, check):
         stdout = "\n".join(stdout.decode('utf-8').splitlines()).rstrip("\n")
 
     return CompletedProcess(popen.args, popen.returncode, stdout)
+
+
+def _update_key(config, section, key, value):
+    '''
+    Updates 'key' in section 'section' in ConfigParser 'config', creating
+    'section' if it does not exist and write the file afterwards.
+
+    If value is None/empty, 'key' is left as-is.
+    '''
+    if not value:
+        return
+
+    if section not in config:
+        config[section] = {}
+
+    config[section][key] = value
+
+    with open(os.path.join(util.west_dir(), 'config'), 'w') as f:
+        config.write(f)
 
 
 # Some Python shenanigans to be able to set up a context with
