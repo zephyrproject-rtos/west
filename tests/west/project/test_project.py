@@ -5,13 +5,10 @@ import shutil
 import subprocess
 import sys
 import textwrap
-from unittest.mock import patch
 
 import pytest
 
 from west import config
-
-import west._bootstrap.main
 
 GIT = shutil.which('git')
 # Assumes this file is west/tests/west/project/test_project.py, returns
@@ -341,7 +338,6 @@ def test_init_again(west_init_tmpdir):
         cmd('init')
 
 
-@patch('west._bootstrap.main.wrap')
 def test_reinit(west_init_tmpdir):
     # Basic test of how reinit works in the bootstrapper.
     #
@@ -351,14 +347,8 @@ def test_reinit(west_init_tmpdir):
 
     # Test that the bootstrap script reinits with the expected
     # --reset-* flags.
-    wrap = west._bootstrap.main.wrap
-    for init_args, wrap_args in ((['-m', 'foo'], ['update', '--reset-west']),
-                                 (['--mr', 'foo'],
-                                  ['update', '--reset-west'])):
-
-        west._bootstrap.main.init(init_args)
-        assert wrap.called_once_with(*wrap_args)
-        wrap.reset_mock()
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('init -m foo')
 
 
 #

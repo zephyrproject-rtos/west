@@ -158,12 +158,6 @@ to handle any resetting yourself.
              .format(MANIFEST_REV_DEFAULT))
 
     init_parser.add_argument(
-        '--nr', '--no-reset', dest='reset', action='store_false',
-        help='''Suppress the automatic reset of the manifest, west, and project
-             repositories when re-running 'west init' in an existing
-             installation to update the manifest or west URL/revision''')
-
-    init_parser.add_argument(
         'directory', nargs='?', default=None,
         help='''Directory to initialize West in. Missing directories will be
              created automatically. (default: current directory)''')
@@ -171,8 +165,8 @@ to handle any resetting yourself.
     args = init_parser.parse_args(args=argv)
 
     try:
-        reinit(os.path.join(west_dir(args.directory), 'config'), args)
-        bootstrapping = False
+        west_dir(args.directory)
+        sys.exit('West already initialized. Aborting.')
     except WestNotFound:
         bootstrapping = True
 
@@ -260,30 +254,6 @@ def bootstrap(args):
 
     print('=== West initialized. Now run "west update" in {}. ==='.
           format(directory))
-
-
-def reinit(config_path, args):
-    '''
-    Reinitialize an existing installation.
-
-    This updates the west/config configuration file, and optionally resets the
-    manifest, west, and project repositories to the new revision.
-    '''
-    manifest_url = args.manifest_url
-
-    if not (manifest_url or args.manifest_rev):
-        sys.exit('West already initialized. Please pass any settings you '
-                 'want to change.')
-
-    update_conf(config_path, manifest_url, args.manifest_rev)
-
-    print('=== Updated configuration written to {} ==='.format(config_path))
-
-    if args.reset:
-        cmd = ['update', '--reset-west']
-        print("=== Running 'west {}' to update repositories ==="
-              .format(' '.join(cmd)))
-        wrap(cmd)
 
 
 def update_conf(config_path, manifest_url, manifest_rev):
