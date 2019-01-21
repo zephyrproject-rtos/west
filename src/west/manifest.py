@@ -21,8 +21,6 @@ import os
 import configparser
 import pykwalify.core
 import yaml
-from urllib.parse import urlparse
-import posixpath
 
 from west import util, log
 from west.config import config
@@ -49,7 +47,7 @@ def manifest_path():
         return os.path.join(util.west_topdir(),
                             config.get('manifest', 'path'),
                             'west.yml')
-    except configparser.NoOptionError as e:
+    except (configparser.NoOptionError, configparser.NoSectionError) as e:
         raise MalformedConfig('missing key: \'{}\' in west config file'
                               .format(e.args[0])) from e
 
@@ -203,21 +201,14 @@ class Manifest:
 
         manifest = data.get('manifest')
 
-        try:
-            url = config.get('manifest', 'remote')
-            revision = config.get('manifest', 'revision')
-        except configparser.NoOptionError as e:
-            raise MalformedConfig('missing key: \'{}\' in west config file'
-                                  .format(e.args[0])) from e
-
-        name = posixpath.basename(urlparse(url).path)
+        path = config.get('manifest', 'path', fallback=None)
 
         self_tag = manifest.get('self')
-        path = self_tag.get('path') if self_tag else name
+        if path is None:
+            path = self_tag.get('path') if self_tag else None
         west_commands = self_tag.get('west-commands') if self_tag else None
 
-        project = SpecialProject(name, revision=revision, path=path, url=url,
-                                 west_commands=west_commands)
+        project = SpecialProject(path, path=path, west_commands=west_commands)
         projects.insert(MANIFEST_PROJECT_INDEX, project)
 
         # Map from each remote's name onto that remote's data in the manifest.
@@ -417,7 +408,7 @@ class SpecialProject(Project):
 
     Projects are neither comparable nor hashable.'''
 
-    def __init__(self, name, path=None, revision=None, url=None,
+    def __init__(self, name, path=None, revision='(not set)', url='(not set)',
                  west_commands=None):
         '''Specify a Special Project by name, and url, and optional information.
 

@@ -20,14 +20,24 @@ def config_file_project_setup(tmpdir):
     tmpdir.join('.west/.west_topdir').ensure()
     tmpdir.join('.west/config').write('''
 [manifest]
-remote = https://example0.com/manifestproject
-revision = master
+path = manifestproject
 ''')
 
     # Switch to the top-level West installation directory
     tmpdir.chdir()
 
     config.read_config()
+
+    return tmpdir
+
+@pytest.fixture
+def project_setup(tmpdir):
+    tmpdir.join('.west/.west_topdir').ensure()
+
+    # Switch to the top-level West installation directory
+    tmpdir.chdir()
+
+    config.config.remove_section('manifest')
 
     return tmpdir
 
@@ -67,9 +77,7 @@ def test_no_defaults(config_file_project_setup):
     with patch('west.util.west_topdir', return_value='/west_top'):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
-        expected = [SpecialProject('manifestproject', path='manifestproject',
-                                   revision='master',
-                                   url='https://example0.com/manifestproject'),
+        expected = [SpecialProject('manifestproject', path='manifestproject'),
                     Project('testproject1', r1, None, path='testproject1',
                             clone_depth=None, revision='rev1'),
                     Project('testproject2', r2, None, path='testproject2',
@@ -84,7 +92,7 @@ def test_no_defaults(config_file_project_setup):
     assert all(p.abspath == os.path.realpath(os.path.join('/west_top', p.path))
                for p in manifest.projects)
 
-def test_self_tag(config_file_project_setup):
+def test_self_tag(project_setup):
     # Manifests with self tag reference.
     content = '''\
     manifest:
@@ -110,9 +118,7 @@ def test_self_tag(config_file_project_setup):
     with patch('west.util.west_topdir', return_value='/west_top'):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
-        expected = [SpecialProject('manifestproject', path='mainproject',
-                                   revision='master',
-                                   url='https://example0.com/manifestproject'),
+        expected = [SpecialProject('mainproject', path='mainproject'),
                     Project('testproject1', r1, None, path='testproject1',
                             clone_depth=None, revision='rev1'),
                     Project('testproject2', r2, None, path='testproject2',
@@ -155,9 +161,7 @@ def test_default_clone_depth(config_file_project_setup):
     with patch('west.util.west_topdir', return_value='/west_top'):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
-        expected = [SpecialProject('manifestproject', path='manifestproject',
-                                   revision='master',
-                                   url='https://example0.com/manifestproject'),
+        expected = [SpecialProject('manifestproject', path='manifestproject'),
                     Project('testproject1', r1, d, path='testproject1',
                             clone_depth=None, revision=d.revision),
                     Project('testproject2', r2, d, path='testproject2',
