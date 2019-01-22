@@ -145,21 +145,29 @@ To suppress the reset of the manifest, west, and projects, pass --no-reset.
 With --no-reset, only the configuration file will be updated, and you will have
 to handle any resetting yourself.
 ''')
-
-    init_parser.add_argument(
+    mutualex_group = init_parser.add_mutually_exclusive_group()
+    mutualex_group.add_argument(
         '-m', '--manifest-url',
         help='Manifest repository URL (default: {})'
              .format(MANIFEST_URL_DEFAULT))
 
+    mutualex_group.add_argument(
+        '-l', '--local', action='store_true',
+        help='''Use an existing local manifest repository directly. The local
+             repository will not be modified in any way. Cannot be combined
+             with --manifest-url and --manifest-rev''')
     init_parser.add_argument(
         '--mr', '--manifest-rev', dest='manifest_rev',
-        help='Manifest revision to fetch (default: {})'
+        help='''Manifest revision to fetch (default: {}). Cannot be combined
+             with --local'''
              .format(MANIFEST_REV_DEFAULT))
 
     init_parser.add_argument(
         'directory', nargs='?', default=None,
-        help='''Directory to initialize West in. Missing directories will be
-             created automatically. (default: current directory)''')
+        help='''Directory to initialize West in, unless the -l option is
+             provided, in which case this is the local path to an existing
+             manifest repository. Missing directories will be created
+             automatically. (default: current directory)''')
 
     args = init_parser.parse_args(args=argv)
 
@@ -169,16 +177,47 @@ to handle any resetting yourself.
     except WestNotFound:
         pass
 
-    bootstrap(args)
+    if args.local:
+        if args.manifest_rev is not None:
+            sys.exit('west init: error: argument --mr/--manifest-rev: not '
+                     'allowed with argument -l/--local')
+        initialize_west(args)
+    else:
+        bootstrap(args)
+
+
+def initialize_west(args):
+    '''Initialize a West installation in existing project.'''
+    manifest_dir = args.directory or os.getcwd()
+    manifest_dir = os.path.abspath(manifest_dir)
+    directory = os.path.dirname(manifest_dir)
+
+    manifest_file = os.path.join(manifest_dir, 'west.yml')
+    if not os.path.exists(manifest_file):
+        sys.exit('Cannot initialize in {}\nNo \'west.yml\' found in {}'.format(
+            directory, manifest_dir))
+
+    print('Initializing in', directory)
+    clone_west(manifest_file, directory)
+
+    # Call `west post-init <options> --local <localdir>` to finish up.
+    #
+    # Note: main west will try to discover zephyr base and fail, as it is
+    # not fully initialized at this time.
+    # Thus a dummy zephyr_base is provided.
+    os.chdir(directory)
+    cmd = ['--zephyr-base', directory, 'post-init', '--local',
+           os.path.abspath(manifest_dir)]
+    wrap(cmd)
+
+    print('=== West initialized. Now run "west update" in {}. ==='.
+          format(directory))
 
 
 def bootstrap(args):
     '''Bootstrap a new manifest + West installation.'''
 
-    west_url = WEST_URL_DEFAULT
     manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
-
-    west_rev = WEST_REV_DEFAULT
     manifest_rev = args.manifest_rev or MANIFEST_REV_DEFAULT
 
     directory = args.directory or os.getcwd()
@@ -206,29 +245,7 @@ def bootstrap(args):
         clone('manifest repository', manifest_url, manifest_rev, tempdir,
               exist_ok=True)
         # Parse the manifest and look for a section named "west"
-        manifest_file = os.path.join(tempdir, 'west.yml')
-        with open(manifest_file, 'r') as f:
-            data = yaml.safe_load(f.read())
-
-        if 'west' in data:
-            wdata = data['west']
-            try:
-                pykwalify.core.Core(
-                    source_data=wdata,
-                    schema_files=[_SCHEMA_PATH]
-                ).validate()
-            except pykwalify.errors.SchemaError as e:
-                sys.exit("Error: Failed to parse manifest file '{}': {}"
-                         .format(manifest_file, e))
-
-            if 'url' in wdata:
-                west_url = wdata['url']
-            if 'revision' in wdata:
-                west_rev = wdata['revision']
-
-        print("cloning {} at revision {}".format(west_url, west_rev))
-        clone('west repository', west_url, west_rev,
-              os.path.join(directory, WEST_DIR, WEST))
+        clone_west(os.path.join(tempdir, 'west.yml'), directory)
 
         # Call `west post-init <options> --use-cache <tempdir>` to finish up.
         #
@@ -237,14 +254,42 @@ def bootstrap(args):
         # Thus a dummy zephyr_base is provided.
         os.chdir(directory)
         cmd = ['--zephyr-base', directory, 'post-init', '--manifest-url',
-               manifest_url, '--manifest-rev', manifest_rev, '--use-cache',
-               tempdir]
+               manifest_url, '--use-cache', tempdir]
         wrap(cmd)
     finally:
         shutil.rmtree(tempdir, ignore_errors=True)
 
     print('=== West initialized. Now run "west update" in {}. ==='.
           format(directory))
+
+
+def clone_west(manifest_file, directory):
+    west_url = WEST_URL_DEFAULT
+    west_rev = WEST_REV_DEFAULT
+
+    # Parse the manifest and look for a section named "west"
+    with open(manifest_file, 'r') as f:
+        data = yaml.safe_load(f.read())
+
+    if 'west' in data:
+        wdata = data['west']
+        try:
+            pykwalify.core.Core(
+                source_data=wdata,
+                schema_files=[_SCHEMA_PATH]
+            ).validate()
+        except pykwalify.errors.SchemaError as e:
+            sys.exit("Error: Failed to parse manifest file '{}': {}"
+                     .format(manifest_file, e))
+
+        if 'url' in wdata:
+            west_url = wdata['url']
+        if 'revision' in wdata:
+            west_rev = wdata['revision']
+
+    print("cloning {} at revision {}".format(west_url, west_rev))
+    clone('west repository', west_url, west_rev,
+          os.path.join(directory, WEST_DIR, WEST))
 
 
 def hide_file(path):

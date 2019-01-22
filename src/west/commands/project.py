@@ -44,29 +44,34 @@ class PostInit(WestCommand):
             _arg('--manifest-url',
                  metavar='URL',
                  help='Manifest repository URL'),
-            _arg('--manifest-rev',
-                 metavar='REVISION',
-                 help='Manifest revision to fetch'),
             _arg('--use-cache',
                  dest='cache',
                  metavar='CACHE',
-                 required=True,
                  help='''Use cached repo at location CACHE'''),
+            _arg('--local',
+                 metavar='LOCAL',
+                 help='''Use local repo at location LOCAL'''),
             _project_list_arg)
 
     def do_run(self, args, user_args):
-        project = Manifest.from_file(os.path.join(args.cache, 'west.yml'))\
-                  .projects[MANIFEST_PROJECT_INDEX]
+        manifest_file = os.path.join(args.local or args.cache, 'west.yml')
 
-        if project.path is None:
-            project.path = posixpath.basename(urlparse(args.manifest_url).path)
-            project.name = project.path
-        project.revision = args.manifest_rev
+        project = Manifest.from_file(manifest_file)\
+            .projects[MANIFEST_PROJECT_INDEX]
 
-        _inf(project, 'Creating repository for {name_and_path}')
-        shutil.move(args.cache, project.abspath)
+        if args.local is not None:
+            rel_manifest = os.path.relpath(args.local, util.west_topdir())
+            _update_key(config, 'manifest', 'path', rel_manifest)
+        else:
+            if project.path is None:
+                url_path = urlparse(args.manifest_url).path
+                project.path = posixpath.basename(url_path)
+                project.name = project.path
 
-        _update_key(config, 'manifest', 'path', project.path)
+            _inf(project, 'Creating repository for {name_and_path}')
+            shutil.move(args.cache, project.abspath)
+
+            _update_key(config, 'manifest', 'path', project.path)
 
 
 class List(WestCommand):
