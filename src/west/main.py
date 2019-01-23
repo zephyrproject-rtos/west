@@ -269,6 +269,9 @@ def add_ext_command_parser(subparser_gen, spec):
     # will be added dynamically as needed later if the command is
     # invoked. We prevent help from being added because the default
     # help printer calls sys.exit(), which is not what we want.
+    #
+    # This strategy has an issue we hack around in
+    # ext_command_handler() below.
     parser = subparser_gen.add_parser(spec.name, add_help=False)
     return parser
 
@@ -287,6 +290,13 @@ def ext_command_handler(subparser_gen, spec, argv, *ignored):
     command = spec.factory()
     parser = command.add_parser(subparser_gen)
     args, unknown = parser.parse_known_args()
+    # HACK: for some reason, the command name is showing up as the
+    # first unknown argument when we use add_parser() above as if it
+    # were a builtin command. It's probably due to the way we cheat in
+    # add_ext_command_parser() above. Just drop the first unknown
+    # argument for now; making the hack self-contained to these two
+    # functions.
+    unknown.pop(0)
     command_handler(command, args, unknown)
 
 
