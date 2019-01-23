@@ -224,7 +224,8 @@ def _commands_module_from_file(command_name, file):
     # west.commands.ext.<command_name>, so the name must be a
     # non-keyword identifier. This module object is returned from a
     # cache if the same file is ever imported again, to avoid a double
-    # import in case the file maintains module-level state.
+    # import in case the file maintains module-level state or defines
+    # multiple commands.
     #
     # (This shouldn't be a problem for west itself since main.py
     # executes at most one WestCommand -- and creates at most one
@@ -285,6 +286,11 @@ class _ExtFactory:
         self.attr = attr
 
     def __call__(self):
+        # Append the python file's directory to sys.path. This lets
+        # its code import helper modules in a natural way.
+        py_dir = os.path.dirname(self.py_file)
+        sys.path.append(py_dir)
+
         # Load the module containing the command. Convert only
         # expected exceptions to BadExternalCommand.
         try:
