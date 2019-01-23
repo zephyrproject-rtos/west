@@ -23,28 +23,13 @@ import textwrap
 from west import log
 from west import config
 from west.commands import CommandContextError, external_commands
-from west.commands.build import Build
-from west.commands.flash import Flash
-from west.commands.debug import Debug, DebugServer, Attach
 from west.commands.project import List, Diff, Status, SelfUpdate, ForAll, \
                              WestUpdated, PostInit, Update
 from west.manifest import Manifest, MalformedConfig
-from west.util import quote_sh_list, in_multirepo_install
-
-IN_MULTIREPO_INSTALL = in_multirepo_install(os.path.dirname(__file__))
-
-RUNNER_COMMANDS = {
-    'building and running zephyr': [
-        Build(),
-        Flash(),
-        Debug(),
-        DebugServer(),
-        Attach()
-    ]
-}
+from west.util import quote_sh_list
 
 PROJECT_COMMANDS = {
-    'managing multiple repositories in the installation': [
+    'commands for managing multiple git repositories': [
         List(),
         Diff(),
         Status(),
@@ -60,11 +45,8 @@ HIDDEN_COMMANDS = {None: [PostInit()]}
 # Built-in commands in this West. For compatibility with monorepo
 # installations of West within the Zephyr tree, we only expose the
 # project commands if this is a multirepo installation.
-BUILTIN_COMMANDS = dict(RUNNER_COMMANDS)
-
-if IN_MULTIREPO_INSTALL:
-    BUILTIN_COMMANDS.update(PROJECT_COMMANDS)
-    BUILTIN_COMMANDS.update(HIDDEN_COMMANDS)
+BUILTIN_COMMANDS = dict(PROJECT_COMMANDS)
+BUILTIN_COMMANDS.update(HIDDEN_COMMANDS)
 
 
 BUILTIN_COMMAND_NAMES = set()
@@ -147,21 +129,20 @@ class WestArgumentParser(argparse.ArgumentParser):
             for wo in self.west_optionals:
                 self.format_west_optional(append, wo, width)
 
-            append('',
-                   'built-in west commands used in various situations:')
+            append('')
             for group, commands in BUILTIN_COMMANDS.items():
                 if group is None:
                     # Skip hidden commands.
                     continue
 
-                append(' ' + group + ':')
+                append(group + ':')
                 for command in commands:
                     self.format_command(append, command, width)
                 append('')
 
             if self.west_externals:
                 for path, specs in self.west_externals.items():
-                    append('external commands from project {} at path "{}":'.
+                    append('commands from project {} at path "{}":'.
                            format(specs[0].project.name, path))
                     for spec in specs:
                         self.format_external_spec(append, spec, width)
@@ -188,7 +169,7 @@ class WestArgumentParser(argparse.ArgumentParser):
         self.format_thing_and_help(append, opt_str, help, width)
 
     def format_command(self, append, command, width):
-        thing = '     {}:'.format(command.name)
+        thing = '  {}:'.format(command.name)
         self.format_thing_and_help(append, thing, command.help, width)
 
     def format_external_spec(self, append, spec, width):
@@ -286,11 +267,12 @@ def ext_command_handler(subparser_gen, spec, argv, *ignored):
     args, unknown = parser.parse_known_args()
     # HACK: for some reason, the command name is showing up as the
     # first unknown argument when we use add_parser() above as if it
-    # were a builtin command. It's probably due to the way we cheat in
-    # add_ext_command_parser() above. Just drop the first unknown
-    # argument for now; making the hack self-contained to these two
-    # functions.
-    unknown.pop(0)
+    # were a builtin command sometimes. It's probably due to the way
+    # we cheat in add_ext_command_parser() above. Just drop the first
+    # unknown argument for now; making the hack self-contained to
+    # these two functions.
+    if unknown and unknown[0] == command.name:
+        unknown.pop(0)
     command_handler(command, args, unknown)
 
 
@@ -362,16 +344,13 @@ def print_version_info():
     log.inf('West bootstrapper version: N/A, not run via bootstrapper')
 
     # The running west installation.
-    if IN_MULTIREPO_INSTALL:
-        try:
-            desc = check_output(['git', 'describe', '--tags'],
-                                stderr=DEVNULL,
-                                cwd=os.path.dirname(__file__))
-            west_version = desc.decode(sys.getdefaultencoding()).strip()
-        except CalledProcessError:
-            west_version = 'unknown'
-    else:
-        west_version = 'N/A, monorepo installation'
+    try:
+        desc = check_output(['git', 'describe', '--tags'],
+                            stderr=DEVNULL,
+                            cwd=os.path.dirname(__file__))
+        west_version = desc.decode(sys.getdefaultencoding()).strip()
+    except CalledProcessError:
+        west_version = 'unknown'
     west_src_west = os.path.dirname(__file__)
     print('West repository version: {} ({})'.
           format(west_version,
@@ -437,8 +416,7 @@ def parse_args(argv, externals):
     # until later.
     log.set_verbosity(args.verbose)
 
-    if IN_MULTIREPO_INSTALL:
-        set_zephyr_base(args)
+    set_zephyr_base(args)
 
     if 'handler' not in args:
         west_parser.print_help(file=sys.stderr, top_level=True)
@@ -473,18 +451,15 @@ def main(argv=None):
     # stdout/stderr isn't a terminal
     colorama.init()
 
-    if IN_MULTIREPO_INSTALL:
-        # Read the configuration files
-        config.read_config()
+    # Read the configuration files
+    config.read_config()
 
-        # Load any external command specs. If the config file isn't
-        # fully set up yet, ignore the error. This allows west init to
-        # work properly.
-        try:
-            externals = get_external_commands()
-        except MalformedConfig:
-            externals = {}
-    else:
+    # Load any external command specs. If the config file isn't
+    # fully set up yet, ignore the error. This allows west init to
+    # work properly.
+    try:
+        externals = get_external_commands()
+    except MalformedConfig:
         externals = {}
 
     if argv is None:
