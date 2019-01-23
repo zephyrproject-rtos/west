@@ -83,19 +83,3 @@ def west_topdir(start=None):
             raise WestNotFound('Could not find a West installation '
                                'in this or any parent directory')
         cur_dir = parent_dir
-
-
-def in_multirepo_install(start=None):
-    '''Returns True iff the path ``start`` is in a multi-repo installation.
-
-    If start is not given, it defaults to the current working directory.
-
-    This is equivalent to checking if west_dir() raises an exception
-    when given the same start kwarg.
-    '''
-    try:
-        west_topdir(start)
-        result = True
-    except WestNotFound:
-        result = False
-    return result
