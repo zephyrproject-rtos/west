@@ -341,6 +341,59 @@ def test_init_again(west_init_tmpdir):
         cmd('init -m foo')
 
 
+def test_init_local_manifest_project(repos_tmpdir):
+    # Do a local clone of manifest repo
+    zephyr_install_dir = repos_tmpdir.join('west_installation', 'zephyr')
+    clone(str(repos_tmpdir.join('repos', 'zephyr')),
+          str(zephyr_install_dir))
+
+    cmd('init -l "{}"'.format(str(zephyr_install_dir)))
+
+    # Verify Zephyr and .west/west has been installed during init -l
+    # but not projects
+    zid = repos_tmpdir.join('west_installation')
+    assert zid.check(dir=1)
+    assert zid.join('.west', 'west').check(dir=1)
+    assert zid.join('subdir', 'Kconfiglib').check(dir=0)
+    assert zid.join('net-tools').check(dir=0)
+    assert zid.join('zephyr').check(dir=1)
+    assert zid.join('zephyr', '.git').check(dir=1)
+    assert zid.join('zephyr', 'CODEOWNERS').check(file=1)
+    assert zid.join('zephyr', 'include', 'header.h').check(file=1)
+    assert zid.join('zephyr', 'subsys', 'bluetooth', 'code.c').check(file=1)
+
+    cmd('update', cwd=str(zid))
+    # The projects should be installled now
+    assert zid.check(dir=1)
+    assert zid.join('subdir', 'Kconfiglib').check(dir=1)
+    assert zid.join('net-tools').check(dir=1)
+    assert zid.join('subdir', 'Kconfiglib').check(dir=1)
+    assert zid.join('subdir', 'Kconfiglib', '.git').check(dir=1)
+    assert zid.join('subdir', 'Kconfiglib', 'kconfiglib.py').check(file=1)
+    assert zid.join('net-tools').check(dir=1)
+    assert zid.join('net-tools', '.git').check(dir=1)
+    assert zid.join('net-tools', 'qemu-script.sh').check(file=1)
+
+
+def test_init_local_already_initialized_failure(west_init_tmpdir):
+    # Test that 'west init -l' on an initialized tmpdir errors out
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('init -l "{}"'.format(str(west_init_tmpdir)))
+
+
+def test_init_local_missing_west_yml_failure(repos_tmpdir):
+    # Test that 'west init -l' on repo without a 'west.yml' fails
+
+    # Do a local clone of manifest repo
+    zephyr_install_dir = repos_tmpdir.join('west_installation', 'zephyr')
+    clone(str(repos_tmpdir.join('repos', 'zephyr')),
+          str(zephyr_install_dir))
+    os.remove(str(zephyr_install_dir.join('west.yml')))
+
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('init -l "{}"'.format(str(zephyr_install_dir)))
+
+
 #
 # Helper functions used by the test cases and fixtures.
 #
@@ -400,6 +453,13 @@ def add_commit(repo, msg, files=None, reconfigure=True):
     subprocess.check_call(
         [GIT, 'commit', '-a', '--allow-empty', '-m', msg, '--no-verify',
          '--no-gpg-sign', '--no-post-rewrite'], cwd=repo)
+
+
+def clone(repo, dst):
+    # Creates a new branch.
+    repo = str(repo)
+
+    subprocess.check_call([GIT, 'clone', repo, dst])
 
 
 def checkout_branch(repo, branch, create=False):
