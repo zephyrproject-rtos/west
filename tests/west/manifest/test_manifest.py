@@ -196,7 +196,7 @@ def test_path():
     with patch('west.util.west_topdir',
                return_value=os.path.realpath('/west_top')):
         manifest = Manifest.from_data(yaml.safe_load(content))
-    assert manifest.projects[1].path == 'sub/directory'
+    assert manifest.projects[1].path == 'sub' + os.path.sep + 'directory'
     assert manifest.projects[1].abspath == \
         os.path.realpath('/west_top/sub/directory')
 
@@ -222,7 +222,7 @@ def test_sections():
         # Parsing manifest only, no exception raised
         manifest = Manifest.from_data(yaml.safe_load(content_wrong_west),
                                       sections=['manifest'])
-    assert manifest.projects[1].path == 'sub/directory'
+    assert manifest.projects[1].path == 'sub' + os.path.sep + 'directory'
     assert manifest.projects[1].abspath == \
         os.path.realpath('/west_top/sub/directory')
     content_wrong_manifest = '''\
