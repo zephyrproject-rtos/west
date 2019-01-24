@@ -170,6 +170,10 @@ def _ext_specs(project):
             'west-commands file {} escapes project path {}'.
             format(project.west_commands, project.path))
 
+    # Project may not be cloned yet.
+    if not os.path.exists(spec_file):
+        return []
+
     # Load the spec file and check the schema.
     with open(spec_file, 'r') as f:
         try:
