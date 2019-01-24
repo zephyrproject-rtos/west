@@ -67,6 +67,7 @@ def repos_tmpdir(tmpdir):
           path: subdir/Kconfiglib
         - name: net-tools
           clone_depth: 1
+          west-commands: scripts/west-commands.yml
       self:
         path: zephyr
     '''
@@ -102,6 +103,7 @@ def repos_tmpdir(tmpdir):
                             revision: zephyr
                             path: subdir/Kconfiglib
                           - name: net-tools
+                            west-commands: scripts/west-commands.yml
                         self:
                           path: zephyr
                       '''.format(west=rp['west'], rr=str(rr)))})
@@ -114,7 +116,29 @@ def repos_tmpdir(tmpdir):
 
     # Initialize the net-tools repository.
     add_commit(rp['net-tools'], 'test net-tools commit',
-               files={'qemu-script.sh': 'echo hello world net-tools\n'})
+               files={'qemu-script.sh': 'echo hello world net-tools\n',
+                      'scripts/west-commands.yml': textwrap.dedent('''\
+                      west-commands:
+                        - file: scripts/test.py
+                          commands:
+                            - name: test
+                              class: Test
+                      '''),
+                      'scripts/test.py': textwrap.dedent('''\
+                      from west.commands import WestCommand
+                      class Test(WestCommand):
+                          def __init__(self):
+                              super(Test, self).__init__(
+                                  'test',
+                                  'test application',
+                                  '')
+                          def do_add_parser(self, parser_adder):
+                              parser = parser_adder.add_parser(self.name)
+                              return parser
+                          def do_run(self, args, ignored):
+                              print('Testing test command 1')
+                      '''),
+                      })
 
     # Initialize the zephyr repository.
     add_commit(rp['zephyr'], 'test zephyr commit',
@@ -393,6 +417,15 @@ def test_init_local_missing_west_yml_failure(repos_tmpdir):
     with pytest.raises(subprocess.CalledProcessError):
         cmd('init -l "{}"'.format(str(zephyr_install_dir)))
 
+
+def test_extension_command_execution(west_init_tmpdir):
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('test')
+
+    cmd('update')
+
+    actual = cmd('test')
+    assert actual == 'Testing test command 1\n'
 
 #
 # Helper functions used by the test cases and fixtures.
