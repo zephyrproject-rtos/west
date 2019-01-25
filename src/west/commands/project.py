@@ -208,7 +208,7 @@ class Update(WestCommand):
     def __init__(self):
         super().__init__(
             'update',
-            'Update projects descibed in west.yml',
+            'update projects described in west.yml',
             _wrap('''
             Updates all projects according to the manifest file, `west.yml`,
             in the manifest repository.
