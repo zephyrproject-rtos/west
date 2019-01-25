@@ -16,7 +16,7 @@ a directory of your choosing::
 
   mkdir zephyrproject && cd zephyrproject
   west init
-  west clone
+  west update
 
 What just happened:
 
@@ -27,9 +27,9 @@ What just happened:
   one supported by the bootstrapper itself; all other commands are
   implemented in the west source repository it clones.
 
-- ``west clone`` clones the repositories in the manifest, creating
+- ``west update`` clones the repositories in the manifest, creating
   working trees in the installation directory. In this case, the
-  bootstrapper notices the command (``clone``) is not ``init``, and
+  bootstrapper notices the command (``update``) is not ``init``, and
   delegates handling to the "main" west implementation in the source
   repository it cloned in the previous step.
 
@@ -82,7 +82,7 @@ Hacking on West
 
 West is distributed as two Python packages:
 
-1. A ``bootstrap`` package, which is distributed via PyPI. Running
+1. A ``west._bootstrap`` package, which is distributed via PyPI. Running
    ``pip3 install west`` installs this **bootstrapper package only**.
 2. The "main" ``west`` package, which is fetched by the bootstrapper
    when ``west init`` is run.
@@ -95,6 +95,9 @@ This somewhat unusual arrangement is because:
   with non-upstream distributions of Zephyr.
 - West is experimental and is not stable. Users need to stay in sync
   with upstream, and this allows west to automatically update itself.
+  Once things have settled down, we plan on making the pip package
+  contain the core west and the multi-repo commands, with other features
+  to be provided by projects in extension commands, but time will tell.
 
 Using a Custom "Main" West
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -105,9 +108,10 @@ manifest ``.yml`` file that points to a ``url`` and ``revision`` of your choice.
 To use another manifest repository (optionally with ``--mr
 some-manifest-branch``)::
 
-  west init -m https://example.com/your-manifest-repository.git
+  west init -m https://example.com/your-manifest-repository.git zephyrproject
 
-After ``init`` time, you can hack on the west tree in ``zephyrproject``.
+After ``init`` time, you can hack on the west tree in
+``zephyrproject/.west/west``.
 
 Using a Custom West Bootstrapper
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
