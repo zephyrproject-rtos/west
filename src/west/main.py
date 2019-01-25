@@ -140,10 +140,20 @@ class WestArgumentParser(argparse.ArgumentParser):
                     self.format_command(append, command, width)
                 append('')
 
+            # TODO we may want to be more aggressive about loading
+            # command modules by default: the current implementation
+            # prevents us from formatting one-line help here.
+            #
+            # Perhaps a commands.external_paranoid that if set, uses
+            # thunks, and otherwise just loads the modules and
+            # provides help for each command.
+            #
+            # This has its own wrinkle: we can't let a failed
+            # import break the built-in commands.
             if self.west_externals:
                 for path, specs in self.west_externals.items():
-                    append('commands from project {} at path "{}":'.
-                           format(specs[0].project.name, path))
+                    append('commands from project at "{}":'.
+                           format(path))
                     for spec in specs:
                         self.format_external_spec(append, spec, width)
                     append('')
