@@ -427,6 +427,159 @@ def test_extension_command_execution(west_init_tmpdir):
     actual = cmd('test')
     assert actual == 'Testing test command 1\n'
 
+
+def test_extension_command_multiproject(repos_tmpdir):
+    # Test to ensure that multiple projects can define extension commands and
+    # that those are correctly presented and executed.
+    rr = repos_tmpdir.join('repos')
+    remote_kconfiglib = str(rr.join('Kconfiglib'))
+    remote_zephyr = str(rr.join('zephyr'))
+    remote_west = str(rr.join('west'))
+
+    # Update the manifest to specify extension commands in Kconfiglib.
+    add_commit(remote_zephyr, 'test added extension command',
+               files={'west.yml': textwrap.dedent('''\
+                      west:
+                        url: file://{west}
+                      manifest:
+                        defaults:
+                          remote: test-local
+
+                        remotes:
+                          - name: test-local
+                            url-base: file://{rr}
+
+                        projects:
+                          - name: Kconfiglib
+                            revision: zephyr
+                            path: subdir/Kconfiglib
+                            west-commands: scripts/west-commands.yml
+                          - name: net-tools
+                            west-commands: scripts/west-commands.yml
+                        self:
+                          path: zephyr
+                      '''.format(west=remote_west, rr=str(rr)))})
+
+    # Add an extension command to the Kconfiglib remote.
+    add_commit(remote_kconfiglib, 'add west commands',
+               files={'scripts/west-commands.yml': textwrap.dedent('''\
+                      west-commands:
+                        - file: scripts/test.py
+                          commands:
+                            - name: kconfigtest
+                              class: Test
+                      '''),
+                      'scripts/test.py': textwrap.dedent('''\
+                      from west.commands import WestCommand
+                      class Test(WestCommand):
+                          def __init__(self):
+                              super(Test, self).__init__(
+                                  'kconfigtest',
+                                  'Kconfig test application',
+                                  '')
+                          def do_add_parser(self, parser_adder):
+                              parser = parser_adder.add_parser(self.name)
+                              return parser
+                          def do_run(self, args, ignored):
+                              print('Testing kconfig test')
+                      '''),
+                      })
+    west_tmpdir = repos_tmpdir.join('west_installation')
+    cmd('init -m "{}" "{}"'.format(str(repos_tmpdir.join('repos', 'zephyr')),
+                                   str(west_tmpdir)))
+    west_tmpdir.chdir()
+    config.read_config()
+    cmd('update')
+
+    help_text = cmd('-h')
+    expected = textwrap.dedent('''\
+        commands from project at "subdir/Kconfiglib":
+          kconfigtest
+
+        commands from project at "net-tools":
+          test
+
+        Run "west <command> -h" for help on each command.''')
+
+    assert expected in help_text
+
+    actual = cmd('test')
+    assert actual == 'Testing test command 1\n'
+
+    actual = cmd('kconfigtest')
+    assert actual == 'Testing kconfig test\n'
+
+
+def test_extension_command_duplicate(repos_tmpdir):
+    # Test to ensure that in case to subprojects introduces same command, it
+    # will print a warning.
+    rr = repos_tmpdir.join('repos')
+    remote_kconfiglib = str(rr.join('Kconfiglib'))
+    remote_zephyr = str(rr.join('zephyr'))
+    remote_west = str(rr.join('west'))
+
+    add_commit(remote_zephyr, 'test added extension command',
+               files={'west.yml': textwrap.dedent('''\
+                      west:
+                        url: file://{west}
+                      manifest:
+                        defaults:
+                          remote: test-local
+
+                        remotes:
+                          - name: test-local
+                            url-base: file://{rr}
+
+                        projects:
+                          - name: Kconfiglib
+                            revision: zephyr
+                            path: subdir/Kconfiglib
+                            west-commands: scripts/west-commands.yml
+                          - name: net-tools
+                            west-commands: scripts/west-commands.yml
+                        self:
+                          path: zephyr
+                      '''.format(west=remote_west, rr=str(rr)))})
+
+    # Initialize the net-tools repository.
+    add_commit(remote_kconfiglib, 'add west commands',
+               files={'scripts/west-commands.yml': textwrap.dedent('''\
+                      west-commands:
+                        - file: scripts/test.py
+                          commands:
+                            - name: test
+                              class: Test
+                      '''),
+                      'scripts/test.py': textwrap.dedent('''\
+                      from west.commands import WestCommand
+                      class Test(WestCommand):
+                          def __init__(self):
+                              super(Test, self).__init__(
+                                  'test',
+                                  'test application',
+                                  '')
+                          def do_add_parser(self, parser_adder):
+                              parser = parser_adder.add_parser(self.name)
+                              return parser
+                          def do_run(self, args, ignored):
+                              print('Testing kconfig test command')
+                      '''),
+                      })
+    west_tmpdir = repos_tmpdir.join('west_installation')
+    cmd('init -m "{}" "{}"'.format(str(repos_tmpdir.join('repos', 'zephyr')),
+                                   str(west_tmpdir)))
+    west_tmpdir.chdir()
+    config.read_config()
+    cmd('update')
+
+    actual = cmd('test', stderr=subprocess.STDOUT)
+    warning = 'WARNING: ignoring project net-tools external command "test";'\
+              ' command "test" already defined as extension command\n'
+    command_out = 'Testing kconfig test command\n'
+
+    assert actual == warning + command_out
+
+
 #
 # Helper functions used by the test cases and fixtures.
 #
@@ -568,7 +721,7 @@ def mirror_west_repo(dst):
     add_commit(wut, 'west under test')
 
 
-def cmd(cmd, cwd=None):
+def cmd(cmd, cwd=None, stderr=None):
     # Run a west command in a directory (cwd defaults to os.getcwd()).
     #
     # This helper takes the command as a string, which is less clunky
@@ -584,7 +737,7 @@ def cmd(cmd, cwd=None):
     # happen fresh.
 
     try:
-        return check_output(shlex.split('west ' + cmd), cwd=cwd)
+        return check_output(shlex.split('west ' + cmd), cwd=cwd, stderr=stderr)
     except subprocess.CalledProcessError:
         print('cmd: west:', shutil.which('west'), file=sys.stderr)
         raise

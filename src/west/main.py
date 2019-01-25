@@ -152,8 +152,14 @@ class WestArgumentParser(argparse.ArgumentParser):
             # import break the built-in commands.
             if self.west_externals:
                 for path, specs in self.west_externals.items():
+                    # This may occur in case a project defines commands already
+                    # defined, in which case it has been filtered out.
+                    if not specs:
+                        continue
+
                     append('commands from project at "{}":'.
                            format(path))
+
                     for spec in specs:
                         self.format_external_spec(append, spec, width)
                     append('')
@@ -440,17 +446,26 @@ def get_external_commands():
         return {}
 
     externals = external_commands()
+    extension_commands = set()
 
-    filtered = []
     for path, specs in externals.items():
-        # Filter out attempts to shadow built-in commands.
+        # Filter out attempts to shadow built-in commands as well as
+        # commands which have names which are already used.
+        filtered = []
         for spec in specs:
             if spec.name in BUILTIN_COMMAND_NAMES:
                 log.wrn('ignoring project {} external command {};'.
                         format(spec.project.name, spec.name),
                         'this is a built in command')
                 continue
+            if spec.name in extension_commands:
+                log.wrn('ignoring project {} external command "{}";'.
+                        format(spec.project.name, spec.name),
+                        'command "{}" already defined as extension command'.
+                        format(spec.name))
+                continue
             filtered.append(spec)
+            extension_commands.add(spec.name)
         externals[path] = filtered
 
     return externals
