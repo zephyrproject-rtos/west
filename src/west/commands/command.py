@@ -121,12 +121,15 @@ class WestCommand(ABC):
 class WestExtCommandSpec:
     '''An object which allows instantiating an external west command.'''
 
-    def __init__(self, name, project, factory):
+    def __init__(self, name, project, help, factory):
         self.name = name
         '''Command name, as known to the user.'''
 
         self.project = project
         '''west.manifest.Project instance which defined the command.'''
+
+        self.help = help
+        '''Help string in west-commands.yml, or a default value.'''
 
         self.factory = factory
         '''"Factory" callable for the command.
@@ -207,8 +210,12 @@ def _ext_specs_from_desc(project, commands_desc):
     for command_desc in commands_desc['commands']:
         name = command_desc['name']
         attr = command_desc.get('class', name)
+        help = command_desc.get(
+            'help',
+            '(no help provided; try "west {} -h")'.
+            format(name))
         factory = _ExtFactory(py_file, name, attr)
-        thunks.append(WestExtCommandSpec(name, project, factory))
+        thunks.append(WestExtCommandSpec(name, project, help, factory))
 
     # Return the thunks for this project.
     return thunks

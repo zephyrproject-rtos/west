@@ -189,7 +189,8 @@ class WestArgumentParser(argparse.ArgumentParser):
         self.format_thing_and_help(append, thing, command.help, width)
 
     def format_external_spec(self, append, spec, width):
-        self.format_thing_and_help(append, '  ' + spec.name, None, width)
+        self.format_thing_and_help(append, '  ' + spec.name + ':',
+                                   spec.help, width)
 
     def format_thing_and_help(self, append, thing, help, width):
         # Format help for some "thing" (arbitrary text) and its
@@ -378,7 +379,7 @@ def parse_args(argv, externals):
     # showing up when West is run via the wrapper
     west_parser = WestArgumentParser(
         prog='west', description='The Zephyr RTOS meta-tool.',
-        epilog='Run "west <command> -h" for help on each command.',
+        epilog='Run "west <command> -h" for detailed help on each command.',
         add_help=False)
 
     # Remember to update scripts/west-completion.bash if you add or remove
