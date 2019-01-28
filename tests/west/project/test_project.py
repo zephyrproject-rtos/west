@@ -220,6 +220,30 @@ def test_list(west_update_tmpdir):
                 'net-tools master net-tools (cloned) None']
     assert actual.splitlines() == expected
 
+    # We should be able to find projects by absolute or relative path
+    # when outside any project. Invalid projects should error out.
+    klib_rel = os.path.join('subdir', 'Kconfiglib')
+    klib_abs = str(west_update_tmpdir.join('subdir', 'Kconfiglib'))
+
+    rel_outside = cmd('list -f "{{name}}" {}'.format(klib_rel)).strip()
+    assert rel_outside == 'Kconfiglib'
+
+    abs_outside = cmd('list -f "{{name}}" {}'.format(klib_abs)).strip()
+    assert abs_outside == 'Kconfiglib'
+
+    rel_inside = cmd('list -f "{name}" .', cwd=klib_abs).strip()
+    assert rel_inside == 'Kconfiglib'
+
+    abs_inside = cmd('list -f "{{name}}" {}'.format(klib_abs),
+                     cwd=klib_abs).strip()
+    assert abs_inside == 'Kconfiglib'
+
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('list NOT_A_PROJECT', cwd=klib_abs)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('list NOT_A_PROJECT')
+
 
 def test_diff(west_init_tmpdir):
     # FIXME: Check output

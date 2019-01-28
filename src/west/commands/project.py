@@ -462,14 +462,11 @@ def _projects(args, listed_must_be_cloned=True, include_west=False,
                     uncloned.append(project.name)
                 break
         else:
-            # The argument is not a project name. See if it is a project
-            # (sub)path.
+            # The argument is not a project name. See if it specifies
+            # an absolute or relative path to a project.
+            proj_arg_norm = normalize(project_arg)
             for project in projects:
-                # The startswith() means we also detect subdirectories of
-                # project repositories. Giving a plain file in the repo will
-                # work here too, but that probably doesn't hurt.
-                if normalize(project_arg).startswith(
-                        normalize(project.abspath)):
+                if proj_arg_norm == normalize(project.abspath):
                     res.append(project)
                     break
             else:
