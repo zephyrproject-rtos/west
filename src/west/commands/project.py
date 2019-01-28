@@ -15,7 +15,7 @@ import textwrap
 from west.config import config
 from west import log
 from west import util
-from west.commands import WestCommand
+from west.commands import WestCommand, CommandError
 from west.manifest import Manifest, MalformedManifest, MANIFEST_PROJECT_INDEX
 from urllib.parse import urlparse
 import posixpath
@@ -212,38 +212,141 @@ class Update(WestCommand):
             _wrap('''
             Updates all projects according to the manifest file, `west.yml`,
             in the manifest repository.
-            All projects will be checked out in detached HEAD and the local
-            manifest-rev branch will be reset hard to same HEAD.
 
-            Any local branches will not be altered by this command.
+            By default:
 
-            This command will not touch the manifest repository.
+            1. West itself is updated to the revision in the manifest
+            file. If revision is a branch, west will update to the tip
+            of the branch.
+
+            2. The local per-project manifest-rev branches (which are
+            managed exclusively by west) will be hard reset to the
+            updated commits fetched from each project's remote.
+
+            3. All projects will have detached HEADs checked out at
+            the manifest-rev commits. Locally checked out branches are
+            unaffected but will no longer be checked out by default.
+            West will print information on how to get back to those
+            branches or update them to the new manifest-rev versions.
+
+            You can avoid 1. using --no-update. You can (sometimes)
+            avoid 3. using --keep-descendants and/or --rebase.
+            See below for more information.
+
+            This command does not change the contents of the manifest
+            repository.
             '''))
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(parser_adder, self, _no_update_arg,
+        return _add_parser(parser_adder, self,
+                           _no_update_arg,
+                           _arg('-k', '--keep-descendants',
+                                action='store_true',
+                                help=_wrap('''
+                                If a local branch is checked out and is a
+                                descendant commit of the new manifest-rev,
+                                then keep that descendant branch checked out
+                                instead of detaching HEAD. This takes priority
+                                over --rebase when possible if both are given.
+                                ''')),
+                           _arg('-r', '--rebase',
+                                action='store_true',
+                                help=_wrap('''
+                                If a local branch is checked out, try
+                                to rebase it onto the new HEAD and
+                                leave the rebased branch checked
+                                out. If this fails, you will need to
+                                clean up the rebase yourself manually.
+                                ''')),
                            _project_list_arg)
 
     def do_run(self, args, user_args):
         if args.update:
             _update_west()
 
+        failed_rebases = []
+
         for project in _projects(args, listed_must_be_cloned=False,
                                  exclude_manifest=True):
-            branch = _current_branch(project)
-
             _fetch(project)
-            _checkout_detach(project, _MANIFEST_REV_BRANCH)
-            sha = _sha(project, 'HEAD')
 
+            branch = _current_branch(project)
+            sha = _sha(project, _MANIFEST_REV_BRANCH)
             if branch is not None:
+                is_ancestor = _is_ancestor_of(project, sha, branch)
+                try_rebase = args.rebase
+            else:
+                # If no branch is checked out, -k and -r don't matter.
+                is_ancestor = False
+                try_rebase = False
+
+            if args.keep_descendants and is_ancestor:
+                # A descendant is currently checked out and -k was
+                # given, so there's nothing more to do.
                 _inf(project,
-                     '{name} has been updated and is in detached HEAD.')
-                _inf(project,
-                     'To checkout and rebase \'{}\' onto \'{}\', run:'
-                     .format(branch, sha))
-                _inf(project,
-                     '`git rebase {} {}`'.format(sha, branch))
+                     'Left branch "{}", a descendant of {}, checked out'.
+                     format(branch, sha))
+            elif try_rebase:
+                # Attempt a rebase. Don't exit the program on error;
+                # instead, append to the list of failed rebases and
+                # continue trying to update the other projects. We'll
+                # tell the user a complete list of errors when we're done.
+                cp = _rebase(project, check=False)
+                if cp.returncode:
+                    failed_rebases.append(project)
+                    _err(project, '{name_and_path} failed to rebase')
+            else:
+                # We can't keep a descendant or rebase, so just check
+                # out the new detached HEAD and print helpful
+                # information about things they can do with any
+                # locally checked out branch.
+                _checkout_detach(project, _MANIFEST_REV_BRANCH)
+                self._post_checkout_help(args, project, branch, sha,
+                                         is_ancestor)
+
+        if failed_rebases:
+            # Avoid printing this message if exactly one project
+            # was specified on the command line.
+            if len(args.projects) != 1:
+                log.err(('The following project{} failed to rebase; '
+                        'see above for details: {}').format(
+                            's' if len(failed_rebases) > 1 else '',
+                            ', '.join(_expand_shorthands(p, '{name_and_path}')
+                                      for p in failed_rebases)))
+            raise CommandError(1)
+
+    def _post_checkout_help(self, args, project, branch, sha,
+                            is_ancestor):
+        # Print helpful information to the user about a project that
+        # might have just left a branch behind.
+
+        if branch is None:
+            # If there was no branch checked out, there are no
+            # additional diagnostics that need emitting.
+            return
+
+        relpath = os.path.relpath(project.abspath)
+        if is_ancestor:
+            # If the branch we just left behind is a descendant of
+            # the new HEAD (e.g. if this is a topic branch the
+            # user is working on and the remote hasn't changed),
+            # print a message that makes it easy to get back,
+            # no matter where in the installation os.getcwd() is.
+            _wrn(project,
+                 ('left behind {{name}} branch "{}"; '
+                  'to fast forward back, use: git -C {} checkout {}').
+                 format(branch, relpath, branch))
+            log.dbg('(To do this automatically in the future,',
+                    'use "west update --keep-descendants".)')
+        else:
+            # Tell the user how they could rebase by hand, and
+            # point them at west update --rebase.
+            _wrn(project,
+                 ('left behind {{name}} branch "{}"; '
+                  'to rebase onto the new HEAD: git -C {} rebase {} {}').
+                 format(branch, relpath, sha, branch))
+            log.dbg('(To do this automatically in the future,',
+                    'use "west update --rebase".)')
 
 
 class SelfUpdate(WestCommand):
@@ -548,15 +651,14 @@ def _fetch(project):
         _git(project, 'checkout --detach {qual_manifest_rev_branch}')
 
 
-def _rebase(project):
+def _rebase(project, **kwargs):
     # Rebases the project against the manifest-rev branch
-
-    if _up_to_date_with(project, _MANIFEST_REV_BRANCH):
-        _inf(project,
-             '{name_and_path} is up-to-date with {manifest_rev_branch}')
-    else:
-        _inf(project, 'Rebasing {name_and_path} to {manifest_rev_branch}')
-        _git(project, 'rebase {qual_manifest_rev_branch}')
+    #
+    # Any kwargs are passed on to the underlying _git() call for the
+    # rebase operation. A CompletedProcess instance is returned for
+    # the git rebase.
+    _inf(project, 'Rebasing {name_and_path} to {manifest_rev_branch}')
+    return _git(project, 'rebase {qual_manifest_rev_branch}', **kwargs)
 
 
 def _sha(project, rev):
@@ -577,8 +679,33 @@ def _up_to_date_with(project, rev):
     # Returns True if all commits in 'rev' are also in HEAD. This is used to
     # check if 'project' needs rebasing. 'revision' can be anything that
     # resolves to a commit.
+    #
+    # This is a special case of _is_ancestor_of() which exists for convenience.
 
-    return _sha(project, rev) == _merge_base(project, 'HEAD', rev)
+    return _is_ancestor_of(project, rev, 'HEAD')
+
+
+def _is_ancestor_of(project, rev1, rev2):
+    # Returns True if rev1 is an ancestor commit of rev2 in the given
+    # project; rev1 and rev2 can be anything that resolves to a
+    # commit. (If rev1 and rev2 refer to the same commit, the return
+    # value is True, i.e. a commit is considered an ancestor of
+    # itself.) Returns False otherwise.
+    returncode = _git(project,
+                      'merge-base --is-ancestor {} {}'.format(rev1, rev2),
+                      check=False).returncode
+
+    if returncode == 0:
+        return True
+    elif returncode == 1:
+        return False
+    else:
+        _wrn(project,
+             ('_is_ancestor_of: {{name_and_path}}: '
+              'git failed with exit code {}; '
+              'treating as if "{}" is not an ancestor of "{}"').
+             format(returncode, rev1, rev2))
+        return False
 
 
 def _cloned(project):
@@ -945,6 +1072,12 @@ def _expand_shorthands(project, s):
                     clone_depth=str(project.clone_depth))
 
 
+def _dbg(project, msg, level):
+    # Like _wrn(), for debug messages
+
+    log.dbg(_expand_shorthands(project, msg), level=level)
+
+
 def _inf(project, msg):
     # Print '=== msg' (to clearly separate it from Git output). Supports the
     # same (foo) shorthands as the git commands.
@@ -961,14 +1094,14 @@ def _wrn(project, msg):
     log.wrn(_expand_shorthands(project, msg))
 
 
-def _dbg(project, msg, level):
-    # Like _wrn(), for debug messages
+def _err(project, msg):
+    # Error with 'msg'. Supports the same (foo) shorthands as the git commands.
 
-    log.dbg(_expand_shorthands(project, msg), level=level)
+    log.err(_expand_shorthands(project, msg))
 
 
 def _die(project, msg):
-    # Like _wrn(), for dying
+    # Like _err(), for dying
 
     log.die(_expand_shorthands(project, msg))
 
