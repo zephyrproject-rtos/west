@@ -17,7 +17,16 @@ from west.manifest import Manifest
 from west.util import escapes_directory
 
 
-class CommandContextError(RuntimeError):
+class CommandError(RuntimeError):
+    '''Indicates that a command failed. The return code attribute
+    specifies the error code to return to the system'''
+
+    def __init__(self, returncode=1):
+        super().__init__()
+        self.returncode = returncode
+
+
+class CommandContextError(CommandError):
     '''Indicates that a context-dependent command could not be run.'''
 
 
