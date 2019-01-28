@@ -22,7 +22,7 @@ import textwrap
 
 from west import log
 from west import config
-from west.commands import CommandContextError, external_commands
+from west.commands import CommandError, CommandContextError, external_commands
 from west.commands.project import List, Diff, Status, SelfUpdate, ForAll, \
                              WestUpdated, PostInit, Update
 from west.manifest import Manifest, MalformedConfig
@@ -510,8 +510,11 @@ def main(argv=None):
         else:
             log.inf(for_stack_trace)
     except CommandContextError as cce:
-        log.die('command', args.command, 'cannot be run in this context:',
+        log.err('command', args.command, 'cannot be run in this context:',
                 *cce.args)
+        sys.exit(cce.returncode)
+    except CommandError as ce:
+        sys.exit(ce.returncode)
 
 
 if __name__ == "__main__":
