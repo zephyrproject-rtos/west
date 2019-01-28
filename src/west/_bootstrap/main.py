@@ -97,7 +97,26 @@ def clone(desc, url, rev, dest, exist_ok=False):
 
     print('=== Cloning {} from {}, rev. {} into {} ==='.format(desc, url, rev,
                                                                dest))
-    subprocess.check_call(('git', 'clone', '-b', rev, '--', url, dest))
+    branch = False
+    subprocess.check_call(('git', 'init', dest))
+    os.chdir(dest)
+    subprocess.check_call(('git', 'remote', 'add', 'origin', '--', url))
+    subprocess.check_call(('git', 'fetch', 'origin', '--', rev))
+
+    try:
+        # Using show-ref to determine if rev is identical to a branch
+        subprocess.check_call(('git', 'show-ref', '--', rev))
+        branch = True
+    except subprocess.CalledProcessError:
+        pass
+
+    if branch:
+        subprocess.check_call(('git', 'checkout', rev))
+    else:
+        subprocess.check_call(('git', 'checkout', 'FETCH_HEAD'))
+
+    # Fetch the rest of the ref-space, similar to git clone
+    subprocess.check_call(('git', 'fetch', '--tags', 'origin'))
 
 
 #
