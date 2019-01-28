@@ -123,6 +123,7 @@ def repos_tmpdir(tmpdir):
                           commands:
                             - name: test
                               class: Test
+                              help: test-help
                       '''),
                       'scripts/test.py': textwrap.dedent('''\
                       from west.commands import WestCommand
@@ -494,12 +495,11 @@ def test_extension_command_multiproject(repos_tmpdir):
     help_text = cmd('-h')
     expected = textwrap.dedent('''\
         commands from project at "subdir/Kconfiglib":
-          kconfigtest
+          kconfigtest:          (no help provided; try "west kconfigtest -h")
 
         commands from project at "net-tools":
-          test
-
-        Run "west <command> -h" for help on each command.''')
+          test:                 test-help
+        ''')
 
     assert expected in help_text
 

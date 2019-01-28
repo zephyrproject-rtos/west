@@ -16,11 +16,14 @@
 #   - file: foo.py
 #     commands:
 #       - name: foo1
+#         help: one-line help for foo1 command in "west --help"
 #       - name: foo2
 #         class: FooTwo
+#         help: help for foo2 in "west --help"
 #   - file: bar.py
 #     commands:
 #       - name: baz
+#         help: help for baz in "west --help"
 #
 # The meaning of the above example is:
 #
@@ -38,6 +41,14 @@
 #
 # - the file bar.py contains a command named "baz", whose class is
 #   bar.baz.
+#
+# - the "help" fields are collected into the top-level help seen by
+#   the user who runs "west --help". They should match the strings in
+#   the help argument passed to WestCommand.__init__().  (This
+#   redundancy exists because extension command modules are not
+#   imported until the user specifically runs "west
+#   some-extension-command", so any help text in the python source
+#   code is not available to "west --help".)
 type: map
 mapping:
   west-commands:
@@ -59,5 +70,8 @@ mapping:
                     required: false
                     type: str
                   class:
+                    required: false
+                    type: str
+                  help:
                     required: false
                     type: str
