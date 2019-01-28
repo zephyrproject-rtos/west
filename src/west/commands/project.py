@@ -345,7 +345,7 @@ _no_update_arg = _arg(
     '--no-update',
     dest='update',
     action='store_false',
-    help='do not update the manifest or West before fetching project data')
+    help='do not self-update West')
 
 # List of projects
 _project_list_arg = _arg('projects', metavar='PROJECT', nargs='*')
@@ -376,12 +376,6 @@ def _wrap(s):
     paragraphs = textwrap.dedent(s[1:]).split("\n\n")
 
     return "\n\n".join(textwrap.fill(paragraph) for paragraph in paragraphs)
-
-
-_NO_UPDATE_HELP = """
-Unless --no-update is passed, the manifest and West source code repositories
-are updated prior to cloning. See the 'update' command.
-"""[1:].replace('\n', ' ')
 
 
 _MANIFEST_REV_HELP = """
