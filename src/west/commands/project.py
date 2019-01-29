@@ -618,12 +618,20 @@ def _all_projects():
         log.die(m.args[0])
 
 
-def _fetch(project):
+def _fetch(project, quiet=False):
     # Fetches upstream changes for 'project' and updates the 'manifest-rev'
     # branch to point to the revision specified in the manifest. If the
     # project's repository does not already exist, it is created first.
+    #
+    # The "quiet" kwarg reduces the verbosity of this fetch so that
+    # normal git output is reduced to log.dbg() levels using the
+    # _git_helper capture_stdout kwarg. Exceptional output (such as
+    # having to clone the repository) is never so silenced regardless
+    # of the quiet kwarg's value.
 
     if not _cloned(project):
+        # Don't use _msg or capture_stdout here -- this is an
+        # exceptional circumstance.
         _inf(project, 'Creating repository for {name_and_path}')
         _git_base(project, 'init {abspath}')
         # This remote is only added for the user's convenience. We always fetch
@@ -639,6 +647,9 @@ def _fetch(project):
     else:
         fetch_cmd = "fetch"
 
+    if quiet:
+        fetch_cmd += " --quiet"
+
     _inf(project, msg)
     # This two-step approach avoids a "trying to write non-commit object" error
     # when the revision is an annotated tag. ^{commit} type peeling isn't
@@ -648,13 +659,16 @@ def _fetch(project):
     # --tags is required to get tags when the remote is specified as an URL.
     if _is_sha(project.revision):
         # Don't fetch a SHA directly, as server may restrict from doing so.
-        _git(project, fetch_cmd + ' --tags -- {url} '
-             'refs/heads/*:refs/west/*')
-        _git(project, 'update-ref {qual_manifest_rev_branch} {revision}')
+        _git(project, fetch_cmd + ' --tags -- {url}',
+             capture_stdout=quiet)
+        _git(project, 'update-ref {qual_manifest_rev_branch} {revision}',
+             capture_stdout=quiet)
     else:
-        _git(project, fetch_cmd + ' --tags -- {url} {revision}')
+        _git(project, fetch_cmd + ' --tags -- {url} {revision}',
+             capture_stdout=quiet)
         _git(project,
-             'update-ref {qual_manifest_rev_branch} FETCH_HEAD^{{commit}}')
+             'update-ref {qual_manifest_rev_branch} FETCH_HEAD^{{commit}}',
+             capture_stdout=quiet)
 
     if not _head_ok(project):
         # If nothing it checked out (which would usually only happen just after
@@ -826,16 +840,9 @@ def _checkout(project, revision):
 
 
 def _checkout_detach(project, revision):
-    _inf(project,
-         "Checking out revision '{}' as detached HEAD in {{name_and_path}}"
-         .format(_sha(project, revision)))
+    msg = "Checking out revision '{}' as detached HEAD in {{name_and_path}}"
+    log.inf(_expand_shorthands(project, msg.format(_sha(project, revision))))
     _git(project, 'checkout --detach --quiet ' + revision)
-    # The checkout above was quiet to avoid multi line spamming when checking
-    # out in detached HEAD in each project.
-    # However the final line 'HEAD is now at ....' is still desired to print.
-    print('HEAD is now at ' + _git(project, 'log --oneline -1',
-                                   capture_stdout=True).stdout)
-
 
 def _west_project():
     # Returns a Project instance for west.
@@ -861,7 +868,7 @@ def _update_west(rebase, keep_descendants):
 
 
 def _update(project, rebase, keep_descendants):
-    _fetch(project)
+    _fetch(project, quiet=True)
 
     branch = _current_branch(project)
     sha = _sha(project, _MANIFEST_REV_BRANCH)
