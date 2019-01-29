@@ -252,45 +252,75 @@ class WestArgumentParser(argparse.ArgumentParser):
         self.west_externals = externals
 
 
+def _make_parsers():
+    # Make a fresh instance of the top level argument parser,
+    # subparser generator, and return them in that order.
+
+    # The prog='west' override avoids the absolute path of the main.py script
+    # showing up when West is run via the wrapper
+    parser = WestArgumentParser(
+        prog='west', description='The Zephyr RTOS meta-tool.',
+        epilog='Run "west <command> -h" for detailed help on each command.',
+        add_help=False)
+
+    # Remember to update scripts/west-completion.bash if you add or remove
+    # flags
+
+    parser.add_argument('-h', '--help', action=WestHelpAction,
+                        help='show this help message and exit')
+
+    parser.add_argument('-z', '--zephyr-base', default=None,
+                        help='''Override the Zephyr base directory. The
+                        default is the manifest project with path
+                        "zephyr".''')
+
+    parser.add_argument('-v', '--verbose', default=0, action='count',
+                        help='''Display verbose output. May be given
+                        multiple times to increase verbosity.''')
+
+    parser.add_argument('-V', '--version', action='store_true',
+                        help='print the program version and exit')
+
+    subparser_gen = parser.add_subparsers(metavar='<command>', dest='command')
+
+    return parser, subparser_gen
+
+
 def command_handler(command, known_args, unknown_args):
     command.run(known_args, unknown_args)
 
 
 def add_ext_command_parser(subparser_gen, spec):
     # This subparser exists only to register the name. The real parser
-    # will be added dynamically as needed later if the command is
-    # invoked. We prevent help from being added because the default
-    # help printer calls sys.exit(), which is not what we want.
-    #
-    # This strategy has an issue we hack around in
-    # ext_command_handler() below.
+    # will be created as needed later if the command is invoked. We
+    # prevent help from being added because the default help printer
+    # calls sys.exit(), which is not what we want.
     parser = subparser_gen.add_parser(spec.name, add_help=False)
     return parser
 
 
-def ext_command_handler(subparser_gen, spec, argv, *ignored):
-    # Deferred creation, argument parsing registration, and handling
-    # for external commands. We go to the extra effort because we
-    # don't want to import any extern classes until the user has
-    # specifically requested an external command.
+def ext_command_handler(spec, argv, *ignored):
+    # Deferred creation, argument parsing, and handling for external
+    # commands. We go to the extra effort because we don't want to
+    # import any extern classes until the user has specifically
+    # requested an external command.
     #
     # 'ignored' is just the known and unknown args as parsed by the
     # 'dummy' parser added by add_ext_command_parser().
     #
-    # The purpose of this handler is to override that parser with the
-    # one provided by `command`, then parse the original argv.
+    # The purpose of this handler is to create the "real" parser that
+    # we need for the newly instantiated `command`, then re-parse the
+    # original argv and run the command.
     command = spec.factory()
-    parser = command.add_parser(subparser_gen)
-    args, unknown = parser.parse_known_args()
-    # HACK: for some reason, the command name is showing up as the
-    # first unknown argument when we use add_parser() above as if it
-    # were a builtin command sometimes. It's probably due to the way
-    # we cheat in add_ext_command_parser() above. Just drop the first
-    # unknown argument for now; making the hack self-contained to
-    # these two functions.
-    if unknown and unknown[0] == command.name:
-        unknown.pop(0)
-    command_handler(command, args, unknown)
+
+    # Our original top level parser and subparser generator have some
+    # garbage state that prevents us from registering the 'real'
+    # command subparser. Just make new ones.
+    west_parser, subparser_gen = _make_parsers()
+    command.add_parser(subparser_gen)
+
+    # Handle the instantiated command in the usual way.
+    command.run(*west_parser.parse_known_args(argv))
 
 
 def set_zephyr_base(args):
@@ -375,33 +405,7 @@ def print_version_info():
 
 
 def parse_args(argv, externals):
-    # The prog='west' override avoids the absolute path of the main.py script
-    # showing up when West is run via the wrapper
-    west_parser = WestArgumentParser(
-        prog='west', description='The Zephyr RTOS meta-tool.',
-        epilog='Run "west <command> -h" for detailed help on each command.',
-        add_help=False)
-
-    # Remember to update scripts/west-completion.bash if you add or remove
-    # flags
-
-    west_parser.add_argument('-h', '--help', action=WestHelpAction,
-                             help='show this help message and exit')
-
-    west_parser.add_argument('-z', '--zephyr-base', default=None,
-                             help='''Override the Zephyr base directory. The
-                             default is the manifest project with path
-                             "zephyr".''')
-
-    west_parser.add_argument('-v', '--verbose', default=0, action='count',
-                             help='''Display verbose output. May be given
-                             multiple times to increase verbosity.''')
-
-    west_parser.add_argument('-V', '--version', action='store_true',
-                             help='print the program version and exit')
-
-    subparser_gen = west_parser.add_subparsers(metavar='<command>',
-                                               dest='command')
+    west_parser, subparser_gen = _make_parsers()
 
     # Add handlers for the built-in commands.
     for command in itertools.chain(*BUILTIN_COMMANDS.values()):
@@ -415,7 +419,7 @@ def parse_args(argv, externals):
             for spec in specs:
                 parser = add_ext_command_parser(subparser_gen, spec)
                 parser.set_defaults(handler=partial(ext_command_handler,
-                                                    subparser_gen, spec, argv))
+                                                    spec, argv))
     west_parser.set_externals(externals)
 
     # Parse arguments.
