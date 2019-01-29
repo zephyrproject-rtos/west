@@ -224,8 +224,7 @@ to handle any resetting yourself.
 
 def initialize_west(args):
     '''Initialize a West installation in existing project.'''
-    manifest_dir = args.directory or os.getcwd()
-    manifest_dir = os.path.abspath(manifest_dir)
+    manifest_dir = os.path.abspath(args.directory or os.getcwd())
     directory = os.path.dirname(manifest_dir)
 
     manifest_file = os.path.join(manifest_dir, 'west.yml')
@@ -240,9 +239,14 @@ def initialize_west(args):
     #
     # Note: main west will try to discover zephyr base and fail, as it is
     # not fully initialized at this time.
-    # Thus a dummy zephyr_base is provided.
+    #
+    # The real fix is to eliminate post-init, merge the two mains, and
+    # have west init be a special case that doesn't set up
+    # ZEPHYR_BASE. For now, we assume the original argument (or cwd)
+    # is a Zephyr repository, since that's how people are using it in
+    # practice.
     os.chdir(directory)
-    cmd = ['--zephyr-base', directory, 'post-init', '--local',
+    cmd = ['--zephyr-base', manifest_dir, 'post-init', '--local',
            os.path.abspath(manifest_dir)]
     wrap(cmd)
 
