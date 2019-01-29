@@ -91,32 +91,49 @@ def west_topdir(start=None):
         cur_dir = parent_dir
 
 
+def _is_sha(s):
+    try:
+        int(s, 16)
+    except ValueError:
+        return False
+
+    return len(s) == 40
+
+
 def clone(desc, url, rev, dest, exist_ok=False):
     if not exist_ok and os.path.exists(dest):
         raise WestError('refusing to clone into existing location ' + dest)
 
     print('=== Cloning {} from {}, rev. {} into {} ==='.format(desc, url, rev,
                                                                dest))
-    branch = False
+    local_rev = False
     subprocess.check_call(('git', 'init', dest))
-    os.chdir(dest)
-    subprocess.check_call(('git', 'remote', 'add', 'origin', '--', url))
-    subprocess.check_call(('git', 'fetch', 'origin', '--', rev))
+    subprocess.check_call(('git', '-C', dest, 'remote', 'add', 'origin',
+                           '--', url))
+    is_sha = _is_sha(rev)
+    if is_sha:
+        # Fetch the ref-space and hope the SHA is contained in that ref-space
+        subprocess.check_call(('git', '-C', dest, 'fetch', 'origin', '--tags',
+                               '--', 'refs/heads/*:refs/remotes/origin/*'))
+    else:
+        # Fetch the ref-space similar to git clone plus the ref given by user.
+        # Redundancy is ok, as example if user specify 'heads/master'.
+        # This allows users to specify: pull/<no>/head for pull requests
+        subprocess.check_call(('git', '-C', dest, 'fetch', 'origin', '--tags',
+                               '--', rev,
+                               'refs/heads/*:refs/remotes/origin/*'))
 
     try:
-        # Using show-ref to determine if rev is identical to a branch
-        subprocess.check_call(('git', 'show-ref', '--', rev))
-        branch = True
+        # Using show-ref to determine if rev is available in local repo.
+        subprocess.check_call(('git', '-C', dest, 'show-ref', '--', rev))
+        local_rev = True
     except subprocess.CalledProcessError:
         pass
 
-    if branch:
-        subprocess.check_call(('git', 'checkout', rev))
+    if local_rev or is_sha:
+        subprocess.check_call(('git', '-C', dest, 'checkout', rev))
     else:
-        subprocess.check_call(('git', 'checkout', 'FETCH_HEAD'))
-
-    # Fetch the rest of the ref-space, similar to git clone
-    subprocess.check_call(('git', 'fetch', '--tags', 'origin'))
+        subprocess.check_call(('git', '-C', dest, 'checkout', 'FETCH_HEAD'))
 
 
 #
