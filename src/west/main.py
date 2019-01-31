@@ -22,7 +22,8 @@ import textwrap
 
 from west import log
 from west import config
-from west.commands import CommandError, CommandContextError, external_commands
+from west.commands import CommandError, CommandContextError, \
+    external_commands, BadExternalCommand
 from west.commands.project import List, Diff, Status, SelfUpdate, ForAll, \
                              WestUpdated, PostInit, Update
 from west.manifest import Manifest, MalformedConfig
@@ -519,6 +520,14 @@ def main(argv=None):
         sys.exit(cce.returncode)
     except CommandError as ce:
         sys.exit(ce.returncode)
+    except BadExternalCommand:
+        log.err('external command', args.command,
+                'was improperly defined and could not be run')
+        if args.verbose:
+            raise
+        else:
+            log.inf(for_stack_trace)
+            sys.exit(1)
 
 
 if __name__ == "__main__":

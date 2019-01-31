@@ -18,7 +18,7 @@ based on configuration in the manifest.
 
 from west.commands.command import WestCommand, \
     CommandContextError, CommandError, \
-    external_commands, WestExtCommandSpec
+    external_commands, WestExtCommandSpec, BadExternalCommand
 
 __all__ = ['CommandContextError', 'CommandError', 'WestCommand',
-           'external_commands', 'WestExtCommandSpec']
+           'external_commands', 'WestExtCommandSpec', 'BadExternalCommand']
