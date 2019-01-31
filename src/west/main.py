@@ -19,11 +19,12 @@ import shutil
 import sys
 from subprocess import CalledProcessError, check_output, DEVNULL
 import textwrap
+import traceback
 
 from west import log
 from west import config
-from west.commands import CommandError, CommandContextError, \
-    external_commands, BadExternalCommand
+from west.commands import external_commands, \
+    CommandError, CommandContextError, ExtensionCommandError
 from west.commands.project import List, Diff, Status, SelfUpdate, ForAll, \
                              WestUpdated, PostInit, Update
 from west.manifest import Manifest, MalformedConfig
@@ -497,8 +498,8 @@ def main(argv=None):
         argv = sys.argv[1:]
     args, unknown = parse_args(argv, externals)
 
-    for_stack_trace = 'run as "west -v ... {} ..." for a stack trace'.format(
-        args.command)
+    for_stack_trace = 'run as "west -v {}" for a stack trace'.format(
+        quote_sh_list(argv))
     try:
         args.handler(args, unknown)
     except WestUpdated:
@@ -511,23 +512,25 @@ def main(argv=None):
         log.err('command exited with status {}: {}'.format(
             cpe.args[0], quote_sh_list(cpe.args[1])))
         if args.verbose:
-            raise
+            traceback.print_exc()
         else:
             log.inf(for_stack_trace)
+        sys.exit(cpe.returncode)
+    except ExtensionCommandError as ece:
+        log.err('external command', args.command,
+                'was improperly defined and could not be run{}'.
+                format(': ' + ece.hint if ece.hint else ''))
+        if args.verbose:
+            traceback.print_exc()
+        else:
+            log.inf(for_stack_trace)
+        sys.exit(ece.returncode)
     except CommandContextError as cce:
         log.err('command', args.command, 'cannot be run in this context:',
                 *cce.args)
         sys.exit(cce.returncode)
     except CommandError as ce:
         sys.exit(ce.returncode)
-    except BadExternalCommand:
-        log.err('external command', args.command,
-                'was improperly defined and could not be run')
-        if args.verbose:
-            raise
-        else:
-            log.inf(for_stack_trace)
-            sys.exit(1)
 
 
 if __name__ == "__main__":
