@@ -30,9 +30,13 @@ class CommandContextError(CommandError):
     '''Indicates that a context-dependent command could not be run.'''
 
 
-class BadExternalCommand(Exception):
+class ExtensionCommandError(CommandError):
     '''Exception class indicating an external command was badly
     defined and could not be created.'''
+
+    def __init__(self, **kwargs):
+        self.hint = kwargs.pop('hint', None)
+        super(ExtensionCommandError, self).__init__(**kwargs)
 
 
 class WestCommand(ABC):
@@ -178,7 +182,7 @@ def _ext_specs(project):
     # Verify project.west_commands isn't trying a directory traversal
     # outside of the project.
     if escapes_directory(spec_file, project.abspath):
-        raise BadExternalCommand(
+        raise ExtensionCommandError(
             'west-commands file {} escapes project path {}'.
             format(project.west_commands, project.path))
 
@@ -191,13 +195,13 @@ def _ext_specs(project):
         try:
             commands_spec = yaml.safe_load(f.read())
         except yaml.YAMLError as e:
-            raise BadExternalCommand from e
+            raise ExtensionCommandError from e
     try:
         pykwalify.core.Core(
             source_data=commands_spec,
             schema_files=[_EXT_SCHEMA_PATH]).validate()
     except pykwalify.errors.SchemaError as e:
-        raise BadExternalCommand from e
+        raise ExtensionCommandError from e
 
     ret = []
     for commands_desc in commands_spec['west-commands']:
@@ -210,7 +214,7 @@ def _ext_specs_from_desc(project, commands_desc):
 
     # Verify the YAML's python file doesn't escape the project directory.
     if escapes_directory(py_file, project.abspath):
-        raise BadExternalCommand(
+        raise ExtensionCommandError(
             'external command python file "{}" escapes project path {}'.
             format(commands_desc['file'], project.path))
 
@@ -294,14 +298,24 @@ class _ExtFactory:
         sys.path.append(py_dir)
 
         # Load the module containing the command. Convert only
-        # expected exceptions to BadExternalCommand.
+        # expected exceptions to ExtensionCommandError.
         try:
             mod = _commands_module_from_file(self.py_file)
         except ImportError as ie:
-            raise BadExternalCommand from ie
+            raise ExtensionCommandError(
+                hint='could not import {}'.format(self.py_file)) from ie
 
         # Get the attribute which provides the WestCommand subclass.
-        cls = getattr(mod, self.attr)
+        try:
+            cls = getattr(mod, self.attr)
+        except AttributeError as ae:
+            hint = 'no attribute {} in {}'.format(self.attr,
+                                                  self.py_file)
+            raise ExtensionCommandError(hint=hint) from ae
 
         # Create the command instance and return it.
-        return cls()
+        try:
+            return cls()
+        except Exception as e:
+            raise ExtensionCommandError(
+                hint='command constructor threw an exception') from e
