@@ -6,7 +6,7 @@
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 import importlib
-from keyword import iskeyword
+import itertools
 import os
 import sys
 
@@ -230,43 +230,25 @@ def _ext_specs_from_desc(project, commands_desc):
     return thunks
 
 
-def _commands_module_from_file(command_name, file):
+def _commands_module_from_file(file):
     # Python magic for importing a module containing west extension
     # commands. To avoid polluting the sys.modules key space, we put
     # these modules in an (otherwise unpopulated) west.commands.ext
     # package.
     #
     # The file is imported as a module named
-    # west.commands.ext.<command_name>, so the name must be a
-    # non-keyword identifier. This module object is returned from a
-    # cache if the same file is ever imported again, to avoid a double
-    # import in case the file maintains module-level state or defines
-    # multiple commands.
-    #
-    # (This shouldn't be a problem for west itself since main.py
-    # executes at most one WestCommand -- and creates at most one
-    # external command -- per process, but better safe than sorry in
-    # case this code gets called from elsewhere.)
-    #
-    # If we ever try to re-use a command_name, a ValueError() is
-    # raised; this prevents the import machinery from returning a
-    # previously cached module from sys.modules for an unrelated file,
-    # and is a decent sanity check against two providers of the same
-    # command.
+    # west.commands.ext.A_FRESH_IDENTIFIER. This module object is
+    # returned from a cache if the same file is ever imported again,
+    # to avoid a double import in case the file maintains module-level
+    # state or defines multiple commands.
     global _EXT_MODULES_CACHE
-    mod_name = 'west.commands.ext.{}'.format(command_name)
-
-    if not command_name.isidentifier() or iskeyword(command_name):
-        raise ValueError('bad command name "{}"'.format(command_name))
-    elif mod_name in sys.modules:
-        raise ValueError('command {} is already defined'.format(
-            mod_name.rsplit('.', 1)[-1]))
+    global _EXT_MODULES_NAME_IT
 
     file = os.path.normcase(os.path.realpath(file))
-
     if file in _EXT_MODULES_CACHE:
         return _EXT_MODULES_CACHE[file]
 
+    mod_name = next(_EXT_MODULES_NAME_IT)
     # The Python 3.4 way to import a module given its file got deprecated
     # later on, but we still need to support 3.4. If that requirement ever
     # gets dropped, this code can be simplified.
@@ -290,8 +272,12 @@ def _commands_module_from_file(command_name, file):
 _EXT_SCHEMA_PATH = os.path.join(os.path.dirname(__file__),
                                 'west-commands-schema.yml')
 
-
+# Cache which maps files implementing extension commands their
+# imported modules.
 _EXT_MODULES_CACHE = {}
+# Infinite iterator of "fresh" extension command module names.
+_EXT_MODULES_NAME_IT = ('west.commands.ext.cmd_{}'.format(i)
+                        for i in itertools.count(1))
 
 
 class _ExtFactory:
@@ -310,9 +296,7 @@ class _ExtFactory:
         # Load the module containing the command. Convert only
         # expected exceptions to BadExternalCommand.
         try:
-            mod = _commands_module_from_file(self.name, self.py_file)
-        except ValueError as ve:
-            raise BadExternalCommand from ve
+            mod = _commands_module_from_file(self.py_file)
         except ImportError as ie:
             raise BadExternalCommand from ie
 
