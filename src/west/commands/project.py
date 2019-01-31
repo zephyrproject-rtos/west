@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import textwrap
+import yaml
 
 from west.config import config
 from west import log
@@ -91,7 +92,7 @@ class List(WestCommand):
             by default. Use --all or the name "west" to include it.'''))
 
     def do_add_parser(self, parser_adder):
-        default_fmt = '{name:14} {path:18} {revision:13} {url} {cloned}'
+        default_fmt = '{name:14} {path:18} {revision:13} {url} {cloned} {metadata}'
         return _add_parser(
             parser_adder, self,
             _arg('-a', '--all', action='store_true',
@@ -135,6 +136,12 @@ class List(WestCommand):
             if project.name == 'west' and not list_west:
                 continue
 
+            settings = None
+            if project.metadata is not None:
+                meta_file = os.path.join(project.abspath, project.metadata)
+                with open(meta_file, 'r') as f:
+                    settings = yaml.safe_load(f.read()).get('settings')
+
             # Spelling out the format keys explicitly here gives us
             # future-proofing if the internal Project representation
             # ever changes.
@@ -146,6 +153,7 @@ class List(WestCommand):
                     abspath=project.abspath,
                     revision=project.revision,
                     cloned="(cloned)" if _cloned(project) else "(not cloned)",
+                    metadata=settings or "",
                     clone_depth=project.clone_depth or "None")
             except KeyError as e:
                 # The raised KeyError seems to just put the first

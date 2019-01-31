@@ -260,7 +260,8 @@ class Manifest:
                               path=mp.get('path'),
                               clone_depth=mp.get('clone-depth'),
                               revision=mp.get('revision'),
-                              west_commands=mp.get('west-commands'))
+                              west_commands=mp.get('west-commands'),
+                              metadata=mp.get('metadata'))
 
             # Two projects cannot have the same path. We use absolute
             # paths to check for collisions to ensure paths are
@@ -357,10 +358,10 @@ class Project:
     Projects are neither comparable nor hashable.'''
 
     __slots__ = ('name remote url path abspath clone_depth '
-                 'revision west_commands').split()
+                 'revision west_commands metadata').split()
 
     def __init__(self, name, remote, defaults, path=None, clone_depth=None,
-                 revision=None, west_commands=None):
+                 revision=None, west_commands=None, metadata=None):
         '''Specify a Project by name, Remote, and optional information.
 
         :param name: Project's user-defined name in the manifest.
@@ -391,6 +392,7 @@ class Project:
         self.clone_depth = clone_depth
         self.revision = revision or defaults.revision
         self.west_commands = west_commands
+        self.metadata = metadata
 
     def __eq__(self, other):
         return NotImplemented
@@ -409,7 +411,7 @@ class SpecialProject(Project):
     Projects are neither comparable nor hashable.'''
 
     def __init__(self, name, path=None, revision='(not set)', url='(not set)',
-                 west_commands=None):
+                 west_commands=None, metadata=None):
         '''Specify a Special Project by name, and url, and optional information.
 
         :param name: Special Project's user-defined name in the manifest
@@ -435,6 +437,7 @@ class SpecialProject(Project):
         self.remote = None
         self.clone_depth = None
         self.west_commands = west_commands
+        self.metadata = metadata
 
 def _wrn_if_not_remote(remote):
     if not isinstance(remote, Remote):

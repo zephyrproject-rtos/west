@@ -138,6 +138,9 @@ mapping:
           west-commands:
             required: false
             type: str
+          metadata:
+            required: false
+            type: text
 
   # The "self" key specifies values for the project containing the manifest
   # file (the "manifest repository").
