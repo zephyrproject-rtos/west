@@ -70,7 +70,7 @@ def wrn(*args):
     '''Print a warning.'''
 
     if config.use_colors():
-        print(colorama.Fore.LIGHTRED_EX, end='', file=sys.stderr)
+        print(colorama.Fore.LIGHTYELLOW_EX, end='', file=sys.stderr)
 
     print('WARNING: ', end='', file=sys.stderr)
     print(*args, file=sys.stderr)
