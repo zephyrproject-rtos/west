@@ -112,32 +112,33 @@ def clone(desc, url, rev, dest, exist_ok=False):
                                                                dest))
     local_rev = False
     subprocess.check_call(('git', 'init', dest))
-    subprocess.check_call(('git', '-C', dest, 'remote', 'add', 'origin',
-                           '--', url))
+    subprocess.check_call(('git', 'remote', 'add', 'origin', '--', url),
+                          cwd=dest)
     is_sha = _is_sha(rev)
     if is_sha:
         # Fetch the ref-space and hope the SHA is contained in that ref-space
-        subprocess.check_call(('git', '-C', dest, 'fetch', 'origin', '--tags',
-                               '--', 'refs/heads/*:refs/remotes/origin/*'))
+        subprocess.check_call(('git', 'fetch', 'origin', '--tags',
+                               '--', 'refs/heads/*:refs/remotes/origin/*'),
+                              cwd=dest)
     else:
         # Fetch the ref-space similar to git clone plus the ref given by user.
         # Redundancy is ok, as example if user specify 'heads/master'.
         # This allows users to specify: pull/<no>/head for pull requests
-        subprocess.check_call(('git', '-C', dest, 'fetch', 'origin', '--tags',
-                               '--', rev,
-                               'refs/heads/*:refs/remotes/origin/*'))
+        subprocess.check_call(('git', 'fetch', 'origin', '--tags', '--', rev,
+                               'refs/heads/*:refs/remotes/origin/*'),
+                              cwd=dest)
 
     try:
         # Using show-ref to determine if rev is available in local repo.
-        subprocess.check_call(('git', '-C', dest, 'show-ref', '--', rev))
+        subprocess.check_call(('git', 'show-ref', '--', rev), cwd=dest)
         local_rev = True
     except subprocess.CalledProcessError:
         pass
 
     if local_rev or is_sha:
-        subprocess.check_call(('git', '-C', dest, 'checkout', rev))
+        subprocess.check_call(('git', 'checkout', rev), cwd=dest)
     else:
-        subprocess.check_call(('git', '-C', dest, 'checkout', 'FETCH_HEAD'))
+        subprocess.check_call(('git', 'checkout', 'FETCH_HEAD'), cwd=dest)
 
 
 #
