@@ -505,7 +505,13 @@ def main(argv=None):
     except WestUpdated:
         # West has been automatically updated. Restart ourselves to run the
         # latest version, with the same arguments that we were given.
-        os.execv(sys.executable, [sys.executable] + [sys.argv[0]] + argv)
+        log.dbg("sys.executable:\"{}\" sys.argv[0]:\"{}\" argv:\"{}\"".format(
+                sys.executable, sys.argv[0], argv))
+        if sys.platform == "win32":
+            # On Windows Python generates .exe executables
+            os.execv(sys.argv[0], argv)
+        else:
+            os.execv(sys.executable, [sys.executable] + [sys.argv[0]] + argv)
     except KeyboardInterrupt:
         sys.exit(0)
     except CalledProcessError as cpe:
