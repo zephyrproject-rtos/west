@@ -60,7 +60,7 @@ def west_dir(start=None):
     return os.path.join(west_topdir(start), '.west')
 
 
-def west_topdir(start=None):
+def west_topdir(start=None, fall_back=True):
     '''
     Like west_dir(), but returns the path to the parent directory of the .west/
     directory instead, where project repositories are stored
@@ -68,10 +68,7 @@ def west_topdir(start=None):
     # If you change this function, make sure to update the bootstrap
     # script's find_west_topdir().
 
-    if start is None:
-        cur_dir = os.getcwd()
-    else:
-        cur_dir = start
+    cur_dir = start or os.getcwd()
 
     while True:
         if os.path.isdir(os.path.join(cur_dir, '.west')):
@@ -79,7 +76,11 @@ def west_topdir(start=None):
 
         parent_dir = os.path.dirname(cur_dir)
         if cur_dir == parent_dir:
-            # At the root
-            raise WestNotFound('Could not find a West installation '
-                               'in this or any parent directory')
+            # At the root. Should we fall back?
+            if fall_back and os.environ.get('ZEPHYR_BASE'):
+                return west_topdir(os.environ['ZEPHYR_BASE'],
+                                   fall_back=False)
+            else:
+                raise WestNotFound('Could not find a West installation '
+                                   'in this or any parent directory')
         cur_dir = parent_dir
