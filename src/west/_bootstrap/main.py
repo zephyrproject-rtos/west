@@ -70,7 +70,7 @@ def west_dir(start=None):
     return os.path.join(west_topdir(start), WEST_DIR)
 
 
-def west_topdir(start=None):
+def west_topdir(start=None, fall_back=True):
     '''
     Like west_dir(), but returns the path to the parent directory of the west/
     directory instead, where project repositories are stored
@@ -85,9 +85,13 @@ def west_topdir(start=None):
 
         parent_dir = os.path.dirname(cur_dir)
         if cur_dir == parent_dir:
-            # At the root
-            raise WestNotFound('Could not find a West installation '
-                               'in this or any parent directory')
+            # At the root. Should we fall back?
+            if fall_back and os.environ.get('ZEPHYR_BASE'):
+                return west_topdir(os.environ['ZEPHYR_BASE'],
+                                   fall_back=False)
+            else:
+                raise WestNotFound('Could not find a West installation '
+                                   'in this or any parent directory')
         cur_dir = parent_dir
 
 
@@ -393,12 +397,18 @@ def wrap(argv):
             print('Run "west init -h" for additional information.')
             sys.exit(0)
         else:
-            print('Error: "{}" is not a Zephyr installation directory.'.
+            print('Error: "{}" is not in a west installation.'.
                   format(start), file=sys.stderr)
             print('Things to try:', file=sys.stderr)
+            print(' - Set ZEPHYR_BASE to a zephyr repository path in a',
+                  'west installation.', file=sys.stderr)
             print(' - Run "west init" to set up an installation here.',
                   file=sys.stderr)
             print(' - Run "west init -h" for additional information.',
+                  file=sys.stderr)
+            print(file=sys.stderr)
+            print('For more information, see:',
+                  'https://docs.zephyrproject.org/latest/tools/west/repo-tool.html',  # noqa: E501
                   file=sys.stderr)
             sys.exit(1)
 
