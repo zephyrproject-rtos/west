@@ -407,10 +407,6 @@ def wrap(argv):
                   file=sys.stderr)
             print(' - Run "west init -h" for additional information.',
                   file=sys.stderr)
-            print(file=sys.stderr)
-            print('For more information, see:',
-                  'https://docs.zephyrproject.org/latest/tools/west/repo-tool.html',  # noqa: E501
-                  file=sys.stderr)
             sys.exit(1)
 
     west_git_repo = os.path.join(topdir, WEST_DIR, WEST)
