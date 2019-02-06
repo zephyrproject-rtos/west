@@ -10,7 +10,9 @@ import collections
 import os
 import shutil
 import subprocess
+import sys
 import textwrap
+import yaml
 
 from west.config import config
 from west import log
@@ -155,6 +157,87 @@ class List(WestCommand):
                         format(e.args[0], args.format))
 
             log.inf(result)
+
+
+class ManifestCommand(WestCommand):
+    # The slightly weird naming is to avoid a conflict with
+    # west.manifest.Manifest.
+
+    def __init__(self):
+        super(ManifestCommand, self).__init__(
+            'manifest',
+            'manage the west manifest',
+            _wrap('''
+            Manages the west manifest.
+
+            Currently, only one operation on the manifest is
+            implemented, namely --freeze. This outputs the manifest
+            with all project-related values fully specified: defaults
+            are applied, and all revisions are converted to SHAs based
+            on the current manifest-rev branches.'''),
+            accepts_unknown_args=False)
+
+    def do_add_parser(self, parser_adder):
+        parser = parser_adder.add_parser(
+            self.name,
+            help=self.help,
+            description=self.description)
+
+        group = parser.add_mutually_exclusive_group(required=True)
+        group.add_argument('--freeze', action='store_true',
+                           help='emit a manifest with SHAs for each revision')
+
+        group = parser.add_argument_group('options for --freeze')
+        group.add_argument('-o', '--out',
+                           help='output file, default is standard output')
+
+        return parser
+
+    def do_run(self, args, user_args):
+        # We assume --freeze here. Future extensions to the group
+        # --freeze is part of can move this code around.
+
+        m = Manifest.from_file()
+
+        # Build a 'frozen' representation of all projects, except the
+        # manifest project.
+        projects = list(m.projects)
+        del projects[MANIFEST_PROJECT_INDEX]
+        frozen_projects = []
+        for project in projects:
+            sha = _sha(project, '{qual_manifest_rev_branch}')
+            d = project.as_dict()
+            d['revision'] = sha
+            frozen_projects.append(d)
+
+        # We include the defaults value here even though all projects
+        # are fully specified in order to make the resulting manifest
+        # easy to extend by users who want to reuse the defaults.
+        o = collections.OrderedDict()
+        o['west'] = m.west_project.as_dict()
+        o['west']['revision'] = _sha(m.west_project,
+                                     '{qual_manifest_rev_branch}')
+        o['manifest'] = collections.OrderedDict()
+        o['manifest']['defaults'] = m.defaults.as_dict()
+        o['manifest']['remotes'] = [r.as_dict() for r in m.remotes]
+        o['manifest']['projects'] = frozen_projects
+        o['manifest']['self'] = m.projects[MANIFEST_PROJECT_INDEX].as_dict()
+
+        # This is a destructive operation, so it's done here to avoid
+        # impacting code which doesn't expect this representer to be
+        # in place.
+        yaml.SafeDumper.add_representer(collections.OrderedDict, self._rep)
+
+        if args.out:
+            with open(args.out, 'w') as f:
+                yaml.safe_dump(o, default_flow_style=False, stream=f)
+        else:
+            yaml.safe_dump(o, default_flow_style=False, stream=sys.stdout)
+
+    def _rep(self, dumper, value):
+        # See https://yaml.org/type/map.html for details on the tag.
+        return util._represent_ordered_dict(dumper, 'tag:yaml.org,2002:map',
+                                            value)
 
 
 class Diff(WestCommand):

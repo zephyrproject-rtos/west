@@ -25,14 +25,15 @@ from west import log
 from west import config
 from west.commands import external_commands, \
     CommandError, CommandContextError, ExtensionCommandError
-from west.commands.project import List, Diff, Status, SelfUpdate, ForAll, \
-                             WestUpdated, PostInit, Update
+from west.commands.project import List, ManifestCommand, Diff, Status, \
+    SelfUpdate, ForAll, WestUpdated, PostInit, Update
 from west.manifest import Manifest, MalformedConfig
 from west.util import quote_sh_list
 
 PROJECT_COMMANDS = {
     'commands for managing multiple git repositories': [
         List(),
+        ManifestCommand(),
         Diff(),
         Status(),
         Update(),

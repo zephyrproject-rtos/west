@@ -16,6 +16,7 @@ manifest. (I.e. "Remote" represents one of the elements in the
 such as the default project revision, may be supplied by this module
 if they are not present in the manifest data.'''
 
+import collections
 import os
 
 import configparser
@@ -322,6 +323,16 @@ class Defaults:
         return 'Defaults(remote={}, revision={})'.format(repr(self.remote),
                                                          repr(self.revision))
 
+    def as_dict(self):
+        '''Return a representation of this object as a dict, as it would be
+        parsed from an equivalent YAML manifest.'''
+        ret = collections.OrderedDict()
+        if self.remote and isinstance(self.remote, Remote):
+            ret['remote'] = self.remote.name
+        if self.revision:
+            ret['revision'] = self.revision
+        return ret
+
 
 class Remote:
     '''Represents a remote defined in a west manifest.
@@ -349,6 +360,12 @@ class Remote:
     def __repr__(self):
         return 'Remote(name={}, url_base={})'.format(repr(self.name),
                                                      repr(self.url_base))
+
+    def as_dict(self):
+        '''Return a representation of this object as a dict, as it would be
+        parsed from an equivalent YAML manifest.'''
+        return collections.OrderedDict(
+            ((s, getattr(self, s)) for s in self.__slots__))
 
 
 class Project:
@@ -402,6 +419,21 @@ class Project:
         return ('Project(name={}, remote={}, url={}, path={}, abspath={}, '
                 'clone_depth={}, revision={})').format(*reprs)
 
+    def as_dict(self):
+        '''Return a representation of this object as a dict, as it would be
+        parsed from an equivalent YAML manifest.'''
+        ret = collections.OrderedDict(
+            (('name', self.name),
+             ('remote', self.remote.name),
+             ('revision', self.revision)))
+        if self.path != self.name:
+            ret['path'] = self.path
+        if self.clone_depth:
+            ret['clone-depth'] = self.clone_depth
+        if self.west_commands:
+            ret['west-commands'] = self.west_commands
+        return ret
+
 
 class SpecialProject(Project):
     '''Represents a special project, e.g. the west or manifest project.
@@ -435,6 +467,17 @@ class SpecialProject(Project):
         self.remote = None
         self.clone_depth = None
         self.west_commands = west_commands
+
+    def as_dict(self):
+        if self.name == 'west':
+            return collections.OrderedDict((('url', self.url),
+                                            ('revision', self.revision)))
+        else:
+            # Manifest project is assumed.
+            ret = collections.OrderedDict({'path': self.path})
+            if self.west_commands:
+                ret['west-commands'] = self.west_commands
+            return ret
 
 def _wrn_if_not_remote(remote):
     if not isinstance(remote, Remote):
