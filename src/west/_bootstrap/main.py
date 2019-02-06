@@ -13,7 +13,6 @@ import pykwalify.core
 import subprocess
 import sys
 import yaml
-import tempfile
 import shutil
 
 import west._bootstrap.version as version
@@ -285,7 +284,8 @@ def bootstrap(args):
 
     # Clone the west source code and the manifest into west/. Git will create
     # the west/ directory if it does not exist.
-    tempdir = tempfile.mkdtemp(prefix='manifest_')
+    tempdir = os.path.join(os.path.abspath(directory),
+                           WEST_DIR, 'tmp')
     try:
         clone('manifest repository', manifest_url, manifest_rev, tempdir,
               exist_ok=True)
