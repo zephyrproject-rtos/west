@@ -628,7 +628,8 @@ def _fetch(project):
     # --tags is required to get tags when the remote is specified as an URL.
     if _is_sha(project.revision):
         # Don't fetch a SHA directly, as server may restrict from doing so.
-        _git(project, fetch_cmd + ' --tags -- {url}')
+        _git(project, fetch_cmd + ' --tags -- {url} '
+             'refs/heads/*:refs/west/*')
         _git(project, 'update-ref {qual_manifest_rev_branch} {revision}')
     else:
         _git(project, fetch_cmd + ' --tags -- {url} {revision}')
