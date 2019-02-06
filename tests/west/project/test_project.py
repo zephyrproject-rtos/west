@@ -1,5 +1,6 @@
 import os
 from os.path import dirname
+import re
 import shlex
 import shutil
 import subprocess
@@ -243,6 +244,43 @@ def test_list(west_update_tmpdir):
 
     with pytest.raises(subprocess.CalledProcessError):
         cmd('list NOT_A_PROJECT')
+
+
+def test_manifest_freeze(west_update_tmpdir):
+    # We should be able to freeze manifests.
+    actual = cmd('manifest --freeze').splitlines()
+    # Match the actual output against the expected line by line,
+    # so failing lines can be printed in the test output.
+    #
+    # Since the actual remote URLs and SHAs are not predictable, we
+    # don't match those precisely. However, we do expect the output to
+    # match project order as specified in our manifest, that all
+    # revisions are full 40-character SHAs, and there isn't any random
+    # YAML tag crap.
+    expected_res = ['^west:$',
+                    '^  url: .*$',
+                    '^  revision: [a-f0-9]{40}$',
+                    '^manifest:$',
+                    '^  defaults:$',
+                    '^    remote: test-local$',
+                    '^    revision: master$',
+                    '^  remotes:$',
+                    '^  - name: test-local$',
+                    '^    url_base: .*$',
+                    '^  projects:$',
+                    '^  - name: Kconfiglib$',
+                    '^    remote: test-local$',
+                    '^    revision: [a-f0-9]{40}$',
+                    '^    path: subdir/Kconfiglib$',
+                    '^  - name: net-tools$',
+                    '^    remote: test-local$',
+                    '^    revision: [a-f0-9]{40}$',
+                    '^    west-commands: scripts/west-commands.yml$',
+                    '^  self:$',
+                    '^    path: zephyr$']
+
+    for eline_re, aline in zip(expected_res, actual):
+        assert re.match(eline_re, aline) is not None, (aline, eline_re)
 
 
 def test_diff(west_init_tmpdir):
