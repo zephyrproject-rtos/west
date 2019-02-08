@@ -349,7 +349,7 @@ def test_update_west(west_init_tmpdir):
         add_commit(path, 'test-update-local', reconfigure=True)
 
     # Check that resetting the west repository removes the local commit
-    cmd('selfupdate --reset-west')
+    cmd('selfupdate')
     assert head_subject('zephyr') == 'test-update-local'  # Unaffected
     assert head_subject('.west/west') == west_prev
     assert head_subject('net-tools') == 'test-update-local'  # Unaffected

@@ -296,28 +296,30 @@ class Update(WestCommand):
             'update',
             'update projects described in west.yml',
             _wrap('''
-            Updates all projects according to the manifest file, `west.yml`,
-            in the manifest repository.
+            Updates west and all project repositories according to the
+            manifest file, `west.yml`, in the manifest repository.
 
             By default:
 
-            1. West itself is updated to the revision in the manifest
-            file. If revision is a branch, west will update to the tip
-            of the branch.
+            1. The revisions in the manifest file are fetched from the
+            remote in the west repository in the installation and each
+            project repository.
 
-            2. The local per-project manifest-rev branches (which are
-            managed exclusively by west) will be hard reset to the
-            updated commits fetched from each project's remote.
+            2. The local manifest-rev branches in each repository
+            (which are managed exclusively by west) will be hard reset
+            to the updated commits fetched in step 1.
 
-            3. All projects will have detached HEADs checked out at
-            the manifest-rev commits. Locally checked out branches are
-            unaffected but will no longer be checked out by default.
-            West will print information on how to get back to those
-            branches or update them to the new manifest-rev versions.
+            3. All repositories will have detached HEADs checked out
+            at the new manifest-rev commits. Locally checked out
+            branches are unaffected but will no longer be checked out
+            by default.  West will print information on how to get
+            back to those branches or update them to the new
+            manifest-rev versions.
 
-            You can avoid 1. using --no-update. You can (sometimes)
-            avoid 3. using --keep-descendants and/or --rebase.
-            See below for more information.
+            You can skip updating west using --no-update.
+
+            You can influence the behavior when local branches are
+            checked out using --keep-descendants and/or --rebase.
 
             This command does not change the contents of the manifest
             repository.
@@ -348,47 +350,16 @@ class Update(WestCommand):
 
     def do_run(self, args, user_args):
         if args.update:
-            _update_west()
+            _update_west(args.rebase, args.keep_descendants)
 
         failed_rebases = []
 
         for project in _projects(args, listed_must_be_cloned=False,
                                  exclude_manifest=True):
-            _fetch(project)
-
-            branch = _current_branch(project)
-            sha = _sha(project, _MANIFEST_REV_BRANCH)
-            if branch is not None:
-                is_ancestor = _is_ancestor_of(project, sha, branch)
-                try_rebase = args.rebase
-            else:
-                # If no branch is checked out, -k and -r don't matter.
-                is_ancestor = False
-                try_rebase = False
-
-            if args.keep_descendants and is_ancestor:
-                # A descendant is currently checked out and -k was
-                # given, so there's nothing more to do.
-                _inf(project,
-                     'Left branch "{}", a descendant of {}, checked out'.
-                     format(branch, sha))
-            elif try_rebase:
-                # Attempt a rebase. Don't exit the program on error;
-                # instead, append to the list of failed rebases and
-                # continue trying to update the other projects. We'll
-                # tell the user a complete list of errors when we're done.
-                cp = _rebase(project, check=False)
-                if cp.returncode:
-                    failed_rebases.append(project)
-                    _err(project, '{name_and_path} failed to rebase')
-            else:
-                # We can't keep a descendant or rebase, so just check
-                # out the new detached HEAD and print helpful
-                # information about things they can do with any
-                # locally checked out branch.
-                _checkout_detach(project, _MANIFEST_REV_BRANCH)
-                self._post_checkout_help(args, project, branch, sha,
-                                         is_ancestor)
+            returncode = _update(project, args.rebase, args.keep_descendants)
+            if returncode:
+                failed_rebases.append(project)
+                _err(project, '{name_and_path} failed to rebase')
 
         if failed_rebases:
             # Avoid printing this message if exactly one project
@@ -401,39 +372,6 @@ class Update(WestCommand):
                                       for p in failed_rebases)))
             raise CommandError(1)
 
-    def _post_checkout_help(self, args, project, branch, sha,
-                            is_ancestor):
-        # Print helpful information to the user about a project that
-        # might have just left a branch behind.
-
-        if branch is None:
-            # If there was no branch checked out, there are no
-            # additional diagnostics that need emitting.
-            return
-
-        relpath = os.path.relpath(project.abspath)
-        if is_ancestor:
-            # If the branch we just left behind is a descendant of
-            # the new HEAD (e.g. if this is a topic branch the
-            # user is working on and the remote hasn't changed),
-            # print a message that makes it easy to get back,
-            # no matter where in the installation os.getcwd() is.
-            _wrn(project,
-                 ('left behind {{name}} branch "{}"; '
-                  'to fast forward back, use: git -C {} checkout {}').
-                 format(branch, relpath, branch))
-            log.dbg('(To do this automatically in the future,',
-                    'use "west update --keep-descendants".)')
-        else:
-            # Tell the user how they could rebase by hand, and
-            # point them at west update --rebase.
-            _wrn(project,
-                 ('left behind {{name}} branch "{}"; '
-                  'to rebase onto the new HEAD: git -C {} rebase {} {}').
-                 format(branch, relpath, sha, branch))
-            log.dbg('(To do this automatically in the future,',
-                    'use "west update --rebase".)')
-
 
 class SelfUpdate(WestCommand):
     def __init__(self):
@@ -441,42 +379,38 @@ class SelfUpdate(WestCommand):
             'selfupdate',
             'selfupdate the west repository',
             _wrap('''
-            Updates the manifest repository and/or the West source code
-            repository. The remote to update from is taken from the
-            manifest.remote and manifest.remote configuration settings, and the
-            revision from manifest.revision and west.revision configuration
-            settings.
+            Updates the West source code repository. The remote to update from
+            and the revision to update to is taken from the west section within
+            the manifest file, `west.yml`, in the manifest repository.
 
             There is normally no need to run this command manually, because
-            'west fetch' and 'west pull' automatically update the West and
-            manifest repositories to the latest version before doing anything
-            else.
-
-            Pass --update-west or --update-manifest to update just that
-            repository. With no arguments, both are updated.
-
-            Updates are skipped (with a warning) if they can't be done via
-            fast-forward, unless --reset-west, or --reset-projects is given.
+            'west update' automatically updates the West repository to the
+            latest version before doing anything else.
             '''))
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(
-            parser_adder, self,
-            _arg('--reset-west',
-                 action='store_true',
-                 help='''Like --update-west, but run 'git reset --keep'
-                      afterwards to reset the west repository to the commit
-                      pointed at by the west.remote and west.revision
-                      configuration settings. This is used internally when
-                      changing west.remote or west.revision via
-                      'west init'.'''),
-                      )
+        return _add_parser(parser_adder, self,
+                           _arg('-k', '--keep-descendants',
+                                action='store_true',
+                                help=_wrap('''
+                                If a local branch is checked out and is a
+                                descendant commit of the new manifest-rev,
+                                then keep that descendant branch checked out
+                                instead of detaching HEAD. This takes priority
+                                over --rebase when possible if both are given.
+                                ''')),
+                           _arg('-r', '--rebase',
+                                action='store_true',
+                                help=_wrap('''
+                                If a local branch is checked out, try
+                                to rebase it onto the new HEAD and
+                                leave the rebased branch checked
+                                out. If this fails, you will need to
+                                clean up the rebase yourself manually.
+                                ''')))
 
     def do_run(self, args, user_args):
-        if args.reset_west:
-            _update_and_reset_west()
-        else:
-            _update_west()
+        _update_west(args.rebase, args.keep_descendants)
 
 
 class ForAll(WestCommand):
@@ -908,38 +842,15 @@ def _west_project():
     return Manifest.from_file(sections=['west']).west_project
 
 
-def _update_west():
+def _update_west(rebase, keep_descendants):
     with _error_context(_FAILED_UPDATE_MSG):
         project = _west_project()
         _dbg(project, 'Updating {name_and_path}', level=log.VERBOSE_NORMAL)
 
         old_sha = _sha(project, 'HEAD')
+        _update(project, rebase, keep_descendants)
 
-        # Only update west via fast-forward, as automatic rebasing is
-        # probably more annoying than useful when working directly on it.
-        #
-        # --tags is required to get tags when the remote is specified as a URL.
-        # --ff-only is required to ensure that the merge only takes place if it
-        # can be fast-forwarded.
-        if _git(project,
-                'fetch --quiet --tags -- {url} {revision}',
-                check=False).returncode:
-
-            _wrn(project,
-                 'Skipping automatic update of {name_and_path}. '
-                 "{revision} cannot be fetched (from {url}).")
-
-        elif _git(project,
-                  'merge --quiet --ff-only FETCH_HEAD',
-                  check=False).returncode:
-
-            _wrn(project,
-                 'Skipping automatic update of {name_and_path}. '
-                 "Can't be fast-forwarded to {revision} (from {url}).")
-
-        elif old_sha != _sha(project, 'HEAD'):
-            _git(project, 'update-ref {qual_manifest_rev_branch} {revision}')
-
+        if old_sha != _sha(project, 'HEAD'):
             _inf(project,
                  'Updated {name_and_path} to {revision} (from {url}).')
 
@@ -949,19 +860,74 @@ def _update_west():
             raise WestUpdated()
 
 
-def _update_and_reset_west():
-    # Updates west by resetting to the new revision after fetching it
-    # (with 'git reset --keep').
+def _update(project, rebase, keep_descendants):
+    _fetch(project)
 
-    project = _west_project()
-    with _error_context(', while updating/resetting west'):
+    branch = _current_branch(project)
+    sha = _sha(project, _MANIFEST_REV_BRANCH)
+    if branch is not None:
+        is_ancestor = _is_ancestor_of(project, sha, branch)
+        try_rebase = rebase
+    else:
+        # If no branch is checked out, 'rebase' and 'keep_descendants' don't
+        # matter.
+        is_ancestor = False
+        try_rebase = False
+
+    if keep_descendants and is_ancestor:
+        # A descendant is currently checked out and keep_descendants was
+        # given, so there's nothing more to do.
         _inf(project,
-             "Fetching and resetting {name_and_path} to '{revision}'")
-        _git(project, 'fetch -- {url} {revision}')
-        if _git(project, 'reset --keep FETCH_HEAD', check=False).returncode:
-            _wrn(project,
-                 'Failed to reset west to "{revision}" '
-                 "(with 'git reset --keep')")
+             'Left branch "{}", a descendant of {}, checked out'.
+             format(branch, sha))
+    elif try_rebase:
+        # Attempt a rebase. Don't exit the program on error;
+        # instead, append to the list of failed rebases and
+        # continue trying to update the other projects. We'll
+        # tell the user a complete list of errors when we're done.
+        cp = _rebase(project, check=False)
+        return cp.returncode
+    else:
+        # We can't keep a descendant or rebase, so just check
+        # out the new detached HEAD and print helpful
+        # information about things they can do with any
+        # locally checked out branch.
+        _checkout_detach(project, _MANIFEST_REV_BRANCH)
+        _post_checkout_help(project, branch, sha, is_ancestor)
+    return 0
+
+
+def _post_checkout_help(project, branch, sha, is_ancestor):
+    # Print helpful information to the user about a project that
+    # might have just left a branch behind.
+
+    if branch is None:
+        # If there was no branch checked out, there are no
+        # additional diagnostics that need emitting.
+        return
+
+    relpath = os.path.relpath(project.abspath)
+    if is_ancestor:
+        # If the branch we just left behind is a descendant of
+        # the new HEAD (e.g. if this is a topic branch the
+        # user is working on and the remote hasn't changed),
+        # print a message that makes it easy to get back,
+        # no matter where in the installation os.getcwd() is.
+        _wrn(project,
+             ('left behind {{name}} branch "{}"; '
+              'to fast forward back, use: git -C {} checkout {}').
+             format(branch, relpath, branch))
+        log.dbg('(To do this automatically in the future,',
+                'use "west update --keep-descendants".)')
+    else:
+        # Tell the user how they could rebase by hand, and
+        # point them at west update --rebase.
+        _wrn(project,
+             ('left behind {{name}} branch "{}"; '
+              'to rebase onto the new HEAD: git -C {} rebase {} {}').
+             format(branch, relpath, sha, branch))
+        log.dbg('(To do this automatically in the future,',
+                'use "west update --rebase".)')
 
 
 def _reset_projects():
