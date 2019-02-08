@@ -21,6 +21,7 @@ import os
 import configparser
 import pykwalify.core
 import yaml
+from pathlib import PurePath
 
 from west import util, log
 from west.config import config
@@ -356,7 +357,7 @@ class Project:
 
     Projects are neither comparable nor hashable.'''
 
-    __slots__ = ('name remote url path abspath clone_depth '
+    __slots__ = ('name remote url path abspath posixpath clone_depth '
                  'revision west_commands').split()
 
     def __init__(self, name, remote, defaults, path=None, clone_depth=None,
@@ -388,6 +389,7 @@ class Project:
         self.path = os.path.normpath(path or name)
         self.abspath = os.path.realpath(os.path.join(util.west_topdir(),
                                                      self.path))
+        self.posixpath = PurePath(self.abspath).as_posix()
         self.clone_depth = clone_depth
         self.revision = revision or defaults.revision
         self.west_commands = west_commands
@@ -431,6 +433,7 @@ class SpecialProject(Project):
         self.path = path or name
         self.abspath = os.path.realpath(os.path.join(util.west_topdir(),
                                                      self.path))
+        self.posixpath = PurePath(self.abspath).as_posix()
         self.revision = revision
         self.remote = None
         self.clone_depth = None

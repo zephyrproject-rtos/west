@@ -121,6 +121,8 @@ class List(WestCommand):
             - path: the relative path to the project from the top level,
               as specified in the manifest where applicable
             - abspath: absolute and normalized path to the project
+            - posixpath: like abspath, but in posix style, that is, with '/'
+              as the separator character instead of '\\'
             - revision: project's manifest revision
             - cloned: "(cloned)" if the project has been cloned, "(not cloned)"
               otherwise
@@ -144,6 +146,7 @@ class List(WestCommand):
                     url=project.url,
                     path=project.path,
                     abspath=project.abspath,
+                    posixpath=project.posixpath,
                     revision=project.revision,
                     cloned="(cloned)" if _cloned(project) else "(not cloned)",
                     clone_depth=project.clone_depth or "None")
