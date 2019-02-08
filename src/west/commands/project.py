@@ -852,6 +852,8 @@ def _update_west():
                  "Can't be fast-forwarded to {revision} (from {url}).")
 
         elif old_sha != _sha(project, 'HEAD'):
+            _git(project, 'update-ref {qual_manifest_rev_branch} {revision}')
+
             _inf(project,
                  'Updated {name_and_path} to {revision} (from {url}).')
 

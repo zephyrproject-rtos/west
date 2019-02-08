@@ -336,6 +336,11 @@ def clone_west(manifest_file, directory):
     clone('west repository', west_url, west_rev,
           os.path.join(directory, WEST_DIR, WEST))
 
+    # Make sure west has a manifest-rev branch, like any project.
+    subprocess.check_call(['git', 'update-ref', 'refs/heads/manifest-rev',
+                           'HEAD'],
+                          cwd=os.path.join(directory, WEST_DIR, WEST))
+
 
 def hide_file(path):
     '''Ensure path is a hidden file.
