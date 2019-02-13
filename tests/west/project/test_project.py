@@ -266,7 +266,7 @@ def test_manifest_freeze(west_update_tmpdir):
                     '^    revision: master$',
                     '^  remotes:$',
                     '^  - name: test-local$',
-                    '^    url_base: .*$',
+                    '^    url-base: .*$',
                     '^  projects:$',
                     '^  - name: Kconfiglib$',
                     '^    remote: test-local$',
