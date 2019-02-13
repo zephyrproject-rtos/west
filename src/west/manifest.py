@@ -359,14 +359,14 @@ class Remote:
         return self.name == other.name and self.url_base == other.url_base
 
     def __repr__(self):
-        return 'Remote(name={}, url_base={})'.format(repr(self.name),
+        return 'Remote(name={}, url-base={})'.format(repr(self.name),
                                                      repr(self.url_base))
 
     def as_dict(self):
         '''Return a representation of this object as a dict, as it would be
         parsed from an equivalent YAML manifest.'''
         return collections.OrderedDict(
-            ((s, getattr(self, s)) for s in self.__slots__))
+            ((s.replace('_', '-'), getattr(self, s)) for s in self.__slots__))
 
 
 class Project:
