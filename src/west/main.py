@@ -11,13 +11,14 @@
 
 import argparse
 import colorama
+import errno
 from functools import partial
 from io import StringIO
 import itertools
 import os
 import shutil
 import sys
-from subprocess import CalledProcessError, check_output, DEVNULL
+from subprocess import Popen, CalledProcessError, check_output, DEVNULL
 import textwrap
 import traceback
 
@@ -506,13 +507,23 @@ def main(argv=None):
     except WestUpdated:
         # West has been automatically updated. Restart ourselves to run the
         # latest version, with the same arguments that we were given.
-        log.dbg("sys.executable:\"{}\" sys.argv[0]:\"{}\" argv:\"{}\"".format(
-                sys.executable, sys.argv[0], argv))
-        if sys.platform == "win32":
-            # On Windows Python generates .exe executables
-            os.execv(sys.argv[0], argv)
-        else:
-            os.execv(sys.executable, [sys.executable] + [sys.argv[0]] + argv)
+        # Treat the Python script as an executable. This works because on
+        # Unix the script created by pip has a shebang and on Windows it is
+        # actually a binary executable
+        log.dbg("sys.argv[0]:\"{}\" argv:\"{}\"".format(sys.argv[0], argv))
+        # Use Popen + exit instead of execv due to the asynchronous nature of
+        # execv # on Windows, where it creates a new process with a different
+        # pid # that executes in parallel to the original one instead of
+        # replacing # it as it does on UNIX
+        # https://bugs.python.org/issue9148
+        # https://bugs.python.org/issue19124
+        try:
+            proc = Popen([sys.argv[0]] + argv)
+            proc.communicate()
+        except KeyboardInterrupt:
+            sys.exit(0)
+        log.dbg('proc.returncode: {}'.format(proc.returncode))
+        sys.exit(errno.EIO if proc.returncode is None else proc.returncode)
     except KeyboardInterrupt:
         sys.exit(0)
     except CalledProcessError as cpe:
