@@ -9,9 +9,11 @@ __comp_west()
 	# Reset to default, to make sure compgen works properly
 	local IFS=$' \t\n'
 
+	# Common arguments for all commands
+	local common="--zephyr-base"
+
 	# Common arguments for runners
 	local run_common="
-	--context
 	--build-dir
 	--cmake-cache
 	--runner
@@ -26,23 +28,22 @@ __comp_west()
 
 	# Associative array with flags for subcommands
 	local -A flags
-	flags[init]="--base-url --manifest-url --manifest-rev --west-url --west-rev"
-	flags[build]="--board --source-dir --build-dir --target --cmake --force"
-	flags[flash]="$run_common"
-	flags[debug]="$run_common"
-	flags[debugserver]="$run_common"
-	flags[attach]="$run_common"
-	flags[list]="--manifest"
-	flags[clone]="-b --no-update"
-	flags[fetch]="--manifest --no-update"
-	flags[pull]="--manifest --no-update"
-	flags[rebase]="--manifest"
-	flags[branch]="--manifest"
-	flags[checkout]="--manifest -b"
-	flags[diff]="--manifest"
-	flags[status]="--manifest"
-	flags[update]="--manifest --update-west --update-manifest"
-	flags[forall]="--manifest -c"
+	flags[init]="$common --manifest-url --manifest-rev --local"
+	flags[help]="$common"
+	flags[list]="$common --format"
+	flags[manifest]="$common --freeze"
+	flags[diff]="$common"
+	flags[status]="$common"
+	flags[update]="$common --no-update --keep-descendants --rebase"
+	flags[selfupdate]="$common --keep-descendants --rebase"
+	flags[forall]="$common -c"
+	# TODO:these should be moved to the zephyr repository
+	flags[build]="$common --board --source-dir --build-dir --target --cmake --force"
+	flags[sign]="$common --build-dir --force --tool-path --bin --no-bin --sbin --hex --no-hex --shex"
+	flags[flash]="$common $run_common"
+	flags[debug]="$common $run_common"
+	flags[debugserver]="$common $run_common"
+	flags[attach]="$common $run_common"
 
 	# Word before current location and at current location
 	local prev=${COMP_WORDS[COMP_CWORD-1]}
