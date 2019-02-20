@@ -52,10 +52,11 @@ HIDDEN_COMMANDS = {None: [PostInit()]}
 BUILTIN_COMMANDS = dict(PROJECT_COMMANDS)
 BUILTIN_COMMANDS.update(HIDDEN_COMMANDS)
 
-
-BUILTIN_COMMAND_NAMES = set()
+# Initialize the set with the virtual 'help' command so that an external
+# command cannot clash with it
+BUILTIN_COMMAND_NAMES = set(['help'])
 for group, commands in BUILTIN_COMMANDS.items():
-    BUILTIN_COMMAND_NAMES.add(c.name for c in commands)
+    BUILTIN_COMMAND_NAMES.update(c.name for c in commands)
 
 
 class InvalidWestContext(RuntimeError):
@@ -264,7 +265,8 @@ def _make_parsers():
     # showing up when West is run via the wrapper
     parser = WestArgumentParser(
         prog='west', description='The Zephyr RTOS meta-tool.',
-        epilog='Run "west <command> -h" for detailed help on each command.',
+        epilog='''Run "west <command> -h" or "west help <command>" for detailed
+help on each command.''',
         add_help=False)
 
     # Remember to update scripts/west-completion.bash if you add or remove
@@ -325,6 +327,32 @@ def ext_command_handler(spec, argv, *ignored):
 
     # Handle the instantiated command in the usual way.
     command.run(*west_parser.parse_known_args(argv))
+
+
+def help_command_handler(west_parser, help_parser, externals, args, *ignored):
+    command_name = args.command
+    if not command_name:
+        west_parser.print_help(top_level=True)
+        return
+
+    if command_name in BUILTIN_COMMAND_NAMES:
+        if command_name == 'help':
+            help_parser.print_help()
+            return
+        for group, commands in BUILTIN_COMMANDS.items():
+            for command in commands:
+                if command.name == command_name:
+                    command.parser.print_help()
+                    return
+    else:
+        for path, specs in externals.items():
+            for spec in specs:
+                if spec.name != command_name:
+                    continue
+                # ext_command_handler() does not return
+                ext_command_handler(spec, [command_name, '--help'])
+        else:
+            west_parser.print_help(top_level=True)
 
 
 def set_zephyr_base(args):
@@ -425,6 +453,12 @@ def parse_args(argv, externals):
                 parser.set_defaults(handler=partial(ext_command_handler,
                                                     spec, argv))
     west_parser.set_externals(externals)
+
+    help_parser = subparser_gen.add_parser('help',
+                                           help='get help on a west command')
+    help_parser.add_argument('command', nargs='?')
+    help_parser.set_defaults(handler=partial(help_command_handler, west_parser,
+                                             help_parser, externals))
 
     # Parse arguments.
     args, unknown = west_parser.parse_known_args(args=argv)
