@@ -34,7 +34,7 @@ __comp_west()
 	flags[manifest]="$common --freeze"
 	flags[diff]="$common"
 	flags[status]="$common"
-	flags[update]="$common --no-update --keep-descendants --rebase"
+	flags[update]="$common --exclude-west --keep-descendants --rebase"
 	flags[selfupdate]="$common --keep-descendants --rebase"
 	flags[forall]="$common -c"
 	# TODO:these should be moved to the zephyr repository
