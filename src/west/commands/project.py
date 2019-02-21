@@ -316,7 +316,7 @@ class Update(WestCommand):
             back to those branches or update them to the new
             manifest-rev versions.
 
-            You can skip updating west using --no-update.
+            You can skip updating west using --exclude-west.
 
             You can influence the behavior when local branches are
             checked out using --keep-descendants and/or --rebase.
@@ -327,7 +327,10 @@ class Update(WestCommand):
 
     def do_add_parser(self, parser_adder):
         return _add_parser(parser_adder, self,
-                           _no_update_arg,
+                           _arg('-x', '--exclude-west',
+                                dest='update',
+                                action='store_false',
+                                help='do not self-update West'),
                            _arg('-k', '--keep-descendants',
                                 action='store_true',
                                 help=_wrap('''
@@ -462,13 +465,6 @@ def _arg(*args, **kwargs):
 
 
 # Arguments shared between more than one command
-
-# For 'fetch' and 'pull'
-_no_update_arg = _arg(
-    '--no-update',
-    dest='update',
-    action='store_false',
-    help='do not self-update West')
 
 # List of projects
 _project_list_arg = _arg('projects', metavar='PROJECT', nargs='*')
@@ -947,8 +943,8 @@ def _reset_projects():
 
 
 _FAILED_UPDATE_MSG = """
-, while running automatic self-update. Pass --no-update to 'west fetch/pull' to
-skip updating the manifest and West for the duration of the command."""[1:]
+, while running automatic self-update. Pass --exclude-west -update to
+'west update' to skip updating west for the duration of the command."""[1:]
 
 
 class WestUpdated(Exception):
