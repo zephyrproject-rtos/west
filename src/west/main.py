@@ -546,9 +546,9 @@ def main(argv=None):
         # actually a binary executable
         log.dbg("sys.argv[0]:\"{}\" argv:\"{}\"".format(sys.argv[0], argv))
         # Use Popen + exit instead of execv due to the asynchronous nature of
-        # execv # on Windows, where it creates a new process with a different
-        # pid # that executes in parallel to the original one instead of
-        # replacing # it as it does on UNIX
+        # execv on Windows, where it creates a new process with a different
+        # pid that executes in parallel to the original one instead of
+        # replacing it as it does on UNIX
         # https://bugs.python.org/issue9148
         # https://bugs.python.org/issue19124
         try:
