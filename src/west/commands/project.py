@@ -63,24 +63,27 @@ class PostInit(WestCommand):
 
         manifest_file = os.path.join(args.local or args.cache, 'west.yml')
 
-        project = Manifest.from_file(manifest_file)\
-            .projects[MANIFEST_PROJECT_INDEX]
+        projects = Manifest.from_file(manifest_file).projects
+        manifest_project = projects[MANIFEST_PROJECT_INDEX]
 
         if args.local is not None:
             rel_manifest = os.path.relpath(args.local, util.west_topdir())
             update_config('manifest', 'path', rel_manifest)
         else:
-            if project.path == '':
+            if manifest_project.path == '':
                 url_path = urlparse(args.manifest_url).path
-                project.path = posixpath.basename(url_path)
-                project.abspath = os.path.realpath(
-                    os.path.join(util.west_topdir(), project.path))
-                project.name = project.path
+                manifest_project.path = posixpath.basename(url_path)
+                manifest_project.abspath = os.path.realpath(
+                    os.path.join(util.west_topdir(), manifest_project.path))
+                manifest_project.name = manifest_project.path
 
-            _inf(project, 'Creating repository for {name_and_path}')
-            shutil.move(args.cache, project.abspath)
+            _inf(manifest_project, 'Creating repository for {name_and_path}')
+            shutil.move(args.cache, manifest_project.abspath)
 
-            update_config('manifest', 'path', project.path)
+            update_config('manifest', 'path', manifest_project.path)
+        for project in projects:
+            if project.path == 'zephyr':
+                update_config('zephyr', 'base', project.path)
 
 
 class List(WestCommand):
@@ -852,6 +855,12 @@ def _update_west(rebase, keep_descendants):
 
         old_sha = _sha(project, 'HEAD')
         _update(project, rebase, keep_descendants)
+
+        if config.get('zephyr', 'base', fallback=None) is None:
+            for proj in _all_projects():
+                if proj.path == 'zephyr':
+                    update_config('zephyr', 'base', proj.path)
+                    break
 
         if old_sha != _sha(project, 'HEAD'):
             _inf(project,

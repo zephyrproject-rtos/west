@@ -29,7 +29,7 @@ from west.commands import external_commands, \
 from west.commands.project import List, ManifestCommand, Diff, Status, \
     SelfUpdate, ForAll, WestUpdated, PostInit, Update
 from west.commands.config import Config
-from west.manifest import Manifest, MalformedConfig
+from west.manifest import MalformedConfig
 from west.util import quote_sh_list
 
 PROJECT_COMMANDS = {
@@ -358,10 +358,18 @@ def help_command_handler(west_parser, help_parser, externals, args, *ignored):
 
 
 def set_zephyr_base(args):
-    '''Ensure ZEPHYR_BASE is set, emitting warnings if that's not
-    possible, or if the user is pointing it somewhere different than
-    what the manifest expects.'''
-    zb_env = os.environ.get('ZEPHYR_BASE')
+    '''Ensure ZEPHYR_BASE is set
+    Order of precedence:
+    1) Value given as command line argument
+    2) Value from environment setting: ZEPHYR_BASE
+    3) Value of zephyr.base setting in west config file
+
+    Order of precedence between 2) and 3) can be changed with the setting
+    zephyr.base-prefer.
+    zephyr.base-prefer takes the values 'env' and 'configfile'
+
+    If 2) and 3) has different values and zephyr.base-prefer is unset a warning
+    is printed to the user.'''
 
     if args.zephyr_base:
         # The command line --zephyr-base takes precedence over
@@ -369,45 +377,53 @@ def set_zephyr_base(args):
         zb = os.path.abspath(args.zephyr_base)
         zb_origin = 'command line'
     else:
-        # If the user doesn't specify it concretely, use the project
-        # with path 'zephyr' if that exists, or the ZEPHYR_BASE value
-        # in the calling environment.
+        # If the user doesn't specify it concretely, then use ZEPHYR_BASE
+        # from the environment or zephyr.base from west.configuration.
+        #
+        # `west init` will configure zephyr.base to the project that has path
+        # 'zephyr'.
         #
         # At some point, we need a more flexible way to set environment
         # variables based on manifest contents, but this is good enough
         # to get started with and to ask for wider testing.
-        try:
-            manifest = Manifest.from_file()
-        except MalformedConfig as e:
-            log.die('Parsing of manifest file failed during command',
-                    args.command, ':', *e.args)
-        for project in manifest.projects:
-            if project.path == 'zephyr':
-                zb = project.abspath
-                zb_origin = 'manifest file {}'.format(manifest.path)
-                break
+        zb_env = os.environ.get('ZEPHYR_BASE')
+        zb_prefer = config.config.get('zephyr', 'base-prefer',
+                                      fallback=None)
+        zb_config = config.config.get('zephyr', 'base', fallback=None)
+
+        if zb_prefer == 'env' and zb_env is not None:
+            zb = zb_env
+            zb_origin = 'env'
+        elif zb_prefer == 'configfile' and zb_config is not None:
+            zb = zb_config
+            zb_origin = 'configfile'
+        elif zb_env is not None:
+            zb = zb_env
+            zb_origin = 'env'
+            if zb_config is not None and \
+                    os.path.abspath(zb_config) != os.path.abspath(zb_env):
+                # The environment ZEPHYR_BASE takes precedence over the config
+                # setting, but in normal multi-repo operation we shouldn't
+                # expect to need to set ZEPHYR_BASE.
+                # Therefore issue a warning as it might have happened that
+                # zephyr-env.sh/cmd was run in some other zephyr installation,
+                # and the user forgot about that.
+                log.wrn('ZEPHYR_BASE={}'.format(zb_env),
+                        'in the calling environment will be used, but was set '
+                        'to', zb_config, 'in west config.\n To disable this '
+                        'warning, execute '
+                        '\'west config --global zephyr.base-prefer env\'')
+        elif zb_config is not None:
+            zb = zb_config
+            zb_origin = 'configfile'
         else:
-            if zb_env is None:
-                log.wrn('no --zephyr-base given, ZEPHYR_BASE is unset,',
-                        'and no manifest project has path "zephyr"')
-                zb = None
-                zb_origin = None
-            else:
-                zb = zb_env
-                zb_origin = 'environment'
+            log.err('no --zephyr-base given, ZEPHYR_BASE is unset,',
+                    'and west config contains no zephyr.base setting')
+            zb = None
+            zb_origin = None
 
-    if zb_env and os.path.abspath(zb) != os.path.abspath(zb_env):
-        # The environment ZEPHYR_BASE takes precedence over either the
-        # command line or the manifest, but in normal multi-repo
-        # operation we shouldn't expect to need to set ZEPHYR_BASE to
-        # point to some random place. In practice, this is probably
-        # happening because zephyr-env.sh/cmd was run in some other
-        # zephyr installation, and the user forgot about that.
-        log.wrn('ZEPHYR_BASE={}'.format(zb_env),
-                'in the calling environment, but has been set to',
-                zb, 'instead by the', zb_origin)
-
-    os.environ['ZEPHYR_BASE'] = zb
+    if zb is not None:
+        os.environ['ZEPHYR_BASE'] = os.path.abspath(zb)
 
     log.dbg('ZEPHYR_BASE={} (origin: {})'.format(zb, zb_origin))
 
