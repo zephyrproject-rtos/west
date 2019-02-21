@@ -14,7 +14,7 @@ import sys
 import textwrap
 import yaml
 
-from west.configuration import config
+from west.configuration import config, update_config
 from west import log
 from west import util
 from west.commands import WestCommand, CommandError
@@ -68,7 +68,7 @@ class PostInit(WestCommand):
 
         if args.local is not None:
             rel_manifest = os.path.relpath(args.local, util.west_topdir())
-            _update_key(config, 'manifest', 'path', rel_manifest)
+            update_config('manifest', 'path', rel_manifest)
         else:
             if project.path == '':
                 url_path = urlparse(args.manifest_url).path
@@ -80,7 +80,7 @@ class PostInit(WestCommand):
             _inf(project, 'Creating repository for {name_and_path}')
             shutil.move(args.cache, project.abspath)
 
-            _update_key(config, 'manifest', 'path', project.path)
+            update_config('manifest', 'path', project.path)
 
 
 class List(WestCommand):
@@ -1054,25 +1054,6 @@ def _git_helper(project, cmd, extra_args, cwd, capture_stdout, check):
         stdout = "\n".join(stdout.decode('utf-8').splitlines()).rstrip("\n")
 
     return CompletedProcess(popen.args, popen.returncode, stdout)
-
-
-def _update_key(config, section, key, value):
-    '''
-    Updates 'key' in section 'section' in ConfigParser 'config', creating
-    'section' if it does not exist and write the file afterwards.
-
-    If value is None/empty, 'key' is left as-is.
-    '''
-    if not value:
-        return
-
-    if section not in config:
-        config[section] = {}
-
-    config[section][key] = value
-
-    with open(os.path.join(util.west_dir(), 'config'), 'w') as f:
-        config.write(f)
 
 
 # Some Python shenanigans to be able to set up a context with
