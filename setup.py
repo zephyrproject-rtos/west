@@ -34,6 +34,7 @@ setuptools.setup(
         'colorama',
         'PyYAML',
         'pykwalify',
+        'configobj',
         ],
     python_requires='>=3.4',
     entry_points={

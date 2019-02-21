@@ -28,6 +28,7 @@ from west.commands import external_commands, \
     CommandError, CommandContextError, ExtensionCommandError
 from west.commands.project import List, ManifestCommand, Diff, Status, \
     SelfUpdate, ForAll, WestUpdated, PostInit, Update
+from west.commands.config import Config
 from west.manifest import Manifest, MalformedConfig
 from west.util import quote_sh_list
 
@@ -39,7 +40,8 @@ PROJECT_COMMANDS = {
         Status(),
         Update(),
         SelfUpdate(),
-        ForAll()
+        ForAll(),
+        Config()
     ]
 }
 

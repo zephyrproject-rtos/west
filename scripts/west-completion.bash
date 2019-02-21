@@ -37,6 +37,7 @@ __comp_west()
 	flags[update]="$common --exclude-west --keep-descendants --rebase"
 	flags[selfupdate]="$common --keep-descendants --rebase"
 	flags[forall]="$common -c"
+	flags[config]="$common --system --global --local"
 	# TODO:these should be moved to the zephyr repository
 	flags[build]="$common --board --source-dir --build-dir --target --cmake --force"
 	flags[sign]="$common --build-dir --force --tool-path --bin --no-bin --sbin --hex --no-hex --shex"
