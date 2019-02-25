@@ -523,11 +523,11 @@ def main(argv=None):
     config.read_config()
 
     # Load any external command specs. If the config file isn't
-    # fully set up yet, ignore the error. This allows west init to
-    # work properly.
+    # fully set up yet or the west.yml cannot be found, ignore the error.
+    # This allows west init to work properly.
     try:
         externals = get_external_commands()
-    except MalformedConfig:
+    except (MalformedConfig, FileNotFoundError):
         externals = {}
 
     if argv is None:
