@@ -56,6 +56,11 @@ class PostInit(WestCommand):
             _project_list_arg)
 
     def do_run(self, args, user_args):
+        # manifest.path is not supposed to be set during init, thus clear it
+        # for the session and update it to correct location when complete.
+        if config.get('manifest', 'path', fallback=None) is not None:
+            config.remove_option('manifest', 'path')
+
         manifest_file = os.path.join(args.local or args.cache, 'west.yml')
 
         project = Manifest.from_file(manifest_file)\
