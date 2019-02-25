@@ -66,7 +66,7 @@ def west_dir(start=None):
 
     Raises WestNotFound if no west directory is found.
     '''
-    return os.path.join(west_topdir(start), WEST_DIR)
+    return os.path.join(west_topdir(start, False), WEST_DIR)
 
 
 def west_topdir(start=None, fall_back=True):
