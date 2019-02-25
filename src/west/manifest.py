@@ -207,7 +207,7 @@ class Manifest:
 
         self_tag = manifest.get('self')
         if path is None:
-            path = self_tag.get('path') if self_tag else None
+            path = self_tag.get('path') if self_tag else ''
         west_commands = self_tag.get('west-commands') if self_tag else None
 
         project = SpecialProject(path, path=path, west_commands=west_commands)

@@ -65,9 +65,11 @@ class PostInit(WestCommand):
             rel_manifest = os.path.relpath(args.local, util.west_topdir())
             _update_key(config, 'manifest', 'path', rel_manifest)
         else:
-            if project.path is None:
+            if project.path == '':
                 url_path = urlparse(args.manifest_url).path
                 project.path = posixpath.basename(url_path)
+                project.abspath = os.path.realpath(
+                    os.path.join(util.west_topdir(), project.path))
                 project.name = project.path
 
             _inf(project, 'Creating repository for {name_and_path}')
