@@ -228,7 +228,8 @@ to handle any resetting yourself.
 
 def initialize_west(args):
     '''Initialize a West installation in existing project.'''
-    manifest_dir = os.path.abspath(args.directory or os.getcwd())
+    manifest_dir = os.path.normpath(os.path.abspath(args.directory or
+                                                    os.getcwd()))
     directory = os.path.dirname(manifest_dir)
 
     manifest_file = os.path.join(manifest_dir, 'west.yml')
