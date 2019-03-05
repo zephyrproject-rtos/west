@@ -18,6 +18,9 @@ if they are not present in the manifest data.'''
 
 import collections
 import os
+import shutil
+import shlex
+import subprocess
 
 import configparser
 import pykwalify.core
@@ -25,6 +28,7 @@ import yaml
 from pathlib import PurePath
 
 from west import util, log
+from west.backports import CompletedProcess
 from west.config import config
 
 
@@ -39,7 +43,16 @@ MANIFEST_SECTIONS = ['manifest', 'west']
 
 MANIFEST_PROJECT_INDEX = 0
 '''Index in projects where the project with contains project manifest file is
-located.'''
+located'''
+
+MANIFEST_REV_BRANCH = 'manifest-rev'
+'''The name of the branch that points to the revision specified in the
+manifest'''
+
+QUAL_MANIFEST_REV_BRANCH = 'refs/heads/' + MANIFEST_REV_BRANCH
+'''A qualified reference to MANIFEST_REV_BRANCH, i.e.
+refs/heads/{}'''.format(MANIFEST_REV_BRANCH)
+
 
 def manifest_path():
     '''Return the path to the manifest file.
@@ -171,6 +184,39 @@ class Manifest:
     def get_remote(self, name):
         '''Get a manifest Remote, given its name.'''
         return self._remotes_dict[name]
+
+    def as_frozen_dict(self):
+        '''Returns an OrderedDict representing this manifest, frozen.
+
+        The manifest is 'frozen' in that all Git revisions in the
+        original data are replaced with the corresponding SHAs.
+
+        Note that this requires that all projects are checked out.
+        '''
+        # Build a 'frozen' representation of all projects, except the
+        # manifest project.
+        projects = list(self.projects)
+        del projects[MANIFEST_PROJECT_INDEX]
+        frozen_projects = []
+        for project in projects:
+            sha = project.sha(QUAL_MANIFEST_REV_BRANCH)
+            d = project.as_dict()
+            d['revision'] = sha
+            frozen_projects.append(d)
+
+        # We include the defaults value here even though all projects
+        # are fully specified in order to make the resulting manifest
+        # easy to extend by users who want to reuse the defaults.
+        r = collections.OrderedDict()
+        r['west'] = self.west_project.as_dict()
+        r['west']['revision'] = self.west_project.sha(QUAL_MANIFEST_REV_BRANCH)
+        r['manifest'] = collections.OrderedDict()
+        r['manifest']['defaults'] = self.defaults.as_dict()
+        r['manifest']['remotes'] = [r.as_dict() for r in self.remotes]
+        r['manifest']['projects'] = frozen_projects
+        r['manifest']['self'] = self.projects[MANIFEST_PROJECT_INDEX].as_dict()
+
+        return r
 
     def _malformed(self, complaint, section='manifest'):
         context = (' file {} '.format(self.path) if self.path
@@ -426,7 +472,7 @@ class Project:
         parsed from an equivalent YAML manifest.'''
         ret = collections.OrderedDict(
             (('name', self.name),
-             ('remote', self.remote.name),
+             ('remote', self.remote.name if self.remote else 'None'),
              ('revision', self.revision)))
         if self.path != self.name:
             ret['path'] = self.path
@@ -436,6 +482,140 @@ class Project:
             ret['west-commands'] = self.west_commands
         return ret
 
+    def format(self, s, *args, **kwargs):
+        '''Calls s.format() with instance-related format keys.
+
+        The formatted value is returned.
+
+        :param s: string (or other object) whose format() method to call
+
+        The format method is called with *args and the following kwargs:
+
+        - this object's __slots__ / values (name, url, etc.)
+        - name_and_path: "self.name + (self.path)"
+        - remote_name: "None" if no remote, otherwise self.remote.name
+        - any additional kwargs passed as parameters
+
+        The kwargs passed as parameters override the other values.
+        '''
+        kwargs = self._format_kwargs(kwargs)
+        return s.format(*args, **kwargs)
+
+    def _format_kwargs(self, kwargs):
+        ret = {s: getattr(self, s) for s in self.__slots__}
+        ret['name_and_path'] = '{} ({})'.format(self.name, self.path)
+        ret['remote_name'] = ('None' if self.remote is None
+                              else self.remote.name)
+        ret.update(kwargs)
+        return ret
+
+    def git(self, cmd, extra_args=(), capture_stdout=False, check=True,
+            cwd=None):
+        '''Helper for running a git command using metadata from a Project
+        instance.
+
+        :param cmd: git command as a string (or list of strings); all strings
+                    are formatted using self.format() before use.
+        :param extra_args: sequence of additional arguments to pass to the git
+                           command (useful mostly if cmd is a string).
+        :param capture_stdout: True if stdout should be captured into the
+                               returned object instead of being printed.
+                               The stderr output is never captured,
+                               to prevent error messages from being eaten.
+        :param check: True if a subprocess.CalledProcessError should be raised
+                      if the git command finishes with a non-zero return code.
+        :param cwd: directory to run command in (default: self.abspath)
+
+        Returns a CompletedProcess (which is back-ported for Python 3.4).'''
+        # TODO: Run once somewhere?
+        if shutil.which('git') is None:
+            log.wrn('Git is not installed or cannot be found')
+
+        if isinstance(cmd, str):
+            cmd_list = shlex.split(cmd)
+        else:
+            cmd_list = list(cmd)
+
+        extra_args = list(extra_args)
+
+        if cwd is None:
+            cwd = self.abspath
+
+        args = ['git'] + [self.format(arg) for arg in cmd_list] + extra_args
+        cmd_str = util.quote_sh_list(args)
+
+        log.dbg("running '{}'".format(cmd_str), 'in', cwd,
+                level=log.VERBOSE_VERY)
+        popen = subprocess.Popen(
+            args, stdout=subprocess.PIPE if capture_stdout else None, cwd=cwd)
+
+        stdout, _ = popen.communicate()
+
+        dbg_msg = "'{}' in {} finished with exit status {}".format(
+            cmd_str, cwd, popen.returncode)
+        if capture_stdout:
+            dbg_msg += " and wrote {} to stdout".format(stdout)
+        log.dbg(dbg_msg, level=log.VERBOSE_VERY)
+
+        # stderr is None because this method never captures it.
+        if check and popen.returncode:
+            raise subprocess.CalledProcessError(popen.returncode, cmd_list,
+                                                output=stdout, stderr=None)
+        else:
+            return CompletedProcess(popen.args, popen.returncode, stdout, None)
+
+    def sha(self, rev):
+        '''Returns the SHA of the given revision in the current project.
+
+        :param rev: git revision (HEAD, v2.0.0, etc.) as a string
+        '''
+        cp = self.git('rev-parse ' + rev, capture_stdout=True)
+        # Assumption: SHAs are hex values and thus safe to decode in ASCII.
+        # It'll be fun when we find out that was wrong and how...
+        return cp.stdout.decode('ascii').strip()
+
+    def is_ancestor_of(self, rev1, rev2):
+        '''Check if 'rev1' is an ancestor of 'rev2' in this project.
+
+        :param rev1: commit that could be the ancestor
+        :param rev2: commit that could be a descendant
+
+        Returns True if rev1 is an ancestor commit of rev2 in the
+        given project; rev1 and rev2 can be anything that resolves to
+        a commit. (If rev1 and rev2 refer to the same commit, the
+        return value is True, i.e. a commit is considered an ancestor
+        of itself.) Returns False otherwise.'''
+        returncode = self.git('merge-base --is-ancestor {} {}'.
+                              format(rev1, rev2),
+                              check=False).returncode
+
+        if returncode == 0:
+            return True
+        elif returncode == 1:
+            return False
+        else:
+            log.wrn(self.format(
+                '{name_and_path}: git failed with exit code {rc}; '
+                'treating as if "{r1}" is not an ancestor of "{r2}"',
+                rc=returncode, r1=rev1, r2=rev2))
+            return False
+
+    def is_up_to_date_with(self, rev):
+        '''Check if a project is up to date with revision 'rev'.
+
+        :param rev: base revision to check if project is up to date with.
+
+        Returns True if all commits in 'rev' are also in HEAD. This
+        can be used to check if this project needs updates, rebasing,
+        etc.; 'rev' can be anything that resolves to a commit.
+
+        This is a special case of is_ancestor_of() provided for convenience.
+        '''
+        return self.is_ancestor_of(rev, 'HEAD')
+
+    def is_up_to_date(self):
+        '''Returns is_up_to_date_with(self.revision).'''
+        return self.is_up_to_date_with(self.revision)
 
 class SpecialProject(Project):
     '''Represents a special project, e.g. the west or manifest project.
@@ -472,6 +652,8 @@ class SpecialProject(Project):
         self.west_commands = west_commands
 
     def as_dict(self):
+        '''Return a representation of this object as a dict, as it would be
+        parsed from an equivalent YAML manifest.'''
         if self.name == 'west':
             return collections.OrderedDict((('url', self.url),
                                             ('revision', self.revision)))
