@@ -19,14 +19,11 @@ from west import log
 from west import util
 from west.commands import WestCommand, CommandError
 from west.manifest import Manifest, MalformedManifest, MANIFEST_PROJECT_INDEX
+from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
+from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
 from urllib.parse import urlparse
 import posixpath
 
-
-# Branch that points to the revision specified in the manifest (which might be
-# an SHA). Local branches created with 'west branch' are set to track this
-# branch.
-_MANIFEST_REV_BRANCH = 'manifest-rev'
 
 class PostInit(WestCommand):
     def __init__(self):
@@ -77,7 +74,7 @@ class PostInit(WestCommand):
                     os.path.join(util.west_topdir(), manifest_project.path))
                 manifest_project.name = manifest_project.path
 
-            _inf(manifest_project, 'Creating repository for {name_and_path}')
+            _banner(project.format('Creating repository for {name_and_path}'))
             shutil.move(args.cache, manifest_project.abspath)
 
             update_config('manifest', 'path', manifest_project.path)
@@ -209,32 +206,7 @@ class ManifestCommand(WestCommand):
     def do_run(self, args, user_args):
         # We assume --freeze here. Future extensions to the group
         # --freeze is part of can move this code around.
-
-        m = Manifest.from_file()
-
-        # Build a 'frozen' representation of all projects, except the
-        # manifest project.
-        projects = list(m.projects)
-        del projects[MANIFEST_PROJECT_INDEX]
-        frozen_projects = []
-        for project in projects:
-            sha = _sha(project, '{qual_manifest_rev_branch}')
-            d = project.as_dict()
-            d['revision'] = sha
-            frozen_projects.append(d)
-
-        # We include the defaults value here even though all projects
-        # are fully specified in order to make the resulting manifest
-        # easy to extend by users who want to reuse the defaults.
-        o = collections.OrderedDict()
-        o['west'] = m.west_project.as_dict()
-        o['west']['revision'] = _sha(m.west_project,
-                                     '{qual_manifest_rev_branch}')
-        o['manifest'] = collections.OrderedDict()
-        o['manifest']['defaults'] = m.defaults.as_dict()
-        o['manifest']['remotes'] = [r.as_dict() for r in m.remotes]
-        o['manifest']['projects'] = frozen_projects
-        o['manifest']['self'] = m.projects[MANIFEST_PROJECT_INDEX].as_dict()
+        frozen = Manifest.from_file().as_frozen_dict()
 
         # This is a destructive operation, so it's done here to avoid
         # impacting code which doesn't expect this representer to be
@@ -243,9 +215,9 @@ class ManifestCommand(WestCommand):
 
         if args.out:
             with open(args.out, 'w') as f:
-                yaml.safe_dump(o, default_flow_style=False, stream=f)
+                yaml.safe_dump(frozen, default_flow_style=False, stream=f)
         else:
-            yaml.safe_dump(o, default_flow_style=False, stream=sys.stdout)
+            yaml.safe_dump(frozen, default_flow_style=False, stream=sys.stdout)
 
     def _rep(self, dumper, value):
         # See https://yaml.org/type/map.html for details on the tag.
@@ -295,7 +267,7 @@ class Status(WestCommand):
 
     def do_run(self, args, user_args):
         for project in _cloned_projects(args):
-            _inf(project, 'status of {name_and_path}')
+            _banner(project.format('status of {name_and_path}'))
             _git(project, 'status', extra_args=user_args)
 
 
@@ -372,7 +344,7 @@ class Update(WestCommand):
             returncode = _update(project, args.rebase, args.keep_descendants)
             if returncode:
                 failed_rebases.append(project)
-                _err(project, '{name_and_path} failed to rebase')
+                log.err(project.format('{name_and_path} failed to rebase'))
 
         if failed_rebases:
             # Avoid printing this message if exactly one project
@@ -381,7 +353,7 @@ class Update(WestCommand):
                 log.err(('The following project{} failed to rebase; '
                         'see above for details: {}').format(
                             's' if len(failed_rebases) > 1 else '',
-                            ', '.join(_expand_shorthands(p, '{name_and_path}')
+                            ', '.join(p.format('{name_and_path}')
                                       for p in failed_rebases)))
             raise CommandError(1)
 
@@ -458,8 +430,8 @@ class ForAll(WestCommand):
 
     def do_run(self, args, user_args):
         for project in _cloned_projects(args):
-            _inf(project, "Running '{}' in {{name_and_path}}"
-                          .format(args.command))
+            _banner(project.format("Running '{cmd}' in {name_and_path}",
+                                   cmd=args.command))
 
             subprocess.Popen(args.command, shell=True, cwd=project.abspath) \
                 .wait()
@@ -498,7 +470,7 @@ def _add_parser(parser_adder, cmd, *extra_args, **kwargs):
 
 def _wrap(s):
     # Wraps help texts for commands. Some of them have variable length (due to
-    # _MANIFEST_REV_BRANCH), so just a textwrap.dedent() can look a bit wonky.
+    # MANIFEST_REV), so just a textwrap.dedent() can look a bit wonky.
 
     # [1:] gets rid of the initial newline. It's turned into a space by
     # textwrap.fill() otherwise.
@@ -510,7 +482,7 @@ def _wrap(s):
 _MANIFEST_REV_HELP = """
 The '{}' branch points to the revision that the manifest specified for the
 project as of the most recent 'west fetch'/'west pull'.
-""".format(_MANIFEST_REV_BRANCH)[1:].replace("\n", " ")
+""".format(MANIFEST_REV)[1:].replace("\n", " ")
 
 
 def _cloned_projects(args):
@@ -630,8 +602,8 @@ def _fetch(project):
     # project's repository does not already exist, it is created first.
 
     if not _cloned(project):
-        _inf(project, 'Creating repository for {name_and_path}')
-        _git_base(project, 'init {abspath}')
+        _banner(project.format('Creating repository for {name_and_path}'))
+        _git(project, 'init {abspath}', cwd=util.west_topdir())
         # This remote is only added for the user's convenience. We always fetch
         # directly from the URL specified in the manifest.
         _git(project, 'remote add -- {remote_name} {url}')
@@ -645,7 +617,7 @@ def _fetch(project):
     else:
         fetch_cmd = "fetch"
 
-    _inf(project, msg)
+    _banner(project.format(msg))
     # This two-step approach avoids a "trying to write non-commit object" error
     # when the revision is an annotated tag. ^{commit} type peeling isn't
     # supported for the <src> in a <src>:<dst> refspec, so we have to do it
@@ -654,13 +626,12 @@ def _fetch(project):
     # --tags is required to get tags when the remote is specified as an URL.
     if _is_sha(project.revision):
         # Don't fetch a SHA directly, as server may restrict from doing so.
-        _git(project, fetch_cmd + ' --tags -- {url} '
-             'refs/heads/*:refs/west/*')
-        _git(project, 'update-ref {qual_manifest_rev_branch} {revision}')
+        _git(project, fetch_cmd + ' --tags -- {url} refs/heads/*:refs/west/*')
+        _git(project, 'update-ref ' + QUAL_MANIFEST_REV + ' {revision}')
     else:
         _git(project, fetch_cmd + ' --tags -- {url} {revision}')
         _git(project,
-             'update-ref {qual_manifest_rev_branch} FETCH_HEAD^{{commit}}')
+             'update-ref ' + QUAL_MANIFEST_REV + ' FETCH_HEAD^{{commit}}')
 
     if not _head_ok(project):
         # If nothing it checked out (which would usually only happen just after
@@ -675,7 +646,7 @@ def _fetch(project):
         # The --detach flag is strictly redundant here, because the
         # refs/heads/<branch> form already detaches HEAD, but it avoids a
         # spammy detached HEAD warning from Git.
-        _git(project, 'checkout --detach {qual_manifest_rev_branch}')
+        _git(project, 'checkout --detach ' + QUAL_MANIFEST_REV)
 
 
 def _rebase(project, **kwargs):
@@ -684,55 +655,19 @@ def _rebase(project, **kwargs):
     # Any kwargs are passed on to the underlying _git() call for the
     # rebase operation. A CompletedProcess instance is returned for
     # the git rebase.
-    _inf(project, 'Rebasing {name_and_path} to {manifest_rev_branch}')
-    return _git(project, 'rebase {qual_manifest_rev_branch}', **kwargs)
+    log.inf(project.format('Rebasing {name_and_path} to ' + MANIFEST_REV))
+    return _git(project, 'rebase ' + QUAL_MANIFEST_REV, **kwargs)
 
 
 def _sha(project, rev):
-    # Returns the SHA of a revision (HEAD, v2.0.0, etc.), passed as a string in
-    # 'rev'
+    # Returns project.sha(rev), aborting the program on CalledProcessError.
 
-    return _git(project, 'rev-parse ' + rev, capture_stdout=True).stdout
-
-
-def _merge_base(project, rev1, rev2):
-    # Returns the latest commit in common between 'rev1' and 'rev2'
-
-    return _git(project, 'merge-base -- {} {}'.format(rev1, rev2),
-                capture_stdout=True).stdout
-
-
-def _up_to_date_with(project, rev):
-    # Returns True if all commits in 'rev' are also in HEAD. This is used to
-    # check if 'project' needs rebasing. 'revision' can be anything that
-    # resolves to a commit.
-    #
-    # This is a special case of _is_ancestor_of() which exists for convenience.
-
-    return _is_ancestor_of(project, rev, 'HEAD')
-
-
-def _is_ancestor_of(project, rev1, rev2):
-    # Returns True if rev1 is an ancestor commit of rev2 in the given
-    # project; rev1 and rev2 can be anything that resolves to a
-    # commit. (If rev1 and rev2 refer to the same commit, the return
-    # value is True, i.e. a commit is considered an ancestor of
-    # itself.) Returns False otherwise.
-    returncode = _git(project,
-                      'merge-base --is-ancestor {} {}'.format(rev1, rev2),
-                      check=False).returncode
-
-    if returncode == 0:
-        return True
-    elif returncode == 1:
-        return False
-    else:
-        _wrn(project,
-             ('_is_ancestor_of: {{name_and_path}}: '
-              'git failed with exit code {}; '
-              'treating as if "{}" is not an ancestor of "{}"').
-             format(returncode, rev1, rev2))
-        return False
+    try:
+        return project.sha(rev)
+    except subprocess.CalledProcessError:
+        log.die(project.format(
+            "failed to get SHA for revision '{r}' in {name_and_path}",
+            r=rev))
 
 
 def _cloned(project):
@@ -759,31 +694,6 @@ def _cloned(project):
     return handle(not (res.returncode or res.stdout))
 
 
-def _branches(project):
-    # Returns a sorted list of all local branches in 'project'
-
-    # refname:lstrip=-1 isn't available before Git 2.8 (introduced by commit
-    # 'tag: do not show ambiguous tag names as "tags/foo"'). Strip
-    # 'refs/heads/' manually instead.
-    return [ref[len('refs/heads/'):] for ref in
-            _git(project,
-                 'for-each-ref --sort=refname --format=%(refname) refs/heads',
-                 capture_stdout=True).stdout.split('\n')]
-
-
-def _create_branch(project, branch):
-    if _has_branch(project, branch):
-        _inf(project, "Branch '{}' already exists in {{name_and_path}}"
-                      .format(branch))
-    else:
-        _inf(project, "Creating branch '{}' in {{name_and_path}}"
-                      .format(branch))
-
-        _git(project,
-             'branch --quiet --track -- {} {{qual_manifest_rev_branch}}'
-             .format(branch))
-
-
 def _current_branch(project):
     # Determine if project is currently on a branch
     if not _cloned(project):
@@ -796,17 +706,6 @@ def _current_branch(project):
         return None
     else:
         return branch
-
-
-def _has_branch(project, branch):
-    return _ref_ok(project, 'refs/heads/' + branch)
-
-
-def _ref_ok(project, ref):
-    # Returns True if the reference 'ref' exists and can be resolved to a
-    # commit
-    return _git(project, 'show-ref --quiet --verify ' + ref, check=False) \
-           .returncode == 0
 
 
 def _head_ok(project):
@@ -825,16 +724,10 @@ def _head_ok(project):
            .returncode == 0
 
 
-def _checkout(project, revision):
-    _inf(project,
-         "Checking out revision '{}' in {{name_and_path}}".format(revision))
-    _git(project, 'checkout ' + revision)
-
-
 def _checkout_detach(project, revision):
-    _inf(project,
-         "Checking out revision '{}' as detached HEAD in {{name_and_path}}"
-         .format(_sha(project, revision)))
+    log.inf(project.format(
+        "Checking out revision '{r}' as detached HEAD in {name_and_path}",
+        r=_sha(project, revision)))
     _git(project, 'checkout --detach --quiet ' + revision)
     # The checkout above was quiet to avoid multi line spamming when checking
     # out in detached HEAD in each project.
@@ -851,7 +744,7 @@ def _west_project():
 def _update_west(rebase, keep_descendants):
     with _error_context(_FAILED_UPDATE_MSG):
         project = _west_project()
-        _dbg(project, 'Updating {name_and_path}', level=log.VERBOSE_NORMAL)
+        log.dbg(project.format('Updating {name_and_path}'))
 
         old_sha = _sha(project, 'HEAD')
         _update(project, rebase, keep_descendants)
@@ -863,8 +756,8 @@ def _update_west(rebase, keep_descendants):
                     break
 
         if old_sha != _sha(project, 'HEAD'):
-            _inf(project,
-                 'Updated {name_and_path} to {revision} (from {url}).')
+            log.inf(project.format(
+                'Updated {name_and_path} to {revision} (from {url}).'))
 
             # Signal self-update, which will cause a restart. This is a bit
             # nicer than doing the restart here, as callers will have a
@@ -876,9 +769,9 @@ def _update(project, rebase, keep_descendants):
     _fetch(project)
 
     branch = _current_branch(project)
-    sha = _sha(project, _MANIFEST_REV_BRANCH)
+    sha = _sha(project, MANIFEST_REV)
     if branch is not None:
-        is_ancestor = _is_ancestor_of(project, sha, branch)
+        is_ancestor = project.is_ancestor_of(sha, branch)
         try_rebase = rebase
     else:
         # If no branch is checked out, 'rebase' and 'keep_descendants' don't
@@ -889,9 +782,8 @@ def _update(project, rebase, keep_descendants):
     if keep_descendants and is_ancestor:
         # A descendant is currently checked out and keep_descendants was
         # given, so there's nothing more to do.
-        _inf(project,
-             'Left branch "{}", a descendant of {}, checked out'.
-             format(branch, sha))
+        log.inf('Left branch "{}", a descendant of {}, checked out'.
+                format(branch, sha))
     elif try_rebase:
         # Attempt a rebase. Don't exit the program on error;
         # instead, append to the list of failed rebases and
@@ -904,7 +796,7 @@ def _update(project, rebase, keep_descendants):
         # out the new detached HEAD and print helpful
         # information about things they can do with any
         # locally checked out branch.
-        _checkout_detach(project, _MANIFEST_REV_BRANCH)
+        _checkout_detach(project, MANIFEST_REV)
         _post_checkout_help(project, branch, sha, is_ancestor)
     return 0
 
@@ -925,41 +817,25 @@ def _post_checkout_help(project, branch, sha, is_ancestor):
         # user is working on and the remote hasn't changed),
         # print a message that makes it easy to get back,
         # no matter where in the installation os.getcwd() is.
-        _wrn(project,
-             ('left behind {{name}} branch "{}"; '
-              'to fast forward back, use: git -C {} checkout {}').
-             format(branch, relpath, branch))
+        log.wrn(project.format(
+            'left behind {name} branch "{b}"; '
+            'to fast forward back, use: git -C {rp} checkout {b}',
+            b=branch, rp=relpath))
         log.dbg('(To do this automatically in the future,',
                 'use "west update --keep-descendants".)')
     else:
         # Tell the user how they could rebase by hand, and
         # point them at west update --rebase.
-        _wrn(project,
-             ('left behind {{name}} branch "{}"; '
-              'to rebase onto the new HEAD: git -C {} rebase {} {}').
-             format(branch, relpath, sha, branch))
+        log.wrn(project.format(
+            'left behind {name} branch "{b}"; '
+            'to rebase onto the new HEAD: git -C {rp} rebase {sh} {b}',
+            b=branch, rp=relpath, sh=sha))
         log.dbg('(To do this automatically in the future,',
                 'use "west update --rebase".)')
 
 
-def _reset_projects():
-    # Fetches changes in all cloned projects and then resets them the manifest
-    # revision (with 'git reset --keep')
-
-    for project in _all_projects():
-        if _cloned(project):
-            _fetch(project)
-            _inf(project, 'Resetting {name_and_path} to {manifest_rev_branch}')
-            if _git(project, 'reset --keep {manifest_rev_branch}',
-                    check=False).returncode:
-
-                _wrn(project,
-                     'Failed to reset {name_and_path} to '
-                     "{manifest_rev_branch} (with 'git reset --keep')")
-
-
 _FAILED_UPDATE_MSG = """
-, while running automatic self-update. Pass --exclude-west -update to
+, while running automatic self-update. Pass --exclude-west to
 'west update' to skip updating west for the duration of the command."""[1:]
 
 
@@ -976,81 +852,26 @@ def _is_sha(s):
     return len(s) == 40
 
 
-def _git_base(project, cmd, *, extra_args=(), capture_stdout=False,
-              check=True):
-    # Runs a git command in the West top directory. See _git_helper() for
-    # parameter documentation.
+def _git(project, cmd, extra_args=(), capture_stdout=False, check=True,
+         cwd=None):
+    # Wrapper for project.git() that by default calls log.die() with a
+    # message about the command that failed if CalledProcessError is raised.
     #
-    # Returns a CompletedProcess instance (see below).
+    # If the global error context value is set, it is appended to the
+    # message.
 
-    return _git_helper(project, cmd, extra_args, util.west_topdir(),
-                       capture_stdout, check)
+    try:
+        res = project.git(cmd, extra_args=extra_args,
+                          capture_stdout=capture_stdout, check=check, cwd=cwd)
+    except subprocess.CalledProcessError as e:
+        msg = project.format(
+            "Command '{c}' failed with code {rc} for {name_and_path}",
+            c=cmd, rc=e.returncode)
 
-
-def _git(project, cmd, *, extra_args=(), capture_stdout=False, check=True):
-    # Runs a git command within a particular project. See _git_helper() for
-    # parameter documentation.
-    #
-    # Returns a CompletedProcess instance (see below).
-
-    return _git_helper(project, cmd, extra_args, project.abspath,
-                       capture_stdout, check)
-
-
-def _git_helper(project, cmd, extra_args, cwd, capture_stdout, check):
-    # Runs a git command.
-    #
-    # project:
-    #   The Project instance for the project, derived from the manifest file.
-    #
-    # cmd:
-    #   String with git arguments. Supports some "(foo)" shorthands. See below.
-    #
-    # extra_args:
-    #   List of additional arguments to pass to the git command (e.g. from the
-    #   user).
-    #
-    # cwd:
-    #   Directory to switch to first (None = current directory)
-    #
-    # capture_stdout:
-    #   True if stdout should be captured into the returned
-    #   subprocess.CompletedProcess instance instead of being printed.
-    #
-    #   We never capture stderr, to prevent error messages from being eaten.
-    #
-    # check:
-    #   True if an error should be raised if the git command finishes with a
-    #   non-zero return code.
-    #
-    # Returns a subprocess.CompletedProcess instance.
-
-    # TODO: Run once somewhere?
-    if shutil.which('git') is None:
-        log.die('Git is not installed or cannot be found')
-
-    args = (('git',) +
-            tuple(_expand_shorthands(project, arg) for arg in cmd.split()) +
-            tuple(extra_args))
-    cmd_str = util.quote_sh_list(args)
-
-    log.dbg("running '{}'".format(cmd_str), 'in', cwd, level=log.VERBOSE_VERY)
-    popen = subprocess.Popen(
-        args, stdout=subprocess.PIPE if capture_stdout else None, cwd=cwd)
-
-    stdout, _ = popen.communicate()
-
-    dbg_msg = "'{}' in {} finished with exit status {}" \
-              .format(cmd_str, cwd, popen.returncode)
-    if capture_stdout:
-        dbg_msg += " and wrote {} to stdout".format(stdout)
-    log.dbg(dbg_msg, level=log.VERBOSE_VERY)
-
-    if check and popen.returncode:
-        msg = "Command '{}' failed for {{name_and_path}}".format(cmd_str)
         if _error_context_msg:
             msg += _error_context_msg.replace('\n', ' ')
-        _die(project, msg)
+
+        log.die(msg)
 
     if capture_stdout:
         # Manual UTF-8 decoding and universal newlines. Before Python 3.6,
@@ -1060,9 +881,10 @@ def _git_helper(project, cmd, extra_args, cwd, capture_stdout, check):
         #
         # Also strip all trailing newlines as convenience. The splitlines()
         # already means we lose a final '\n' anyway.
-        stdout = "\n".join(stdout.decode('utf-8').splitlines()).rstrip("\n")
+        res.stdout = "\n".join(
+            res.stdout.decode('utf-8').splitlines()).rstrip("\n")
 
-    return CompletedProcess(popen.args, popen.returncode, stdout)
+    return res
 
 
 # Some Python shenanigans to be able to set up a context with
@@ -1070,7 +892,8 @@ def _git_helper(project, cmd, extra_args, cwd, capture_stdout, check):
 #   with _error_context("Doing stuff"):
 #       Do the stuff
 #
-# A context is just some extra text that gets printed on Git errors.
+# The _error_context() argument is extra text that gets printed in the
+# log.die() call made by _git() in case of errors.
 #
 # Note: If we ever need to support nested contexts, _error_context_msg could be
 # turned into a stack.
@@ -1091,74 +914,6 @@ class _error_context:
         _error_context_msg = None
 
 
-def _expand_shorthands(project, s):
-    # Expands project-related shorthands in 's' to their values,
-    # returning the expanded string
-
-    # Some of the trickier ones below. 'qual' stands for 'qualified', meaning
-    # the full path to the ref (e.g. refs/heads/master).
-    #
-    # manifest-rev-branch:
-    #   The name of the magic branch that points to the manifest revision
-    #
-    # qual-manifest-rev-branch:
-    #   A qualified reference to the magic manifest revision branch, e.g.
-    #   refs/heads/manifest-rev
-
-    return s.format(name=project.name,
-                    name_and_path='{} ({})'.format(
-                        project.name, os.path.join(project.path, "")),
-                    remote_name=('None' if project.remote is None
-                                 else project.remote.name),
-                    url=project.url,
-                    path=project.path,
-                    abspath=project.abspath,
-                    revision=project.revision,
-                    manifest_rev_branch=_MANIFEST_REV_BRANCH,
-                    qual_manifest_rev_branch=('refs/heads/' +
-                                              _MANIFEST_REV_BRANCH),
-                    clone_depth=str(project.clone_depth))
-
-
-def _dbg(project, msg, level):
-    # Like _wrn(), for debug messages
-
-    log.dbg(_expand_shorthands(project, msg), level=level)
-
-
-def _inf(project, msg):
-    # Print '=== msg' (to clearly separate it from Git output). Supports the
-    # same (foo) shorthands as the git commands.
-    #
-    # Prints the message in green if stdout is a terminal, to clearly separate
-    # it from command (usually Git) output.
-
-    log.inf('=== ' + _expand_shorthands(project, msg), colorize=True)
-
-
-def _wrn(project, msg):
-    # Warn with 'msg'. Supports the same (foo) shorthands as the git commands.
-
-    log.wrn(_expand_shorthands(project, msg))
-
-
-def _err(project, msg):
-    # Error with 'msg'. Supports the same (foo) shorthands as the git commands.
-
-    log.err(_expand_shorthands(project, msg))
-
-
-def _die(project, msg):
-    # Like _err(), for dying
-
-    log.die(_expand_shorthands(project, msg))
-
-
-# subprocess.CompletedProcess-alike, used instead of the real deal for Python
-# 3.4 compatibility, and with two small differences:
-#
-# - Trailing newlines are stripped from stdout
-#
-# - The 'stderr' attribute is omitted, because we never capture stderr
-CompletedProcess = collections.namedtuple(
-    'CompletedProcess', 'args returncode stdout')
+def _banner(msg):
+    # Prints "msg" as a "banner", i.e. prefixed with '=== ' and colorized.
+    log.inf('=== ' + msg, colorize=True)
