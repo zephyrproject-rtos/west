@@ -13,6 +13,7 @@ import sys
 import pykwalify
 import yaml
 
+from west import log
 from west.manifest import Manifest
 from west.util import escapes_directory
 
@@ -44,7 +45,8 @@ class WestCommand(ABC):
 
     All top-level commands supported by west implement this interface.'''
 
-    def __init__(self, name, help, description, accepts_unknown_args=False):
+    def __init__(self, name, help, description, accepts_unknown_args=False,
+                 check_up_to_date=True):
         '''Create a command instance.
 
         Some of the fields in a WestCommand (such as `name`, `help`, and
@@ -62,11 +64,14 @@ class WestCommand(ABC):
                                      in its run() method. Otherwise, passing
                                      unknown arguments will cause
                                      UnknownArgumentsError to be raised.
+        :param check_up_to_date: if true, run() calls check_up_to_date()
+                                 before calling do_run().
         '''
         self.name = name
         self.help = help
         self.description = description
         self._accept_unknown = accepts_unknown_args
+        self._check_up_to_date = check_up_to_date
 
     def run(self, args, unknown):
         '''Run the command.
@@ -82,6 +87,10 @@ class WestCommand(ABC):
         '''
         if unknown and not self._accept_unknown:
             self.parser.error('unexpected arguments: {}'.format(unknown))
+
+        if self._check_up_to_date:
+            self.check_up_to_date()
+
         self.do_run(args, unknown)
 
     def add_parser(self, parser_adder):
@@ -99,6 +108,22 @@ class WestCommand(ABC):
             raise ValueError('no parser was returned')
 
         return self.parser
+
+    def check_up_to_date(self):
+        '''Checks if west itself is up to date, emitting a warning if not.'''
+        try:
+            manifest = Manifest.from_file(sections=['west'])
+            west_project = manifest.west_project
+            if not west_project.is_up_to_date():
+                log.wrn(west_project.format(
+                    '{name_and_path} is at {wsh}, '
+                    'which is not up to date with manifest revision {msh}; '
+                    'consider a "west selfupdate"',
+                    wsh=west_project.sha('HEAD'),
+                    msh=west_project.revision))
+        except:                 # noqa: E722
+            log.err("couldn't check if west is up to date;",
+                    "this installation may be damaged")
 
     #
     # Mandatory subclass hooks

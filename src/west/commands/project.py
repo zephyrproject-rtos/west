@@ -35,7 +35,8 @@ class PostInit(WestCommand):
 
             Continue the initialization of the project containing the manifest
             file. You should never need to call this.
-            '''))
+            '''),
+            check_up_to_date=False)
 
     def do_add_parser(self, parser_adder):
         return _add_parser(
@@ -302,7 +303,8 @@ class Update(WestCommand):
 
             This command does not change the contents of the manifest
             repository.
-            '''))
+            '''),
+            check_up_to_date=False)  # we'll check ourselves if necessary
 
     def do_add_parser(self, parser_adder):
         return _add_parser(parser_adder, self,
@@ -333,6 +335,8 @@ class Update(WestCommand):
     def do_run(self, args, user_args):
         if args.update:
             _update_west(args.rebase, args.keep_descendants)
+        else:
+            self.check_up_to_date()
 
         failed_rebases = []
 
@@ -368,7 +372,8 @@ class SelfUpdate(WestCommand):
             There is normally no need to run this command manually, because
             'west update' automatically updates the West repository to the
             latest version before doing anything else.
-            '''))
+            '''),
+            check_up_to_date=False)  # no need, we're about to update west
 
     def do_add_parser(self, parser_adder):
         return _add_parser(parser_adder, self,
