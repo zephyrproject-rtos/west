@@ -74,10 +74,9 @@ class PostInit(WestCommand):
                     os.path.join(util.west_topdir(), manifest_project.path))
                 manifest_project.name = manifest_project.path
 
-            _banner(project.format('Creating repository for {name_and_path}'))
             shutil.move(args.cache, manifest_project.abspath)
-
             update_config('manifest', 'path', manifest_project.path)
+
         for project in projects:
             if project.path == 'zephyr':
                 update_config('zephyr', 'base', project.path)
@@ -166,7 +165,7 @@ class List(WestCommand):
                 log.die('unknown key "{}" in format string "{}"'.
                         format(e.args[0], args.format))
 
-            log.inf(result)
+            log.inf(result, colorize=False)  # don't use _msg()!
 
 
 class ManifestCommand(WestCommand):
@@ -245,6 +244,7 @@ class Diff(WestCommand):
 
     def do_run(self, args, user_args):
         for project in _cloned_projects(args):
+            _banner(project.format('diff for {name_and_path}:'))
             # Use paths that are relative to the base directory to make it
             # easier to see where the changes are
             _git(project, 'diff --src-prefix={path}/ --dst-prefix={path}/',
@@ -267,7 +267,7 @@ class Status(WestCommand):
 
     def do_run(self, args, user_args):
         for project in _cloned_projects(args):
-            _banner(project.format('status of {name_and_path}'))
+            _banner(project.format('status of {name_and_path}:'))
             _git(project, 'status', extra_args=user_args)
 
 
@@ -341,6 +341,8 @@ class Update(WestCommand):
 
         for project in _projects(args, listed_must_be_cloned=False,
                                  exclude_manifest=True):
+            _banner(project.format('updating {name_and_path}:'))
+
             returncode = _update(project, args.rebase, args.keep_descendants)
             if returncode:
                 failed_rebases.append(project)
@@ -430,8 +432,8 @@ class ForAll(WestCommand):
 
     def do_run(self, args, user_args):
         for project in _cloned_projects(args):
-            _banner(project.format("Running '{cmd}' in {name_and_path}",
-                                   cmd=args.command))
+            _banner(project.format('running "{c}" in {name_and_path}:',
+                                   c=args.command))
 
             subprocess.Popen(args.command, shell=True, cwd=project.abspath) \
                 .wait()
@@ -602,7 +604,7 @@ def _fetch(project):
     # project's repository does not already exist, it is created first.
 
     if not _cloned(project):
-        _banner(project.format('Creating repository for {name_and_path}'))
+        _msg(project.format('{name}: cloning and initializing'))
         _git(project, 'init {abspath}', cwd=util.west_topdir())
         # This remote is only added for the user's convenience. We always fetch
         # directly from the URL specified in the manifest.
@@ -610,14 +612,14 @@ def _fetch(project):
 
     # Fetch the revision specified in the manifest into the manifest-rev branch
 
-    msg = "Fetching changes for {name_and_path}"
+    msg = "{name}: fetching changes"
     if project.clone_depth:
         fetch_cmd = "fetch --depth={clone_depth}"
         msg += " with --depth {clone_depth}"
     else:
         fetch_cmd = "fetch"
 
-    _banner(project.format(msg))
+    _msg(project.format(msg))
     # This two-step approach avoids a "trying to write non-commit object" error
     # when the revision is an annotated tag. ^{commit} type peeling isn't
     # supported for the <src> in a <src>:<dst> refspec, so we have to do it
@@ -655,7 +657,7 @@ def _rebase(project, **kwargs):
     # Any kwargs are passed on to the underlying _git() call for the
     # rebase operation. A CompletedProcess instance is returned for
     # the git rebase.
-    log.inf(project.format('Rebasing {name_and_path} to ' + MANIFEST_REV))
+    _msg(project.format('{name}: rebasing to ' + MANIFEST_REV))
     return _git(project, 'rebase ' + QUAL_MANIFEST_REV, **kwargs)
 
 
@@ -725,15 +727,9 @@ def _head_ok(project):
 
 
 def _checkout_detach(project, revision):
-    log.inf(project.format(
-        "Checking out revision '{r}' as detached HEAD in {name_and_path}",
-        r=_sha(project, revision)))
     _git(project, 'checkout --detach --quiet ' + revision)
-    # The checkout above was quiet to avoid multi line spamming when checking
-    # out in detached HEAD in each project.
-    # However the final line 'HEAD is now at ....' is still desired to print.
-    print('HEAD is now at ' + _git(project, 'log --oneline -1',
-                                   capture_stdout=True).stdout)
+    _msg(project.format("{name}: checked out {r} as detached HEAD",
+                        r=_sha(project, revision)))
 
 
 def _west_project():
@@ -742,10 +738,9 @@ def _west_project():
 
 
 def _update_west(rebase, keep_descendants):
+    _banner('self-updating west:')
     with _error_context(_FAILED_UPDATE_MSG):
         project = _west_project()
-        log.dbg(project.format('Updating {name_and_path}'))
-
         old_sha = _sha(project, 'HEAD')
         _update(project, rebase, keep_descendants)
 
@@ -756,8 +751,8 @@ def _update_west(rebase, keep_descendants):
                     break
 
         if old_sha != _sha(project, 'HEAD'):
-            log.inf(project.format(
-                'Updated {name_and_path} to {revision} (from {url}).'))
+            _msg(project.format(
+                '{name}: updated to {revision} (from {url}).'))
 
             # Signal self-update, which will cause a restart. This is a bit
             # nicer than doing the restart here, as callers will have a
@@ -782,8 +777,9 @@ def _update(project, rebase, keep_descendants):
     if keep_descendants and is_ancestor:
         # A descendant is currently checked out and keep_descendants was
         # given, so there's nothing more to do.
-        log.inf('Left branch "{}", a descendant of {}, checked out'.
-                format(branch, sha))
+        _msg(project.format(
+            '{name}: left descendant branch "{b}" checked out',
+            b=branch))
     elif try_rebase:
         # Attempt a rebase. Don't exit the program on error;
         # instead, append to the list of failed rebases and
@@ -917,3 +913,8 @@ class _error_context:
 def _banner(msg):
     # Prints "msg" as a "banner", i.e. prefixed with '=== ' and colorized.
     log.inf('=== ' + msg, colorize=True)
+
+def _msg(msg):
+    # Prints "msg" as a smaller banner, i.e. prefixed with '-- ' and
+    # not colorized.
+    log.inf('--- ' + msg, colorize=False)
