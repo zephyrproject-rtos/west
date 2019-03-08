@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from west import config
+from west import configuration as config
 from west.manifest import Manifest, Defaults, Remote, Project, \
     SpecialProject, MalformedManifest
 

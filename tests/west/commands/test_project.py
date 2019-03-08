@@ -5,7 +5,7 @@ import textwrap
 
 import pytest
 
-from west import config
+from west import configuration as config
 from conftest import add_commit, check_output, cmd, GIT
 
 #
