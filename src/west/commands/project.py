@@ -14,7 +14,7 @@ import sys
 import textwrap
 import yaml
 
-from west.config import config
+from west.configuration import config
 from west import log
 from west import util
 from west.commands import WestCommand, CommandError

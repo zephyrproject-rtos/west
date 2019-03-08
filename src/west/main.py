@@ -23,7 +23,7 @@ import textwrap
 import traceback
 
 from west import log
-from west import config
+from west import configuration as config
 from west.commands import external_commands, \
     CommandError, CommandContextError, ExtensionCommandError
 from west.commands.project import List, ManifestCommand, Diff, Status, \

@@ -6,7 +6,7 @@ import subprocess
 import sys
 import textwrap
 
-from west import config
+from west import configuration as config
 import pytest
 
 GIT = shutil.which('git')

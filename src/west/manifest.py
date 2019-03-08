@@ -25,7 +25,7 @@ import yaml
 from pathlib import PurePath
 
 from west import util, log
-from west.config import config
+from west.configuration import config
 
 
 # Todo: take from _bootstrap?

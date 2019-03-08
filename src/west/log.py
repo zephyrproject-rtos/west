@@ -6,7 +6,7 @@
 
 Provides common methods for logging messages to display to the user.'''
 
-from west import config
+from west import configuration as config
 
 import colorama
 import sys
