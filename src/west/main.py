@@ -171,7 +171,7 @@ class WestArgumentParser(argparse.ArgumentParser):
 
             append(self.epilog)
 
-            return sio.getvalue()
+            return sio.getvalue().rstrip()
 
     def format_west_optional(self, append, wo, width):
         metavar = wo['metavar']
