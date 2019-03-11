@@ -7,10 +7,16 @@ Configuration file handling, using the standard configparser module.
 '''
 
 import configparser
-import configobj
 import os
 import platform
 from enum import Enum
+try:
+    # Try to import configobj.
+    # If not available we fallback to simple configparser
+    import configobj
+    use_configobj = True
+except ImportError:
+    use_configobj = False
 
 from west.util import west_dir
 
@@ -121,13 +127,22 @@ def update_config(section, key, value, configfile=ConfigFile.LOCAL):
         filename = os.path.join(west_dir(), configfile.value)
     else:
         filename = configfile.value
-    updater = configobj.ConfigObj(filename)
+
+    if use_configobj:
+        updater = configobj.ConfigObj(filename)
+    else:
+        updater = configparser.ConfigParser()
+        read_config(configfile, updater)
 
     if section not in updater:
         updater[section] = {}
     updater[section][key] = value
 
-    updater.write()
+    if use_configobj:
+        updater.write()
+    else:
+        with open(filename, 'w') as f:
+            updater.write(f)
 
 
 def use_colors():
