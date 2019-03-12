@@ -15,6 +15,8 @@ import sys
 import yaml
 import shutil
 
+import colorama
+
 import west._bootstrap.version as version
 
 if sys.version_info < (3,):
@@ -107,8 +109,7 @@ def clone(desc, url, rev, dest, exist_ok=False):
     if not exist_ok and os.path.exists(dest):
         raise WestError('refusing to clone into existing location ' + dest)
 
-    print('=== Cloning {} from {}, rev. {} into {} ==='.format(desc, url, rev,
-                                                               dest))
+    _banner('Cloning {} from {}, rev. {} into {}'.format(desc, url, rev, dest))
     local_rev = False
     subprocess.check_call(('git', 'init', dest))
     subprocess.check_call(('git', 'remote', 'add', 'origin', '--', url),
@@ -140,10 +141,27 @@ def clone(desc, url, rev, dest, exist_ok=False):
         subprocess.check_call(('git', 'checkout', 'FETCH_HEAD'), cwd=dest)
 
 
+def _banner(*args, colorize=True):
+    # This approach colorizes any sep= and end= text too, as expected.
+    #
+    # colorama automatically strips the ANSI escapes when stdout isn't a
+    # terminal (by wrapping sys.stdout).
+    if colorize:
+        print(colorama.Fore.LIGHTGREEN_EX, end='')
+
+    print('=== ', end='')
+    print(*args)
+
+    if colorize:
+        # The flush=True avoids issues with unrelated output from
+        # commands (usually Git) becoming colorized, due to the final
+        # attribute reset ANSI escape getting line-buffered
+        print(colorama.Style.RESET_ALL, end='', flush=True)
+
+
 #
 # west init
 #
-
 
 def init(argv):
     '''Command line handler for ``west init`` invocations.
@@ -255,8 +273,8 @@ def initialize_west(args):
            os.path.abspath(manifest_dir)]
     wrap(cmd)
 
-    print('=== West initialized. Now run "west update" in {}. ==='.
-          format(directory))
+    _banner('West initialized. Now run "west update" in {}.'.
+            format(directory))
 
 
 def bootstrap(args):
@@ -305,13 +323,14 @@ def bootstrap(args):
     finally:
         shutil.rmtree(tempdir, ignore_errors=True)
 
-    print('=== West initialized. Now run "west update" in {}. ==='.
-          format(directory))
+    _banner('West initialized. Now run "west update" in {}.'.
+            format(directory))
 
 
 def clone_west(manifest_file, directory):
     west_url = WEST_URL_DEFAULT
     west_rev = WEST_REV_DEFAULT
+    west_dir = os.path.join(directory, WEST_DIR, WEST)
 
     # Parse the manifest and look for a section named "west"
     with open(manifest_file, 'r') as f:
@@ -334,13 +353,15 @@ def clone_west(manifest_file, directory):
             west_rev = wdata['revision']
 
     print("cloning {} at revision {}".format(west_url, west_rev))
-    clone('west repository', west_url, west_rev,
-          os.path.join(directory, WEST_DIR, WEST))
+    clone('west repository', west_url, west_rev, west_dir)
 
     # Make sure west has a manifest-rev branch, like any project.
     subprocess.check_call(['git', 'update-ref', 'refs/heads/manifest-rev',
                            'HEAD'],
-                          cwd=os.path.join(directory, WEST_DIR, WEST))
+                          cwd=west_dir)
+
+    # Make sure HEAD is detached to avoid a warning when self-updating west.
+    subprocess.check_call(['git', 'checkout', '-q', '--detach'], cwd=west_dir)
 
 
 def hide_file(path):
