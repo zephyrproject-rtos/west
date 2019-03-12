@@ -29,7 +29,7 @@ from west.commands import external_commands, \
 from west.commands.project import List, ManifestCommand, Diff, Status, \
     SelfUpdate, ForAll, WestUpdated, PostInit, Update
 from west.commands.config import Config
-from west.manifest import MalformedConfig
+from west.manifest import Manifest, MalformedConfig
 from west.util import quote_sh_list
 
 PROJECT_COMMANDS = {
@@ -417,10 +417,26 @@ def set_zephyr_base(args):
             zb = zb_config
             zb_origin = 'configfile'
         else:
-            log.err('no --zephyr-base given, ZEPHYR_BASE is unset,',
-                    'and west config contains no zephyr.base setting')
             zb = None
             zb_origin = None
+            # No --zephyr-base, no ZEPHYR_BASE envronment and no zephyr.base
+            # Fallback to loop over projects, to identify if a project has path
+            # 'zephyr' for fallback.
+            try:
+                manifest = Manifest.from_file()
+            except MalformedConfig as e:
+                log.die('Parsing of manifest file failed during command',
+                        args.command, ':', *e.args)
+            for project in manifest.projects:
+                if project.path == 'zephyr':
+                    zb = project.abspath
+                    zb_origin = 'manifest file {}'.format(manifest.path)
+                    break
+
+            if zb_origin is None:
+                log.err('no --zephyr-base given, ZEPHYR_BASE is unset,',
+                        'west config contains no zephyr.base setting, and no',
+                        'manifest project has path "zephyr"')
 
     if zb is not None:
         os.environ['ZEPHYR_BASE'] = os.path.abspath(zb)
