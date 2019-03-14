@@ -30,7 +30,7 @@ from west.commands.project import List, ManifestCommand, Diff, Status, \
     SelfUpdate, ForAll, WestUpdated, PostInit, Update
 from west.commands.config import Config
 from west.manifest import Manifest, MalformedConfig
-from west.util import quote_sh_list
+from west.util import quote_sh_list, west_topdir
 
 PROJECT_COMMANDS = {
     'commands for managing multiple git repositories': [
@@ -390,6 +390,8 @@ def set_zephyr_base(args):
         zb_prefer = config.config.get('zephyr', 'base-prefer',
                                       fallback=None)
         zb_config = config.config.get('zephyr', 'base', fallback=None)
+        if zb_config is not None:
+            zb_config = os.path.join(west_topdir(), zb_config)
 
         if zb_prefer == 'env' and zb_env is not None:
             zb = zb_env
@@ -439,7 +441,7 @@ def set_zephyr_base(args):
                         'manifest project has path "zephyr"')
 
     if zb is not None:
-        os.environ['ZEPHYR_BASE'] = os.path.abspath(zb)
+        os.environ['ZEPHYR_BASE'] = zb
 
     log.dbg('ZEPHYR_BASE={} (origin: {})'.format(zb, zb_origin))
 
