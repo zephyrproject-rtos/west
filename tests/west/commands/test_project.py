@@ -6,7 +6,7 @@ import textwrap
 import pytest
 
 from west import configuration as config
-from conftest import add_commit, check_output, cmd, GIT
+from conftest import create_repo, add_commit, check_output, cmd, GIT, rev_parse
 
 #
 # Test fixtures
@@ -549,3 +549,72 @@ def update_helper(west_tmpdir, command):
             nt_head_0, nt_head_1,
             kl_mr_0, kl_mr_1,
             kl_head_0, kl_head_1)
+
+
+def test_change_remote_conflict(west_update_tmpdir):
+    # Test that `west update` will force fetch into local refs space when
+    # remote has changed and cannot be fast forwarded.
+    wct = west_update_tmpdir
+    tmpdir = wct.join('..')
+
+    rrepo = str(tmpdir.join('repos'))
+    net_tools = str(tmpdir.join('repos', 'net-tools'))
+    rwest = str(tmpdir.join('repos', 'west'))
+    alt_repo = str(tmpdir.join('alt_repo'))
+    alt_net_tools = str(tmpdir.join('alt_repo', 'net-tools'))
+    create_repo(alt_net_tools)
+    add_commit(alt_net_tools, 'test conflicting commit',
+               files={'qemu-script.sh': 'echo alternate world net-tools\n'})
+
+    revision = rev_parse(net_tools, 'HEAD')
+
+    west_yml_content = textwrap.dedent('''\
+                      west:
+                        url: file://{west}
+                      manifest:
+                        defaults:
+                          remote: test-local
+
+                        remotes:
+                          - name: test-local
+                            url-base: file://{rr}
+
+                        projects:
+                          - name: net-tools
+                            revision: {rev}
+                        self:
+                          path: zephyr
+                      '''.format(west=rwest, rr=rrepo, rev=revision))
+    add_commit(str(wct.join('zephyr')), 'test update manifest',
+               files={'west.yml': west_yml_content})
+
+    cmd('update')
+
+    revision = rev_parse(alt_net_tools, 'HEAD')
+
+    west_yml_content = textwrap.dedent('''\
+                      west:
+                        url: file://{west}
+                      manifest:
+                        defaults:
+                          remote: test-local
+
+                        remotes:
+                          - name: test-local
+                            url-base: file://{rr}
+                          - name: test-alternate
+                            url-base: file://{ar}
+
+                        projects:
+                          - name: net-tools
+                            remote: test-alternate
+                            revision: {rev}
+                        self:
+                          path: zephyr
+                      '''.format(west=rwest, ar=alt_repo, rr=rrepo,
+                                 rev=revision))
+
+    add_commit(str(wct.join('zephyr')), 'test update manifest conflict',
+               files={'west.yml': west_yml_content})
+
+    cmd('update')

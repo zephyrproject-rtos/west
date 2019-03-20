@@ -316,3 +316,8 @@ def add_commit(repo, msg, files=None, reconfigure=True):
     subprocess.check_call(
         [GIT, 'commit', '-a', '--allow-empty', '-m', msg, '--no-verify',
          '--no-gpg-sign', '--no-post-rewrite'], cwd=repo)
+
+
+def rev_parse(repo, revision):
+    out = subprocess.check_output([GIT, 'rev-parse', revision], cwd=repo)
+    return out.decode(sys.getdefaultencoding())
