@@ -13,6 +13,7 @@ import sys
 import pykwalify
 import yaml
 
+from west.configuration import config
 from west.manifest import Manifest
 from west.util import escapes_directory
 
@@ -164,9 +165,18 @@ def extension_commands(manifest=None):
     commands. The map's iteration order matches the manifest.projects
     order.
 
+    The return value is empty if configuration option
+    ``commands.allow_extensions`` is false.
+
     :param manifest: a parsed ``west.manifest.Manifest`` object, or None
                      to reload a new one.
+
     '''
+    allow_extensions = config.getboolean('commands', 'allow_extensions',
+                                         fallback=True)
+    if not allow_extensions:
+        return {}
+
     if manifest is None:
         manifest = Manifest.from_file()
 

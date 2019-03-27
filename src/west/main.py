@@ -521,9 +521,6 @@ def parse_args(argv, extensions):
 
 
 def get_extension_commands():
-    if not config.config.get('commands', 'allow_extensions', fallback=True):
-        return {}
-
     extensions = extension_commands()
     extension_names = set()
 
