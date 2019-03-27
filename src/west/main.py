@@ -402,8 +402,14 @@ def set_zephyr_base(args):
         elif zb_env is not None:
             zb = zb_env
             zb_origin = 'env'
-            if zb_config is not None and \
-                    os.path.abspath(zb_config) != os.path.abspath(zb_env):
+            try:
+                different = (zb_config is not None and
+                             not os.path.samefile(zb_config, zb_env))
+            except FileNotFoundError:
+                different = (zb_config is not None and
+                             (os.path.normpath(os.path.abspath(zb_config)) !=
+                              os.path.normpath(os.path.abspath(zb_env))))
+            if different:
                 # The environment ZEPHYR_BASE takes precedence over the config
                 # setting, but in normal multi-repo operation we shouldn't
                 # expect to need to set ZEPHYR_BASE.
