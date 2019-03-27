@@ -1,10 +1,9 @@
 # Copyright 2018 Open Source Foundries Limited.
+# Copyright 2019 Foundries.io Limited.
 #
 # SPDX-License-Identifier: Apache-2.0
 
-'''Logging module for west
-
-Provides common methods for logging messages to display to the user.'''
+'''Provides common methods for logging messages to display to the user.'''
 
 from west import configuration as config
 
@@ -12,10 +11,10 @@ import colorama
 import sys
 
 VERBOSE_NONE = 0
-'''Base verbosity level (zero), no verbose messages printed.'''
+'''Default verbosity level, no dbg() messages printed.'''
 
 VERBOSE_NORMAL = 1
-'''Base verbosity level, some verbose messages printed.'''
+'''Some verbose messages printed.'''
 
 VERBOSE_VERY = 2
 '''Very verbose output messages will be printed.'''
@@ -28,13 +27,19 @@ VERBOSE = VERBOSE_NONE
 
 
 def set_verbosity(value):
-    '''Set the logging verbosity level.'''
+    '''Set the logging verbosity level.
+
+    :param value: verbosity level to set, e.g. VERBOSE_VERY.
+    '''
     global VERBOSE
     VERBOSE = int(value)
 
 
 def dbg(*args, level=VERBOSE_NORMAL):
     '''Print a verbose debug logging message.
+
+    :param args: sequence of arguments to print.
+    :param value: verbosity level to set, e.g. VERBOSE_VERY.
 
     The message is only printed if level is at least the current
     verbosity level.'''
@@ -46,8 +51,10 @@ def dbg(*args, level=VERBOSE_NORMAL):
 def inf(*args, colorize=False):
     '''Print an informational message.
 
-    colorize (default: False):
-      If True, the message is printed in bright green if stdout is a terminal.
+    :param args: sequence of arguments to print.
+    :param colorize: If this is True, the configuration option ``color.ui``
+                     is undefined or true, and stdout is a terminal, then
+                     the message is printed in green.
     '''
 
     if not config.use_colors():
@@ -67,7 +74,14 @@ def inf(*args, colorize=False):
 
 
 def wrn(*args):
-    '''Print a warning.'''
+    '''Print a warning.
+
+    :param args: sequence of arguments to print.
+
+    The message is prefixed with "WARNING: ".
+
+    If this is True, the configuration option ``color.ui`` is undefined or
+    true, and stdout is a terminal, then the message is printed in yellow.'''
 
     if config.use_colors():
         print(colorama.Fore.LIGHTYELLOW_EX, end='', file=sys.stderr)
@@ -80,7 +94,16 @@ def wrn(*args):
 
 
 def err(*args, fatal=False):
-    '''Print an error.'''
+    '''Print an error.
+
+    This function does not abort the program. For that, use `die()`.
+
+    :param args: sequence of arguments to print.
+    :param fatal: if True, the the message is prefixed with "FATAL ERROR: ";
+                  otherwise, "ERROR: " is used.
+
+    If this is True, the configuration option ``color.ui`` is undefined or
+    true, and stdout is a terminal, then the message is printed in red.'''
 
     if config.use_colors():
         print(colorama.Fore.LIGHTRED_EX, end='', file=sys.stderr)
@@ -93,7 +116,13 @@ def err(*args, fatal=False):
 
 
 def die(*args, exit_code=1):
-    '''Print a fatal error, and abort with the given exit code.'''
+    '''Print a fatal error, and abort the program.
+
+    :param args: sequence of arguments to print.
+    :param exit_code: return code the program should use when aborting.
+
+    Equivalent to ``die(*args, fatal=True)``, followed by an attempt to
+    abort.'''
     err(*args, fatal=True)
     sys.exit(exit_code)
 

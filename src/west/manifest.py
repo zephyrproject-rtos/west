@@ -1,5 +1,5 @@
 # Copyright (c) 2018, Nordic Semiconductor ASA
-# Copyright 2018, Foundries.io Ltd
+# Copyright 2018, 2019 Foundries.io Ltd
 #
 # SPDX-License-Identifier: Apache-2.0
 
@@ -51,7 +51,7 @@ manifest'''
 
 QUAL_MANIFEST_REV_BRANCH = 'refs/heads/' + MANIFEST_REV_BRANCH
 '''A qualified reference to MANIFEST_REV_BRANCH, i.e.
-refs/heads/{}'''.format(MANIFEST_REV_BRANCH)
+refs/heads/manifest-rev.'''
 
 
 def manifest_path():
@@ -361,7 +361,9 @@ class Defaults:
             revision = 'master'
 
         self.remote = remote
+        '''`Remote` corresponding to the default remote, or None.'''
         self.revision = revision
+        '''Revision to applied to projects without an explicit value.'''
 
     def __eq__(self, other):
         return NotImplemented
@@ -399,7 +401,9 @@ class Remote:
                     'appended by West')
 
         self.name = name
+        '''Remote name as it appears in the manifest.'''
         self.url_base = url_base
+        '''Remote url-base value as it appears in the manifest.'''
 
     def __eq__(self, other):
         return self.name == other.name and self.url_base == other.url_base
@@ -441,21 +445,31 @@ class Project:
         :param revision: Project revision as given in the manifest, if present.
                          If not given, defaults.revision is used instead.
         :param west_commands: path to a YAML file in the project containing
-                              a description of external west commands provided
+                              a description of west extension commands provided
                               by the project, if given.
         '''
         _wrn_if_not_remote(remote)
 
         self.name = name
+        '''Project name as it appears in the manifest.'''
         self.remote = remote
+        '''`Remote` instance corresponding to the project's remote.'''
         self.url = remote.url_base + '/' + name
+        '''Complete fetch URL for the project.'''
         self.path = os.path.normpath(path or name)
+        '''Relative path to the project in the installation.'''
         self.abspath = os.path.realpath(os.path.join(util.west_topdir(),
                                                      self.path))
+        '''Absolute path to the project.'''
         self.posixpath = PurePath(self.abspath).as_posix()
+        '''Absolute path to the project, POSIX style (with forward slashes).'''
         self.clone_depth = clone_depth
+        '''Project's clone depth, or None'''
         self.revision = revision or defaults.revision
+        '''Revision to check out for this project, as given in the manifest,
+        from manifest defaults, or from the default supplied by west.'''
         self.west_commands = west_commands
+        '''Path to project's "west-commands", or None.'''
 
     def __eq__(self, other):
         return NotImplemented
@@ -489,9 +503,10 @@ class Project:
 
         :param s: string (or other object) whose format() method to call
 
-        The format method is called with *args and the following kwargs:
+        The format method is called with ``*args`` and the following
+        ``kwargs``:
 
-        - this object's __slots__ / values (name, url, etc.)
+        - this object's ``__slots__`` / values (name, url, etc.)
         - name_and_path: "self.name + (self.path)"
         - remote_name: "None" if no remote, otherwise self.remote.name
         - any additional kwargs passed as parameters
@@ -633,7 +648,7 @@ class SpecialProject(Project):
         :param revision: Project revision as given in the manifest, if present.
         :param url: Complete URL for special project.
         :param west_commands: path to a YAML file in the project containing
-                              a description of external west commands provided
+                              a description of west extension commands provided
                               by the project, if given. This obviously only
                               makes sense for the manifest project, not west.
         '''
@@ -641,15 +656,35 @@ class SpecialProject(Project):
             raise ValueError('setting west_commands on west is forbidden')
 
         self.name = name
+        '''Project name, either "west" or "manifest".'''
+
         self.url = url
+        '''Complete fetch URL for the project.'''
+
         self.path = path or name
+        '''Relative path to the project in the installation.'''
+
         self.abspath = os.path.realpath(os.path.join(util.west_topdir(),
                                                      self.path))
+        '''Absolute path to the project.'''
+
         self.posixpath = PurePath(self.abspath).as_posix()
+        '''Absolute path to the project, POSIX style (with forward slashes).'''
+
         self.revision = revision
+        '''Revision to check out for the west project, as given in the manifest,
+        from manifest defaults, or from the default supplied by west. Undefined
+        for the manifest project.'''
+
         self.remote = None
+        '''None, provided for analogy with Project.'''
+
         self.clone_depth = None
+        '''None, provided for analogy with Project.'''
+
         self.west_commands = west_commands
+        '''Path to project's "west-commands", for the manifest project, or
+        None.'''
 
     def as_dict(self):
         '''Return a representation of this object as a dict, as it would be

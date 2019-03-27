@@ -2,9 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-'''
-Configuration file handling, using the standard configparser module.
-'''
+'''West configuration file handling.'''
 
 import configparser
 import os
@@ -31,6 +29,13 @@ config = configparser.ConfigParser(allow_no_value=True)
 
 
 class ConfigFile(Enum):
+    '''Enum representing the possible types of configuration file.
+
+    - SYSTEM: the system-wide file shared by all users
+    - GLOBAL: the "global" or user-wide file
+    - LOCAL: the per-installation file
+    - ALL: all three of the above, where applicable
+    '''
     ALL = 0
     if platform.system() == 'Linux':
         SYSTEM = '/etc/westconfig'
@@ -45,8 +50,7 @@ class ConfigFile(Enum):
 
 
 def read_config(config_file=ConfigFile.ALL, config=config):
-    '''
-    Reads all configuration files, making the configuration values available as
+    '''Reads all configuration files, making the configuration values available as
     a configparser.ConfigParser object in config.config. This object works
     similarly to a dictionary: config.config['foo']['bar'] gets the value for
     key 'bar' in section 'foo'.
@@ -64,26 +68,24 @@ def read_config(config_file=ConfigFile.ALL, config=config):
 
     System-wide:
 
-        Linux:   /etc/westconfig
-        Mac OS:  /usr/local/etc/westconfig
-        Windows: %PROGRAMDATA%\\west\\config
+    - Linux: ``/etc/westconfig``
+    - macOS: ``/usr/local/etc/westconfig``
+    - Windows: ``%PROGRAMDATA%\\west\\config``
 
-    User-specific:
+    "Global" or user-wide:
 
-        $XDG_CONFIG_HOME/west/config (on Linux)
-          and
-        ~/.westconfig
+    - Linux: ``~/.westconfig`` or ``$XDG_CONFIG_HOME/west/config``
+    - macOS: ``~/.westconfig``
+    - Windows: ``.westconfig`` in the user's home directory, as determined
+      by os.path.expanduser.
 
-        ($XDG_CONFIG_DIR defaults to ~/.config/ if unset.)
+    Local (per-installation)
 
-    Instance-specific:
-
-        <West base directory>/.west/config
+    - Linux, macOS, Windows: ``path/to/installation/.west/config``
 
     Configuration values from later configuration files override configuration
-    from earlier ones. Instance-specific configuration values have the highest
-    precedence, and system-wide the lowest.
-    '''
+    from earlier ones. Local values have highest precedence, and system values
+    lowest.'''
 
     # Gather (potential) configuration file paths
     files = []
