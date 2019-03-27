@@ -9,54 +9,32 @@
 ##
 ## However, the features don't map 1:1.
 
-# The top-level manifest is a map. There may be multiple sections in the
-# manifest file. Each section can be validated by their own schema.
-# This schema validates the 'manifest' section.
+# --------------------------------------------------------------
+#
+#  DO NOT CHANGE THIS FILE WITHOUT UPDATING THE DOCUMENTATION!
+#
+# --------------------------------------------------------------
+
 type: map
 mapping:
   # The "defaults" key specifies some default values used in the
   # rest of the manifest.
-  #
-  # The value is a map with the following keys:
-  #
-  # - remote: if given, this is the default remote in each project
-  # - revision: if given, this is the default revision to check
-  #   out of each project
-  #
-  # See below for more information about remotes and projects.
-  #
-  # Examples:
-  #
-  # default:
-  #   remote: zephyrproject-rtos
-  #   revision: master
   defaults:
     required: false
     type: map
     mapping:
+      # The name of the default remote.
       remote:
         required: false
         type: str
+      # The default revision (master if not given).
       revision:
         required: false
         type: str
 
-  # The "remotes" key specifies a sequence of remotes, each of
-  # which has a name and a fetch URL.
-  #
-  # These work like repo remotes, in that they specify a URL
-  # prefix which remote-specific Git repositories hang off of.
-  # (This saves typing and makes it easier to move things around
-  # when most repositories are on the same server or GitHub
-  # organization.)
-  #
-  # Example:
-  #
-  #   remotes:
-  #     - name: zephyrproject-rtos
-  #       url-base: https://github.com/zephyrproject-rtos
-  #     - name: developer-fork
-  #       url-base: https://github.com/a-developer
+  # The "remotes" key specifies a sequence of remotes, each of which has a name
+  # and a fetch URL base. These URL bases are concatenated with project names
+  # (separated by a /) to form complete fetch URLs.
   remotes:
     required: true
     type: seq
@@ -70,92 +48,42 @@ mapping:
             required: true
             type: str
 
-  # The "projects" key specifies a sequence of "projects",
-  # i.e. Git repositories. These work like repo projects, in that
-  # each project has a name, a remote, and optional additional
-  # metadata.
-  #
-  # Each project is a map with the following keys:
-  #
-  # - name: Mandatory, the name of the git repository. The clone
-  #   URL is formed by remote url-base + '/' + name. The name cannot
-  #   be one of the reserved values "west" and "manifest".
-  # - remote: Optional, the name of the remote to pull it from.
-  #   If the remote is missing, the remote'key in the top-level
-  #   defaults key is used instead. If both are missing, it's an error.
-  # - revision: Optional, the name of the revision to check out.
-  #   If not given, the value from the default element will be used.
-  #   If both are missing, then the default is 'master'.
-  # - path: Where to clone the repository locally. If missing,
-  #   it's cloned at top level in a directory given by its name.
-  # - clone-depth: if given, it is a number which creates a shallow
-  #   history in the cloned repository limited to the given number
-  #   of commits.
-  # - west-commands: if given, it is a relative path to a YAML file
-  #   within the project which describes additional west commands
-  #   provided by that project. See west-commands-schema.yml for
-  #   details on the format. By convention, this file should be named
-  #   west-commands.yml.
-  #
-  # Example, using default and non-default remotes:
-  #
-  #   projects:
-  #     # Uses default remote (zephyrproject-rtos), so clone URL is:
-  #     #   https://github.com/zephyrproject-rtos/zephyr
-  #     - name: zephyr
-  #     # Manually specified remote; clone URL is:
-  #     #   https://github.com/a-developer/west
-  #     - name: west
-  #       remote: developer-fork
-  #     # Manually specified remote, clone URL is:
-  #     #   https://github.com/zephyrproject-rtos/some-vendor-hal
-  #     # Local clone path (relative to installation root) is:
-  #     #   ext/hal/some-vendor
-  #     - name: some-vendor-hal
-  #       remote: zephyrproject-rtos
-  #       path: ext/hal/some-vendor
+  # The "projects" key specifies a sequence of "projects", each of which has a
+  # remote, and may specify additional configuration.
   projects:
     required: true
     type: seq
     sequence:
       - type: map
         mapping:
+          # remote.url-base + / + name is the fetch URL
           name:
             required: true
             type: str
+          # Name of the project remote
           remote:
             required: false
             type: str
+          # Revision to check out. May be a branch, tag, or SHA.
           revision:
             required: false
             type: text        # SHAs could be only numbers
+          # Path to check out, relative to the west installation root.
+          # The default is the name.
           path:
             required: false
             type: str
+          # Limits the clone depth of the project if given.
           clone-depth:
             required: false
             type: int
+          # Path to a west-commands.yml inside the project.
           west-commands:
             required: false
             type: str
 
   # The "self" key specifies values for the project containing the manifest
   # file (the "manifest repository").
-  #
-  # The path key specifies the local directory to clone this repository into,
-  # in the same way projects can specify their paths. For example, the
-  # following would cause the manifest repository to be checked out into local
-  # path "project-path":
-  #
-  # Example:
-  #
-  #   self:
-  #     path: project-path
-  #
-  # If the path key is missing, the basename of the path component in the
-  # manifest repository URL will be used by default.
-  # For example, if the URL is https://example.com/project-repo, the
-  # manifest repository would be cloned to the directory "project-repo".
   self:
     required: false
     type: map

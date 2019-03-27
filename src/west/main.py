@@ -533,12 +533,12 @@ def get_external_commands():
         filtered = []
         for spec in specs:
             if spec.name in BUILTIN_COMMAND_NAMES:
-                log.wrn('ignoring project {} external command {};'.
+                log.wrn('ignoring project {} extension command {};'.
                         format(spec.project.name, spec.name),
                         'this is a built in command')
                 continue
             if spec.name in extension_commands:
-                log.wrn('ignoring project {} external command "{}";'.
+                log.wrn('ignoring project {} extension command "{}";'.
                         format(spec.project.name, spec.name),
                         'command "{}" already defined as extension command'.
                         format(spec.name))
@@ -605,7 +605,7 @@ def main(argv=None):
             log.inf(for_stack_trace)
         sys.exit(cpe.returncode)
     except ExtensionCommandError as ece:
-        log.err('external command', args.command,
+        log.err('extension command', args.command,
                 'was improperly defined and could not be run{}'.
                 format(': ' + ece.hint if ece.hint else ''))
         if args.verbose:

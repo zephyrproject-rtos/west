@@ -19,7 +19,7 @@ from west.util import escapes_directory
 
 class CommandError(RuntimeError):
     '''Indicates that a command failed. The return code attribute
-    specifies the error code to return to the system'''
+    specifies the error code to return to the system.'''
 
     def __init__(self, returncode=1):
         super().__init__()
@@ -27,12 +27,16 @@ class CommandError(RuntimeError):
 
 
 class CommandContextError(CommandError):
-    '''Indicates that a context-dependent command could not be run.'''
+    '''Indicates that a context-dependent command could not be run.
+
+    Subclass of CommandError.'''
 
 
 class ExtensionCommandError(CommandError):
-    '''Exception class indicating an external command was badly
-    defined and could not be created.'''
+    '''Exception class indicating an extension command was badly
+    defined and could not be created.
+
+    Subclass of CommandError.'''
 
     def __init__(self, **kwargs):
         self.hint = kwargs.pop('hint', None)
@@ -87,7 +91,7 @@ class WestCommand(ABC):
     def add_parser(self, parser_adder):
         '''Registers a parser for this command, and returns it.
 
-        The parser object is stored in the `parser` attribute of this
+        The parser object is stored in the ``parser`` attribute of this
         WestCommand.
 
         :param parser_adder: The return value of a call to
@@ -125,14 +129,14 @@ class WestCommand(ABC):
         '''Subclasses must implement; called when the command is run.
 
         :param args: is the namespace of parsed known arguments.
-        :param unknown: If `accepts_unknown_args` was False when constructing
+        :param unknown: If ``accepts_unknown_args`` was False when constructing
                         this object, this parameter is an empty sequence.
                         Otherwise, it is an iterable containing all unknown
                         arguments present on the command line.'''
 
 
 class WestExtCommandSpec:
-    '''An object which allows instantiating an external west command.'''
+    '''An object which allows instantiating an extension west command.'''
 
     def __init__(self, name, project, help, factory):
         self.name = name
@@ -153,14 +157,14 @@ class WestExtCommandSpec:
 
 
 def external_commands(manifest=None):
-    '''Get descriptions of available external commands.
+    '''Get descriptions of available extension commands.
 
     The return value is an ordered map from project paths to lists of
-    WestExtCommandSpec objects, for projects which define external
+    WestExtCommandSpec objects, for projects which define extension
     commands. The map's iteration order matches the manifest.projects
     order.
 
-    :param manifest: a parsed `west.manifest.Manifest` object, or None
+    :param manifest: a parsed ``west.manifest.Manifest`` object, or None
                      to reload a new one.
     '''
     if manifest is None:
@@ -215,7 +219,7 @@ def _ext_specs_from_desc(project, commands_desc):
     # Verify the YAML's python file doesn't escape the project directory.
     if escapes_directory(py_file, project.abspath):
         raise ExtensionCommandError(
-            'external command python file "{}" escapes project path {}'.
+            'extension command python file "{}" escapes project path {}'.
             format(commands_desc['file'], project.path))
 
     # Create the command thunks.

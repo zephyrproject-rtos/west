@@ -468,7 +468,7 @@ def test_extension_command_duplicate(repos_tmpdir):
     cmd('update')
 
     actual = cmd('test', stderr=subprocess.STDOUT)
-    warning = 'WARNING: ignoring project net-tools external command "test";'\
+    warning = 'WARNING: ignoring project net-tools extension command "test";'\
               ' command "test" already defined as extension command\n'
     command_out = 'Testing kconfig test command\n'
 

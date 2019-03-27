@@ -4,51 +4,12 @@
 ##
 ## By convention, this file is named west-commands.yml.
 
-# The top-level of the file is a map with a 'west-commands:' key.  The
-# west-commands key's value is a sequence of "command descriptors".
-# Each command descriptor gives the location of a file containing west
-# commands, along with the names of the commands provided by the file
-# (and optionally the names of the classes which define them).
+# --------------------------------------------------------------
 #
-# Here is an example west-commands.yml file:
+#  DO NOT CHANGE THIS FILE WITHOUT UPDATING THE DOCUMENTATION!
 #
-# west-commands:
-#   - file: foo.py
-#     commands:
-#       - name: foo1
-#         help: one-line help for foo1 command in "west --help"
-#       - name: foo2
-#         class: FooTwo
-#         help: help for foo2 in "west --help"
-#   - file: bar.py
-#     commands:
-#       - name: baz
-#         help: help for baz in "west --help"
-#
-# The meaning of the above example is:
-#
-# - the file foo.py defines commands named "foo1" and "foo2".
-#
-# - the "foo1" WestCommand implementation is just foo.foo1, but the
-#   "foo2" command class is named "FooTwo". That is, foo.py contains
-#   some code that looks like this:
-#
-#   class foo1(WestCommand):
-#       [...]
-#
-#   class FooTwo(WestCommand):
-#       [...]
-#
-# - the file bar.py contains a command named "baz", whose class is
-#   bar.baz.
-#
-# - the "help" fields are collected into the top-level help seen by
-#   the user who runs "west --help". They should match the strings in
-#   the help argument passed to WestCommand.__init__().  (This
-#   redundancy exists because extension command modules are not
-#   imported until the user specifically runs "west
-#   some-extension-command", so any help text in the python source
-#   code is not available to "west --help".)
+# --------------------------------------------------------------
+
 type: map
 mapping:
   west-commands:
