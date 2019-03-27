@@ -156,7 +156,7 @@ class WestExtCommandSpec:
         the command) before constructing it, however.'''
 
 
-def external_commands(manifest=None):
+def extension_commands(manifest=None):
     '''Get descriptions of available extension commands.
 
     The return value is an ordered map from project paths to lists of

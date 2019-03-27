@@ -24,7 +24,7 @@ import traceback
 
 from west import log
 from west import configuration as config
-from west.commands import external_commands, \
+from west.commands import extension_commands, \
     CommandError, CommandContextError, ExtensionCommandError
 from west.commands.project import List, ManifestCommand, Diff, Status, \
     SelfUpdate, ForAll, WestUpdated, PostInit, Update
@@ -54,7 +54,7 @@ HIDDEN_COMMANDS = {None: [PostInit()]}
 BUILTIN_COMMANDS = dict(PROJECT_COMMANDS)
 BUILTIN_COMMANDS.update(HIDDEN_COMMANDS)
 
-# Initialize the set with the virtual 'help' command so that an external
+# Initialize the set with the virtual 'help' command so that an extension
 # command cannot clash with it
 BUILTIN_COMMAND_NAMES = set(['help'])
 for group, commands in BUILTIN_COMMANDS.items():
@@ -94,7 +94,7 @@ class WestArgumentParser(argparse.ArgumentParser):
         # The super constructor calls add_argument(), so this has to
         # come first as our override of that method relies on it.
         self.west_optionals = []
-        self.west_externals = None
+        self.west_extensions = None
 
         super(WestArgumentParser, self).__init__(*args, **kwargs)
 
@@ -151,14 +151,14 @@ class WestArgumentParser(argparse.ArgumentParser):
             # command modules by default: the current implementation
             # prevents us from formatting one-line help here.
             #
-            # Perhaps a commands.external_paranoid that if set, uses
+            # Perhaps a commands.extension_paranoid that if set, uses
             # thunks, and otherwise just loads the modules and
             # provides help for each command.
             #
             # This has its own wrinkle: we can't let a failed
             # import break the built-in commands.
-            if self.west_externals:
-                for path, specs in self.west_externals.items():
+            if self.west_extensions:
+                for path, specs in self.west_extensions.items():
                     # This may occur in case a project defines commands already
                     # defined, in which case it has been filtered out.
                     if not specs:
@@ -168,7 +168,7 @@ class WestArgumentParser(argparse.ArgumentParser):
                            format(path))
 
                     for spec in specs:
-                        self.format_external_spec(append, spec, width)
+                        self.format_extension_spec(append, spec, width)
                     append('')
 
             append(self.epilog)
@@ -195,7 +195,7 @@ class WestArgumentParser(argparse.ArgumentParser):
         thing = '  {}:'.format(command.name)
         self.format_thing_and_help(append, thing, command.help, width)
 
-    def format_external_spec(self, append, spec, width):
+    def format_extension_spec(self, append, spec, width):
         self.format_thing_and_help(append, '  ' + spec.name + ':',
                                    spec.help, width)
 
@@ -255,8 +255,8 @@ class WestArgumentParser(argparse.ArgumentParser):
         # Let argparse handle the actual argument.
         super(WestArgumentParser, self).add_argument(*args, **kwargs)
 
-    def set_externals(self, externals):
-        self.west_externals = externals
+    def set_extensions(self, extensions):
+        self.west_extensions = extensions
 
 
 def _make_parsers():
@@ -308,10 +308,10 @@ def add_ext_command_parser(subparser_gen, spec):
 
 
 def ext_command_handler(spec, argv, *ignored):
-    # Deferred creation, argument parsing, and handling for external
+    # Deferred creation, argument parsing, and handling for extension
     # commands. We go to the extra effort because we don't want to
     # import any extern classes until the user has specifically
-    # requested an external command.
+    # requested an extension command.
     #
     # 'ignored' is just the known and unknown args as parsed by the
     # 'dummy' parser added by add_ext_command_parser().
@@ -331,7 +331,7 @@ def ext_command_handler(spec, argv, *ignored):
     command.run(*west_parser.parse_known_args(argv))
 
 
-def help_command_handler(west_parser, help_parser, externals, args, *ignored):
+def help_command_handler(west_parser, help_parser, extensions, args, *ignored):
     command_name = args.command
     if not command_name:
         west_parser.print_help(top_level=True)
@@ -347,7 +347,7 @@ def help_command_handler(west_parser, help_parser, externals, args, *ignored):
                     command.parser.print_help()
                     return
     else:
-        for path, specs in externals.items():
+        for path, specs in extensions.items():
             for spec in specs:
                 if spec.name != command_name:
                     continue
@@ -472,7 +472,7 @@ def print_version_info():
                  os.path.dirname(os.path.dirname(west_src_west))))
 
 
-def parse_args(argv, externals):
+def parse_args(argv, extensions):
     west_parser, subparser_gen = _make_parsers()
 
     # Add handlers for the built-in commands.
@@ -480,21 +480,21 @@ def parse_args(argv, externals):
         parser = command.add_parser(subparser_gen)
         parser.set_defaults(handler=partial(command_handler, command))
 
-    # Add handlers for external commands, and finalize the list with
+    # Add handlers for extension commands, and finalize the list with
     # our parser.
-    if externals:
-        for path, specs in externals.items():
+    if extensions:
+        for path, specs in extensions.items():
             for spec in specs:
                 parser = add_ext_command_parser(subparser_gen, spec)
                 parser.set_defaults(handler=partial(ext_command_handler,
                                                     spec, argv))
-    west_parser.set_externals(externals)
+    west_parser.set_extensions(extensions)
 
     help_parser = subparser_gen.add_parser('help',
                                            help='get help on a west command')
     help_parser.add_argument('command', nargs='?')
     help_parser.set_defaults(handler=partial(help_command_handler, west_parser,
-                                             help_parser, externals))
+                                             help_parser, extensions))
 
     # Parse arguments.
     args, unknown = west_parser.parse_known_args(args=argv)
@@ -505,7 +505,7 @@ def parse_args(argv, externals):
 
     # Set up logging verbosity before running the command, so
     # e.g. verbose messages related to argument handling errors work
-    # properly. This works even for external commands that haven't
+    # properly. This works even for extension commands that haven't
     # been instantiated yet, because --verbose is an option to the top
     # level parser, and the command run() method doesn't get called
     # until later.
@@ -520,14 +520,14 @@ def parse_args(argv, externals):
     return args, unknown
 
 
-def get_external_commands():
-    if not config.config.get('commands', 'allow_external', fallback=True):
+def get_extension_commands():
+    if not config.config.get('commands', 'allow_extensions', fallback=True):
         return {}
 
-    externals = external_commands()
-    extension_commands = set()
+    extensions = extension_commands()
+    extension_names = set()
 
-    for path, specs in externals.items():
+    for path, specs in extensions.items():
         # Filter out attempts to shadow built-in commands as well as
         # commands which have names which are already used.
         filtered = []
@@ -537,17 +537,17 @@ def get_external_commands():
                         format(spec.project.name, spec.name),
                         'this is a built in command')
                 continue
-            if spec.name in extension_commands:
+            if spec.name in extension_names:
                 log.wrn('ignoring project {} extension command "{}";'.
                         format(spec.project.name, spec.name),
                         'command "{}" already defined as extension command'.
                         format(spec.name))
                 continue
             filtered.append(spec)
-            extension_commands.add(spec.name)
-        externals[path] = filtered
+            extension_names.add(spec.name)
+        extensions[path] = filtered
 
-    return externals
+    return extensions
 
 
 def main(argv=None):
@@ -558,17 +558,17 @@ def main(argv=None):
     # Read the configuration files
     config.read_config()
 
-    # Load any external command specs. If the config file isn't
+    # Load any extension command specs. If the config file isn't
     # fully set up yet or the west.yml cannot be found, ignore the error.
     # This allows west init to work properly.
     try:
-        externals = get_external_commands()
+        extensions = get_extension_commands()
     except (MalformedConfig, FileNotFoundError):
-        externals = {}
+        extensions = {}
 
     if argv is None:
         argv = sys.argv[1:]
-    args, unknown = parse_args(argv, externals)
+    args, unknown = parse_args(argv, extensions)
 
     for_stack_trace = 'run as "west -v {}" for a stack trace'.format(
         quote_sh_list(argv))
