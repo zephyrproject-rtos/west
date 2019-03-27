@@ -12,7 +12,7 @@ This package also provides support for extension commands.'''
 
 from west.commands.command import WestCommand, \
     CommandContextError, CommandError, \
-    external_commands, WestExtCommandSpec, ExtensionCommandError
+    extension_commands, WestExtCommandSpec, ExtensionCommandError
 
 __all__ = ['CommandContextError', 'CommandError', 'WestCommand',
-           'external_commands', 'WestExtCommandSpec', 'ExtensionCommandError']
+           'extension_commands', 'WestExtCommandSpec', 'ExtensionCommandError']
