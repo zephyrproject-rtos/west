@@ -41,8 +41,9 @@ PROJECT_COMMANDS = {
         Update(),
         SelfUpdate(),
         ForAll(),
-        Config()
-    ]
+    ],
+
+    'configuring west': [Config()],
 }
 
 # Commands we don't want to show to the user. For now, this is PostInit.
