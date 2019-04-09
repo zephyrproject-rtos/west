@@ -478,7 +478,10 @@ def wrap(argv):
     # Put this at position 1 to make sure it comes before random stuff
     # that might be on a developer's PYTHONPATH in the import order.
     sys.path.insert(1, os.path.join(west_git_repo, 'src'))
-    import west.main
+    try:
+        import west.main
+    except ImportError:
+        sys.exit('Error: no west.main in ' + west_git_repo)
     west.main.main(argv)
 
 
