@@ -96,6 +96,18 @@ def west_topdir(start=None, fall_back=True):
         cur_dir = parent_dir
 
 
+def have_git():
+    # Windows users often end up in a situation where 'git' is
+    # installed, but not on PATH.
+    return shutil.which('git') is not None
+
+
+def ensure_git():
+    if not have_git():
+        sys.exit('Error: cannot find a git executable. '
+                 'Please install git or ensure the binary is on your PATH.')
+
+
 def _is_sha(s):
     try:
         int(s, 16)
@@ -235,6 +247,7 @@ to handle any resetting yourself.
     except WestNotFound:
         pass
 
+    ensure_git()
     if args.local:
         if args.manifest_rev is not None:
             sys.exit('west init: error: argument --mr/--manifest-rev: not '
@@ -438,6 +451,10 @@ def wrap(argv):
 
     west_git_repo = os.path.join(topdir, WEST_DIR, WEST)
     if printing_version:
+        if not have_git():
+            print('West repository version: unknown; git was not found')
+            sys.exit(0)
+
         try:
             git_describe = subprocess.check_output(
                 ['git', 'describe', '--tags'],
