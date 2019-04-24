@@ -1,8 +1,0 @@
-manifest:
-  remotes:
-    - name: testremote
-      url-base: https://example.com
-
-  projects:
-    - name: west
-      remote: testremote

@@ -38,9 +38,6 @@ WEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/west'
 # Default revision to check out of the west repository.
 WEST_REV_DEFAULT = 'master'
 
-MANIFEST_SECTIONS = ['manifest', 'west']
-'''Sections in the manifest file'''
-
 MANIFEST_PROJECT_INDEX = 0
 '''Index in projects where the project with contains project manifest file is
 located'''
@@ -74,12 +71,10 @@ class Manifest:
     from_file and from_data helper methods.'''
 
     @staticmethod
-    def from_file(source_file=None, sections=MANIFEST_SECTIONS):
+    def from_file(source_file=None):
         '''Create and return a new Manifest object given a source YAML file.
 
         :param source_file: Path to a YAML file containing the manifest.
-        :param sections: Only parse specified sections from YAML file,
-                         default: all sections are parsed.
 
         If source_file is None, the value returned by manifest_path()
         is used.
@@ -88,28 +83,23 @@ class Manifest:
         Raises MalformedConfig in case of missing configuration settings.'''
         if source_file is None:
             source_file = manifest_path()
-        return Manifest(source_file=source_file, sections=sections)
+        return Manifest(source_file=source_file)
 
     @staticmethod
-    def from_data(source_data, sections=MANIFEST_SECTIONS):
+    def from_data(source_data):
         '''Create and return a new Manifest object given parsed YAML data.
 
         :param source_data: Parsed YAML data as a Python object.
-        :param sections: Only parse specified sections from YAML data,
-                         default: all sections are parsed.
 
         Raises MalformedManifest in case of validation errors.
         Raises MalformedConfig in case of missing configuration settings.'''
-        return Manifest(source_data=source_data, sections=sections)
+        return Manifest(source_data=source_data)
 
-    def __init__(self, source_file=None, source_data=None,
-                 sections=MANIFEST_SECTIONS):
+    def __init__(self, source_file=None, source_data=None):
         '''Create a new Manifest object.
 
         :param source_file: Path to a YAML file containing the manifest.
         :param source_data: Parsed YAML data as a Python object.
-        :param sections: Only parse specified sections from YAML file,
-                         default: all sections are parsed.
 
         Normally, it is more convenient to use the `from_file` and
         `from_data` convenience factories than calling the constructor
@@ -131,10 +121,6 @@ class Manifest:
             self._data = source_data
             path = None
 
-        for section in sections:
-            if section not in MANIFEST_SECTIONS:
-                raise ValueError('invalid section {}'.format(section))
-
         self.path = path
         '''Path to the file containing the manifest, or None if created
         from data rather than the file system.'''
@@ -144,16 +130,13 @@ class Manifest:
 
         if 'manifest' not in self._data:
             self._malformed('manifest contains no manifest element')
+        data = self._data['manifest']
 
-        for key in self._data:
-            if key in sections:
-                try:
-                    pykwalify.core.Core(
-                        source_data=self._data[key],
-                        schema_files=[_SCHEMA_PATH[key]]
-                    ).validate()
-                except pykwalify.errors.SchemaError as e:
-                    self._malformed(e, key)
+        try:
+            pykwalify.core.Core(source_data=data,
+                                schema_files=[_SCHEMA_PATH]).validate()
+        except pykwalify.errors.SchemaError as se:
+            self._malformed('schema error', parent=se)
 
         self.defaults = None
         '''west.manifest.Defaults object representing default values
@@ -173,13 +156,9 @@ class Manifest:
         Note: The index MANIFEST_PROJECT_INDEX in sequence will hold the
         project which contains the project manifest file.'''
 
-        self.west_project = None
-        '''west.manifest.SpecialProject object representing the west meta
-        project.'''
-
         # Set up the public attributes documented above, as well as
         # any internal attributes needed to implement the public API.
-        self._load(self._data, sections)
+        self._load(self._data)
 
     def get_remote(self, name):
         '''Get a manifest Remote, given its name.'''
@@ -208,8 +187,6 @@ class Manifest:
         # are fully specified in order to make the resulting manifest
         # easy to extend by users who want to reuse the defaults.
         r = collections.OrderedDict()
-        r['west'] = self.west_project.as_dict()
-        r['west']['revision'] = self.west_project.sha(QUAL_MANIFEST_REV_BRANCH)
         r['manifest'] = collections.OrderedDict()
         r['manifest']['defaults'] = self.defaults.as_dict()
         r['manifest']['remotes'] = [r.as_dict() for r in self.remotes]
@@ -218,32 +195,20 @@ class Manifest:
 
         return r
 
-    def _malformed(self, complaint, section='manifest'):
+    def _malformed(self, complaint, parent=None):
         context = (' file {} '.format(self.path) if self.path
                    else ' data:\n{}\n'.format(self._data))
-        raise MalformedManifest('Malformed manifest{}(schema: {}):\n{}'
-                                .format(context, _SCHEMA_PATH[section],
+        exc = MalformedManifest('Malformed manifest{}(schema: {}):\n{}'
+                                .format(context, _SCHEMA_PATH,
                                         complaint))
+        if parent:
+            raise exc from parent
+        else:
+            raise exc
 
-    def _load(self, data, sections):
+    def _load(self, data):
         # Initialize this instance's fields from values given in the
         # manifest data, which must be validated according to the schema.
-        if 'west' in sections:
-            west = data.get('west', {})
-
-            url = west.get('url') or WEST_URL_DEFAULT
-            revision = west.get('revision') or WEST_REV_DEFAULT
-
-            self.west_project = SpecialProject('west',
-                                               url=url,
-                                               revision=revision,
-                                               path=os.path.join('.west',
-                                                                 'west'))
-
-        # Next is the manifest section
-        if 'manifest' not in sections:
-            return
-
         projects = []
         project_abspaths = set()
 
@@ -256,7 +221,7 @@ class Manifest:
             path = self_tag.get('path') if self_tag else ''
         west_commands = self_tag.get('west-commands') if self_tag else None
 
-        project = SpecialProject(path, path=path, west_commands=west_commands)
+        project = ManifestProject(path=path, west_commands=west_commands)
         projects.insert(MANIFEST_PROJECT_INDEX, project)
 
         # Map from each remote's name onto that remote's data in the manifest.
@@ -288,9 +253,6 @@ class Manifest:
         for mp in manifest['projects']:
             # Validate the project name.
             name = mp['name']
-            if name == 'west':
-                self._malformed('the name "west" is reserved and cannot '
-                                'be used to name a manifest project')
 
             # Validate the project remote.
             remote_name = mp.get('remote', default_remote_name)
@@ -632,16 +594,13 @@ class Project:
         '''Returns is_up_to_date_with(self.revision).'''
         return self.is_up_to_date_with(self.revision)
 
-class SpecialProject(Project):
-    '''Represents a special project, e.g. the west or manifest project.
+class ManifestProject(Project):
+    '''Represents the manifest as a project.'''
 
-    Projects are neither comparable nor hashable.'''
-
-    def __init__(self, name, path=None, revision='(not set)', url='(not set)',
+    def __init__(self, path=None, revision='(not set)', url='(not set)',
                  west_commands=None):
         '''Specify a Special Project by name, and url, and optional information.
 
-        :param name: Special Project's user-defined name in the manifest
         :param path: Relative path to the project in the west
                      installation, if present in the manifest. If None,
                      the project's ``name`` is used.
@@ -652,16 +611,13 @@ class SpecialProject(Project):
                               by the project, if given. This obviously only
                               makes sense for the manifest project, not west.
         '''
-        if name == 'west' and west_commands:
-            raise ValueError('setting west_commands on west is forbidden')
-
-        self.name = name
-        '''Project name, either "west" or "manifest".'''
+        self.name = path or 'manifest'
+        '''Project's name (path or default "manifest").'''
 
         self.url = url
         '''Complete fetch URL for the project.'''
 
-        self.path = path or name
+        self.path = path or self.name
         '''Relative path to the project in the installation.'''
 
         self.abspath = os.path.realpath(os.path.join(util.west_topdir(),
@@ -689,23 +645,14 @@ class SpecialProject(Project):
     def as_dict(self):
         '''Return a representation of this object as a dict, as it would be
         parsed from an equivalent YAML manifest.'''
-        if self.name == 'west':
-            return collections.OrderedDict((('url', self.url),
-                                            ('revision', self.revision)))
-        else:
-            # Manifest project is assumed.
-            ret = collections.OrderedDict({'path': self.path})
-            if self.west_commands:
-                ret['west-commands'] = self.west_commands
-            return ret
+        ret = collections.OrderedDict({'path': self.path})
+        if self.west_commands:
+            ret['west-commands'] = self.west_commands
+        return ret
 
 def _wrn_if_not_remote(remote):
     if not isinstance(remote, Remote):
         log.wrn('Remote', remote, 'is not a Remote instance')
 
 
-_SCHEMA_PATH = {'manifest': os.path.join(os.path.dirname(__file__),
-                                         "manifest-schema.yml"),
-                'west': os.path.join(os.path.dirname(__file__),
-                                     "_bootstrap",
-                                     "west-schema.yml")}
+_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")

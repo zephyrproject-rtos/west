@@ -1,4 +1,4 @@
-# Copyright (c) 2018, Nordic Semiconductor ASA
+# Copyright (c) 2018, 2019 Nordic Semiconductor ASA
 # Copyright 2018, 2019 Foundries.io
 #
 # SPDX-License-Identifier: Apache-2.0
@@ -8,7 +8,8 @@
 import argparse
 import collections
 import os
-from os.path import join, relpath, realpath, normcase, isdir
+from os.path import join, abspath, relpath, realpath, normpath, \
+    basename, dirname, normcase, exists, isdir
 import shutil
 import subprocess
 import sys
@@ -19,68 +20,212 @@ from west.configuration import config, update_config
 from west import log
 from west import util
 from west.commands import WestCommand, CommandError
-from west.manifest import Manifest, MalformedManifest, MANIFEST_PROJECT_INDEX
+from west.manifest import Manifest, MalformedManifest, MalformedConfig, \
+    MANIFEST_PROJECT_INDEX
 from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
 from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
 from urllib.parse import urlparse
 import posixpath
 
 
-class PostInit(WestCommand):
+class Init(WestCommand):
+
     def __init__(self):
         super().__init__(
-            'post-init',
-            'finish init tasks (do not use)',
-            _wrap('''
-            Finish initializing projects.
+            'init',
+            'create a west installation',
+            textwrap.dedent('''\
+            Creates a west installation as follows:
 
-            Continue the initialization of the project containing the manifest
-            file. You should never need to call this.
-            '''))
+              1. Creates a .west directory and clones the manifest repository
+                 to a temporary subdirectory of it
+              2. Creates a local configuration file (.west/config)
+              3. Parses west.yml in the manifest repository and moves that
+                 repository to the correct location in the installation.'''),
+            requires_installation=False)
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(
-            parser_adder, self,
-            _arg('--manifest-url',
-                 metavar='URL',
-                 help='Manifest repository URL'),
-            _arg('--use-cache',
-                 dest='cache',
-                 metavar='CACHE',
-                 help='''Use cached repo at location CACHE'''),
-            _arg('--local',
-                 metavar='LOCAL',
-                 help='''Use local repo at location LOCAL'''),
-            _project_list_arg)
+        parser = parser_adder.add_parser(
+            self.name, help=self.help, description=self.description,
+            formatter_class=argparse.RawDescriptionHelpFormatter)
 
-    def do_run(self, args, user_args):
-        # manifest.path is not supposed to be set during init, thus clear it
-        # for the session and update it to correct location when complete.
+        mutualex_group = parser.add_mutually_exclusive_group()
+        mutualex_group.add_argument(
+            '-m', '--manifest-url',
+            help='Manifest repository URL (default: {})'
+                 .format(MANIFEST_URL_DEFAULT))
+        mutualex_group.add_argument(
+            '-l', '--local', action='store_true',
+            help='''Use an existing local manifest repository instead of
+                 cloning one. The local repository will not be modified.
+                 Cannot be combined with -m or --mr.''')
+
+        parser.add_argument(
+            '--mr', '--manifest-rev', dest='manifest_rev',
+            help='''Manifest revision to fetch (default: {}). Cannot be combined
+                 with --local'''
+                 .format(MANIFEST_REV_DEFAULT))
+        parser.add_argument(
+            'directory', nargs='?', default=None,
+            help='''Directory to create the installation in (default: cwd).
+                 Missing directories will be created. If -l is given, this is
+                 the path to the manifest repository to use instead.''')
+
+        return parser
+
+    def do_run(self, args, ignored):
+        if self.topdir:
+            log.die('already in an installation ({}), aborting'.
+                    format(self.topdir))
+
+        if shutil.which('git') is None:
+            log.die("can't find git; install it or ensure it's on your PATH")
+
+        # west.manifest will try to read manifest.path and use it when
+        # parsing the manifest. Clear it out for now so we can parse
+        # the manifest without it; local() or bootstrap() will set it
+        # properly.
         if config.get('manifest', 'path', fallback=None) is not None:
             config.remove_option('manifest', 'path')
-
-        manifest_file = join(args.local or args.cache, 'west.yml')
-
-        projects = Manifest.from_file(manifest_file).projects
-        manifest_project = projects[MANIFEST_PROJECT_INDEX]
-
-        if args.local is not None:
-            rel_manifest = relpath(args.local, util.west_topdir())
-            update_config('manifest', 'path', rel_manifest)
+        if args.local:
+            projects, manifest_dir = self.local(args)
         else:
-            if manifest_project.path == '':
-                url_path = urlparse(args.manifest_url).path
-                manifest_project.path = posixpath.basename(url_path)
-                manifest_project.abspath = realpath(
-                    join(util.west_topdir(), manifest_project.path))
-                manifest_project.name = manifest_project.path
+            projects, manifest_dir = self.bootstrap(args)
 
-            shutil.move(args.cache, manifest_project.abspath)
-            update_config('manifest', 'path', manifest_project.path)
+        self.fixup_zephyr_base(projects)
 
+        _banner('Initialized. Now run "west update" inside {}.'.
+                format(self.topdir))
+
+    def local(self, args):
+        if args.manifest_rev is not None:
+            log.die('--mr cannot be used with -l')
+
+        manifest_dir = canonical(args.directory or os.getcwd())
+        manifest_file = join(manifest_dir, 'west.yml')
+        topdir = dirname(manifest_dir)
+        rel_manifest = basename(manifest_dir)
+        west_dir = os.path.join(topdir, WEST_DIR)
+
+        _banner('Initializing from existing manifest repository ' +
+                rel_manifest)
+        if not exists(manifest_file):
+            log.die('No "west.yml" found in {}'.format(manifest_dir))
+
+        self.create(west_dir)
+        os.chdir(topdir)
+        projects = self.projects(manifest_file)  # This validates the manifest.
+        _msg('Creating {} and local configuration'.format(west_dir))
+        update_config('manifest', 'path', rel_manifest)
+
+        self.topdir = topdir
+
+        return projects, manifest_dir
+
+    def bootstrap(self, args):
+        manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
+        manifest_rev = args.manifest_rev or MANIFEST_REV_DEFAULT
+        topdir = canonical(args.directory or os.getcwd())
+        west_dir = join(topdir, WEST_DIR)
+
+        _banner('Initializing in ' + topdir)
+        if not isdir(topdir):
+            self.create(topdir, exist_ok=False)
+        os.chdir(topdir)
+
+        # Clone the manifest repository into a temporary directory. It's
+        # important that west_dir exists and we're under topdir, or we
+        # won't be able to call self.projects() without error later.
+        tempdir = join(west_dir, 'manifest-tmp')
+        if exists(tempdir):
+            log.dbg('removing existing temporary manifest directory', tempdir)
+            shutil.rmtree(tempdir)
+        try:
+            self.clone_manifest(manifest_url, manifest_rev, tempdir)
+            temp_manifest_file = join(tempdir, 'west.yml')
+            if not exists(temp_manifest_file):
+                log.die('No "west.yml" in manifest repository ({})'.
+                        format(tempdir))
+
+            projects = self.projects(temp_manifest_file)
+            manifest_project = projects[MANIFEST_PROJECT_INDEX]
+            if manifest_project.path:
+                manifest_path = manifest_project.path
+                manifest_abspath = join(topdir, manifest_path)
+            else:
+                url_path = urlparse(manifest_url).path
+                manifest_path = posixpath.basename(url_path)
+                manifest_abspath = join(topdir, manifest_path)
+
+            shutil.move(tempdir, manifest_abspath)
+            update_config('manifest', 'path', manifest_path)
+        finally:
+            shutil.rmtree(tempdir, ignore_errors=True)
+
+        self.topdir = topdir
+
+        return projects, manifest_project.abspath
+
+    def projects(self, manifest_file):
+        try:
+            return Manifest.from_file(manifest_file).projects
+        except MalformedManifest as mm:
+            log.die(mm.args[0])
+        except MalformedConfig as mc:
+            log.die(mc.args[0])
+
+    def fixup_zephyr_base(self, projects):
         for project in projects:
             if project.path == 'zephyr':
                 update_config('zephyr', 'base', project.path)
+
+    def create(self, directory, exist_ok=True):
+        try:
+            os.makedirs(directory, exist_ok=exist_ok)
+        except PermissionError:
+            log.die('Cannot initialize in {}: permission denied'.
+                    format(directory))
+        except FileExistsError:
+            log.die('Something else created {} concurrently; quitting'.
+                    format(directory))
+        except Exception as e:
+            log.die("Can't create directory {}: {}".format(directory, e.args))
+
+    def clone_manifest(self, url, rev, dest, exist_ok=False):
+        _msg('Cloning manifest repository from {}, rev. {}'.format(url, rev))
+        if not exist_ok and exists(dest):
+            log.die('refusing to clone into existing location ' + dest)
+
+        subprocess.check_call(('git', 'init', dest))
+        subprocess.check_call(('git', 'remote', 'add', 'origin', '--', url),
+                              cwd=dest)
+        is_sha = _is_sha(rev)
+        if is_sha:
+            # Fetch the ref-space and hope the SHA is contained in
+            # that ref-space
+            subprocess.check_call(('git', 'fetch', 'origin', '--tags',
+                                   '--', 'refs/heads/*:refs/remotes/origin/*'),
+                                  cwd=dest)
+        else:
+            # Fetch the ref-space similar to git clone plus the ref
+            # given by user.  Redundancy is ok, for example if the user
+            # specifies 'heads/master'. This allows users to specify:
+            # pull/<no>/head for pull requests
+            subprocess.check_call(('git', 'fetch', 'origin', '--tags', '--',
+                                   rev, 'refs/heads/*:refs/remotes/origin/*'),
+                                  cwd=dest)
+
+        try:
+            # Using show-ref to determine if rev is available in local repo.
+            subprocess.check_call(('git', 'show-ref', '--', rev), cwd=dest)
+            local_rev = True
+        except subprocess.CalledProcessError:
+            local_rev = False
+
+        if local_rev or is_sha:
+            subprocess.check_call(('git', 'checkout', rev), cwd=dest)
+        else:
+            subprocess.check_call(('git', 'checkout', 'FETCH_HEAD'), cwd=dest)
 
 
 class List(WestCommand):
@@ -139,13 +284,7 @@ class List(WestCommand):
             '''.format(default_fmt)))
 
     def do_run(self, args, user_args):
-        # Only list west if it was given by name, or --all was given.
-        list_west = bool(args.projects) or args.all
-
-        for project in _projects(args, include_west=True):
-            if project.name == 'west' and not list_west:
-                continue
-
+        for project in _projects(args):
             # Spelling out the format keys explicitly here gives us
             # future-proofing if the internal Project representation
             # ever changes.
@@ -279,41 +418,29 @@ class Update(WestCommand):
             'update',
             'update projects described in west.yml',
             _wrap('''
-            Updates west and all project repositories according to the
+            Updates all project repositories according to the
             manifest file, `west.yml`, in the manifest repository.
 
             By default:
 
-            1. The revisions in the manifest file are fetched from the
-            remote in the west repository in the installation and each
-            project repository.
-
+            1. The revisions in the manifest file are fetched.
             2. The local manifest-rev branches in each repository
-            (which are managed exclusively by west) will be hard reset
-            to the updated commits fetched in step 1.
-
+               are reset to the updated revisions.
             3. All repositories will have detached HEADs checked out
-            at the new manifest-rev commits. Locally checked out
-            branches are unaffected but will no longer be checked out
-            by default.  West will print information on how to get
-            back to those branches or update them to the new
-            manifest-rev versions.
-
-            You can skip updating west using --exclude-west.
+               at the new manifest-rev commits.
 
             You can influence the behavior when local branches are
             checked out using --keep-descendants and/or --rebase.
 
             This command does not change the contents of the manifest
-            repository.
-            '''))
+            repository.'''))
 
     def do_add_parser(self, parser_adder):
         return _add_parser(parser_adder, self,
                            _arg('-x', '--exclude-west',
-                                dest='update',
-                                action='store_false',
-                                help='do not self-update West'),
+                                action='store_true',
+                                help='''deprecated and ignored; exists
+                                for backwards compatibility'''),
                            _arg('-k', '--keep-descendants',
                                 action='store_true',
                                 help=_wrap('''
@@ -335,8 +462,8 @@ class Update(WestCommand):
                            _project_list_arg)
 
     def do_run(self, args, user_args):
-        if args.update:
-            _update_west(args.rebase, args.keep_descendants)
+        if args.exclude_west:
+            log.wrn('ignoring --exclude-west')
 
         failed_rebases = []
 
@@ -359,46 +486,6 @@ class Update(WestCommand):
                             ', '.join(p.format('{name_and_path}')
                                       for p in failed_rebases)))
             raise CommandError(1)
-
-
-class SelfUpdate(WestCommand):
-    def __init__(self):
-        super().__init__(
-            'selfupdate',
-            'selfupdate the west repository',
-            _wrap('''
-            Updates the West source code repository. The remote to update from
-            and the revision to update to is taken from the west section within
-            the manifest file, `west.yml`, in the manifest repository.
-
-            There is normally no need to run this command manually, because
-            'west update' automatically updates the West repository to the
-            latest version before doing anything else.
-            '''))
-
-    def do_add_parser(self, parser_adder):
-        return _add_parser(parser_adder, self,
-                           _arg('-k', '--keep-descendants',
-                                action='store_true',
-                                help=_wrap('''
-                                If a local branch is checked out and is a
-                                descendant commit of the new manifest-rev,
-                                then keep that descendant branch checked out
-                                instead of detaching HEAD. This takes priority
-                                over --rebase when possible if both are given.
-                                ''')),
-                           _arg('-r', '--rebase',
-                                action='store_true',
-                                help=_wrap('''
-                                If a local branch is checked out, try
-                                to rebase it onto the new HEAD and
-                                leave the rebased branch checked
-                                out. If this fails, you will need to
-                                clean up the rebase yourself manually.
-                                ''')))
-
-    def do_run(self, args, user_args):
-        _update_west(args.rebase, args.keep_descendants)
 
 
 class ForAll(WestCommand):
@@ -438,6 +525,20 @@ class ForAll(WestCommand):
 
             subprocess.Popen(args.command, shell=True, cwd=project.abspath) \
                 .wait()
+
+
+class SelfUpdate(WestCommand):
+    def __init__(self):
+        super().__init__(
+            'selfupdate',
+            'deprecated; exists for backwards compatibility',
+            'Do not use. You can upgrade west with pip only from v0.6.0.')
+
+    def do_add_parser(self, parser_adder):
+        return _add_parser(parser_adder, self)
+
+    def do_run(self, args, user_args):
+        log.die(self.description)
 
 
 def _arg(*args, **kwargs):
@@ -498,8 +599,7 @@ def _cloned_projects(args):
         [project for project in _all_projects() if _cloned(project)]
 
 
-def _projects(args, listed_must_be_cloned=True, include_west=False,
-              exclude_manifest=False):
+def _projects(args, listed_must_be_cloned=True, exclude_manifest=False):
     # Returns a list of project instances for the projects requested in 'args'
     # (the command-line arguments), in the same order that they were listed by
     # the user. If args.projects is empty, no projects were listed, and all
@@ -513,19 +613,11 @@ def _projects(args, listed_must_be_cloned=True, include_west=False,
     #   If True, an error is raised if an uncloned project was listed. This
     #   only applies to projects listed explicitly on the command line.
     #
-    # include_west (default: False):
-    #   If True, west may be given in args.projects without raising errors.
-    #   It will be included in the return value if args.projects is empty.
-    #
     # exclude_manifest (default: False):
     #   If True, the manifest project will not be included in the returned
     #   list.
 
     projects = _all_projects()
-    west_project = _west_project()
-
-    if include_west:
-        projects.append(west_project)
 
     if exclude_manifest:
         projects.pop(MANIFEST_PROJECT_INDEX)
@@ -594,7 +686,7 @@ def _all_projects():
     # command aborts.
 
     try:
-        return list(Manifest.from_file(sections=['manifest']).projects)
+        return list(Manifest.from_file().projects)
     except MalformedManifest as m:
         log.die(m.args[0])
 
@@ -734,34 +826,6 @@ def _checkout_detach(project, revision):
                         r=_sha(project, revision)))
 
 
-def _west_project():
-    # Returns a Project instance for west.
-    return Manifest.from_file(sections=['west']).west_project
-
-
-def _update_west(rebase, keep_descendants):
-    _banner('self-updating west:')
-    with _error_context(_FAILED_UPDATE_MSG):
-        project = _west_project()
-        old_sha = _sha(project, 'HEAD')
-        _update(project, rebase, keep_descendants)
-
-        if config.get('zephyr', 'base', fallback=None) is None:
-            for proj in _all_projects():
-                if proj.path == 'zephyr':
-                    update_config('zephyr', 'base', proj.path)
-                    break
-
-        if old_sha != _sha(project, 'HEAD'):
-            _msg(project.format(
-                '{name}: updated to {revision} (from {url}).'))
-
-            # Signal self-update, which will cause a restart. This is a bit
-            # nicer than doing the restart here, as callers will have a
-            # chance to flush file buffers, etc.
-            raise WestUpdated()
-
-
 def _update(project, rebase, keep_descendants):
     _fetch(project)
 
@@ -830,15 +894,6 @@ def _post_checkout_help(project, branch, sha, is_ancestor):
             b=branch, rp=rel, sh=sha))
         log.dbg('(To do this automatically in the future,',
                 'use "west update --rebase".)')
-
-
-_FAILED_UPDATE_MSG = """
-, while running automatic self-update. Pass --exclude-west to
-'west update' to skip updating west for the duration of the command."""[1:]
-
-
-class WestUpdated(Exception):
-    '''Raised after West has updated its own source code'''
 
 
 def _is_sha(s):
@@ -920,3 +975,24 @@ def _msg(msg):
     # Prints "msg" as a smaller banner, i.e. prefixed with '-- ' and
     # not colorized.
     log.inf('--- ' + msg, colorize=False)
+
+def canonical(path):
+    return normpath(abspath(path))
+
+
+#
+# Special files and directories in the west installation.
+#
+# These are given variable names for clarity, but they can't be
+# changed without propagating the changes into west itself.
+#
+
+# Top-level west directory, containing west itself and the manifest.
+WEST_DIR = '.west'
+
+# Manifest repository directory under WEST_DIR.
+MANIFEST = 'manifest'
+# Default manifest repository URL.
+MANIFEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/zephyr'
+# Default revision to check out of the manifest repository.
+MANIFEST_REV_DEFAULT = 'master'

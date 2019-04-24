@@ -12,14 +12,13 @@
 
 import argparse
 import colorama
-import errno
 from functools import partial
 from io import StringIO
 import itertools
 import os
 import shutil
 import sys
-from subprocess import Popen, CalledProcessError, check_output, DEVNULL
+from subprocess import CalledProcessError
 import textwrap
 import traceback
 
@@ -28,43 +27,34 @@ from west import configuration as config
 from west.commands import extension_commands, \
     CommandError, CommandContextError, ExtensionCommandError
 from west.commands.project import List, ManifestCommand, Diff, Status, \
-    SelfUpdate, ForAll, WestUpdated, PostInit, Update
+    SelfUpdate, ForAll, Init, Update
 from west.commands.config import Config
 from west.manifest import Manifest, MalformedConfig
 from west.util import quote_sh_list, west_topdir, WestNotFound
+from west.version import __version__
 
-PROJECT_COMMANDS = {
+BUILTIN_COMMANDS = {
     'commands for managing multiple git repositories': [
+        Init(),
+        Update(),
         List(),
         ManifestCommand(),
         Diff(),
         Status(),
-        Update(),
-        SelfUpdate(),
         ForAll(),
     ],
 
     'configuring west': [Config()],
+
+    # None is for hidden commands we don't want to show to the user.
+    None: [SelfUpdate()]
 }
-
-# Commands we don't want to show to the user. For now, this is PostInit.
-HIDDEN_COMMANDS = {None: [PostInit()]}
-
-# Built-in commands in this West. For compatibility with monorepo
-# installations of West within the Zephyr tree, we only expose the
-# project commands if this is a multirepo installation.
-BUILTIN_COMMANDS = dict(PROJECT_COMMANDS)
-BUILTIN_COMMANDS.update(HIDDEN_COMMANDS)
 
 # Initialize the set with the virtual 'help' command so that an extension
 # command cannot clash with it
 BUILTIN_COMMAND_NAMES = set(['help'])
 for group, commands in BUILTIN_COMMANDS.items():
     BUILTIN_COMMAND_NAMES.update(c.name for c in commands)
-
-
-class InvalidWestContext(RuntimeError):
-    pass
 
 
 class WestHelpAction(argparse.Action):
@@ -456,32 +446,6 @@ def set_zephyr_base(args):
     log.dbg('ZEPHYR_BASE={} (origin: {})'.format(zb, zb_origin))
 
 
-def print_version_info():
-    # The bootstrapper will print its own version, as well as that of
-    # the west repository itself, then exit. So if this file is being
-    # asked to print the version, it's because it's being run
-    # directly, and not via the bootstrapper.
-    #
-    # Rather than play tricks like invoking "pip show west" (which
-    # assumes the bootstrapper was installed via pip, the common but
-    # not universal case), refuse the temptation to make guesses and
-    # print an honest answer.
-    log.inf('West bootstrapper version: N/A, not run via bootstrapper')
-
-    # The running west installation.
-    try:
-        desc = check_output(['git', 'describe', '--tags'],
-                            stderr=DEVNULL,
-                            cwd=os.path.dirname(__file__))
-        west_version = desc.decode(sys.getdefaultencoding()).strip()
-    except CalledProcessError:
-        west_version = 'unknown'
-    west_src_west = os.path.dirname(__file__)
-    print('West repository version: {} ({})'.
-          format(west_version,
-                 os.path.dirname(os.path.dirname(west_src_west))))
-
-
 def parse_args(argv, extensions, topdir):
     west_parser, subparser_gen = _make_parsers()
 
@@ -497,7 +461,7 @@ def parse_args(argv, extensions, topdir):
             for spec in specs:
                 parser = add_ext_command_parser(subparser_gen, spec)
                 parser.set_defaults(handler=partial(ext_command_handler,
-                                                    topdir, spec, argv))
+                                                    spec, topdir, argv))
     west_parser.set_extensions(extensions)
 
     help_parser = subparser_gen.add_parser('help',
@@ -510,7 +474,7 @@ def parse_args(argv, extensions, topdir):
     args, unknown = west_parser.parse_known_args(args=argv)
 
     if args.version:
-        print_version_info()
+        print('West version: v{}'.format(__version__))
         sys.exit(0)
 
     # Set up logging verbosity before running the command, so
@@ -563,14 +527,15 @@ def main(argv=None):
     # stdout/stderr isn't a terminal
     colorama.init()
 
-    # Read the configuration files
-    config.read_config()
-
     # See if we're in an installation.
     try:
         topdir = west_topdir()
     except WestNotFound:
         topdir = None
+
+    # Read the configuration files before looking for extensions.
+    # We need this to find the manifest path in order to load extensions.
+    config.read_config()
 
     # Load any extension command specs if we're in an installation.
     if topdir:
@@ -578,6 +543,8 @@ def main(argv=None):
             extensions = get_extension_commands()
         except (MalformedConfig, FileNotFoundError):
             extensions = {}
+    else:
+        extensions = {}
 
     if argv is None:
         argv = sys.argv[1:]
@@ -587,26 +554,6 @@ def main(argv=None):
         quote_sh_list(argv))
     try:
         args.handler(args, unknown)
-    except WestUpdated:
-        # West has been automatically updated. Restart ourselves to run the
-        # latest version, with the same arguments that we were given.
-        # Treat the Python script as an executable. This works because on
-        # Unix the script created by pip has a shebang and on Windows it is
-        # actually a binary executable
-        log.dbg("sys.argv[0]:\"{}\" argv:\"{}\"".format(sys.argv[0], argv))
-        # Use Popen + exit instead of execv due to the asynchronous nature of
-        # execv on Windows, where it creates a new process with a different
-        # pid that executes in parallel to the original one instead of
-        # replacing it as it does on UNIX
-        # https://bugs.python.org/issue9148
-        # https://bugs.python.org/issue19124
-        try:
-            proc = Popen([sys.argv[0]] + argv)
-            proc.communicate()
-        except KeyboardInterrupt:
-            sys.exit(0)
-        log.dbg('proc.returncode: {}'.format(proc.returncode))
-        sys.exit(errno.EIO if proc.returncode is None else proc.returncode)
     except KeyboardInterrupt:
         sys.exit(0)
     except CalledProcessError as cpe:

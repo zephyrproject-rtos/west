@@ -34,7 +34,7 @@ __comp_west()
 	flags[manifest]="$common --freeze"
 	flags[diff]="$common"
 	flags[status]="$common"
-	flags[update]="$common --exclude-west --keep-descendants --rebase"
+	flags[update]="$common --keep-descendants --rebase"
 	flags[selfupdate]="$common --keep-descendants --rebase"
 	flags[forall]="$common -c"
 	flags[config]="$common --system --global --local"

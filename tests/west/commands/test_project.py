@@ -90,10 +90,7 @@ def test_manifest_freeze(west_update_tmpdir):
     # match project order as specified in our manifest, that all
     # revisions are full 40-character SHAs, and there isn't any random
     # YAML tag crap.
-    expected_res = ['^west:$',
-                    '^  url: .*$',
-                    '^  revision: [a-f0-9]{40}$',
-                    '^manifest:$',
+    expected_res = ['^manifest:$',
                     '^  defaults:$',
                     '^    remote: test-local$',
                     '^    revision: master$',
@@ -163,29 +160,6 @@ def test_forall(west_init_tmpdir):
 
     cmd('update Kconfiglib')
     cmd("forall -c 'echo *'")
-
-
-def test_update_west(west_init_tmpdir):
-    # Test the 'west selfupdate' command. It calls through to the same backend
-    # functions that are used for automatic updates and 'west init'
-    # reinitialization.
-
-    # update the net-tools repository
-    cmd('update net-tools')
-
-    west_prev = head_subject('.west/west')
-
-    # Add commits to the local repos. We need to reconfigure
-    # explicitly as these are clones, and west doesn't handle that for
-    # us.
-    for path in 'zephyr', '.west/west', 'net-tools':
-        add_commit(path, 'test-update-local', reconfigure=True)
-
-    # Check that resetting the west repository removes the local commit
-    cmd('selfupdate')
-    assert head_subject('zephyr') == 'test-update-local'  # Unaffected
-    assert head_subject('.west/west') == west_prev
-    assert head_subject('net-tools') == 'test-update-local'  # Unaffected
 
 
 def test_update_projects(west_init_tmpdir):
@@ -273,7 +247,6 @@ def test_init_local_manifest_project(repos_tmpdir):
     # but not projects
     zid = repos_tmpdir.join('west_installation')
     assert zid.check(dir=1)
-    assert zid.join('.west', 'west').check(dir=1)
     assert zid.join('subdir', 'Kconfiglib').check(dir=0)
     assert zid.join('net-tools').check(dir=0)
     assert zid.join('zephyr').check(dir=1)
