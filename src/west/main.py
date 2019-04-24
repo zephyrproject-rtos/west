@@ -518,7 +518,8 @@ def parse_args(argv, extensions):
     # until later.
     log.set_verbosity(args.verbose)
 
-    set_zephyr_base(args)
+    if args.command != 'init':  # init --> we haven't got a zephyr repo.
+        set_zephyr_base(args)
 
     if 'handler' not in args:
         west_parser.print_help(file=sys.stderr, top_level=True)
