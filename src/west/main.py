@@ -2,6 +2,7 @@
 
 # Copyright 2018 Open Source Foundries Limited.
 # Copyright 2019 Foundries.io Limited.
+# Copyright (c) 2019, Nordic Semiconductor ASA
 #
 # SPDX-License-Identifier: Apache-2.0
 
@@ -30,7 +31,7 @@ from west.commands.project import List, ManifestCommand, Diff, Status, \
     SelfUpdate, ForAll, WestUpdated, PostInit, Update
 from west.commands.config import Config
 from west.manifest import Manifest, MalformedConfig
-from west.util import quote_sh_list, west_topdir
+from west.util import quote_sh_list, west_topdir, WestNotFound
 
 PROJECT_COMMANDS = {
     'commands for managing multiple git repositories': [
@@ -295,8 +296,8 @@ help on each command.''',
     return parser, subparser_gen
 
 
-def command_handler(command, known_args, unknown_args):
-    command.run(known_args, unknown_args)
+def command_handler(command, topdir, known_args, unknown_args):
+    command.run(known_args, unknown_args, topdir)
 
 
 def add_ext_command_parser(subparser_gen, spec):
@@ -308,7 +309,7 @@ def add_ext_command_parser(subparser_gen, spec):
     return parser
 
 
-def ext_command_handler(spec, argv, *ignored):
+def ext_command_handler(spec, topdir, argv, *ignored):
     # Deferred creation, argument parsing, and handling for extension
     # commands. We go to the extra effort because we don't want to
     # import any extern classes until the user has specifically
@@ -329,10 +330,12 @@ def ext_command_handler(spec, argv, *ignored):
     command.add_parser(subparser_gen)
 
     # Handle the instantiated command in the usual way.
-    command.run(*west_parser.parse_known_args(argv))
+    args, unknown = west_parser.parse_known_args(argv)
+    command.run(args, unknown, topdir)
 
 
-def help_command_handler(west_parser, help_parser, extensions, args, *ignored):
+def help_command_handler(west_parser, topdir, help_parser, extensions, args,
+                         *ignored):
     command_name = args.command
     if not command_name:
         west_parser.print_help(top_level=True)
@@ -353,7 +356,7 @@ def help_command_handler(west_parser, help_parser, extensions, args, *ignored):
                 if spec.name != command_name:
                     continue
                 # ext_command_handler() does not return
-                ext_command_handler(spec, [command_name, '--help'])
+                ext_command_handler(spec, topdir, [command_name, '--help'])
         else:
             west_parser.print_help(top_level=True)
 
@@ -479,13 +482,13 @@ def print_version_info():
                  os.path.dirname(os.path.dirname(west_src_west))))
 
 
-def parse_args(argv, extensions):
+def parse_args(argv, extensions, topdir):
     west_parser, subparser_gen = _make_parsers()
 
     # Add handlers for the built-in commands.
     for command in itertools.chain(*BUILTIN_COMMANDS.values()):
         parser = command.add_parser(subparser_gen)
-        parser.set_defaults(handler=partial(command_handler, command))
+        parser.set_defaults(handler=partial(command_handler, command, topdir))
 
     # Add handlers for extension commands, and finalize the list with
     # our parser.
@@ -494,14 +497,14 @@ def parse_args(argv, extensions):
             for spec in specs:
                 parser = add_ext_command_parser(subparser_gen, spec)
                 parser.set_defaults(handler=partial(ext_command_handler,
-                                                    spec, argv))
+                                                    topdir, spec, argv))
     west_parser.set_extensions(extensions)
 
     help_parser = subparser_gen.add_parser('help',
                                            help='get help on a west command')
     help_parser.add_argument('command', nargs='?')
     help_parser.set_defaults(handler=partial(help_command_handler, west_parser,
-                                             help_parser, extensions))
+                                             topdir, help_parser, extensions))
 
     # Parse arguments.
     args, unknown = west_parser.parse_known_args(args=argv)
@@ -563,17 +566,22 @@ def main(argv=None):
     # Read the configuration files
     config.read_config()
 
-    # Load any extension command specs. If the config file isn't
-    # fully set up yet or the west.yml cannot be found, ignore the error.
-    # This allows west init to work properly.
+    # See if we're in an installation.
     try:
-        extensions = get_extension_commands()
-    except (MalformedConfig, FileNotFoundError):
-        extensions = {}
+        topdir = west_topdir()
+    except WestNotFound:
+        topdir = None
+
+    # Load any extension command specs if we're in an installation.
+    if topdir:
+        try:
+            extensions = get_extension_commands()
+        except (MalformedConfig, FileNotFoundError):
+            extensions = {}
 
     if argv is None:
         argv = sys.argv[1:]
-    args, unknown = parse_args(argv, extensions)
+    args, unknown = parse_args(argv, extensions, topdir)
 
     for_stack_trace = 'run as "west -v {}" for a stack trace'.format(
         quote_sh_list(argv))

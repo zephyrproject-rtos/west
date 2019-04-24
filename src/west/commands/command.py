@@ -14,6 +14,7 @@ import pykwalify
 import yaml
 
 from west.configuration import config
+from west import log
 from west.manifest import Manifest
 from west.util import escapes_directory
 
@@ -44,12 +45,20 @@ class ExtensionCommandError(CommandError):
         super(ExtensionCommandError, self).__init__(**kwargs)
 
 
+_NO_TOPDIR_MSG_FMT = '''Error: "{}" is not in a west installation.
+Things to try:
+ - Set ZEPHYR_BASE to a zephyr repository path in a west installation.
+ - Run "west init" to set up an installation here.
+ - Run "west init -h" for additional information.
+'''
+
 class WestCommand(ABC):
     '''Abstract superclass for a west command.
 
     All top-level commands supported by west implement this interface.'''
 
-    def __init__(self, name, help, description, accepts_unknown_args=False):
+    def __init__(self, name, help, description, accepts_unknown_args=False,
+                 requires_installation=True):
         '''Create a command instance.
 
         Some of the fields in a WestCommand (such as `name`, `help`, and
@@ -67,13 +76,19 @@ class WestCommand(ABC):
                                      in its run() method. Otherwise, passing
                                      unknown arguments will cause
                                      UnknownArgumentsError to be raised.
+        :param requires_installation: if true, the command requires a
+                                      west installation to run. Running such a
+                                      command outside of any installation
+                                      (i.e. without a valid topdir) will exit
+                                      with an error.
         '''
         self.name = name
         self.help = help
         self.description = description
         self._accept_unknown = accepts_unknown_args
+        self.requires_installation = requires_installation
 
-    def run(self, args, unknown):
+    def run(self, args, unknown, topdir):
         '''Run the command.
 
         This raises CommandContextError if the command cannot be run
@@ -84,9 +99,15 @@ class WestCommand(ABC):
         :param unknown: unknown arguments present on the command line;
                         this must be empty if the constructor
                         was passed accepts_unknown_args=False.
+        :param topdir: top level directory of west installation, or None;
+                       this is stored as an attribute before do_run() is
+                       called.
         '''
         if unknown and not self._accept_unknown:
             self.parser.error('unexpected arguments: {}'.format(unknown))
+        if not topdir and self.requires_installation:
+            log.die(_NO_TOPDIR_MSG_FMT.format(os.getcwd()))
+        self.topdir = topdir
         self.do_run(args, unknown)
 
     def add_parser(self, parser_adder):
