@@ -16,7 +16,7 @@ try:
 except ImportError:
     use_configobj = False
 
-from west.util import west_dir
+from west.util import west_dir, WestNotFound
 
 
 # Configuration values.
@@ -106,7 +106,10 @@ def read_config(config_file=ConfigFile.ALL, config=config):
     # Repository-specific
 
     if config_file == ConfigFile.ALL or config_file == ConfigFile.LOCAL:
-        files.append(os.path.join(west_dir(), ConfigFile.LOCAL.value))
+        try:
+            files.append(os.path.join(west_dir(), ConfigFile.LOCAL.value))
+        except WestNotFound:
+            pass
 
     #
     # Parse all existing configuration files
