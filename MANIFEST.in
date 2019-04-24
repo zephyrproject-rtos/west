@@ -1,1 +1,2 @@
-include src/west/_bootstrap/west-schema.yml
+include src/west/commands/west-commands-schema.yml
+include src/west/manifest-schema.yml

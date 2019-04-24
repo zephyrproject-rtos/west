@@ -11,7 +11,7 @@ import yaml
 
 from west import configuration as config
 from west.manifest import Manifest, Defaults, Remote, Project, \
-    SpecialProject, MalformedManifest
+    ManifestProject, MalformedManifest
 
 THIS_DIRECTORY = os.path.dirname(__file__)
 
@@ -77,7 +77,7 @@ def test_no_defaults(config_file_project_setup):
     with patch('west.util.west_topdir', return_value='/west_top'):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
-        expected = [SpecialProject('manifestproject', path='manifestproject'),
+        expected = [ManifestProject(path='manifestproject'),
                     Project('testproject1', r1, None, path='testproject1',
                             clone_depth=None, revision='rev1'),
                     Project('testproject2', r2, None, path='testproject2',
@@ -118,7 +118,7 @@ def test_self_tag(project_setup):
     with patch('west.util.west_topdir', return_value='/west_top'):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
-        expected = [SpecialProject('mainproject', path='mainproject'),
+        expected = [ManifestProject(path='mainproject'),
                     Project('testproject1', r1, None, path='testproject1',
                             clone_depth=None, revision='rev1'),
                     Project('testproject2', r2, None, path='testproject2',
@@ -161,7 +161,7 @@ def test_default_clone_depth(config_file_project_setup):
     with patch('west.util.west_topdir', return_value='/west_top'):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
-        expected = [SpecialProject('manifestproject', path='manifestproject'),
+        expected = [ManifestProject(path='manifestproject'),
                     Project('testproject1', r1, d, path='testproject1',
                             clone_depth=None, revision=d.revision),
                     Project('testproject2', r2, d, path='testproject2',
@@ -202,7 +202,9 @@ def test_path():
 
 
 def test_sections():
-    # Projects must be able to override their default paths.
+    # We no longer validate the west section, so things that would
+    # once have been schema errors shouldn't matter.
+
     content_wrong_west = '''\
     west:
       url: https://example.com
@@ -220,32 +222,10 @@ def test_sections():
     with patch('west.util.west_topdir',
                return_value=os.path.realpath('/west_top')):
         # Parsing manifest only, no exception raised
-        manifest = Manifest.from_data(yaml.safe_load(content_wrong_west),
-                                      sections=['manifest'])
+        manifest = Manifest.from_data(yaml.safe_load(content_wrong_west))
     assert manifest.projects[1].path == 'sub' + os.path.sep + 'directory'
     assert manifest.projects[1].abspath == \
         os.path.realpath('/west_top/sub/directory')
-    content_wrong_manifest = '''\
-    west:
-      url: https://example.com
-      revision: abranch
-    manifest:
-      remotes:
-        - name: testremote
-          url-base: https://example.com
-      projects:
-        - name: testproject
-          remote: testremote
-          path: sub/directory
-    '''
-    with patch('west.util.west_topdir',
-               return_value=os.path.realpath('/west_top')):
-        # Parsing west section only, no exception raised
-        manifest = Manifest.from_data(yaml.safe_load(content_wrong_manifest),
-                                      sections=['west'])
-    assert manifest.west_project.url == 'https://example.com'
-    assert manifest.west_project.revision == 'abranch'
-
 
 def test_west_commands():
     # Projects may specify subdirectories containing west commands.
@@ -262,11 +242,27 @@ def test_west_commands():
     '''
     with patch('west.util.west_topdir',
                return_value=os.path.realpath('/west_top')):
-        # Parsing manifest only, no exception raised
-        manifest = Manifest.from_data(yaml.safe_load(content),
-                                      sections=['manifest'])
+        manifest = Manifest.from_data(yaml.safe_load(content))
     assert len(manifest.projects) == 2
     assert manifest.projects[-1].west_commands == 'some-path/west-commands.yml'
+
+
+def test_west_is_ok():
+    # Projects named west are allowed now.
+    content = '''\
+    manifest:
+      remotes:
+        - name: testremote
+          url-base: https://example.com
+
+      projects:
+        - name: west
+          remote: testremote
+    '''
+    with patch('west.util.west_topdir',
+               return_value=os.path.realpath('/west_top')):
+        manifest = Manifest.from_data(yaml.safe_load(content))
+    assert manifest.projects[1].name == 'west'
 
 
 # Invalid manifests should raise MalformedManifest.
