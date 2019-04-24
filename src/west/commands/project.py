@@ -8,6 +8,7 @@
 import argparse
 import collections
 import os
+from os.path import join, relpath, realpath, normcase, isdir
 import shutil
 import subprocess
 import sys
@@ -58,20 +59,20 @@ class PostInit(WestCommand):
         if config.get('manifest', 'path', fallback=None) is not None:
             config.remove_option('manifest', 'path')
 
-        manifest_file = os.path.join(args.local or args.cache, 'west.yml')
+        manifest_file = join(args.local or args.cache, 'west.yml')
 
         projects = Manifest.from_file(manifest_file).projects
         manifest_project = projects[MANIFEST_PROJECT_INDEX]
 
         if args.local is not None:
-            rel_manifest = os.path.relpath(args.local, util.west_topdir())
+            rel_manifest = relpath(args.local, util.west_topdir())
             update_config('manifest', 'path', rel_manifest)
         else:
             if manifest_project.path == '':
                 url_path = urlparse(args.manifest_url).path
                 manifest_project.path = posixpath.basename(url_path)
-                manifest_project.abspath = os.path.realpath(
-                    os.path.join(util.west_topdir(), manifest_project.path))
+                manifest_project.abspath = realpath(
+                    join(util.west_topdir(), manifest_project.path))
                 manifest_project.name = manifest_project.path
 
             shutil.move(args.cache, manifest_project.abspath)
@@ -546,7 +547,7 @@ def _projects(args, listed_must_be_cloned=True, include_west=False,
         # Returns a case-normalized canonical absolute version of 'path', for
         # comparisons. The normcase() is a no-op on platforms on case-sensitive
         # filesystems.
-        return os.path.normcase(os.path.realpath(path))
+        return normcase(realpath(path))
 
     res = []
     uncloned = []
@@ -684,7 +685,7 @@ def _cloned(project):
                 level=log.VERBOSE_EXTREME)
         return result
 
-    if not os.path.isdir(project.abspath):
+    if not isdir(project.abspath):
         return handle(False)
 
     # --is-inside-work-tree doesn't require that the directory is the top-level
@@ -807,7 +808,7 @@ def _post_checkout_help(project, branch, sha, is_ancestor):
         # additional diagnostics that need emitting.
         return
 
-    relpath = os.path.relpath(project.abspath)
+    rel = relpath(project.abspath)
     if is_ancestor:
         # If the branch we just left behind is a descendant of
         # the new HEAD (e.g. if this is a topic branch the
@@ -817,7 +818,7 @@ def _post_checkout_help(project, branch, sha, is_ancestor):
         log.wrn(project.format(
             'left behind {name} branch "{b}"; '
             'to fast forward back, use: git -C {rp} checkout {b}',
-            b=branch, rp=relpath))
+            b=branch, rp=rel))
         log.dbg('(To do this automatically in the future,',
                 'use "west update --keep-descendants".)')
     else:
@@ -826,7 +827,7 @@ def _post_checkout_help(project, branch, sha, is_ancestor):
         log.wrn(project.format(
             'left behind {name} branch "{b}"; '
             'to rebase onto the new HEAD: git -C {rp} rebase {sh} {b}',
-            b=branch, rp=relpath, sh=sha))
+            b=branch, rp=rel, sh=sha))
         log.dbg('(To do this automatically in the future,',
                 'use "west update --rebase".)')
 
