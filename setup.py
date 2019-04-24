@@ -29,13 +29,13 @@ setuptools.setup(
         'Operating System :: POSIX :: Linux',
         'Operating System :: MacOS :: MacOS X',
         'Operating System :: Microsoft :: Windows',
-        ],
+    ],
     install_requires=[
         'colorama',
         'PyYAML',
         'pykwalify',
         'configobj',
-        ],
+    ],
     python_requires='>=3.4',
     entry_points={
         'console_scripts': (
