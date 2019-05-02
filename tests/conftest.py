@@ -10,9 +10,9 @@ from west import configuration as config
 import pytest
 
 GIT = shutil.which('git')
-# Assumes this file is west/tests/west/commands/conftest.py, returns
-# path to toplevel 'west'
-THIS_WEST = os.path.abspath(dirname(dirname(dirname(dirname(__file__)))))
+# Assumes this file is west/tests/conftest.py, returns path to
+# toplevel 'west'
+THIS_WEST = os.path.abspath(dirname((dirname(__file__))))
 
 #
 # Test fixtures
