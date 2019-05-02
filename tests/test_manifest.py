@@ -267,7 +267,8 @@ def test_west_is_ok():
 
 # Invalid manifests should raise MalformedManifest.
 @pytest.mark.parametrize('invalid',
-                         glob(os.path.join(THIS_DIRECTORY, 'invalid_*.yml')))
+                         glob(os.path.join(THIS_DIRECTORY, 'manifests',
+                                           'invalid_*.yml')))
 @patch('west.util.west_topdir', return_value='/west_top')
 def test_invalid(topdir, invalid):
     with pytest.raises(MalformedManifest):
