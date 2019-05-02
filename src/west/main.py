@@ -557,12 +557,10 @@ def main(argv=None):
     except KeyboardInterrupt:
         sys.exit(0)
     except CalledProcessError as cpe:
-        log.err('command exited with status {}: {}'.format(
-            cpe.args[0], quote_sh_list(cpe.args[1])))
+        log.err('command exited with status {}: {}'.
+                format(cpe.returncode, quote_sh_list(cpe.cmd)))
         if args.verbose:
             traceback.print_exc()
-        else:
-            log.inf(for_stack_trace)
         sys.exit(cpe.returncode)
     except ExtensionCommandError as ece:
         log.err('extension command', args.command,
