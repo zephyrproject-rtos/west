@@ -19,6 +19,7 @@ import os
 import shutil
 import sys
 from subprocess import CalledProcessError
+import tempfile
 import textwrap
 import traceback
 
@@ -522,6 +523,15 @@ def get_extension_commands():
     return extensions
 
 
+def dump_traceback():
+    # Save the current exception to a file and return its path.
+    fd, name = tempfile.mkstemp(prefix='west-exc-', suffix='.txt')
+    os.close(fd)        # traceback has no use for the fd
+    with open(name, 'w') as f:
+        traceback.print_exc(file=f)
+    return name
+
+
 def main(argv=None):
     # Makes ANSI color escapes work on Windows, and strips them when
     # stdout/stderr isn't a terminal
@@ -550,8 +560,6 @@ def main(argv=None):
         argv = sys.argv[1:]
     args, unknown = parse_args(argv, extensions, topdir)
 
-    for_stack_trace = 'run as "west -v {}" for a stack trace'.format(
-        quote_sh_list(argv))
     try:
         args.handler(args, unknown)
     except KeyboardInterrupt:
@@ -563,19 +571,22 @@ def main(argv=None):
             traceback.print_exc()
         sys.exit(cpe.returncode)
     except ExtensionCommandError as ece:
-        log.err('extension command', args.command,
-                'was improperly defined and could not be run{}'.
-                format(': ' + ece.hint if ece.hint else ''))
+        msg = 'extension command "{}" could not be run{}.'.format(
+            args.command, ': ' + ece.hint if ece.hint else '')
         if args.verbose:
+            log.err(msg)
             traceback.print_exc()
         else:
-            log.inf(for_stack_trace)
+            log.err(msg, 'See {} for a traceback.'.format(dump_traceback()))
         sys.exit(ece.returncode)
     except CommandContextError as cce:
         log.err('command', args.command, 'cannot be run in this context:',
                 *cce.args)
+        log.err('see {} for a traceback.'.format(dump_traceback()))
         sys.exit(cce.returncode)
     except CommandError as ce:
+        # No need to dump_traceback() here. The command is responsible
+        # for logging its own errors.
         sys.exit(ce.returncode)
 
 
