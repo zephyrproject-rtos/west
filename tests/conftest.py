@@ -9,87 +9,52 @@ from west import configuration as config
 import pytest
 
 GIT = shutil.which('git')
+MANIFEST_TEMPLATE = '''\
+manifest:
+  defaults:
+    remote: test-local
+
+  remotes:
+    - name: test-local
+      url-base: THE_URL_BASE
+
+  projects:
+    - name: Kconfiglib
+      revision: zephyr
+      path: subdir/Kconfiglib
+    - name: net-tools
+      west-commands: scripts/west-commands.yml
+  self:
+    path: zephyr
+'''
 
 #
 # Test fixtures
 #
 
-@pytest.fixture
-def repos_tmpdir(tmpdir):
-    '''Fixture for tmpdir with "remote" repositories, manifest, and west.
+@pytest.fixture(scope='session')
+def _session_repos():
+    '''Just a helper, do not use directly.'''
 
-    These can then be used to bootstrap an installation and run
-    project-related commands on it with predictable results.
+    # It saves time to create repositories once at session scope, then
+    # clone the results as needed in per-test fixtures.
+    session_repos = os.path.join(os.environ['TOXTEMPDIR'], 'session_repos')
+    print('initializing session repositories in', session_repos)
+    shutil.rmtree(session_repos, ignore_errors=True)
 
-    Switches directory to, and returns, the top level tmpdir -- NOT
-    the subdirectory containing the repositories themselves.
-
-    Initializes placeholder upstream repositories in <tmpdir>/remote-repos/
-    with the following contents:
-
-    repos/
-    ├── manifest (branch: master)
-    │   └── west.yml
-    ├── Kconfiglib (branch: zephyr)
-    │   └── kconfiglib.py
-    ├── net-tools (branch: master)
-    │   └── qemu-script.sh
-    └── zephyr (branch: master)
-        ├── CODEOWNERS
-        ├── west.yml
-        ├── include
-        │   └── header.h
-        └── subsys
-            └── bluetooth
-                └── code.c
-
-    The contents of west.yml are:
-
-    manifest:
-      defaults:
-        remote: test-local
-      remotes:
-        - name: test-local
-          url-base: file://<tmpdir>/remote-repos
-      projects:
-        - name: Kconfiglib
-          revision: zephyr
-          path: subdir/Kconfiglib
-        - name: net-tools
-          clone_depth: 1
-          west-commands: scripts/west-commands.yml
-      self:
-        path: zephyr
-    '''
-    rr = tmpdir.mkdir('repos')  # "remote" repositories
-    rp = {}                     # individual repository paths under rr
-
-    # Create the other repositories.
+    # Create the repositories.
+    rp = {}      # individual repository paths
     for repo in 'net-tools', 'Kconfiglib', 'zephyr':
-        path = str(rr.join(repo))
+        path = os.path.join(session_repos, repo)
         rp[repo] = path
         create_repo(path)
 
-    # Initialize the manifest repository.
-    add_commit(rp['zephyr'], 'test manifest',
-               files={'west.yml': textwrap.dedent('''\
-                      manifest:
-                        defaults:
-                          remote: test-local
-
-                        remotes:
-                          - name: test-local
-                            url-base: file://{rr}
-
-                        projects:
-                          - name: Kconfiglib
-                            revision: zephyr
-                            path: subdir/Kconfiglib
-                          - name: net-tools
-                            west-commands: scripts/west-commands.yml
-                        self:
-                          path: zephyr
-                      '''.format(rr=str(rr)))})
+    # Initialize the "zephyr" repository.
+    # The caller needs to add west.yml with the right url-base.
+    add_commit(rp['zephyr'], 'base zephyr commit',
+               files={'CODEOWNERS': '',
+                      'include/header.h': '#pragma once\n',
+                      'subsys/bluetooth/code.c': 'void foo(void) {}\n'})
 
     # Initialize the Kconfiglib repository.
     subprocess.check_call([GIT, 'checkout', '-b', 'zephyr'],
@@ -124,20 +89,69 @@ def repos_tmpdir(tmpdir):
                       '''),
                       })
 
-    # Initialize the zephyr repository.
-    add_commit(rp['zephyr'], 'test zephyr commit',
-               files={'CODEOWNERS': '',
-                      'include/header.h': '#pragma once\n',
-                      'subsys/bluetooth/code.c': 'void foo(void) {}\n'})
+    # Return the top-level temporary directory. Don't clean it up on
+    # teardown, so the contents can be inspected post-portem.
+    print('finished initializing session repositories')
+    return session_repos
 
-    # Switch to and return the top-level temporary directory.
-    #
-    # This can be used to populate a west installation alongside.
+@pytest.fixture
+def repos_tmpdir(tmpdir, _session_repos):
+    '''Fixture for tmpdir with "remote" repositories, manifest, and west.
 
-    # Switch to the top-level West installation directory
-    tmpdir.chdir()
+    These can then be used to bootstrap an installation and run
+    project-related commands on it with predictable results.
+
+    Switches directory to, and returns, the top level tmpdir -- NOT
+    the subdirectory containing the repositories themselves.
+
+    Initializes placeholder upstream repositories in tmpdir with the
+    following contents:
+
+    repos/
+    ├── Kconfiglib (branch: zephyr)
+    │   └── kconfiglib.py
+    ├── net-tools (branch: master)
+    │   └── qemu-script.sh
+    └── zephyr (branch: master)
+        ├── CODEOWNERS
+        ├── west.yml
+        ├── include
+        │   └── header.h
+        └── subsys
+            └── bluetooth
+                └── code.c
+
+    The contents of west.yml are:
+
+    manifest:
+      defaults:
+        remote: test-local
+      remotes:
+        - name: test-local
+          url-base: <tmpdir>/repos
+      projects:
+        - name: Kconfiglib
+          revision: zephyr
+          path: subdir/Kconfiglib
+        - name: net-tools
+          clone_depth: 1
+          west-commands: scripts/west-commands.yml
+      self:
+        path: zephyr
+
+    '''
+    kconfiglib, net_tools, zephyr = [os.path.join(_session_repos, x) for x in
+                                     ['Kconfiglib', 'net-tools', 'zephyr']]
+    repos = tmpdir.mkdir('repos')
+    repos.chdir()
+    for r in [kconfiglib, net_tools, zephyr]:
+        subprocess.check_call([GIT, 'clone', r])
+
+    manifest = MANIFEST_TEMPLATE.replace('THE_URL_BASE',
+                                         str(tmpdir.join('repos')))
+    add_commit(str(repos.join('zephyr')), 'add manifest',
+               files={'west.yml': manifest})
     return tmpdir
-
 
 @pytest.fixture
 def west_init_tmpdir(repos_tmpdir):
@@ -193,8 +207,10 @@ def cmd(cmd, cwd=None, stderr=None):
     # a python subprocess so that program-level setup and teardown
     # happen fresh.
 
+    cmdlst = shlex.split('west ' + cmd)
+    print('running:', cmdlst)
     try:
-        return check_output(shlex.split('west ' + cmd), cwd=cwd, stderr=stderr)
+        return check_output(cmdlst, cwd=cwd, stderr=stderr)
     except subprocess.CalledProcessError:
         print('cmd: west:', shutil.which('west'), file=sys.stderr)
         raise
