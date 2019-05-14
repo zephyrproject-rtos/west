@@ -210,6 +210,7 @@ class Manifest:
         # Initialize this instance's fields from values given in the
         # manifest data, which must be validated according to the schema.
         projects = []
+        project_names = set()
         project_abspaths = set()
 
         manifest = data.get('manifest')
@@ -281,6 +282,10 @@ class Manifest:
             except ValueError as ve:
                 self._malformed(ve.args[0])
 
+            # Project names must be unique.
+            if project.name in project_names:
+                self._malformed('project name {} is already used'.
+                                format(project.name))
             # Two projects cannot have the same path. We use absolute
             # paths to check for collisions to ensure paths are
             # normalized (e.g. for case-insensitive file systems or
@@ -290,6 +295,7 @@ class Manifest:
                 self._malformed('project {} path {} is already in use'.
                                 format(project.name, project.path))
 
+            project_names.add(project.name)
             project_abspaths.add(project.abspath)
             projects.append(project)
 
