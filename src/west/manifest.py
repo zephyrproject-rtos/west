@@ -144,7 +144,7 @@ class Manifest:
 
         self.remotes = None
         '''Sequence of west.manifest.Remote objects representing manifest
-        remotes.'''
+        remotes. Note that not all projects have a remote.'''
 
         self.projects = None
         '''Sequence of west.manifest.Project objects representing manifest
@@ -226,7 +226,7 @@ class Manifest:
 
         # Map from each remote's name onto that remote's data in the manifest.
         remotes = tuple(Remote(r['name'], r['url-base']) for r in
-                        manifest['remotes'])
+                        manifest.get('remotes', []))
         remotes_dict = {r.name: r for r in remotes}
 
         # Get any defaults out of the manifest.
@@ -254,23 +254,32 @@ class Manifest:
             # Validate the project name.
             name = mp['name']
 
-            # Validate the project remote.
+            # Validate the project remote or URL.
             remote_name = mp.get('remote', default_remote_name)
-            if remote_name is None:
-                self._malformed('project {} does not specify a remote'.
+            url = mp.get('url')
+            if remote_name is None and url is None:
+                self._malformed('project {} does not specify a remote or URL'.
                                 format(name))
-            if remote_name not in remotes_dict:
-                self._malformed('project {} remote {} is not defined'.
-                                format(name, remote_name))
+            if remote_name:
+                if remote_name not in remotes_dict:
+                    self._malformed('project {} remote {} is not defined'.
+                                    format(name, remote_name))
+                remote = remotes_dict[remote_name]
+            else:
+                remote = None
 
             # Create the project instance for final checking.
-            project = Project(name,
-                              defaults,
-                              path=mp.get('path'),
-                              clone_depth=mp.get('clone-depth'),
-                              revision=mp.get('revision'),
-                              west_commands=mp.get('west-commands'),
-                              remote=remotes_dict[remote_name])
+            try:
+                project = Project(name,
+                                  defaults,
+                                  path=mp.get('path'),
+                                  clone_depth=mp.get('clone-depth'),
+                                  revision=mp.get('revision'),
+                                  west_commands=mp.get('west-commands'),
+                                  remote=remote,
+                                  url=url)
+            except ValueError as ve:
+                self._malformed(ve.args[0])
 
             # Two projects cannot have the same path. We use absolute
             # paths to check for collisions to ensure paths are
@@ -317,8 +326,8 @@ class Defaults:
                        or None (an actual Remote object, not the name of
                        a remote as a string).
         :param revision: Default Git revision; 'master' if not given.'''
-        if remote is not None:
-            _wrn_if_not_remote(remote)
+        if remote is not None and not isinstance(remote, Remote):
+            raise ValueError('{} is not a Remote'.format(remote))
         if revision is None:
             revision = 'master'
 
@@ -390,7 +399,7 @@ class Project:
                  'revision west_commands').split()
 
     def __init__(self, name, defaults, path=None, clone_depth=None,
-                 revision=None, west_commands=None, remote=None):
+                 revision=None, west_commands=None, remote=None, url=None):
         '''Specify a Project by name, Remote, and optional information.
 
         :param name: Project's user-defined name in the manifest.
@@ -409,13 +418,19 @@ class Project:
         :param remote: Remote instance corresponding to this Project as
                        specified in the manifest. This is used to build
                        the project's URL, and is also stored as an attribute.
+        :param url: The project's fetch URL. This cannot be given with `remote`
+                    as well: choose one.
         '''
-        _wrn_if_not_remote(remote)
+        if remote and url:
+            raise ValueError('got remote={} and url={}'.format(remote, url))
+        if not (remote or url):
+            raise ValueError('got neither a remote nor a URL')
 
         self.name = name
         '''Project name as it appears in the manifest.'''
-        self.url = remote.url_base + '/' + name
-        '''Complete fetch URL for the project.'''
+        self.url = url or (remote.url_base + '/' + name)
+        '''Complete fetch URL for the project, either as given by the url kwarg
+        or computed from the remote URL base and the project name.'''
         self.path = os.path.normpath(path or name)
         '''Relative path to the project in the installation.'''
         self.abspath = os.path.realpath(os.path.join(util.west_topdir(),
@@ -431,7 +446,7 @@ class Project:
         self.west_commands = west_commands
         '''Path to project's "west-commands", or None.'''
         self.remote = remote
-        '''`Remote` instance corresponding to the project's remote.'''
+        '''`Remote` instance corresponding to the project's remote, or None.'''
 
     def __eq__(self, other):
         return NotImplemented
@@ -649,10 +664,6 @@ class ManifestProject(Project):
         if self.west_commands:
             ret['west-commands'] = self.west_commands
         return ret
-
-def _wrn_if_not_remote(remote):
-    if not isinstance(remote, Remote):
-        log.wrn('Remote', remote, 'is not a Remote instance')
 
 
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")

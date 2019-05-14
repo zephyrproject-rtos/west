@@ -36,7 +36,7 @@ mapping:
   # and a fetch URL base. These URL bases are concatenated with project names
   # (separated by a /) to form complete fetch URLs.
   remotes:
-    required: true
+    required: false
     type: seq
     sequence:
       - type: map
@@ -62,6 +62,10 @@ mapping:
             type: str
           # Name of the project remote
           remote:
+            required: false
+            type: str
+          # Explicit project URL (may not be given with a remote as well)
+          url:
             required: false
             type: str
           # Revision to check out. May be a branch, tag, or SHA.
