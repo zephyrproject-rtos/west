@@ -1,5 +1,4 @@
 import os
-from os.path import dirname
 import shlex
 import shutil
 import subprocess
@@ -10,9 +9,6 @@ from west import configuration as config
 import pytest
 
 GIT = shutil.which('git')
-# Assumes this file is west/tests/conftest.py, returns path to
-# toplevel 'west'
-THIS_WEST = os.path.abspath(dirname((dirname(__file__))))
 
 #
 # Test fixtures
@@ -32,8 +28,6 @@ def repos_tmpdir(tmpdir):
     with the following contents:
 
     repos/
-    ├── west (branch: master)
-    │   └── (contains this west's worktree contents)
     ├── manifest (branch: master)
     │   └── west.yml
     ├── Kconfiglib (branch: zephyr)
@@ -51,8 +45,6 @@ def repos_tmpdir(tmpdir):
 
     The contents of west.yml are:
 
-    west:
-      url: file://<tmpdir>/west
     manifest:
       defaults:
         remote: test-local
@@ -72,11 +64,6 @@ def repos_tmpdir(tmpdir):
     rr = tmpdir.mkdir('repos')  # "remote" repositories
     rp = {}                     # individual repository paths under rr
 
-    # Mirror this west tree into a "remote" west repository under rr.
-    wdst = rr.join('west')
-    mirror_west_repo(wdst)
-    rp['west'] = str(wdst)
-
     # Create the other repositories.
     for repo in 'net-tools', 'Kconfiglib', 'zephyr':
         path = str(rr.join(repo))
@@ -86,8 +73,6 @@ def repos_tmpdir(tmpdir):
     # Initialize the manifest repository.
     add_commit(rp['zephyr'], 'test manifest',
                files={'west.yml': textwrap.dedent('''\
-                      west:
-                        url: file://{west}
                       manifest:
                         defaults:
                           remote: test-local
@@ -104,7 +89,7 @@ def repos_tmpdir(tmpdir):
                             west-commands: scripts/west-commands.yml
                         self:
                           path: zephyr
-                      '''.format(west=rp['west'], rr=str(rr)))})
+                      '''.format(rr=str(rr)))})
 
     # Initialize the Kconfiglib repository.
     subprocess.check_call([GIT, 'checkout', '-b', 'zephyr'],
@@ -160,8 +145,7 @@ def west_init_tmpdir(repos_tmpdir):
 
     Uses the remote repositories from the repos_tmpdir fixture to
     create a west installation using the system bootstrapper's init
-    command -- and thus the test environment must install the
-    bootstrapper from the current west source code tree under test.
+    command.
 
     The contents of the west installation aren't checked at all.
     This is left up to the test cases.
@@ -193,52 +177,6 @@ def check_output(*args, **kwargs):
         print(e.output.decode(), file=sys.stderr)
         raise
     return out_bytes.decode(sys.getdefaultencoding())
-
-
-def mirror_west_repo(dst):
-    # Create a west repository in dst which mirrors the exact state of
-    # the current tree, except ignored files.
-    #
-    # This is done in a simple way:
-    #
-    # 1. recursively copy THIS_WEST there (except .git and ignored files)
-    # 2. init a new git repository there
-    # 3. add the entire tree, and commit
-    #
-    # (We can't just clone THIS_WEST because we want to allow
-    # developers to test their working trees without having to make a
-    # commit -- remember, 'west init' clones the remote.)
-    wut = str(dst)  # "west under test"
-
-    # Copy the west working tree, except ignored files.
-    def ignore(directory, files):
-        # Get newline separated list of ignored files, as a string.
-        try:
-            ignored = check_output([GIT, 'check-ignore'] + files,
-                                   cwd=directory)
-        except subprocess.CalledProcessError as e:
-            # From the manpage: return values 0 and 1 respectively
-            # mean that some and no argument files were ignored. These
-            # are both OK. Treat other return values as errors.
-            if e.returncode not in (0, 1):
-                raise
-            else:
-                ignored = e.output.decode(sys.getdefaultencoding())
-
-        # Convert ignored to a set of file names as strings.
-        ignored = set(ignored.splitlines())
-
-        # Also ignore the .git directory itself.
-        if '.git' in files:
-            ignored.add('.git')
-
-        return ignored
-    shutil.copytree(THIS_WEST, wut, ignore=ignore)
-
-    # Create a fresh .git and commit existing directory tree.
-    create_repo(wut)
-    subprocess.check_call([GIT, 'add', '-A'], cwd=wut)
-    add_commit(wut, 'west under test')
 
 def cmd(cmd, cwd=None, stderr=None):
     # Run a west command in a directory (cwd defaults to os.getcwd()).
