@@ -1,3 +1,5 @@
+# If any project does not have a URL specified, there must be a remote
+# section and a default remote set to it.
 manifest:
   projects:
     - name: testproject
