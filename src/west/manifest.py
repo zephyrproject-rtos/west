@@ -398,13 +398,14 @@ class Project:
     __slots__ = ('name remote url path abspath posixpath clone_depth '
                  'revision west_commands').split()
 
-    def __init__(self, name, defaults, path=None, clone_depth=None,
+    def __init__(self, name, defaults=None, path=None, clone_depth=None,
                  revision=None, west_commands=None, remote=None, url=None):
         '''Specify a Project by name, Remote, and optional information.
 
         :param name: Project's user-defined name in the manifest.
         :param defaults: If the revision parameter is not given, the project's
-                         revision is set to defaults.revision.
+                         revision is set to defaults.revision if defaults is
+                         not None, or the west-wide default otherwise.
         :param path: Relative path to the project in the west
                      installation, if present in the manifest. If not given,
                      the project's ``name`` is used.
@@ -425,6 +426,9 @@ class Project:
             raise ValueError('got remote={} and url={}'.format(remote, url))
         if not (remote or url):
             raise ValueError('got neither a remote nor a URL')
+
+        if defaults is None:
+            defaults = _DEFAULTS
 
         self.name = name
         '''Project name as it appears in the manifest.'''
@@ -667,3 +671,4 @@ class ManifestProject(Project):
 
 
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
+_DEFAULTS = Defaults()
