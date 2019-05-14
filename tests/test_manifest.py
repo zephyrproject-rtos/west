@@ -4,6 +4,7 @@
 
 from glob import glob
 import os
+import platform
 from unittest.mock import patch
 
 import pytest
@@ -53,6 +54,56 @@ def deep_eq_check(actual, expected):
     assert actual.revision == expected.revision
     assert actual.west_commands == expected.west_commands
 
+@patch('west.util.west_topdir', return_value='/west_top')
+def test_init_with_url(west_topdir):
+    # Test the project constructor works as expected with a URL.
+
+    p = Project('p', url='some-url')
+    assert p.name == 'p'
+    assert p.remote is None
+    assert p.url == 'some-url'
+    assert p.path == 'p'
+    assert p.abspath == os.path.realpath(os.path.join('/west_top', 'p'))
+    posixpath = p.posixpath
+    if platform.system() == 'Windows':
+        posixpath = os.path.splitdrive(posixpath)[1]
+    assert posixpath == '/west_top/p'
+    assert p.clone_depth is None
+    assert p.revision == 'master'
+    assert p.west_commands is None
+
+@patch('west.util.west_topdir', return_value='/west_top')
+def test_remote_url_init(west_topdir):
+    # Projects must be initialized with a remote or a URL, but not both.
+    # The resulting URLs must behave as documented.
+
+    r1 = Remote('testremote1', 'https://example.com')
+    p1 = Project('project1', None, remote=r1)
+    assert p1.remote is r1
+    assert p1.url == 'https://example.com/project1'
+
+    p2 = Project('project2', None, url='https://example.com/project2')
+    assert p2.remote is None
+    assert p2.url == 'https://example.com/project2'
+
+    with pytest.raises(ValueError):
+        Project('project3', None, remote=r1, url='not-empty')
+
+    with pytest.raises(ValueError):
+        Project('project4', None, remote=None, url=None)
+
+@patch('west.util.west_topdir', return_value='/west_top')
+def test_no_remote_ok(west_topdir):
+    # remotes isn't required if projects are specified by URL.
+
+    content = '''\
+    manifest:
+      projects:
+        - name: testproject
+          url: https://example.com/my-project
+    '''
+    manifest = Manifest.from_data(yaml.safe_load(content))
+    assert manifest.projects[1].url == 'https://example.com/my-project'
 
 def test_no_defaults(config_file_project_setup):
     # Manifests with no defaults should work.

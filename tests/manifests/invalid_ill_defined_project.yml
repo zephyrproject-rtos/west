@@ -4,4 +4,4 @@ manifest:
       url-base: https://example.com
 
   projects:
-    - name: ill_defined_no_remote
+    - name: ill_defined_no_remote_or_url
