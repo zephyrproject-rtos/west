@@ -78,10 +78,10 @@ def test_no_defaults(config_file_project_setup):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
         expected = [ManifestProject(path='manifestproject'),
-                    Project('testproject1', r1, None, path='testproject1',
-                            clone_depth=None, revision='rev1'),
-                    Project('testproject2', r2, None, path='testproject2',
-                            clone_depth=None, revision='master')]
+                    Project('testproject1', None, path='testproject1',
+                            clone_depth=None, revision='rev1', remote=r1),
+                    Project('testproject2', None, path='testproject2',
+                            clone_depth=None, revision='master', remote=r2)]
 
     # Check the remotes are as expected.
     assert list(manifest.remotes) == [r1, r2]
@@ -119,10 +119,10 @@ def test_self_tag(project_setup):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
         expected = [ManifestProject(path='mainproject'),
-                    Project('testproject1', r1, None, path='testproject1',
-                            clone_depth=None, revision='rev1'),
-                    Project('testproject2', r2, None, path='testproject2',
-                            clone_depth=None, revision='master')]
+                    Project('testproject1', None, path='testproject1',
+                            clone_depth=None, revision='rev1', remote=r1),
+                    Project('testproject2', None, path='testproject2',
+                            clone_depth=None, revision='master', remote=r2)]
 
     # Check the remotes are as expected.
     assert list(manifest.remotes) == [r1, r2]
@@ -162,10 +162,10 @@ def test_default_clone_depth(config_file_project_setup):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
         expected = [ManifestProject(path='manifestproject'),
-                    Project('testproject1', r1, d, path='testproject1',
-                            clone_depth=None, revision=d.revision),
-                    Project('testproject2', r2, d, path='testproject2',
-                            clone_depth=1, revision='rev')]
+                    Project('testproject1', d, path='testproject1',
+                            clone_depth=None, revision=d.revision, remote=r1),
+                    Project('testproject2', d, path='testproject2',
+                            clone_depth=1, revision='rev', remote=r2)]
 
     # Check that default attributes match.
     assert manifest.defaults.remote == d.remote

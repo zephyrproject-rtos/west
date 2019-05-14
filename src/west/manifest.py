@@ -265,12 +265,12 @@ class Manifest:
 
             # Create the project instance for final checking.
             project = Project(name,
-                              remotes_dict[remote_name],
                               defaults,
                               path=mp.get('path'),
                               clone_depth=mp.get('clone-depth'),
                               revision=mp.get('revision'),
-                              west_commands=mp.get('west-commands'))
+                              west_commands=mp.get('west-commands'),
+                              remote=remotes_dict[remote_name])
 
             # Two projects cannot have the same path. We use absolute
             # paths to check for collisions to ensure paths are
@@ -389,14 +389,11 @@ class Project:
     __slots__ = ('name remote url path abspath posixpath clone_depth '
                  'revision west_commands').split()
 
-    def __init__(self, name, remote, defaults, path=None, clone_depth=None,
-                 revision=None, west_commands=None):
+    def __init__(self, name, defaults, path=None, clone_depth=None,
+                 revision=None, west_commands=None, remote=None):
         '''Specify a Project by name, Remote, and optional information.
 
         :param name: Project's user-defined name in the manifest.
-        :param remote: Remote instance corresponding to this Project as
-                       specified in the manifest. This is used to build
-                       the project's URL, and is also stored as an attribute.
         :param defaults: If the revision parameter is not given, the project's
                          revision is set to defaults.revision.
         :param path: Relative path to the project in the west
@@ -409,13 +406,14 @@ class Project:
         :param west_commands: path to a YAML file in the project containing
                               a description of west extension commands provided
                               by the project, if given.
+        :param remote: Remote instance corresponding to this Project as
+                       specified in the manifest. This is used to build
+                       the project's URL, and is also stored as an attribute.
         '''
         _wrn_if_not_remote(remote)
 
         self.name = name
         '''Project name as it appears in the manifest.'''
-        self.remote = remote
-        '''`Remote` instance corresponding to the project's remote.'''
         self.url = remote.url_base + '/' + name
         '''Complete fetch URL for the project.'''
         self.path = os.path.normpath(path or name)
@@ -432,6 +430,8 @@ class Project:
         from manifest defaults, or from the default supplied by west.'''
         self.west_commands = west_commands
         '''Path to project's "west-commands", or None.'''
+        self.remote = remote
+        '''`Remote` instance corresponding to the project's remote.'''
 
     def __eq__(self, other):
         return NotImplemented
