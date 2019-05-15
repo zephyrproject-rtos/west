@@ -90,6 +90,7 @@ def test_manifest_freeze(west_update_tmpdir):
     # match project order as specified in our manifest, that all
     # revisions are full 40-character SHAs, and there isn't any random
     # YAML tag crap.
+    kconfig_rel = os.path.join('subdir', 'Kconfiglib')
     expected_res = ['^manifest:$',
                     '^  defaults:$',
                     '^    remote: test-local$',
@@ -101,7 +102,7 @@ def test_manifest_freeze(west_update_tmpdir):
                     '^  - name: Kconfiglib$',
                     '^    remote: test-local$',
                     '^    revision: [a-f0-9]{40}$',
-                    '^    path: subdir/Kconfiglib$',
+                    '^    path: {}$'.format(re.escape(kconfig_rel)),
                     '^  - name: net-tools$',
                     '^    remote: test-local$',
                     '^    revision: [a-f0-9]{40}$',
@@ -151,15 +152,15 @@ def test_forall(west_init_tmpdir):
 
     # 'forall' with no projects cloned shouldn't fail
 
-    cmd("forall -c 'echo *'")
+    cmd('forall -c "echo *"')
 
     # Neither should it fail after cloning one or both projects
 
     cmd('update net-tools')
-    cmd("forall -c 'echo *'")
+    cmd('forall -c "echo *"')
 
     cmd('update Kconfiglib')
-    cmd("forall -c 'echo *'")
+    cmd('forall -c "echo *"')
 
 
 def test_update_projects(west_init_tmpdir):
@@ -294,7 +295,7 @@ def test_extension_command_execution(west_init_tmpdir):
     cmd('update')
 
     actual = cmd('test')
-    assert actual == 'Testing test command 1\n'
+    assert actual.rstrip() == 'Testing test command 1'
 
 
 def test_extension_command_multiproject(repos_tmpdir):
@@ -360,22 +361,22 @@ def test_extension_command_multiproject(repos_tmpdir):
     config.read_config()
     cmd('update')
 
-    help_text = cmd('-h')
-    expected = textwrap.dedent('''\
-        commands from project at "subdir/Kconfiglib":
-          kconfigtest:          (no help provided; try "west kconfigtest -h")
-
-        commands from project at "net-tools":
-          test:                 test-help
-        ''')
-
-    assert expected in help_text
+    # The newline shenanigans are for Windows.
+    help_text = '\n'.join(cmd('-h').splitlines())
+    expected = '\n'.join([
+        'commands from project at "{}":'.format(os.path.join('subdir',
+                                                             'Kconfiglib')),
+        '  kconfigtest:          (no help provided; try "west kconfigtest -h")',  # noqa: E501
+        '',
+        'commands from project at "net-tools":',
+        '  test:                 test-help'])
+    assert expected in help_text, help_text
 
     actual = cmd('test')
-    assert actual == 'Testing test command 1\n'
+    assert actual.rstrip() == 'Testing test command 1'
 
     actual = cmd('kconfigtest')
-    assert actual == 'Testing kconfig test\n'
+    assert actual.rstrip() == 'Testing kconfig test'
 
 
 def test_extension_command_duplicate(repos_tmpdir):
@@ -440,12 +441,13 @@ def test_extension_command_duplicate(repos_tmpdir):
     config.read_config()
     cmd('update')
 
-    actual = cmd('test', stderr=subprocess.STDOUT)
-    warning = 'WARNING: ignoring project net-tools extension command "test";'\
-              ' command "test" already defined as extension command\n'
-    command_out = 'Testing kconfig test command\n'
+    actual = cmd('test', stderr=subprocess.STDOUT).splitlines()
+    expected = [
+        'WARNING: ignoring project net-tools extension command "test"; command "test" already defined as extension command',  # noqa: E501
+        'Testing kconfig test command',
+    ]
 
-    assert actual == warning + command_out
+    assert actual == expected
 
 
 #
