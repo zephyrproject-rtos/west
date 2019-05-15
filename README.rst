@@ -1,8 +1,6 @@
 This is the Zephyr RTOS meta tool, ``west``.
 
-For more information about west, see:
-
-https://docs.zephyrproject.org/latest/tools/west/index.html
+https://docs.zephyrproject.org/latest/guides/west/index.html
 
 Installation
 ------------
