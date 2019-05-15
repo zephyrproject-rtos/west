@@ -1,4 +1,5 @@
 import os
+import platform
 import shlex
 import shutil
 import subprocess
@@ -195,9 +196,7 @@ def check_output(*args, **kwargs):
 def cmd(cmd, cwd=None, stderr=None):
     # Run a west command in a directory (cwd defaults to os.getcwd()).
     #
-    # This helper takes the command as a string, which is less clunky
-    # to work with than a list. It is split according to shell rules
-    # before being run.
+    # This helper takes the command as a string.
     #
     # This helper relies on the test environment to ensure that the
     # 'west' executable is a bootstrapper installed from the current
@@ -206,11 +205,12 @@ def cmd(cmd, cwd=None, stderr=None):
     # stdout from cmd is captured and returned. The command is run in
     # a python subprocess so that program-level setup and teardown
     # happen fresh.
-
-    cmdlst = shlex.split('west ' + cmd)
-    print('running:', cmdlst)
+    cmd = 'west ' + cmd
+    if platform.system() != 'Windows':
+        cmd = shlex.split(cmd)
+    print('running:', cmd)
     try:
-        return check_output(cmdlst, cwd=cwd, stderr=stderr)
+        return check_output(cmd, cwd=cwd, stderr=stderr)
     except subprocess.CalledProcessError:
         print('cmd: west:', shutil.which('west'), file=sys.stderr)
         raise
