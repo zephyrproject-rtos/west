@@ -16,6 +16,7 @@ import os
 import pytest
 import subprocess
 from west import configuration as config
+from west.util import canon_path
 from conftest import cmd
 
 
@@ -31,72 +32,78 @@ def test_config_global(west_init_tmpdir):
     # To ensure that GLOBAL home folder points into tox temp dir.
     # Otherwise fail the test, as we don't want to risk manipulating user's
     # west config
-    assert config.ConfigFile.GLOBAL.value == \
-        os.path.join(os.environ.get('TOXTEMPDIR'), 'pytest-home/.westconfig')
+    assert canon_path(config.ConfigFile.GLOBAL.value) == \
+        canon_path(os.path.join(os.environ.get('TOXTEMPDIR'),
+                                'pytest-home', '.westconfig'))
 
+    # Make sure the value is currently unset.
     testkey_value = cmd('config pytest.testkey_global')
     assert testkey_value == ''
 
-    # Set value in user's testing home
-    cmd('config --global pytest.testkey_global ' + str(west_init_tmpdir))
+    # Set value globally.
+    cmd('config --global pytest.testkey_global foo')
 
-    # Readback from --local, to ensure that is empty.
+    # Read from --local, to ensure that is empty.
     testkey_value = cmd('config --local pytest.testkey_global')
     assert testkey_value == ''
 
-    # Readback from --system, to ensure that is empty.
+    # Read from --system, to ensure that is empty.
     testkey_value = cmd('config --system pytest.testkey_global')
     assert testkey_value == ''
 
-    # Readback from --global, and compare the value with the expected.
+    # Read from --global, and check the value.
     testkey_value = cmd('config --global pytest.testkey_global')
-    assert testkey_value.strip('\n') == str(west_init_tmpdir)
+    assert testkey_value.rstrip() == 'foo'
 
-    # Readback in from all files should also provide the value.
+    # Without an explicit config source, the global value (the only
+    # one set) should be returned.
     testkey_value = cmd('config pytest.testkey_global')
-    assert testkey_value.strip('\n') == str(west_init_tmpdir)
+    assert testkey_value.rstrip() == 'foo'
 
 
 def test_config_local(west_init_tmpdir):
     if not os.path.exists(os.path.expanduser('~')):
         os.mkdir(os.path.expanduser('~'))
 
-    test_value = str(west_init_tmpdir) + '_local'
-
     testkey_value = cmd('config pytest.testkey_local')
     assert testkey_value == ''
 
-    # Set value in project local
-    cmd('config --local pytest.testkey_local ' + test_value)
+    # Set a config option in the installation.
+    cmd('config --local pytest.testkey_local foo')
 
-    # Readback from --global, to ensure that is empty.
+    # It should not be available in the global or system files.
     testkey_value = cmd('config --global pytest.testkey_local')
     assert testkey_value == ''
-
-    # Readback from --local, and compare the value with the expected.
-    testkey_value = cmd('config --local pytest.testkey_local')
-    assert testkey_value.strip('\n') == test_value
-
-    # Readback in from all files should also provide the value.
-    testkey_value = cmd('config pytest.testkey_local')
-    assert testkey_value.strip('\n') == test_value
-
-    # Update the value in user's testing home without --local and see it's
-    # default to --local when reading back
-    test_value_update = str(west_init_tmpdir) + '_update'
-    cmd('config pytest.testkey_local ' + test_value_update)
-
-    # Readback from --global, to ensure that is empty.
-    testkey_value = cmd('config --global pytest.testkey_local')
+    testkey_value = cmd('config --system pytest.testkey_local')
     assert testkey_value == ''
 
-    # Readback from --local, and compare the value with the expected.
+    # It should be available with --local.
     testkey_value = cmd('config --local pytest.testkey_local')
-    assert testkey_value.strip('\n') == test_value_update
+    assert testkey_value.rstrip() == 'foo'
 
-    # Readback in from all files should also provide the value.
+    # Without an explicit config source, the local value (the only one
+    # set) should be returned.
     testkey_value = cmd('config pytest.testkey_local')
-    assert testkey_value.strip('\n') == test_value_update
+    assert testkey_value.rstrip() == 'foo'
+
+    # Update the value without a config destination, which should
+    # default to --local.
+    cmd('config pytest.testkey_local foo2')
+
+    # The --global and --system settings should still be empty.
+    testkey_value = cmd('config --global pytest.testkey_local')
+    assert testkey_value == ''
+    testkey_value = cmd('config --system pytest.testkey_local')
+    assert testkey_value == ''
+
+    # Read from --local, and check the value.
+    testkey_value = cmd('config --local pytest.testkey_local')
+    assert testkey_value.rstrip() == 'foo2'
+
+    # Without an explicit config source, the local value (the only one
+    # set) should be returned.
+    testkey_value = cmd('config pytest.testkey_local')
+    assert testkey_value.rstrip() == 'foo2'
 
 
 # We skip this test if executed directly using pytest, to avoid modifying
@@ -108,36 +115,32 @@ def test_config_precendence(west_init_tmpdir):
     if not os.path.exists(os.path.expanduser('~')):
         os.mkdir(os.path.expanduser('~'))
 
-    test_value_local = str(west_init_tmpdir) + '_precedence'
-    test_value_global = str(west_init_tmpdir) + '_global'
-
+    # Make sure the value is not set.
     testkey_value = cmd('config pytest.testkey_precedence')
     assert testkey_value == ''
 
-    # Set value in user's testing home
-    cmd('config --global pytest.testkey_precedence ' + test_value_global)
-
-    # Readback from --global, to verify it is set.
+    # Set value globally and verify it is set.
+    cmd('config --global pytest.testkey_precedence foo_global')
     testkey_value = cmd('config --global pytest.testkey_precedence')
-    assert testkey_value.strip('\n') == test_value_global
+    assert testkey_value.rstrip() == 'foo_global'
 
-    # Readback from --local, to ensure it is not available using --local
+    # Read with --local and ensure it is not set.
     testkey_value = cmd('config --local pytest.testkey_precedence')
-    assert testkey_value.strip('\n') == ''
+    assert testkey_value.rstrip() == ''
 
-    # Set value in project local and verify it can be read back.
-    cmd('config --local pytest.testkey_precedence ' + test_value_local)
+    # Set with --local and verify it is set.
+    cmd('config --local pytest.testkey_precedence foo_local')
     testkey_value = cmd('config --local pytest.testkey_precedence')
-    assert testkey_value.strip('\n') == test_value_local
+    assert testkey_value.rstrip() == 'foo_local'
 
-    # Readback without specifying --local or --global and see that project
-    # specific value takes precedence.
+    # Read without specifying --local or --global and verify that
+    # --local takes precedence.
     testkey_value = cmd('config pytest.testkey_precedence')
-    assert testkey_value.strip('\n') == test_value_local
+    assert testkey_value.rstrip() == 'foo_local'
 
-    # Make additional verification that --global is still available.
+    # Make sure the --global value is still available.
     testkey_value = cmd('config --global pytest.testkey_precedence')
-    assert testkey_value.strip('\n') == test_value_global
+    assert testkey_value.rstrip() == 'foo_global'
 
 
 def test_config_missing_key(west_init_tmpdir):
