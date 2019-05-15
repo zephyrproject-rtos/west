@@ -42,6 +42,17 @@ import textwrap
 
 import yaml
 
+def canon_path(path):
+    '''Returns a canonical version of the path.
+
+    This is currently ``os.path.normcase(os.path.abspath(path))``. The
+    path separator is converted to os.sep on platforms where that
+    matters (Windows).
+
+    :param path: path whose canonical name to return; need not
+                 refer to an existing file.
+    '''
+    return os.path.normcase(os.path.abspath(path))
 
 def escapes_directory(path, directory):
     '''Returns True if `path` escapes parent directory `directory`.
