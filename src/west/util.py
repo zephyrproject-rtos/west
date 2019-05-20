@@ -92,13 +92,13 @@ class WestNotFound(RuntimeError):
 
 
 def west_dir(start=None):
-    '''Returns the absolute path of the west/ top level directory.
+    '''Returns the absolute path of the installation's .west directory.
 
     Starts the search from the start directory, and goes to its
     parents. If the start directory is not specified, the current
     directory is used.
 
-    Raises WestNotFound if no west top-level directory is found.
+    Raises WestNotFound if no .west directory is found.
     '''
     return os.path.join(west_topdir(start), '.west')
 
