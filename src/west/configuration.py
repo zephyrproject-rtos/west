@@ -1,8 +1,36 @@
-# Copyright (c) 2018, Nordic Semiconductor ASA
+# Copyright (c) 2018, 2019, Nordic Semiconductor ASA
 #
 # SPDX-License-Identifier: Apache-2.0
 
-'''West configuration file handling.'''
+'''West configuration file handling.
+
+West follows Git-like conventions for configuration file locations.
+There are three types of configuration file: system-wide files apply
+to all users on the current machine, global files apply to the current
+user, and local files apply to the current west installation.
+
+System files:
+
+- Linux: ``/etc/westconfig``
+- macOS: ``/usr/local/etc/westconfig``
+- Windows: ``%PROGRAMDATA%\\west\\config``
+
+Global files:
+
+- Linux: ``~/.westconfig`` or (if ``$XDG_CONFIG_HOME`` is set)
+  ``$XDG_CONFIG_HOME/west/config``
+- macOS: ``~/.westconfig``
+- Windows: ``.westconfig`` in the user's home directory, as determined
+  by os.path.expanduser.
+
+Local files:
+
+- Linux, macOS, Windows: ``<installation-root-directory>/.west/config``
+
+Configuration values from later configuration files override configuration
+from earlier ones. Local values have highest precedence, and system values
+lowest.
+'''
 
 import configparser
 import os
@@ -31,9 +59,11 @@ config = configparser.ConfigParser(allow_no_value=True)
 class ConfigFile(Enum):
     '''Enum representing the possible types of configuration file.
 
-    - SYSTEM: the system-wide file shared by all users
-    - GLOBAL: the "global" or user-wide file
-    - LOCAL: the per-installation file
+    Enumerators:
+
+    - SYSTEM: system level configuration shared by all users
+    - GLOBAL: global or user-wide configuration
+    - LOCAL: per-installation configuration
     - ALL: all three of the above, where applicable
     '''
     ALL = 0
@@ -49,80 +79,42 @@ class ConfigFile(Enum):
     LOCAL = 'config'
 
 
-def read_config(config_file=ConfigFile.ALL, config=config):
-    '''Reads all configuration files, making the configuration values available as
-    a configparser.ConfigParser object in config.config. This object works
-    similarly to a dictionary: config.config['foo']['bar'] gets the value for
-    key 'bar' in section 'foo'.
+def read_config(configfile=None, config=config, config_file=None):
+    '''Read configuration files into `config`.
 
-    If config_file is given, then read only that particular file, file can be
-    either 'ConfigFile.LOCAL', 'ConfigFile.GLOBAL', or 'ConfigFile.SYSTEM'.
+    :param configfile: a `west.config.ConfigFile` enumerator
+    :param config: configuration object to read into
+    :param config_file: deprecated alternative spelling for ``configfile``
 
-    If config object is provided, then configuration values will be copied to
-    there instead of the module global 'config' variable.
+    Reads the files given by `configfile`, storing the values into
+    the configparser.ConfigParser object `config`. If `config` is not
+    given, the global `west.configuration.config` object is used.
 
-    Git conventions for configuration file locations are used. See the FILES
-    section in the git-config(1) man page.
-
-    The following configuration files are read.
-
-    System-wide:
-
-    - Linux: ``/etc/westconfig``
-    - macOS: ``/usr/local/etc/westconfig``
-    - Windows: ``%PROGRAMDATA%\\west\\config``
-
-    "Global" or user-wide:
-
-    - Linux: ``~/.westconfig`` or ``$XDG_CONFIG_HOME/west/config``
-    - macOS: ``~/.westconfig``
-    - Windows: ``.westconfig`` in the user's home directory, as determined
-      by os.path.expanduser.
-
-    Local (per-installation)
-
-    - Linux, macOS, Windows: ``path/to/installation/.west/config``
-
-    Configuration values from later configuration files override configuration
-    from earlier ones. Local values have highest precedence, and system values
-    lowest.'''
-
-    # Gather (potential) configuration file paths
-    files = []
-
-    # System-wide and user-specific
-    if config_file == ConfigFile.ALL or config_file == ConfigFile.SYSTEM:
-        files.append(ConfigFile.SYSTEM.value)
-
-    if config_file == ConfigFile.ALL and platform.system() == 'Linux':
-        files.append(os.path.join(os.environ.get(
-            'XDG_CONFIG_HOME',
-            os.path.expanduser('~/.config')),
-            'west', 'config'))
-
-    if config_file == ConfigFile.ALL or config_file == ConfigFile.GLOBAL:
-        files.append(ConfigFile.GLOBAL.value)
-
-    # Repository-specific
-
-    if config_file == ConfigFile.ALL or config_file == ConfigFile.LOCAL:
-        try:
-            files.append(os.path.join(west_dir(), ConfigFile.LOCAL.value))
-        except WestNotFound:
-            pass
-
-    #
-    # Parse all existing configuration files
-    #
-    config.read(files, encoding='utf-8')
+    If `configfile` is given, only the files implied by its value are
+    read. If not given, ``ConfigFile.ALL`` is used.'''
+    if configfile is not None and config_file is not None:
+        raise ValueError('use "configfile" or "config_file"; not both')
+    if configfile is None:
+        configfile = ConfigFile.ALL
+    if config_file is not None:
+        configfile = config_file
+    config.read(_gather_configs(configfile), encoding='utf-8')
 
 
 def update_config(section, key, value, configfile=ConfigFile.LOCAL):
-    '''
-    Sets 'key' to 'value' in the given config 'section', creating the section
-    if it does not exist.
+    '''Sets ``section.key`` to ``value``.
 
-    The destination file to write is given by 'configfile'.
+    :param section: config section; will be created if it does not exist
+    :param key: key to set in the given section
+    :param value: value to set the key to
+    :param configfile: `west.configuration.ConfigFile` enumerator
+                       (must not be ConfigFile.ALL)
+
+    The destination file to write is given by `configfile`. The
+    default value (ConfigFile.LOCAL) writes to the per-installation
+    file .west/config. This function must therefore be called from a
+    west installation if this default is used, or WestNotFound will be
+    raised.
     '''
     if configfile == ConfigFile.ALL:
         # Not possible to update ConfigFile.ALL, needs specific conf file here.
@@ -148,6 +140,32 @@ def update_config(section, key, value, configfile=ConfigFile.LOCAL):
     else:
         with open(filename, 'w') as f:
             updater.write(f)
+
+
+def _gather_configs(configfile):
+    # Find the paths to the given configuration files, in increasing
+    # precedence order.
+    ret = []
+
+    if configfile == ConfigFile.ALL or configfile == ConfigFile.SYSTEM:
+        ret.append(ConfigFile.SYSTEM.value)
+
+    if configfile == ConfigFile.ALL and platform.system() == 'Linux':
+        ret.append(os.path.join(os.environ.get(
+            'XDG_CONFIG_HOME',
+            os.path.expanduser('~/.config')),
+            'west', 'config'))
+
+    if configfile == ConfigFile.ALL or configfile == ConfigFile.GLOBAL:
+        ret.append(ConfigFile.GLOBAL.value)
+
+    if configfile == ConfigFile.ALL or configfile == ConfigFile.LOCAL:
+        try:
+            ret.append(os.path.join(west_dir(), ConfigFile.LOCAL.value))
+        except WestNotFound:
+            pass
+
+    return ret
 
 
 def use_colors():
