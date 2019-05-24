@@ -427,24 +427,26 @@ def set_zephyr_base(args):
             # 'zephyr' for fallback.
             try:
                 manifest = Manifest.from_file()
+                for project in manifest.projects:
+                    if project.path == 'zephyr':
+                        zb = project.abspath
+                        zb_origin = 'manifest file {}'.format(manifest.path)
+                        break
+                else:
+                    log.err('no --zephyr-base given, ZEPHYR_BASE is unset,',
+                            'west config contains no zephyr.base setting,',
+                            'and no manifest project has path "zephyr"')
             except MalformedConfig as e:
-                log.die('Parsing of manifest file failed during command',
+                log.wrn("Can't set ZEPHYR_BASE:",
+                        'parsing of manifest file failed during command',
                         args.command, ':', *e.args)
-            for project in manifest.projects:
-                if project.path == 'zephyr':
-                    zb = project.abspath
-                    zb_origin = 'manifest file {}'.format(manifest.path)
-                    break
-
-            if zb_origin is None:
-                log.err('no --zephyr-base given, ZEPHYR_BASE is unset,',
-                        'west config contains no zephyr.base setting, and no',
-                        'manifest project has path "zephyr"')
+            except WestNotFound:
+                log.wrn("Can't set ZEPHYR_BASE:",
+                        'not currently in a west installation')
 
     if zb is not None:
         os.environ['ZEPHYR_BASE'] = zb
-
-    log.dbg('ZEPHYR_BASE={} (origin: {})'.format(zb, zb_origin))
+        log.dbg('ZEPHYR_BASE={} (origin: {})'.format(zb, zb_origin))
 
 
 def parse_args(argv, extensions, topdir):
