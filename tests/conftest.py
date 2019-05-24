@@ -97,7 +97,7 @@ def _session_repos():
 
 @pytest.fixture
 def repos_tmpdir(tmpdir, _session_repos):
-    '''Fixture for tmpdir with "remote" repositories, manifest, and west.
+    '''Fixture for tmpdir with "remote" repositories.
 
     These can then be used to bootstrap an installation and run
     project-related commands on it with predictable results.
