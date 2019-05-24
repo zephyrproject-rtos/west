@@ -220,6 +220,15 @@ class Manifest:
         self_tag = manifest.get('self')
         if path is None:
             path = self_tag.get('path') if self_tag else ''
+
+        # Both are named "self.path" depending on where you look at.
+        if path and self.path:
+            realpath = os.path.dirname(self.path)
+            realdir = os.path.basename(realpath)
+            if realdir not in [os.path.basename(path), 'manifest-tmp']:
+                raise MalformedManifest("""Manifest self.path is '{}' \
+but located in directory '{}'""".format(path, realpath))
+
         west_commands = self_tag.get('west-commands') if self_tag else None
 
         project = ManifestProject(path=path, west_commands=west_commands)

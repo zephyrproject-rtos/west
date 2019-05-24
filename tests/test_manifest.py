@@ -21,7 +21,7 @@ def config_file_project_setup(tmpdir):
     tmpdir.join('.west/.west_topdir').ensure()
     tmpdir.join('.west/config').write('''
 [manifest]
-path = manifestproject
+path = manifests
 ''')
 
     # Switch to the top-level West installation directory
@@ -128,7 +128,7 @@ def test_no_defaults(config_file_project_setup):
     with patch('west.util.west_topdir', return_value='/west_top'):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
-        expected = [ManifestProject(path='manifestproject'),
+        expected = [ManifestProject(path='manifests'),
                     Project('testproject1', None, path='testproject1',
                             clone_depth=None, revision='rev1', remote=r1),
                     Project('testproject2', None, path='testproject2',
@@ -161,7 +161,7 @@ def test_self_tag(project_setup):
           remote: testremote2
 
       self:
-        path: mainproject
+        path: manifests
     '''
     r1 = Remote('testremote1', 'https://example1.com')
     r2 = Remote('testremote2', 'https://example2.com')
@@ -169,7 +169,7 @@ def test_self_tag(project_setup):
     with patch('west.util.west_topdir', return_value='/west_top'):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
-        expected = [ManifestProject(path='mainproject'),
+        expected = [ManifestProject(path='manifests'),
                     Project('testproject1', None, path='testproject1',
                             clone_depth=None, revision='rev1', remote=r1),
                     Project('testproject2', None, path='testproject2',
@@ -212,7 +212,7 @@ def test_default_clone_depth(config_file_project_setup):
     with patch('west.util.west_topdir', return_value='/west_top'):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
-        expected = [ManifestProject(path='manifestproject'),
+        expected = [ManifestProject(path='manifests'),
                     Project('testproject1', d, path='testproject1',
                             clone_depth=None, revision=d.revision, remote=r1),
                     Project('testproject2', d, path='testproject2',
