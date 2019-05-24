@@ -45,7 +45,8 @@ class ExtensionCommandError(CommandError):
         super(ExtensionCommandError, self).__init__(**kwargs)
 
 
-_NO_TOPDIR_MSG_FMT = '''Error: "{}" is not in a west installation.
+_NO_TOPDIR_MSG_FMT = '''\
+no west installation found from "{}"; "west {}" requires one.
 Things to try:
  - Set ZEPHYR_BASE to a zephyr repository path in a west installation.
  - Run "west init" to set up an installation here.
@@ -106,7 +107,7 @@ class WestCommand(ABC):
         if unknown and not self._accept_unknown:
             self.parser.error('unexpected arguments: {}'.format(unknown))
         if not topdir and self.requires_installation:
-            log.die(_NO_TOPDIR_MSG_FMT.format(os.getcwd()))
+            log.die(_NO_TOPDIR_MSG_FMT.format(os.getcwd(), self.name))
         self.topdir = topdir
         self.do_run(args, unknown)
 
