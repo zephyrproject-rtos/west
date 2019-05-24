@@ -13,10 +13,13 @@
 #
 
 import os
-import pytest
 import subprocess
+
+import pytest
+
 from west import configuration as config
 from west.util import canon_path
+
 from conftest import cmd
 
 
@@ -59,7 +62,6 @@ def test_config_global(west_init_tmpdir):
     # one set) should be returned.
     testkey_value = cmd('config pytest.testkey_global')
     assert testkey_value.rstrip() == 'foo'
-
 
 def test_config_local(west_init_tmpdir):
     if not os.path.exists(os.path.expanduser('~')):
@@ -105,13 +107,12 @@ def test_config_local(west_init_tmpdir):
     testkey_value = cmd('config pytest.testkey_local')
     assert testkey_value.rstrip() == 'foo2'
 
-
 # We skip this test if executed directly using pytest, to avoid modifying
 # user's real ~/.westconfig.
 # We want to ensure HOME is pointing inside TOX temp dir before continuing.
 @pytest.mark.skipif(os.environ.get('TOXTEMPDIR') is None,
                     reason="This test requires to be executed using tox")
-def test_config_precendence(west_init_tmpdir):
+def test_config_precedence(west_init_tmpdir):
     if not os.path.exists(os.path.expanduser('~')):
         os.mkdir(os.path.expanduser('~'))
 
