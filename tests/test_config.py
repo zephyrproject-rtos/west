@@ -13,7 +13,18 @@ from west.util import canon_path
 
 from conftest import cmd
 
-@pytest.fixture
+SYSTEM = config.ConfigFile.SYSTEM
+GLOBAL = config.ConfigFile.GLOBAL
+LOCAL = config.ConfigFile.LOCAL
+ALL = config.ConfigFile.ALL
+
+def cfg(f=ALL):
+    # Load a fresh configuration object at the given level, and return it.
+    cp = configparser.ConfigParser(allow_no_value=True)
+    config.read_config(config_file=f, config=cp)
+    return cp
+
+@pytest.fixture(autouse=True)
 def config_tmpdir(tmpdir):
     # Fixture for running from a temporary directory with a .west
     # inside. We also:
@@ -31,114 +42,119 @@ def config_tmpdir(tmpdir):
     # configuration code doesn't depend on features like the existence
     # of a manifest file, helping separate concerns.
     assert 'TOXTEMPDIR' in os.environ, 'you must run tests using tox'
-    assert canon_path(config.ConfigFile.GLOBAL.value) == \
-        canon_path(os.path.join(os.environ.get('TOXTEMPDIR'),
-                                'pytest-home', '.westconfig'))
-    if not os.path.exists(os.path.expanduser('~')):
-        os.mkdir(os.path.expanduser('~'))
-    os.environ['ZEPHYR_BASE'] = str(tmpdir.join('no-zephyr-here'))
+    toxtmp = os.environ['TOXTEMPDIR']
+    toxhome = canon_path(os.path.join(toxtmp, 'pytest-home'))
+    assert canon_path(os.path.expanduser('~')) == toxhome
+    assert canon_path(GLOBAL.value) == os.path.join(toxhome, '.westconfig')
+    os.makedirs(toxhome, exist_ok=True)
+    if os.path.exists(GLOBAL.value):
+        os.remove(GLOBAL.value)
     tmpdir.mkdir('.west')
     tmpdir.chdir()
 
-def cfg_obj():
-    return configparser.ConfigParser(allow_no_value=True)
+    # Make sure the 'pytest' section is not present. If it is,
+    # something is wrong in either the test environment (e.g. the user
+    # has a system file with a 'pytest' section in it) or the tests
+    # (if we're not setting ourselves up properly)
+    os.environ['ZEPHYR_BASE'] = str(tmpdir.join('no-zephyr-here'))
+    if 'pytest' in cfg():
+        del os.environ['ZEPHYR_BASE']
+        assert False, 'bad fixture setup'
+    yield tmpdir
+    del os.environ['ZEPHYR_BASE']
 
+def test_config_global():
+    # Set a global config option via the command interface. Make sure
+    # it can be read back using the API calls and at the command line
+    # at ALL and GLOBAL locations only.
+    cmd('config --global pytest.global foo')
 
-def test_config_global(config_tmpdir):
-    # Make sure the value is currently unset.
-    testkey_value = cmd('config pytest.testkey_global')
-    assert testkey_value == ''
+    assert cfg(f=GLOBAL)['pytest']['global'] == 'foo'
+    assert cfg(f=ALL)['pytest']['global'] == 'foo'
+    assert 'pytest' not in cfg(f=SYSTEM)
+    assert 'pytest' not in cfg(f=LOCAL)
+    assert cmd('config pytest.global').rstrip() == 'foo'
+    assert cmd('config --global pytest.global').rstrip() == 'foo'
 
-    # Set value globally.
-    cmd('config --global pytest.testkey_global foo')
+    # Make sure we can change the value of an existing variable.
+    cmd('config --global pytest.global bar')
 
-    # Read from --local, to ensure that is empty.
-    testkey_value = cmd('config --local pytest.testkey_global')
-    assert testkey_value == ''
+    assert cfg(f=GLOBAL)['pytest']['global'] == 'bar'
+    assert cfg(f=ALL)['pytest']['global'] == 'bar'
+    assert cmd('config pytest.global').rstrip() == 'bar'
+    assert cmd('config --global pytest.global').rstrip() == 'bar'
 
-    # Read from --system, to ensure that is empty.
-    testkey_value = cmd('config --system pytest.testkey_global')
-    assert testkey_value == ''
+    # Sanity check that we can create multiple variables per section.
+    # Just use the API here; there's coverage already that the command line
+    # and API match.
+    cmd('config --global pytest.global2 foo2')
 
-    # Read from --global, and check the value.
-    testkey_value = cmd('config --global pytest.testkey_global')
-    assert testkey_value.rstrip() == 'foo'
+    all, glb, lcl = cfg(f=ALL), cfg(f=GLOBAL), cfg(f=LOCAL)
+    assert all['pytest']['global'] == 'bar'
+    assert glb['pytest']['global'] == 'bar'
+    assert 'pytest' not in lcl
+    assert all['pytest']['global2'] == 'foo2'
+    assert glb['pytest']['global2'] == 'foo2'
+    assert 'pytest' not in lcl
 
-    # Without an explicit config source, the global value (the only
-    # one set) should be returned.
-    testkey_value = cmd('config pytest.testkey_global')
-    assert testkey_value.rstrip() == 'foo'
+def test_config_local():
+    # test_config_system for local variables.
+    cmd('config --local pytest.local foo')
 
-def test_config_local(config_tmpdir):
-    testkey_value = cmd('config pytest.testkey_local')
-    assert testkey_value == ''
+    assert cfg(f=LOCAL)['pytest']['local'] == 'foo'
+    assert cfg(f=ALL)['pytest']['local'] == 'foo'
+    assert 'pytest' not in cfg(f=SYSTEM)
+    assert 'pytest' not in cfg(f=GLOBAL)
+    assert cmd('config pytest.local').rstrip() == 'foo'
+    assert cmd('config --local pytest.local').rstrip() == 'foo'
 
-    # Set a config option in the installation.
-    cmd('config --local pytest.testkey_local foo')
+    cmd('config --local pytest.local bar')
 
-    # It should not be available in the global or system files.
-    testkey_value = cmd('config --global pytest.testkey_local')
-    assert testkey_value == ''
-    testkey_value = cmd('config --system pytest.testkey_local')
-    assert testkey_value == ''
+    assert cfg(f=LOCAL)['pytest']['local'] == 'bar'
+    assert cfg(f=ALL)['pytest']['local'] == 'bar'
+    assert 'pytest' not in cfg(f=SYSTEM)
+    assert 'pytest' not in cfg(f=GLOBAL)
+    assert cmd('config pytest.local').rstrip() == 'bar'
+    assert cmd('config --local pytest.local').rstrip() == 'bar'
 
-    # It should be available with --local.
-    testkey_value = cmd('config --local pytest.testkey_local')
-    assert testkey_value.rstrip() == 'foo'
+    cmd('config --local pytest.local2 foo2')
 
-    # Without an explicit config source, the local value (the only one
-    # set) should be returned.
-    testkey_value = cmd('config pytest.testkey_local')
-    assert testkey_value.rstrip() == 'foo'
+    all, glb, lcl = cfg(f=ALL), cfg(f=GLOBAL), cfg(f=LOCAL)
+    assert all['pytest']['local'] == 'bar'
+    assert 'pytest' not in glb
+    assert lcl['pytest']['local'] == 'bar'
+    assert all['pytest']['local2'] == 'foo2'
+    assert 'pytest' not in glb
+    assert lcl['pytest']['local2'] == 'foo2'
 
-    # Update the value without a config destination, which should
-    # default to --local.
-    cmd('config pytest.testkey_local foo2')
+def test_default_config():
+    # Writing to a value without a config destination should default
+    # to --local.
+    cmd('config pytest.local foo')
 
-    # The --global and --system settings should still be empty.
-    testkey_value = cmd('config --global pytest.testkey_local')
-    assert testkey_value == ''
-    testkey_value = cmd('config --system pytest.testkey_local')
-    assert testkey_value == ''
+    assert cmd('config pytest.local').rstrip() == 'foo'
+    assert cmd('config --local pytest.local').rstrip() == 'foo'
+    assert cfg(f=ALL)['pytest']['local'] == 'foo'
+    assert 'pytest' not in cfg(f=SYSTEM)
+    assert 'pytest' not in cfg(f=GLOBAL)
+    assert cfg(f=LOCAL)['pytest']['local'] == 'foo'
 
-    # Read from --local, and check the value.
-    testkey_value = cmd('config --local pytest.testkey_local')
-    assert testkey_value.rstrip() == 'foo2'
+def test_config_precedence():
+    # Verify that local settings take precedence over global ones,
+    # but that both values are still available, and that setting
+    # either doesn't affect system settings.
+    cmd('config --global pytest.precedence global')
+    cmd('config --local pytest.precedence local')
 
-    # Without an explicit config source, the local value (the only one
-    # set) should be returned.
-    testkey_value = cmd('config pytest.testkey_local')
-    assert testkey_value.rstrip() == 'foo2'
+    assert cmd('config --global pytest.precedence').rstrip() == 'global'
+    assert cmd('config --local pytest.precedence').rstrip() == 'local'
+    assert cmd('config pytest.precedence').rstrip() == 'local'
+    assert cfg(f=ALL)['pytest']['precedence'] == 'local'
+    assert 'pytest' not in cfg(f=SYSTEM)
+    assert cfg(f=GLOBAL)['pytest']['precedence'] == 'global'
+    assert cfg(f=LOCAL)['pytest']['precedence'] == 'local'
 
-def test_config_precedence(config_tmpdir):
-    # Make sure the value is not set.
-    testkey_value = cmd('config pytest.testkey_precedence')
-    assert testkey_value == ''
-
-    # Set value globally and verify it is set.
-    cmd('config --global pytest.testkey_precedence foo_global')
-    testkey_value = cmd('config --global pytest.testkey_precedence')
-    assert testkey_value.rstrip() == 'foo_global'
-
-    # Read with --local and ensure it is not set.
-    testkey_value = cmd('config --local pytest.testkey_precedence')
-    assert testkey_value.rstrip() == ''
-
-    # Set with --local and verify it is set.
-    cmd('config --local pytest.testkey_precedence foo_local')
-    testkey_value = cmd('config --local pytest.testkey_precedence')
-    assert testkey_value.rstrip() == 'foo_local'
-
-    # Read without specifying --local or --global and verify that
-    # --local takes precedence.
-    testkey_value = cmd('config pytest.testkey_precedence')
-    assert testkey_value.rstrip() == 'foo_local'
-
-    # Make sure the --global value is still available.
-    testkey_value = cmd('config --global pytest.testkey_precedence')
-    assert testkey_value.rstrip() == 'foo_global'
-
-def test_config_missing_key(config_tmpdir):
+def test_config_missing_key():
     with pytest.raises(subprocess.CalledProcessError) as e:
         cmd('config pytest')
         assert str(e) == 'west config: error: missing key, please invoke ' \
