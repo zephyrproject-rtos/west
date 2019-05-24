@@ -6,7 +6,6 @@
 
 import argparse
 import configparser
-import platform
 
 from west import log
 from west import configuration
@@ -16,28 +15,32 @@ from west.commands import WestCommand
 CONFIG_DESCRIPTION = '''\
 West configuration file handling.
 
-This command allows getting or setting configuration options in the
-per-installation configuration file, west user configuration file, or the
-system wide configuration file.
+West follows Git-like conventions for configuration file locations.
+There are three types of configuration file: system-wide files apply
+to all users on the current machine, global files apply to the current
+user, and local files apply to the current west installation.
 
-System-wide:
+System files:
 
-    Linux:   /etc/westconfig
-    Mac OS:  /usr/local/etc/westconfig
-    Windows: %PROGRAMDATA%\\west\\config
+- Linux: /etc/westconfig
+- macOS: /usr/local/etc/westconfig
+- Windows: %PROGRAMDATA%\\west\\config
 
-User-specific:
+Global files:
 
-    Linux:   $XDG_CONFIG_HOME/west/config (only getting)
-             ~/.westconfig
-    Mac OS:  ~/.westconfig
-    Windows: %HOME%\\.westconfig
+- Linux: ~/.westconfig or (if $XDG_CONFIG_HOME is set)
+  $XDG_CONFIG_HOME/west/config
+- macOS: ~/.westconfig
+- Windows: .westconfig in the user's home directory, as determined
+  by os.path.expanduser.
 
-    ($XDG_CONFIG_DIR defaults to ~/.config/ if unset.)
+Local files:
 
-Per-installation specific file:
+- Linux, macOS, Windows: <installation-root-directory>/.west/config
 
-    <West base directory>/.west/config
+Configuration values from later configuration files override configuration
+from earlier ones. Local values have highest precedence, and system values
+lowest.
 
 To get a value for <name>, type:
     west config <name>
@@ -46,6 +49,32 @@ To set a value for <name>, type:
     west config <name> <value>
 '''
 
+CONFIG_EPILOG = '''\
+If the configuration file to use is not set, reads use all three in
+precedence order, and writes use the local file.'''
+
+ALL = ConfigFile.ALL
+SYSTEM = ConfigFile.SYSTEM
+GLOBAL = ConfigFile.GLOBAL
+LOCAL = ConfigFile.LOCAL
+
+class Once(argparse.Action):
+    # For enforcing mutual exclusion of options by ensuring self.dest
+    # can only be set once.
+    #
+    # This sets the 'configfile' attribute depending on the option string,
+    # which must be --system, --global, or --local.
+
+    def __call__(self, parser, namespace, ignored, option_string=None):
+        values = {'--system': SYSTEM, '--global': GLOBAL, '--local': LOCAL}
+        rev = {v: k for k, v in values.items()}
+
+        if getattr(namespace, self.dest):
+            previous = rev[getattr(namespace, self.dest)]
+            parser.error("argument {}: not allowed with argument {}".
+                         format(option_string, previous))
+
+        setattr(namespace, self.dest, values[option_string])
 
 class Config(WestCommand):
     def __init__(self):
@@ -59,44 +88,23 @@ class Config(WestCommand):
             self.name,
             help=self.help,
             formatter_class=argparse.RawDescriptionHelpFormatter,
-            description=self.description)
+            description=self.description,
+            epilog=CONFIG_EPILOG)
 
-        parser.add_argument(
-            'name',
-            help='''name is section and key, separated by a dot; e.g. 'foo.bar'
-            sets section 'foo', key 'bar' ''')
+        group = parser.add_argument_group(
+            'configuration file to use (give at most one)')
+        group.add_argument('--system', dest='configfile', nargs=0, action=Once,
+                           help='system-wide file')
+        group.add_argument('--global', dest='configfile', nargs=0, action=Once,
+                           help='global (user-wide) file')
+        group.add_argument('--local', dest='configfile', nargs=0, action=Once,
+                           help="this installation's file")
 
-        parser.add_argument(
-            'value',
-            nargs='?',
-            help='value to set in config file for the given name')
+        parser.add_argument('name',
+                            help='''config option in section.key format;
+                            e.g. "foo.bar" is section "foo", key "bar"''')
+        parser.add_argument('value', nargs='?', help='value to set "name" to')
 
-        mx_group = parser.add_mutually_exclusive_group()
-        if platform.system() == 'Windows':
-            mx_group.add_argument('--global',
-                                  dest='configfile',
-                                  action='store_const',
-                                  const=ConfigFile.GLOBAL,
-                                  help='''Use global %%HOME%%\\.westconfig for
-                                  values''')
-        else:
-            mx_group.add_argument('--global',
-                                  dest='configfile',
-                                  action='store_const',
-                                  const=ConfigFile.GLOBAL,
-                                  help='Use global ~/.westconfig for values')
-        mx_group.add_argument('--local',
-                              dest='configfile',
-                              action='store_const',
-                              const=ConfigFile.LOCAL,
-                              help='''Use project specific .west/config for
-                              values''')
-        mx_group.add_argument('--system',
-                              dest='configfile',
-                              action='store_const',
-                              const=ConfigFile.SYSTEM,
-                              help='''Use system specific west config for
-                              values''')
         return parser
 
     def do_run(self, args, user_args):
