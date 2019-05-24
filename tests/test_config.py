@@ -2,16 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-#
-# Test cases
-#
-# For some tests cases, the environment setting HOME must be redirected to a
-# tmp folder.
-# This is configured in tox.ini to ensure tests can run without modifying the
-# settings of the calling user.
-# If running this test directly using pytest, those tests will be skipped.
-#
-
+import configparser
 import os
 import subprocess
 
@@ -22,23 +13,38 @@ from west.util import canon_path
 
 from conftest import cmd
 
-
-# We skip this test if executed directly using pytest, to avoid modifying
-# user's real ~/.westconfig.
-# We want to ensure HOME is pointing inside TOX temp dir before continuing.
-@pytest.mark.skipif(os.environ.get('TOXTEMPDIR') is None,
-                    reason="This test requires to be executed using tox")
-def test_config_global(west_init_tmpdir):
-    if not os.path.exists(os.path.expanduser('~')):
-        os.mkdir(os.path.expanduser('~'))
-
-    # To ensure that GLOBAL home folder points into tox temp dir.
-    # Otherwise fail the test, as we don't want to risk manipulating user's
-    # west config
+@pytest.fixture
+def config_tmpdir(tmpdir):
+    # Fixture for running from a temporary directory with a .west
+    # inside. We also:
+    #
+    # - ensure we're being run under tox, to avoid messing with
+    #   the user's actual configuration files
+    # - ensure configuration files point where they should inside
+    #   the temporary tox directories, for the same reason
+    # - ensure ~ exists (since the test environment
+    #   doesn't let us run in the true user $HOME).
+    # - set ZEPHYR_BASE (to avoid complaints in subcommand stderr)
+    #
+    # Using this makes the tests run faster than if we used
+    # west_init_tmpdir from conftest.py, and also ensures that the
+    # configuration code doesn't depend on features like the existence
+    # of a manifest file, helping separate concerns.
+    assert 'TOXTEMPDIR' in os.environ, 'you must run tests using tox'
     assert canon_path(config.ConfigFile.GLOBAL.value) == \
         canon_path(os.path.join(os.environ.get('TOXTEMPDIR'),
                                 'pytest-home', '.westconfig'))
+    if not os.path.exists(os.path.expanduser('~')):
+        os.mkdir(os.path.expanduser('~'))
+    os.environ['ZEPHYR_BASE'] = str(tmpdir.join('no-zephyr-here'))
+    tmpdir.mkdir('.west')
+    tmpdir.chdir()
 
+def cfg_obj():
+    return configparser.ConfigParser(allow_no_value=True)
+
+
+def test_config_global(config_tmpdir):
     # Make sure the value is currently unset.
     testkey_value = cmd('config pytest.testkey_global')
     assert testkey_value == ''
@@ -63,10 +69,7 @@ def test_config_global(west_init_tmpdir):
     testkey_value = cmd('config pytest.testkey_global')
     assert testkey_value.rstrip() == 'foo'
 
-def test_config_local(west_init_tmpdir):
-    if not os.path.exists(os.path.expanduser('~')):
-        os.mkdir(os.path.expanduser('~'))
-
+def test_config_local(config_tmpdir):
     testkey_value = cmd('config pytest.testkey_local')
     assert testkey_value == ''
 
@@ -107,15 +110,7 @@ def test_config_local(west_init_tmpdir):
     testkey_value = cmd('config pytest.testkey_local')
     assert testkey_value.rstrip() == 'foo2'
 
-# We skip this test if executed directly using pytest, to avoid modifying
-# user's real ~/.westconfig.
-# We want to ensure HOME is pointing inside TOX temp dir before continuing.
-@pytest.mark.skipif(os.environ.get('TOXTEMPDIR') is None,
-                    reason="This test requires to be executed using tox")
-def test_config_precedence(west_init_tmpdir):
-    if not os.path.exists(os.path.expanduser('~')):
-        os.mkdir(os.path.expanduser('~'))
-
+def test_config_precedence(config_tmpdir):
     # Make sure the value is not set.
     testkey_value = cmd('config pytest.testkey_precedence')
     assert testkey_value == ''
@@ -143,11 +138,7 @@ def test_config_precedence(west_init_tmpdir):
     testkey_value = cmd('config --global pytest.testkey_precedence')
     assert testkey_value.rstrip() == 'foo_global'
 
-
-def test_config_missing_key(west_init_tmpdir):
-    if not os.path.exists(os.path.expanduser('~')):
-        os.mkdir(os.path.expanduser('~'))
-
+def test_config_missing_key(config_tmpdir):
     with pytest.raises(subprocess.CalledProcessError) as e:
         cmd('config pytest')
         assert str(e) == 'west config: error: missing key, please invoke ' \
