@@ -304,6 +304,9 @@ class List(WestCommand):
                 # how many unrecognizable keys there were.
                 log.die('unknown key "{}" in format string "{}"'.
                         format(e.args[0], args.format))
+            except IndexError:
+                self.parser.print_usage()
+                log.die('invalid format string', args.format)
 
             log.inf(result, colorize=False)  # don't use _msg()!
 
