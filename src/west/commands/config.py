@@ -121,4 +121,11 @@ class Config(WestCommand):
             if configfile == ConfigFile.ALL:
                 # No file given, thus writing defaults to LOCAL
                 configfile = ConfigFile.LOCAL
-            configuration.update_config(section, key, args.value, configfile)
+            try:
+                configuration.update_config(section, key, args.value,
+                                            configfile)
+            except PermissionError as pe:
+                log.die("can't set {}.{}: permission denied when writing {}{}".
+                        format(section, key, pe.filename,
+                               ('; are you root/administrator?'
+                                if configfile == ConfigFile.SYSTEM else '')))

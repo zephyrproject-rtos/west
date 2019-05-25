@@ -5,6 +5,7 @@
 import configparser
 import os
 import subprocess
+from unittest.mock import patch
 
 import pytest
 
@@ -23,6 +24,22 @@ def cfg(f=ALL):
     cp = configparser.ConfigParser(allow_no_value=True)
     config.read_config(config_file=f, config=cp)
     return cp
+
+def tstloc(cfg):
+    # Monkeypatch for the config file location. assumes we are called
+    # in a tmpdir.
+    #
+    # Important: This is only safe to use to test the API in this process.
+    #            DON'T call cmd('config ...'); subprocesses aren't patched,
+    #            so the system location is the "real" one.
+    if cfg == SYSTEM:
+        return os.path.join(os.getcwd(), 'system', 'config')
+    elif cfg == GLOBAL:
+        return os.path.join(os.getcwd(), 'global', 'config')
+    elif cfg == LOCAL:
+        return os.path.join(os.getcwd(), 'local', 'config')
+    else:
+        raise ValueError('cfg: {}'.format(cfg))
 
 @pytest.fixture(autouse=True)
 def config_tmpdir(tmpdir):
@@ -127,6 +144,64 @@ def test_config_local():
     assert all['pytest']['local2'] == 'foo2'
     assert 'pytest' not in glb
     assert lcl['pytest']['local2'] == 'foo2'
+
+@patch('west.configuration._location', new=tstloc)
+def test_system_creation():
+    # Test that the system file -- and just that file -- is created on
+    # demand.
+    #
+    # Since we use tstloc(), we can't call cmd('config ...') here.
+    assert not os.path.isfile(tstloc(SYSTEM))
+    assert not os.path.isfile(tstloc(GLOBAL))
+    assert not os.path.isfile(tstloc(LOCAL))
+
+    config.update_config('pytest', 'key', 'val', configfile=SYSTEM)
+
+    assert os.path.isfile(tstloc(SYSTEM))
+    assert not os.path.isfile(tstloc(GLOBAL))
+    assert not os.path.isfile(tstloc(LOCAL))
+    assert cfg(f=ALL)['pytest']['key'] == 'val'
+    assert cfg(f=SYSTEM)['pytest']['key'] == 'val'
+    assert 'pytest' not in cfg(f=GLOBAL)
+    assert 'pytest' not in cfg(f=LOCAL)
+
+@patch('west.configuration._location', new=tstloc)
+def test_global_creation():
+    # Like test_system_creation, for global config options.
+    #
+    # Since we use tstloc(), we can't call cmd('config ...') here.
+    assert not os.path.isfile(tstloc(SYSTEM))
+    assert not os.path.isfile(tstloc(GLOBAL))
+    assert not os.path.isfile(tstloc(LOCAL))
+
+    config.update_config('pytest', 'key', 'val', configfile=GLOBAL)
+
+    assert not os.path.isfile(tstloc(SYSTEM))
+    assert os.path.isfile(tstloc(GLOBAL))
+    assert not os.path.isfile(tstloc(LOCAL))
+    assert cfg(f=ALL)['pytest']['key'] == 'val'
+    assert 'pytest' not in cfg(f=SYSTEM)
+    assert cfg(f=GLOBAL)['pytest']['key'] == 'val'
+    assert 'pytest' not in cfg(f=LOCAL)
+
+@patch('west.configuration._location', new=tstloc)
+def test_local_creation():
+    # Like test_system_creation, for local config options.
+    #
+    # Since we use tstloc(), we can't call cmd('config ...') here.
+    assert not os.path.isfile(tstloc(SYSTEM))
+    assert not os.path.isfile(tstloc(GLOBAL))
+    assert not os.path.isfile(tstloc(LOCAL))
+
+    config.update_config('pytest', 'key', 'val', configfile=LOCAL)
+
+    assert not os.path.isfile(tstloc(SYSTEM))
+    assert not os.path.isfile(tstloc(GLOBAL))
+    assert os.path.isfile(tstloc(LOCAL))
+    assert cfg(f=ALL)['pytest']['key'] == 'val'
+    assert 'pytest' not in cfg(f=SYSTEM)
+    assert 'pytest' not in cfg(f=GLOBAL)
+    assert cfg(f=LOCAL)['pytest']['key'] == 'val'
 
 def test_default_config():
     # Writing to a value without a config destination should default

@@ -34,6 +34,7 @@ lowest.
 
 import configparser
 import os
+import pathlib
 import platform
 from enum import Enum
 try:
@@ -112,7 +113,7 @@ def update_config(section, key, value, configfile=ConfigFile.LOCAL):
         # Not possible to update ConfigFile.ALL, needs specific conf file here.
         raise ValueError('invalid configfile: {}'.format(configfile))
 
-    filename = _location(configfile)
+    filename = _ensure_config(configfile)
 
     if use_configobj:
         updater = configobj.ConfigObj(filename)
@@ -180,6 +181,29 @@ def _gather_configs(cfg):
             pass
 
     return ret
+
+
+def _ensure_config(configfile):
+    # Ensure the given configfile exists, returning its path. May
+    # raise permissions errors, WestNotFound, etc.
+    #
+    # Uses pathlib as this is hard to implement correctly without it.
+    loc = _location(configfile)
+    path = pathlib.Path(loc)
+
+    if path.is_file():
+        return loc
+
+    # Create the directory. We can't use
+    #     path.parent.mkdir(..., exist_ok=True)
+    # in Python 3.4, so roughly emulate its behavior.
+    try:
+        path.parent.mkdir(parents=True)
+    except FileExistsError:
+        pass
+
+    path.touch(exist_ok=True)
+    return canon_path(str(path))
 
 
 def use_colors():
