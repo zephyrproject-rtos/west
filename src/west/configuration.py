@@ -246,8 +246,3 @@ def _ensure_config(configfile):
 
     path.touch(exist_ok=True)
     return canon_path(str(path))
-
-
-def use_colors():
-    # Convenience function for reading the color.ui setting
-    return config.getboolean('color', 'ui', fallback=True)
