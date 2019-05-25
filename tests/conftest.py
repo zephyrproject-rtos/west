@@ -1,3 +1,7 @@
+# Copyright (c) 2019, Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: Apache-2.0
+
 import os
 import platform
 import shlex
