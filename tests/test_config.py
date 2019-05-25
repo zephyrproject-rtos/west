@@ -146,6 +146,41 @@ def test_config_local():
     assert lcl['pytest']['local2'] == 'foo2'
 
 @patch('west.configuration._location', new=tstloc)
+def test_config_system():
+    # Basic test of system-level configuration.
+    #
+    # Since we use tstloc(), we can't call cmd('config ...') here.
+
+    config.update_config('pytest', 'key', 'val', configfile=SYSTEM)
+    assert cfg(f=ALL)['pytest']['key'] == 'val'
+    assert cfg(f=SYSTEM)['pytest']['key'] == 'val'
+    assert 'pytest' not in cfg(f=GLOBAL)
+    assert 'pytest' not in cfg(f=LOCAL)
+
+    config.update_config('pytest', 'key', 'val2', configfile=SYSTEM)
+    assert cfg(f=SYSTEM)['pytest']['key'] == 'val2'
+
+@patch('west.configuration._location', new=tstloc)
+def test_config_system_precedence():
+    # Test precedence rules, including system level.
+    #
+    # Since we use tstloc(), we can't call cmd('config ...') here.
+    config.update_config('pytest', 'key', 'sys', configfile=SYSTEM)
+    assert cfg(f=SYSTEM)['pytest']['key'] == 'sys'
+    assert cfg(f=ALL)['pytest']['key'] == 'sys'
+
+    config.update_config('pytest', 'key', 'glb', configfile=GLOBAL)
+    assert cfg(f=SYSTEM)['pytest']['key'] == 'sys'
+    assert cfg(f=GLOBAL)['pytest']['key'] == 'glb'
+    assert cfg(f=ALL)['pytest']['key'] == 'glb'
+
+    config.update_config('pytest', 'key', 'lcl', configfile=LOCAL)
+    assert cfg(f=SYSTEM)['pytest']['key'] == 'sys'
+    assert cfg(f=GLOBAL)['pytest']['key'] == 'glb'
+    assert cfg(f=LOCAL)['pytest']['key'] == 'lcl'
+    assert cfg(f=ALL)['pytest']['key'] == 'lcl'
+
+@patch('west.configuration._location', new=tstloc)
 def test_system_creation():
     # Test that the system file -- and just that file -- is created on
     # demand.
