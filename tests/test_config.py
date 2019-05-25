@@ -342,6 +342,75 @@ def test_delete_local_one():
     assert 'pytest' in cfg(f=LOCAL)
     assert cfg(f=LOCAL)['pytest']['key2'] == 'bar'
 
+def test_delete_cmd_all():
+    # west config -D should delete from everywhere
+    cmd('config --system pytest.key system')
+    cmd('config --global pytest.key global')
+    cmd('config --local pytest.key local')
+    assert cfg(f=ALL)['pytest']['key'] == 'local'
+    cmd('config -D pytest.key')
+    assert 'pytest' not in cfg(f=ALL)
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('config -D pytest.key')
+
+def test_delete_cmd_none():
+    # west config -d should delete from lowest-precedence global or
+    # local file only.
+    cmd('config --system pytest.key system')
+    cmd('config --global pytest.key global')
+    cmd('config --local pytest.key local')
+    cmd('config -d pytest.key')
+    assert cmd('config pytest.key').rstrip() == 'global'
+    cmd('config -d pytest.key')
+    assert cmd('config pytest.key').rstrip() == 'system'
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('config -d pytest.key')
+
+def test_delete_cmd_system():
+    # west config -d --system should only delete from system
+    cmd('config --system pytest.key system')
+    cmd('config --global pytest.key global')
+    cmd('config --local pytest.key local')
+    cmd('config -d --system pytest.key')
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('config --system pytest.key')
+    assert cmd('config --global pytest.key').rstrip() == 'global'
+    assert cmd('config --local pytest.key').rstrip() == 'local'
+
+def test_delete_cmd_global():
+    # west config -d --global should only delete from global
+    cmd('config --system pytest.key system')
+    cmd('config --global pytest.key global')
+    cmd('config --local pytest.key local')
+    cmd('config -d --global pytest.key')
+    assert cmd('config --system pytest.key').rstrip() == 'system'
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('config --global pytest.key')
+    assert cmd('config --local pytest.key').rstrip() == 'local'
+
+def test_delete_cmd_local():
+    # west config -d --local should only delete from local
+    cmd('config --system pytest.key system')
+    cmd('config --global pytest.key global')
+    cmd('config --local pytest.key local')
+    cmd('config -d --local pytest.key')
+    assert cmd('config --system pytest.key').rstrip() == 'system'
+    assert cmd('config --global pytest.key').rstrip() == 'global'
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('config --local pytest.key')
+
+def test_delete_cmd_error():
+    # Verify illegal combinations of flags error out.
+    with pytest.raises(subprocess.CalledProcessError) as e:
+        cmd('config -l -d pytest.key')
+        assert '-l cannot be combined with -d or -D' in str(e)
+    with pytest.raises(subprocess.CalledProcessError) as e:
+        cmd('config -l -D pytest.key')
+        assert '-l cannot be combined with -d or -D' in str(e)
+    with pytest.raises(subprocess.CalledProcessError) as e:
+        cmd('config -d -D pytest.key')
+        assert '-d cannot be combined with -D' in str(e)
+
 def test_default_config():
     # Writing to a value without a config destination should default
     # to --local.
