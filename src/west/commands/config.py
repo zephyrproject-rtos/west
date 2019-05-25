@@ -10,7 +10,7 @@ import configparser
 from west import log
 from west import configuration
 from west.configuration import ConfigFile
-from west.commands import WestCommand
+from west.commands import WestCommand, CommandError
 
 CONFIG_DESCRIPTION = '''\
 West configuration file handling.
@@ -125,6 +125,9 @@ class Config(WestCommand):
             value = config_settings.get(section, key, fallback=None)
             if value is not None:
                 log.inf(value)
+            else:
+                log.dbg('{} is unset'.format(args.name))
+                raise CommandError(returncode=1)
         else:
             if configfile == ConfigFile.ALL:
                 # No file given, thus writing defaults to LOCAL
