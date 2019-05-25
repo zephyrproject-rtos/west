@@ -8,8 +8,7 @@ import argparse
 import configparser
 
 from west import log
-from west import configuration
-from west.configuration import ConfigFile
+from west.configuration import read_config, update_config, ConfigFile
 from west.commands import WestCommand, CommandError
 
 CONFIG_DESCRIPTION = '''\
@@ -108,35 +107,36 @@ class Config(WestCommand):
         return parser
 
     def do_run(self, args, user_args):
-        config_settings = configparser.ConfigParser()
-        configfile = args.configfile or ConfigFile.ALL
-
-        name_list = args.name.split(".", 1)
-
-        if len(name_list) != 2:
-            log.die('missing key, please invoke as: west config '
-                    '<section>.<key>', exit_code=3)
-
-        section = name_list[0]
-        key = name_list[1]
-
         if args.value is None:
-            configuration.read_config(configfile, config_settings)
-            value = config_settings.get(section, key, fallback=None)
-            if value is not None:
-                log.inf(value)
-            else:
-                log.dbg('{} is unset'.format(args.name))
-                raise CommandError(returncode=1)
+            self.read(args)
         else:
-            if configfile == ConfigFile.ALL:
-                # No file given, thus writing defaults to LOCAL
-                configfile = ConfigFile.LOCAL
-            try:
-                configuration.update_config(section, key, args.value,
-                                            configfile)
-            except PermissionError as pe:
-                log.die("can't set {}.{}: permission denied when writing {}{}".
-                        format(section, key, pe.filename,
-                               ('; are you root/administrator?'
-                                if configfile == ConfigFile.SYSTEM else '')))
+            self.write(args)
+
+    def read(self, args):
+        section, key = self._sk(args)
+        cfg = configparser.ConfigParser()
+        read_config(configfile=args.configfile or ALL, config=cfg)
+        value = cfg.get(section, key, fallback=None)
+        if value is not None:
+            log.inf(value)
+        else:
+            log.dbg('{} is unset'.format(args.name))
+            raise CommandError(returncode=1)
+
+    def write(self, args):
+        section, key = self._sk(args)
+        what = args.configfile or LOCAL
+        try:
+            update_config(section, key, args.value, configfile=what)
+        except PermissionError as pe:
+            log.die("can't set {}.{}: permission denied when writing {}{}".
+                    format(section, key, pe.filename,
+                           ('; are you root/administrator?' if what == SYSTEM
+                            else '')))
+
+    def _sk(self, args):
+        name_list = args.name.split(".", 1)
+        if len(name_list) != 2:
+            self.parser.error('name {} should be in the form <section>.<key>',
+                              exit_code=3)
+        return name_list[0], name_list[1]
