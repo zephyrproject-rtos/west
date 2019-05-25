@@ -37,6 +37,9 @@ Local files:
 
 - Linux, macOS, Windows: <installation-root-directory>/.west/config
 
+You can override these files' locations with the WEST_CONFIG_SYSTEM,
+WEST_CONFIG_GLOBAL, and WEST_CONFIG_LOCAL environment variables.
+
 Configuration values from later configuration files override configuration
 from earlier ones. Local values have highest precedence, and system values
 lowest.

@@ -27,6 +27,9 @@ Local files:
 
 - Linux, macOS, Windows: ``<installation-root-directory>/.west/config``
 
+You can override these files' locations with the ``WEST_CONFIG_SYSTEM``,
+``WEST_CONFIG_GLOBAL``, and ``WEST_CONFIG_LOCAL`` environment variables.
+
 Configuration values from later configuration files override configuration
 from earlier ones. Local values have highest precedence, and system values
 lowest.
@@ -142,6 +145,9 @@ def _location(cfg):
     if cfg == ConfigFile.ALL:
         raise ValueError('ConfigFile.ALL has no location')
     elif cfg == ConfigFile.SYSTEM:
+        if 'WEST_CONFIG_SYSTEM' in os.environ:
+            return os.environ['WEST_CONFIG_SYSTEM']
+
         plat = platform.system()
         if plat == 'Linux':
             return '/etc/westconfig'
@@ -154,14 +160,19 @@ def _location(cfg):
         else:
             raise ValueError('unsupported platform ' + plat)
     elif cfg == ConfigFile.GLOBAL:
-        if platform.system() == 'Linux' and 'XDG_CONFIG_HOME' in env:
+        if 'WEST_CONFIG_GLOBAL' in os.environ:
+            return os.environ['WEST_CONFIG_GLOBAL']
+        elif platform.system() == 'Linux' and 'XDG_CONFIG_HOME' in env:
             return os.path.join(env['XDG_CONFIG_HOME'], 'west', 'config')
         else:
             return canon_path(
                 os.path.join(os.path.expanduser('~'), '.westconfig'))
     elif cfg == ConfigFile.LOCAL:
-        # Might raise WestNotFound!
-        return os.path.join(west_dir(), 'config')
+        if 'WEST_CONFIG_LOCAL' in os.environ:
+            return os.environ['WEST_CONFIG_LOCAL']
+        else:
+            # Might raise WestNotFound!
+            return os.path.join(west_dir(), 'config')
     else:
         raise ValueError('invalid configuration file {}'.format(cfg))
 
