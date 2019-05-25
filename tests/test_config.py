@@ -277,3 +277,34 @@ def test_unset_config():
     with pytest.raises(subprocess.CalledProcessError) as e:
         cmd('-v config pytest.missing')
         assert 'pytest.missing is unset' in str(e)
+
+def test_no_args():
+    with pytest.raises(subprocess.CalledProcessError) as e:
+        cmd('config')
+        assert 'missing argument name' in str(e)
+
+def test_list():
+    def sorted_list(other_args=''):
+        return list(sorted(cmd('config -l ' + other_args).splitlines()))
+
+    with pytest.raises(subprocess.CalledProcessError) as e:
+        cmd('config -l pytest.foo')
+        assert '-l cannot be combined with name argument' in str(e)
+
+    assert cmd('config -l').strip() == ''
+
+    cmd('config pytest.foo who')
+    assert sorted_list() == ['pytest.foo=who']
+
+    cmd('config pytest.bar what')
+    assert sorted_list() == ['pytest.bar=what',
+                             'pytest.foo=who']
+
+    cmd('config --global pytest.baz where')
+    assert sorted_list() == ['pytest.bar=what',
+                             'pytest.baz=where',
+                             'pytest.foo=who']
+    assert sorted_list('--system') == []
+    assert sorted_list('--global') == ['pytest.baz=where']
+    assert sorted_list('--local') == ['pytest.bar=what',
+                                      'pytest.foo=who']

@@ -46,6 +46,9 @@ To get a value for <name>, type:
 
 To set a value for <name>, type:
     west config <name> <value>
+
+To list all options and their values:
+    west config -l
 '''
 
 CONFIG_EPILOG = '''\
@@ -90,6 +93,9 @@ class Config(WestCommand):
             description=self.description,
             epilog=CONFIG_EPILOG)
 
+        parser.add_argument('-l', '--list', action='store_true',
+                            help='list all options and their values')
+
         group = parser.add_argument_group(
             'configuration file to use (give at most one)')
         group.add_argument('--system', dest='configfile', nargs=0, action=Once,
@@ -99,7 +105,7 @@ class Config(WestCommand):
         group.add_argument('--local', dest='configfile', nargs=0, action=Once,
                            help="this installation's file")
 
-        parser.add_argument('name',
+        parser.add_argument('name', nargs='?',
                             help='''config option in section.key format;
                             e.g. "foo.bar" is section "foo", key "bar"''')
         parser.add_argument('value', nargs='?', help='value to set "name" to')
@@ -107,10 +113,27 @@ class Config(WestCommand):
         return parser
 
     def do_run(self, args, user_args):
-        if args.value is None:
+        if args.list:
+            if args.name:
+                self.parser.error('-l cannot be combined with name argument')
+        elif not args.name:
+            self.parser.error('missing argument name '
+                              '(to list all options and values, use -l)')
+
+        if args.list:
+            self.list(args)
+        elif args.value is None:
             self.read(args)
         else:
             self.write(args)
+
+    def list(self, args):
+        cfg = configparser.ConfigParser()
+        what = args.configfile or ALL
+        read_config(configfile=what, config=cfg)
+        for s in cfg.sections():
+            for k, v in cfg[s].items():
+                log.inf('{}.{}={}'.format(s, k, v))
 
     def read(self, args):
         section, key = self._sk(args)
