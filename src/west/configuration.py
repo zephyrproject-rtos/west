@@ -44,7 +44,7 @@ try:
 except ImportError:
     use_configobj = False
 
-from west.util import west_dir, WestNotFound
+from west.util import west_dir, WestNotFound, canon_path
 
 
 # Configuration values.
@@ -66,18 +66,10 @@ class ConfigFile(Enum):
     - LOCAL: per-installation configuration
     - ALL: all three of the above, where applicable
     '''
-    ALL = 0
-    if platform.system() == 'Linux':
-        SYSTEM = '/etc/westconfig'
-    elif platform.system() == 'Darwin':  # Mac OS
-        # This was seen on a local machine ($(prefix) = /usr/local)
-        SYSTEM = '/usr/local/etc/westconfig'
-    elif platform.system() == 'Windows':
-        # Seen on a local machine
-        SYSTEM = os.path.expandvars('%PROGRAMDATA%\\west\\config')
-    GLOBAL = os.path.expanduser('~/.westconfig')
-    LOCAL = 'config'
-
+    ALL = 1
+    SYSTEM = 2
+    GLOBAL = 3
+    LOCAL = 4
 
 def read_config(configfile=None, config=config, config_file=None):
     '''Read configuration files into `config`.
@@ -120,10 +112,7 @@ def update_config(section, key, value, configfile=ConfigFile.LOCAL):
         # Not possible to update ConfigFile.ALL, needs specific conf file here.
         raise ValueError('invalid configfile: {}'.format(configfile))
 
-    if configfile == ConfigFile.LOCAL:
-        filename = os.path.join(west_dir(), configfile.value)
-    else:
-        filename = configfile.value
+    filename = _location(configfile)
 
     if use_configobj:
         updater = configobj.ConfigObj(filename)
@@ -141,27 +130,52 @@ def update_config(section, key, value, configfile=ConfigFile.LOCAL):
         with open(filename, 'w') as f:
             updater.write(f)
 
+def _location(cfg):
+    # Making this a function that gets called each time you ask for a
+    # configuration file makes it respect updated environment
+    # variables (such as XDG_CONFIG_HOME, PROGRAMDATA) if they're set
+    # during the program lifetime. It also makes it easier to
+    # monkey-patch for testing :).
+    env = os.environ
 
-def _gather_configs(configfile):
+    if cfg == ConfigFile.ALL:
+        raise ValueError('ConfigFile.ALL has no location')
+    elif cfg == ConfigFile.SYSTEM:
+        plat = platform.system()
+        if plat == 'Linux':
+            return '/etc/westconfig'
+        elif plat == 'Darwin':
+            return '/usr/local/etc/westconfig'
+        elif plat == 'Windows':
+            return os.path.expandvars('%PROGRAMDATA%\\west\\config')
+        elif 'BSD' in plat:
+            return '/etc/westconfig'
+        else:
+            raise ValueError('unsupported platform ' + plat)
+    elif cfg == ConfigFile.GLOBAL:
+        if platform.system() == 'Linux' and 'XDG_CONFIG_HOME' in env:
+            return os.path.join(env['XDG_CONFIG_HOME'], 'west', 'config')
+        else:
+            return canon_path(
+                os.path.join(os.path.expanduser('~'), '.westconfig'))
+    elif cfg == ConfigFile.LOCAL:
+        # Might raise WestNotFound!
+        return os.path.join(west_dir(), 'config')
+    else:
+        raise ValueError('invalid configuration file {}'.format(cfg))
+
+def _gather_configs(cfg):
     # Find the paths to the given configuration files, in increasing
     # precedence order.
     ret = []
 
-    if configfile == ConfigFile.ALL or configfile == ConfigFile.SYSTEM:
-        ret.append(ConfigFile.SYSTEM.value)
-
-    if configfile == ConfigFile.ALL and platform.system() == 'Linux':
-        ret.append(os.path.join(os.environ.get(
-            'XDG_CONFIG_HOME',
-            os.path.expanduser('~/.config')),
-            'west', 'config'))
-
-    if configfile == ConfigFile.ALL or configfile == ConfigFile.GLOBAL:
-        ret.append(ConfigFile.GLOBAL.value)
-
-    if configfile == ConfigFile.ALL or configfile == ConfigFile.LOCAL:
+    if cfg == ConfigFile.ALL or cfg == ConfigFile.SYSTEM:
+        ret.append(_location(ConfigFile.SYSTEM))
+    if cfg == ConfigFile.ALL or cfg == ConfigFile.GLOBAL:
+        ret.append(_location(ConfigFile.GLOBAL))
+    if cfg == ConfigFile.ALL or cfg == ConfigFile.LOCAL:
         try:
-            ret.append(os.path.join(west_dir(), ConfigFile.LOCAL.value))
+            ret.append(_location(ConfigFile.LOCAL))
         except WestNotFound:
             pass
 

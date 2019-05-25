@@ -44,11 +44,12 @@ def config_tmpdir(tmpdir):
     assert 'TOXTEMPDIR' in os.environ, 'you must run tests using tox'
     toxtmp = os.environ['TOXTEMPDIR']
     toxhome = canon_path(os.path.join(toxtmp, 'pytest-home'))
+    global_loc = canon_path(config._location(GLOBAL))
     assert canon_path(os.path.expanduser('~')) == toxhome
-    assert canon_path(GLOBAL.value) == os.path.join(toxhome, '.westconfig')
+    assert global_loc == os.path.join(toxhome, '.westconfig')
     os.makedirs(toxhome, exist_ok=True)
-    if os.path.exists(GLOBAL.value):
-        os.remove(GLOBAL.value)
+    if os.path.exists(global_loc):
+        os.remove(global_loc)
     tmpdir.mkdir('.west')
     tmpdir.chdir()
 
