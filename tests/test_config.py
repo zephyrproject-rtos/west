@@ -270,3 +270,10 @@ def test_config_missing_key():
         cmd('config pytest')
         assert str(e) == 'west config: error: missing key, please invoke ' \
             'as: west config <section>.<key>\n'
+
+def test_unset_config():
+    # Getting unset configuration options should raise an error.
+    # With verbose output, the exact missing option should be printed.
+    with pytest.raises(subprocess.CalledProcessError) as e:
+        cmd('-v config pytest.missing')
+        assert 'pytest.missing is unset' in str(e)
