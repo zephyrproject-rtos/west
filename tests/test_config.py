@@ -29,9 +29,8 @@ def tstloc(cfg):
     # Monkeypatch for the config file location. assumes we are called
     # in a tmpdir.
     #
-    # Important: This is only safe to use to test the API in this process.
-    #            DON'T call cmd('config ...'); subprocesses aren't patched,
-    #            so the system location is the "real" one.
+    # Important: If you call cmd('config ...'), the subprocess isn't affected,
+    #            so the location is determined by config_tmpdir().
     if cfg == SYSTEM:
         return os.path.join(os.getcwd(), 'system', 'config')
     elif cfg == GLOBAL:
@@ -52,6 +51,8 @@ def config_tmpdir(tmpdir):
     #   the temporary tox directories, for the same reason
     # - ensure ~ exists (since the test environment
     #   doesn't let us run in the true user $HOME).
+    # - set WEST_CONFIG_SYSTEM to lie inside the tmpdir (to avoid
+    #   interacting with the real system file)
     # - set ZEPHYR_BASE (to avoid complaints in subcommand stderr)
     #
     # Using this makes the tests run faster than if we used
@@ -75,11 +76,13 @@ def config_tmpdir(tmpdir):
     # has a system file with a 'pytest' section in it) or the tests
     # (if we're not setting ourselves up properly)
     os.environ['ZEPHYR_BASE'] = str(tmpdir.join('no-zephyr-here'))
+    os.environ['WEST_CONFIG_SYSTEM'] = str(tmpdir.join('config.system'))
     if 'pytest' in cfg():
         del os.environ['ZEPHYR_BASE']
         assert False, 'bad fixture setup'
     yield tmpdir
     del os.environ['ZEPHYR_BASE']
+    del os.environ['WEST_CONFIG_SYSTEM']
 
 def test_config_global():
     # Set a global config option via the command interface. Make sure
@@ -148,8 +151,6 @@ def test_config_local():
 @patch('west.configuration._location', new=tstloc)
 def test_config_system():
     # Basic test of system-level configuration.
-    #
-    # Since we use tstloc(), we can't call cmd('config ...') here.
 
     config.update_config('pytest', 'key', 'val', configfile=SYSTEM)
     assert cfg(f=ALL)['pytest']['key'] == 'val'
@@ -163,8 +164,7 @@ def test_config_system():
 @patch('west.configuration._location', new=tstloc)
 def test_config_system_precedence():
     # Test precedence rules, including system level.
-    #
-    # Since we use tstloc(), we can't call cmd('config ...') here.
+
     config.update_config('pytest', 'key', 'sys', configfile=SYSTEM)
     assert cfg(f=SYSTEM)['pytest']['key'] == 'sys'
     assert cfg(f=ALL)['pytest']['key'] == 'sys'
@@ -184,8 +184,7 @@ def test_config_system_precedence():
 def test_system_creation():
     # Test that the system file -- and just that file -- is created on
     # demand.
-    #
-    # Since we use tstloc(), we can't call cmd('config ...') here.
+
     assert not os.path.isfile(tstloc(SYSTEM))
     assert not os.path.isfile(tstloc(GLOBAL))
     assert not os.path.isfile(tstloc(LOCAL))
@@ -203,8 +202,7 @@ def test_system_creation():
 @patch('west.configuration._location', new=tstloc)
 def test_global_creation():
     # Like test_system_creation, for global config options.
-    #
-    # Since we use tstloc(), we can't call cmd('config ...') here.
+
     assert not os.path.isfile(tstloc(SYSTEM))
     assert not os.path.isfile(tstloc(GLOBAL))
     assert not os.path.isfile(tstloc(LOCAL))
@@ -222,8 +220,7 @@ def test_global_creation():
 @patch('west.configuration._location', new=tstloc)
 def test_local_creation():
     # Like test_system_creation, for local config options.
-    #
-    # Since we use tstloc(), we can't call cmd('config ...') here.
+
     assert not os.path.isfile(tstloc(SYSTEM))
     assert not os.path.isfile(tstloc(GLOBAL))
     assert not os.path.isfile(tstloc(LOCAL))
@@ -308,3 +305,42 @@ def test_list():
     assert sorted_list('--global') == ['pytest.baz=where']
     assert sorted_list('--local') == ['pytest.bar=what',
                                       'pytest.foo=who']
+
+def test_env_overrides():
+    # Test that the WEST_CONFIG_SYSTEM etc. overrides work as
+    # expected.
+    #
+    # We are *not* using tstloc() and want to call cmd(), but
+    # we don't want to set the global or local environment variables
+    # in os.environ, or we'd have to be careful to clean them up,
+    # since they would affect other test cases. Use a copy instead.
+    # (Our autouse fixture cleans up the system variable.)
+
+    # Our test fixture already set up a system variable; test it.
+    assert not os.path.isfile(os.environ['WEST_CONFIG_SYSTEM'])
+    cmd('config --system pytest.foo bar')
+    assert os.path.isfile(os.environ['WEST_CONFIG_SYSTEM'])
+    assert cfg(f=SYSTEM)['pytest']['foo'] == 'bar'
+
+    # Copy the environment to make sure global and local settings
+    # take effect there, and only there.
+    env = os.environ.copy()
+    env['WEST_CONFIG_GLOBAL'] = os.path.abspath('config.global')
+    env['WEST_CONFIG_LOCAL'] = os.path.abspath('config.local')
+
+    config.update_config('pytest', 'foo', 'global-not-in-env',
+                         configfile=GLOBAL)
+    assert not os.path.isfile(env['WEST_CONFIG_GLOBAL'])
+    assert cfg(f=ALL)['pytest']['foo'] == 'global-not-in-env'
+
+    cmd('config --global pytest.foo global-in-env', env=env)
+    assert os.path.isfile(env['WEST_CONFIG_GLOBAL'])
+    assert cmd('config pytest.foo', env=env).rstrip() == 'global-in-env'
+
+    config.update_config('pytest', 'foo', 'local-not-in-env',
+                         configfile=LOCAL)
+    assert not os.path.isfile(env['WEST_CONFIG_LOCAL'])
+    assert cfg(f=ALL)['pytest']['foo'] == 'local-not-in-env'
+    cmd('config --local pytest.foo local-in-env', env=env)
+    assert os.path.isfile(env['WEST_CONFIG_LOCAL'])
+    assert cmd('config pytest.foo', env=env).rstrip() == 'local-in-env'
