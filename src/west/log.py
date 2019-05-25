@@ -57,7 +57,7 @@ def inf(*args, colorize=False):
                      the message is printed in green.
     '''
 
-    if not config.use_colors():
+    if not _use_colors():
         colorize = False
 
     # This approach colorizes any sep= and end= text too, as expected.
@@ -83,13 +83,13 @@ def wrn(*args):
     If this is True, the configuration option ``color.ui`` is undefined or
     true, and stdout is a terminal, then the message is printed in yellow.'''
 
-    if config.use_colors():
+    if _use_colors():
         print(colorama.Fore.LIGHTYELLOW_EX, end='', file=sys.stderr)
 
     print('WARNING: ', end='', file=sys.stderr)
     print(*args, file=sys.stderr)
 
-    if config.use_colors():
+    if _use_colors():
         _reset_colors(sys.stderr)
 
 
@@ -105,13 +105,13 @@ def err(*args, fatal=False):
     If this is True, the configuration option ``color.ui`` is undefined or
     true, and stdout is a terminal, then the message is printed in red.'''
 
-    if config.use_colors():
+    if _use_colors():
         print(colorama.Fore.LIGHTRED_EX, end='', file=sys.stderr)
 
     print('FATAL ERROR: ' if fatal else 'ERROR: ', end='', file=sys.stderr)
     print(*args, file=sys.stderr)
 
-    if config.use_colors():
+    if _use_colors():
         _reset_colors(sys.stderr)
 
 
@@ -125,6 +125,23 @@ def die(*args, exit_code=1):
     abort.'''
     err(*args, fatal=True)
     sys.exit(exit_code)
+
+
+_COLOR_UI_WARNED = False
+
+def _use_colors():
+    # Convenience function for reading the color.ui setting
+    try:
+        return config.config.getboolean('color', 'ui', fallback=True)
+    except ValueError as e:
+        global _COLOR_UI_WARNED
+        if not _COLOR_UI_WARNED:
+            print("WARNING: invalid color.ui value: {}.".format(e),
+                  file=sys.stderr)
+            print('         To fix, run: "west config color.ui <true|false>"',
+                  file=sys.stderr)
+            _COLOR_UI_WARNED = True
+        return False
 
 
 def _reset_colors(file):
