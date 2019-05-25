@@ -193,7 +193,7 @@ def check_output(*args, **kwargs):
         raise
     return out_bytes.decode(sys.getdefaultencoding())
 
-def cmd(cmd, cwd=None, stderr=None):
+def cmd(cmd, cwd=None, stderr=None, env=None):
     # Run a west command in a directory (cwd defaults to os.getcwd()).
     #
     # This helper takes the command as a string.
@@ -209,8 +209,16 @@ def cmd(cmd, cwd=None, stderr=None):
     if platform.system() != 'Windows':
         cmd = shlex.split(cmd)
     print('running:', cmd)
+    if env:
+        print('with non-default environment:')
+        for k in env:
+            if k not in os.environ or env[k] != os.environ[k]:
+                print('\t{}={}'.format(k, env[k]))
+        for k in os.environ:
+            if k not in env:
+                print('\t{}: deleted, was: {}'.format(k, os.environ[k]))
     try:
-        return check_output(cmd, cwd=cwd, stderr=stderr)
+        return check_output(cmd, cwd=cwd, stderr=stderr, env=env)
     except subprocess.CalledProcessError:
         print('cmd: west:', shutil.which('west'), file=sys.stderr)
         raise
