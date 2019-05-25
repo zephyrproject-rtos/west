@@ -40,13 +40,8 @@ import os
 import pathlib
 import platform
 from enum import Enum
-try:
-    # Try to import configobj.
-    # If not available we fallback to simple configparser
-    import configobj
-    use_configobj = True
-except ImportError:
-    use_configobj = False
+
+import configobj
 
 from west.util import west_dir, WestNotFound, canon_path
 
@@ -117,22 +112,11 @@ def update_config(section, key, value, configfile=ConfigFile.LOCAL):
         raise ValueError('invalid configfile: {}'.format(configfile))
 
     filename = _ensure_config(configfile)
-
-    if use_configobj:
-        updater = configobj.ConfigObj(filename)
-    else:
-        updater = configparser.ConfigParser()
-        read_config(configfile, updater)
-
+    updater = configobj.ConfigObj(filename)
     if section not in updater:
         updater[section] = {}
     updater[section][key] = value
-
-    if use_configobj:
-        updater.write()
-    else:
-        with open(filename, 'w') as f:
-            updater.write(f)
+    updater.write()
 
 def _location(cfg):
     # Making this a function that gets called each time you ask for a
