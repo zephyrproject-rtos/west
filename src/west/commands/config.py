@@ -8,7 +8,8 @@ import argparse
 import configparser
 
 from west import log
-from west.configuration import read_config, update_config, ConfigFile
+from west.configuration import read_config, update_config, delete_config, \
+    ConfigFile
 from west.commands import WestCommand, CommandError
 
 CONFIG_DESCRIPTION = '''\
@@ -52,6 +53,16 @@ To set a value for <name>, type:
 
 To list all options and their values:
     west config -l
+
+To delete <name> in the local or global file (wherever it's set
+first, not in both; if set locally, global values become visible):
+    west config -d <name>
+
+To delete <name> in the global file only:
+    west config -d --global <name>
+
+To delete <name> everywhere it's set, including the system file:
+    west config -D <name>
 '''
 
 CONFIG_EPILOG = '''\
@@ -98,6 +109,10 @@ class Config(WestCommand):
 
         parser.add_argument('-l', '--list', action='store_true',
                             help='list all options and their values')
+        parser.add_argument('-d', '--delete', action='store_true',
+                            help='delete an option in one config file')
+        parser.add_argument('-D', '--delete-all', action='store_true',
+                            help="delete an option everywhere it's set")
 
         group = parser.add_argument_group(
             'configuration file to use (give at most one)')
@@ -116,15 +131,22 @@ class Config(WestCommand):
         return parser
 
     def do_run(self, args, user_args):
+        delete = args.delete or args.delete_all
         if args.list:
             if args.name:
                 self.parser.error('-l cannot be combined with name argument')
+            elif delete:
+                self.parser.error('-l cannot be combined with -d or -D')
         elif not args.name:
             self.parser.error('missing argument name '
                               '(to list all options and values, use -l)')
+        elif args.delete and args.delete_all:
+            self.parser.error('-d cannot be combined with -D')
 
         if args.list:
             self.list(args)
+        elif delete:
+            self.delete(args)
         elif args.value is None:
             self.read(args)
         else:
@@ -137,6 +159,24 @@ class Config(WestCommand):
         for s in cfg.sections():
             for k, v in cfg[s].items():
                 log.inf('{}.{}={}'.format(s, k, v))
+
+    def delete(self, args):
+        section, key = self._sk(args)
+        if args.delete_all:
+            what = ALL
+        elif args.configfile:
+            what = args.configfile
+        else:
+            what = None   # local or global, whichever comes first
+
+        try:
+            delete_config(section, key, configfile=what)
+        except KeyError:
+            log.dbg('{} was not set in requested location(s)'.
+                    format(args.name))
+            raise CommandError(returncode=1)
+        except PermissionError as pe:
+            self._perm_error(pe, what, section, key)
 
     def read(self, args):
         section, key = self._sk(args)
@@ -155,10 +195,7 @@ class Config(WestCommand):
         try:
             update_config(section, key, args.value, configfile=what)
         except PermissionError as pe:
-            log.die("can't set {}.{}: permission denied when writing {}{}".
-                    format(section, key, pe.filename,
-                           ('; are you root/administrator?' if what == SYSTEM
-                            else '')))
+            self._perm_error(pe, what, section, key)
 
     def _sk(self, args):
         name_list = args.name.split(".", 1)
@@ -166,3 +203,9 @@ class Config(WestCommand):
             self.parser.error('name {} should be in the form <section>.<key>',
                               exit_code=3)
         return name_list[0], name_list[1]
+
+    def _perm_error(self, pe, what, section, key):
+        rootp = ('; are you root/administrator?' if what in [SYSTEM, ALL]
+                 else '')
+        log.die("can't update {}.{}: permission denied when writing {}{}".
+                format(section, key, pe.filename, rootp))
