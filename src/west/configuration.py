@@ -118,6 +118,53 @@ def update_config(section, key, value, configfile=ConfigFile.LOCAL):
     updater[section][key] = value
     updater.write()
 
+def delete_config(section, key, configfile=None):
+    '''Delete the option section.key from the given file or files.
+
+    :param section: section whose key to delete
+    :param key: key to delete
+    :param configfile: If ConfigFile.ALL, delete section.key in all files
+                       where it is set.
+                       If None, delete only from the highest-precedence
+                       global or local file where it is set, allowing
+                       lower-precedence values to take effect again.
+                       If a list of ConfigFile enumerators, delete
+                       from those files.
+                       Otherwise, delete from the given ConfigFile.
+
+    Deleting the only key in a section deletes the entire section.
+
+    If the option is not set, KeyError is raised.'''
+    stop = False
+    if configfile is None:
+        to_check = [_location(x) for x in
+                    [ConfigFile.LOCAL, ConfigFile.GLOBAL]]
+        stop = True
+    elif configfile == ConfigFile.ALL:
+        to_check = [_location(x) for x in
+                    [ConfigFile.SYSTEM, ConfigFile.GLOBAL, ConfigFile.LOCAL]]
+    elif isinstance(configfile, ConfigFile):
+        to_check = [_location(configfile)]
+    else:
+        to_check = [_location(x) for x in configfile]
+
+    found = False
+    for path in to_check:
+        cobj = configobj.ConfigObj(path)
+        if section not in cobj or key not in cobj[section]:
+            continue
+
+        del cobj[section][key]
+        if not cobj[section].items():
+            del cobj[section]
+        cobj.write()
+        found = True
+        if stop:
+            break
+
+    if not found:
+        raise KeyError('{}.{}'.format(section, key))
+
 def _location(cfg):
     # Making this a function that gets called each time you ask for a
     # configuration file makes it respect updated environment
