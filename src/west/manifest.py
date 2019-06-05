@@ -622,15 +622,15 @@ class Project:
 class ManifestProject(Project):
     '''Represents the manifest as a project.'''
 
-    def __init__(self, path=None, revision='(not set)', url='(not set)',
+    def __init__(self, path=None, revision=None, url=None,
                  west_commands=None):
         '''Specify a Special Project by name, and url, and optional information.
 
         :param path: Relative path to the project in the west
                      installation, if present in the manifest. If None,
                      the project's ``name`` is used.
-        :param revision: Project revision as given in the manifest, if present.
-        :param url: Complete URL for special project.
+        :param revision: manifest project revision, or None
+        :param url: Complete URL for the manifest project, or None
         :param west_commands: path to a YAML file in the project containing
                               a description of west extension commands provided
                               by the project, if given. This obviously only

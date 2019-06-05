@@ -48,10 +48,10 @@ def test_list(west_update_tmpdir):
     # Projects shall be listed in the order they appear in the manifest.
     # Check the behavior for some format arguments of interest as well.
     actual = cmd('list -f "{name} {revision} {path} {cloned} {clone_depth}"')
-    expected = ['zephyr (not set) zephyr (cloned) None',
-                'Kconfiglib zephyr {} (cloned) None'.format(
+    expected = ['zephyr N/A zephyr cloned None',
+                'Kconfiglib zephyr {} cloned None'.format(
                     os.path.join('subdir', 'Kconfiglib')),
-                'net-tools master net-tools (cloned) None']
+                'net-tools master net-tools cloned None']
     assert actual.splitlines() == expected
 
     # We should be able to find projects by absolute or relative path

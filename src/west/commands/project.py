@@ -7,6 +7,7 @@
 
 import argparse
 import collections
+from functools import partial
 import os
 from os.path import join, abspath, relpath, realpath, normpath, \
     basename, dirname, normcase, exists, isdir
@@ -245,7 +246,7 @@ class List(WestCommand):
             by default. Use --all or the name "west" to include it.'''))
 
     def do_add_parser(self, parser_adder):
-        default_fmt = '{name:14} {path:18} {revision:13} {url} {cloned}'
+        default_fmt = '{name:12} {path:28} {revision:40} {url}'
         return _add_parser(
             parser_adder, self,
             _arg('-a', '--all', action='store_true',
@@ -277,27 +278,45 @@ class List(WestCommand):
             - abspath: absolute and normalized path to the project
             - posixpath: like abspath, but in posix style, that is, with '/'
               as the separator character instead of '\\'
-            - revision: project's manifest revision
-            - cloned: "(cloned)" if the project has been cloned, "(not cloned)"
+            - revision: project's revision as it appears in the manifest
+            - sha: project's revision as a SHA
+            - cloned: "cloned" if the project has been cloned, "not-cloned"
               otherwise
             - clone_depth: project clone depth if specified, "None" otherwise
             '''.format(default_fmt)))
 
     def do_run(self, args, user_args):
+        def sha_thunk(project):
+            if project.revision:
+                return _sha(project, MANIFEST_REV)
+            else:
+                return '{:40}'.format('N/A')
+
+        def cloned_thunk(project):
+            return "cloned" if _cloned(project) else "not-cloned"
+
+        def delay(func, project):
+            return DelayFormat(partial(func, project))
+
         for project in _projects(args):
             # Spelling out the format keys explicitly here gives us
             # future-proofing if the internal Project representation
             # ever changes.
+            #
+            # Using DelayFormat delays computing derived values, such
+            # as SHAs, unless they are specifically requested, and then
+            # ensures they are only computed once.
             try:
                 result = args.format.format(
                     name=project.name,
-                    url=project.url,
+                    url=project.url or 'N/A',
                     path=project.path,
                     abspath=project.abspath,
                     posixpath=project.posixpath,
-                    revision=project.revision,
-                    cloned="(cloned)" if _cloned(project) else "(not cloned)",
-                    clone_depth=project.clone_depth or "None")
+                    revision=project.revision or 'N/A',
+                    clone_depth=project.clone_depth or "None",
+                    cloned=delay(cloned_thunk, project),
+                    sha=delay(sha_thunk, project))
             except KeyError as e:
                 # The raised KeyError seems to just put the first
                 # invalid argument in the args tuple, regardless of
@@ -999,3 +1018,30 @@ MANIFEST = 'manifest'
 MANIFEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/zephyr'
 # Default revision to check out of the manifest repository.
 MANIFEST_REV_DEFAULT = 'master'
+
+#
+# Helper class for creating format string keys that are expensive or
+# undesirable to compute if not needed.
+#
+
+class DelayFormat:
+    '''Delays formatting an object.'''
+
+    def __init__(self, obj):
+        '''Delay formatting `obj` until a format operation using it.
+
+        :param obj: object to format
+
+        If callable(obj) returns True, then obj() will be used as the
+        string to be formatted. Otherwise, str(obj) is used.'''
+        self.obj = obj
+        self.as_str = None
+
+    def __format__(self, format_spec):
+        if self.as_str is None:
+            if callable(self.obj):
+                self.as_str = self.obj()
+                assert isinstance(self.as_str, str)
+            else:
+                self.as_str = str(self.obj)
+        return ('{:' + format_spec + '}').format(self.as_str)
