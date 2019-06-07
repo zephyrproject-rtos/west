@@ -650,7 +650,7 @@ class Project:
         self.topdir = topdir
         '''Root directory of the west installation this project is inside,
         or None.'''
-        self.abspath = (os.path.realpath(os.path.join(topdir, self.path))
+        self.abspath = (os.path.abspath(os.path.join(topdir, self.path))
                         if topdir else None)
         '''Absolute path to the project on disk, or None.'''
         self.posixpath = (PurePath(self.abspath).as_posix()
@@ -904,7 +904,7 @@ class ManifestProject(Project):
         installation, or None.'''
         self.topdir = topdir
         '''Root directory of the west installation, or None.'''
-        self.abspath = (os.path.realpath(os.path.join(topdir, self.path))
+        self.abspath = (os.path.abspath(os.path.join(topdir, self.path))
                         if topdir and path else None)
         '''Absolute path to the manifest repository, or None.'''
         self.posixpath = (PurePath(self.abspath).as_posix()

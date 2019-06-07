@@ -91,6 +91,30 @@ class WestNotFound(RuntimeError):
     '''Neither the current directory nor any parent has a West installation.'''
 
 
+def get_pwd_or_cwd():
+    '''To align with shells that support symbolic links, prefer the PWD
+    environment variable, otherwise return os.getcwd()
+    '''
+    pwd = os.environ.get('PWD', None)
+    cwd = os.getcwd()
+
+    if pwd is None:
+        return cwd
+
+    # west_topdir is crucial, so let's be paranoid.
+    if not os.path.isdir(pwd):
+        raise os.error("PWD %s is not a directory" % pwd)
+
+    if not os.path.realpath(pwd) == os.path.realpath(cwd):
+        # This can happen if we're not invoked by the shell directly but
+        # by a process which changed cwd without changing PWD. To
+        # reproduce edit some CMakeLists.txt file and run make -C build
+        # which re-runs cmake --check-build-system -> west --version
+        return cwd
+
+    return pwd
+
+
 def west_dir(start=None):
     '''Returns the absolute path of the installation's .west directory.
 
@@ -111,7 +135,7 @@ def west_topdir(start=None, fall_back=True):
     # If you change this function, make sure to update the bootstrap
     # script's find_west_topdir().
 
-    cur_dir = start or os.getcwd()
+    cur_dir = start or get_pwd_or_cwd()
 
     while True:
         if os.path.isdir(os.path.join(cur_dir, '.west')):
