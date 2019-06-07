@@ -215,7 +215,8 @@ def test_no_defaults(config_file_project_setup):
     with patch('west.util.west_topdir', return_value='/west_top'):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
-        expected = [ManifestProject(path='manifestproject'),
+        expected = [ManifestProject(west_top="/west_top",
+                                    path='manifestproject'),
                     Project('testproject1', None, path='testproject1',
                             clone_depth=None, revision='rev1', remote=r1),
                     Project('testproject2', None, path='testproject2',
@@ -256,7 +257,8 @@ def test_self_tag(project_setup):
     with patch('west.util.west_topdir', return_value='/west_top'):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
-        expected = [ManifestProject(path='mainproject'),
+        expected = [ManifestProject(west_top="/west_top",
+                                    path='mainproject'),
                     Project('testproject1', None, path='testproject1',
                             clone_depth=None, revision='rev1', remote=r1),
                     Project('testproject2', None, path='testproject2',
@@ -299,7 +301,8 @@ def test_default_clone_depth(config_file_project_setup):
     with patch('west.util.west_topdir', return_value='/west_top'):
         manifest = Manifest.from_data(yaml.safe_load(content))
 
-        expected = [ManifestProject(path='manifestproject'),
+        expected = [ManifestProject(west_top="/west_top",
+                                    path='manifestproject'),
                     Project('testproject1', d, path='testproject1',
                             clone_depth=None, revision=d.revision, remote=r1),
                     Project('testproject2', d, path='testproject2',

@@ -290,8 +290,9 @@ class Manifest:
             path = self_tag.get('path') if self_tag else ''
         west_commands = self_tag.get('west-commands') if self_tag else None
 
-        project = ManifestProject(path=path, west_commands=west_commands)
-        projects.insert(MANIFEST_PROJECT_INDEX, project)
+        self_project = ManifestProject(west_top=util.west_topdir(),
+                                       path=path, west_commands=west_commands)
+        projects.insert(MANIFEST_PROJECT_INDEX, self_project)
 
         # Map from each remote's name onto that remote's data in the manifest.
         remotes = tuple(Remote(r['name'], r['url-base']) for r in
@@ -352,7 +353,8 @@ class Manifest:
                                   west_commands=mp.get('west-commands'),
                                   remote=remote,
                                   repo_path=repo_path,
-                                  url=url)
+                                  url=url,
+                                  west_top=self_project.west_top)
             except ValueError as ve:
                 self._malformed(ve.args[0])
 
@@ -479,11 +481,11 @@ class Project:
     Projects are neither comparable nor hashable.'''
 
     __slots__ = ('name remote url path abspath posixpath clone_depth '
-                 'revision west_commands').split()
+                 'revision west_commands west_top').split()
 
     def __init__(self, name, defaults=None, path=None, clone_depth=None,
                  revision=None, west_commands=None, remote=None,
-                 repo_path=None, url=None):
+                 repo_path=None, url=None, west_top=None):
         '''Specify a Project by name, Remote, and optional information.
 
         :param name: Project's user-defined name in the manifest.
@@ -509,6 +511,7 @@ class Project:
                           fetch URL.
         :param url: The project's fetch URL. This cannot be given with *remote*
                     or *repo_path*.
+        :param west_top: Saves a call to util.west_topdir() if given.
         '''
         if remote and url:
             raise ValueError('got both remote={} and url={}'.
@@ -534,7 +537,9 @@ class Project:
         or computed from the remote URL base and the project name.'''
         self.path = os.path.normpath(path or name)
         '''Relative path to the project in the installation.'''
-        self.abspath = os.path.realpath(os.path.join(util.west_topdir(),
+        self.west_top = west_top if west_top else util.west_topdir()
+        '''Installation path where projects are stored.'''
+        self.abspath = os.path.realpath(os.path.join(self.west_top,
                                                      self.path))
         '''Absolute path to the project.'''
         self.posixpath = PurePath(self.abspath).as_posix()
@@ -733,10 +738,11 @@ class Project:
 class ManifestProject(Project):
     '''Represents the manifest as a project.'''
 
-    def __init__(self, path=None, revision=None, url=None,
+    def __init__(self, west_top, path=None, revision=None, url=None,
                  west_commands=None):
         '''Specify a Special Project by name, and url, and optional information.
 
+        :param west_top: West installation where this manifest is located.
         :param path: Relative path to the project in the west
                      installation, if present in the manifest. If None,
                      the project's ``name`` is used.
@@ -747,6 +753,9 @@ class ManifestProject(Project):
                               by the project, if given. This obviously only
                               makes sense for the manifest project, not west.
         '''
+        self.west_top = west_top
+        '''Installation path where projects are stored.'''
+
         self.name = path or 'manifest'
         '''Project's name (path or default "manifest").'''
 
@@ -756,7 +765,7 @@ class ManifestProject(Project):
         self.path = path or self.name
         '''Relative path to the project in the installation.'''
 
-        self.abspath = os.path.realpath(os.path.join(util.west_topdir(),
+        self.abspath = os.path.realpath(os.path.join(self.west_top,
                                                      self.path))
         '''Absolute path to the project.'''
 
