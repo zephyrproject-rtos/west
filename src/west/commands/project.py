@@ -902,8 +902,8 @@ def _post_checkout_help(project, branch, sha, is_ancestor):
         # print a message that makes it easy to get back,
         # no matter where in the installation os.getcwd() is.
         log.wrn(project.format(
-            'left behind {name} branch "{b}"; '
-            'to fast forward back, use: git -C {rp} checkout {b}',
+            'left behind {name} branch "{b}"; to switch '
+            'back to it (fast forward), use: git -C {rp} checkout {b}',
             b=branch, rp=rel))
         log.dbg('(To do this automatically in the future,',
                 'use "west update --keep-descendants".)')
