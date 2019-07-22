@@ -6,7 +6,7 @@
 '''Parser and abstract data types for west manifests.
 
 The main class is Manifest. The recommended method for creating a
-Manifest instance is via its from_file() or from_data() helper
+Manifest instance is via its ``from_file()`` or ``from_data()`` helper
 methods.
 
 There are additionally Defaults, Remote, and Project types defined,
@@ -38,17 +38,17 @@ WEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/west'
 # Default revision to check out of the west repository.
 WEST_REV_DEFAULT = 'master'
 
+#: Index in projects where the project with contains project manifest file is
+#: located
 MANIFEST_PROJECT_INDEX = 0
-'''Index in projects where the project with contains project manifest file is
-located'''
 
+#: The name of the branch that points to the revision specified in the
+#: manifest
 MANIFEST_REV_BRANCH = 'manifest-rev'
-'''The name of the branch that points to the revision specified in the
-manifest'''
 
+#: A qualified reference to MANIFEST_REV_BRANCH, i.e.
+#: refs/heads/manifest-rev.
 QUAL_MANIFEST_REV_BRANCH = 'refs/heads/' + MANIFEST_REV_BRANCH
-'''A qualified reference to MANIFEST_REV_BRANCH, i.e.
-refs/heads/manifest-rev.'''
 
 
 def manifest_path():
@@ -76,11 +76,11 @@ class Manifest:
 
         :param source_file: Path to a YAML file containing the manifest.
 
-        If source_file is None, the value returned by manifest_path()
+        If source_file is None, the value returned by `manifest_path()`
         is used.
 
-        Raises MalformedManifest in case of validation errors.
-        Raises MalformedConfig in case of missing configuration settings.'''
+        Raises `MalformedManifest` in case of validation errors.
+        Raises `MalformedConfig` in case of missing configuration settings.'''
         if source_file is None:
             source_file = manifest_path()
         return Manifest(source_file=source_file)
