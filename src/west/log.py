@@ -3,7 +3,12 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-'''Provides common methods for logging messages to display to the user.'''
+'''Provides common methods for printing messages to display to the user.
+
+WestCommand instances should generally use the functions in this
+module rather than calling print() directly if possible, as these
+respect the ``color.ui`` configuration option and verbosity level.
+'''
 
 from west import configuration as config
 
@@ -78,10 +83,10 @@ def wrn(*args):
 
     :param args: sequence of arguments to print.
 
-    The message is prefixed with "WARNING: ".
+    The message is prefixed with the string ``"WARNING: "``.
 
-    If this is True, the configuration option ``color.ui`` is undefined or
-    true, and stdout is a terminal, then the message is printed in yellow.'''
+    If the configuration option ``color.ui`` is undefined or true and
+    stdout is a terminal, then the message is printed in yellow.'''
 
     if _use_colors():
         print(colorama.Fore.LIGHTYELLOW_EX, end='', file=sys.stderr)
@@ -102,8 +107,8 @@ def err(*args, fatal=False):
     :param fatal: if True, the the message is prefixed with "FATAL ERROR: ";
                   otherwise, "ERROR: " is used.
 
-    If this is True, the configuration option ``color.ui`` is undefined or
-    true, and stdout is a terminal, then the message is printed in red.'''
+    If the configuration option ``color.ui`` is undefined or true and
+    stdout is a terminal, then the message is printed in red.'''
 
     if _use_colors():
         print(colorama.Fore.LIGHTRED_EX, end='', file=sys.stderr)
@@ -122,7 +127,7 @@ def die(*args, exit_code=1):
     :param exit_code: return code the program should use when aborting.
 
     Equivalent to ``die(*args, fatal=True)``, followed by an attempt to
-    abort.'''
+    abort with the given *exit_code*.'''
     err(*args, fatal=True)
     sys.exit(exit_code)
 
