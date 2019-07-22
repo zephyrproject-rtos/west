@@ -54,11 +54,10 @@ from west.util import west_dir, WestNotFound, canon_path
 # tests).
 config = configparser.ConfigParser(allow_no_value=True)
 
-
 class ConfigFile(Enum):
-    '''Enum representing the possible types of configuration file.
+    '''Types of west configuration file.
 
-    Enumerators:
+    Enumeration members:
 
     - SYSTEM: system level configuration shared by all users
     - GLOBAL: global or user-wide configuration
@@ -71,18 +70,19 @@ class ConfigFile(Enum):
     LOCAL = 4
 
 def read_config(configfile=None, config=config, config_file=None):
-    '''Read configuration files into `config`.
+    '''Read configuration files into *config*.
 
-    :param configfile: a `west.config.ConfigFile` enumerator
+    :param configfile: a `west.configuration.ConfigFile`
     :param config: configuration object to read into
-    :param config_file: deprecated alternative spelling for ``configfile``
+    :param config_file: deprecated alternative spelling for *configfile*
 
-    Reads the files given by `configfile`, storing the values into
-    the configparser.ConfigParser object `config`. If `config` is not
+    Reads the files given by *configfile*, storing the values into
+    the configparser.ConfigParser object *config*. If *config* is not
     given, the global `west.configuration.config` object is used.
 
-    If `configfile` is given, only the files implied by its value are
-    read. If not given, ``ConfigFile.ALL`` is used.'''
+    If *configfile* is given, only the files implied by its value are
+    read. If not given, ``ConfigFile.ALL`` is used.
+    '''
     if configfile is not None and config_file is not None:
         raise ValueError('use "configfile" or "config_file"; not both')
     if configfile is None:
@@ -93,16 +93,15 @@ def read_config(configfile=None, config=config, config_file=None):
 
 
 def update_config(section, key, value, configfile=ConfigFile.LOCAL):
-    '''Sets ``section.key`` to ``value``.
+    '''Sets ``section.key`` to *value* in the given configuration file.
 
     :param section: config section; will be created if it does not exist
     :param key: key to set in the given section
     :param value: value to set the key to
-    :param configfile: `west.configuration.ConfigFile` enumerator
-                       (must not be ConfigFile.ALL)
+    :param configfile: `west.configuration.ConfigFile`, must not be ALL
 
-    The destination file to write is given by `configfile`. The
-    default value (ConfigFile.LOCAL) writes to the per-installation
+    The destination file to write is given by *configfile*. The
+    default value (``ConfigFile.LOCAL``) writes to the per-installation
     file .west/config. This function must therefore be called from a
     west installation if this default is used, or WestNotFound will be
     raised.
