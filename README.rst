@@ -5,12 +5,30 @@ https://docs.zephyrproject.org/latest/guides/west/index.html
 Installation
 ------------
 
-Install west's bootstrapper with pip::
+Using pip::
 
   pip3 install west
 
-Then install the rest of west and a Zephyr development environment in
-a directory of your choosing::
+(Use ``pip3 uninstall west`` to uninstall it.)
+
+Basic Usage
+-----------
+
+West lets you manage multiple Git repositories under a single directory using a
+single file, called the *west manifest file*, or *manifest* for short. The
+manifest file is named ``west.yml``. You use ``west init`` to set up this
+directory, then ``west update`` to fetch and/or update the repositories named
+in the manifest.
+
+By default, west uses `upstream Zephyr's manifest file
+<https://github.com/zephyrproject-rtos/zephyr/blob/master/west.yml>`_, but west
+doesn't care if the manifest repository is a Zephyr tree or not.
+
+For more details, see `Multiple Repository Management
+<https://docs.zephyrproject.org/latest/guides/west/repo-tool.html>`_ in the
+west documentation.
+
+Example usage using the upstream manifest file::
 
   mkdir zephyrproject && cd zephyrproject
   west init
@@ -18,50 +36,35 @@ a directory of your choosing::
 
 What just happened:
 
-- ``west init`` runs the bootstrapper, which clones the west source
-  repository and a *west manifest* repository. The manifest contains a
-  YAML description of the Zephyr installation, including Git
-  repositories and other metadata. The ``init`` command is the only
-  one supported by the bootstrapper itself; all other commands are
-  implemented in the west source repository it clones.
+- ``west init`` clones the upstream *west manifest* repository, which in this
+  case is the zephyr repository. The manifest repository contains ``west.yml``,
+  a YAML description of the Zephyr installation, including Git repositories and
+  other metadata.
 
-- ``west update`` clones the repositories in the manifest, creating
-  working trees in the installation directory. In this case, the
-  bootstrapper notices the command (``update``) is not ``init``, and
-  delegates handling to the "main" west implementation in the source
-  repository it cloned in the previous step.
+- ``west update`` clones the other repositories named in the manifest file,
+  creating working trees in the installation directory ``zephyrproject``.
 
-(For those familiar with it, this is similar to how Android's Repo
-tool works.)
+Use ``west init -m`` to specify another manifest repository. Use ``--mr`` to
+use a revision other than ``master``.
 
-Command auto-completion for Bash
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The ``scripts/west-completion.bash`` script adds auto-completion for West
-subcommands and flags. See the top of file for installation instructions.
-
-Usage
------
+Additional Commands
+-------------------
 
 West has multiple sub-commands. After running ``west init``, you can
 run them from anywhere under ``zephyrproject``.
 
 For a list of available commands, run ``west -h``. Get help on a
-command with ``west <command> -h``. For example::
+command with ``west <command> -h``.
 
-  $ west -h
-  usage: west [-h] [-z ZEPHYR_BASE] [-v]
-              {build,flash,debug,debugserver,attach,list-projects,fetch,pull,rebase,branch,checkout,diff,status,forall}
-              ...
-  [snip]
-  $ west flash -h
-  usage: west flash [-h] [-H] [-d BUILD_DIR] ...
-  [snip]
+West is extensible: you can add new commands to west without modifying its
+source code. See `Extensions
+<https://docs.zephyrproject.org/latest/guides/west/extensions.html>`_ in the
+documentation for details.
 
-Test Suite
-----------
+Running the Tests
+-----------------
 
-Before running tests, install tox::
+First, install tox::
 
   # macOS, Windows
   pip3 install tox
@@ -69,7 +72,7 @@ Before running tests, install tox::
   # Linux
   pip3 install --user tox
 
-Then, to run the test suite locally::
+Then, run the test suite locally from the top level directory::
 
   tox
 
@@ -78,68 +81,40 @@ See the tox configuration file, tox.ini, for more details.
 Hacking on West
 ---------------
 
-West is distributed as two Python packages:
+Installing from Source
+~~~~~~~~~~~~~~~~~~~~~~
 
-1. A ``west._bootstrap`` package, which is distributed via PyPI. Running
-   ``pip3 install west`` installs this **bootstrapper package only**.
-2. The "main" ``west`` package, which is fetched by the bootstrapper
-   when ``west init`` is run.
+The `wheel`_ package is required to install west from source. See "Installing
+Wheel" below if you don't have ``wheel`` installed.
 
-This somewhat unusual arrangement is because:
+To build the west wheel file::
 
-- One of west's jobs is to manage a Zephyr installation's Git
-  repositories, including its own.
-- It allows easy customization of the version of west that's shipped
-  with non-upstream distributions of Zephyr.
-- West is experimental and is not stable. Users need to stay in sync
-  with upstream, and this allows west to automatically update itself.
-  Once things have settled down, we plan on making the pip package
-  contain the core west and the multi-repo commands, with other features
-  to be provided by projects in extension commands, but time will tell.
-
-Using a Custom "Main" West
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-To initialize west from a non-default location add a section ``west`` in the
-manifest ``.yml`` file that points to a ``url`` and ``revision`` of your choice.
-
-To use another manifest repository (optionally with ``--mr
-some-manifest-branch``)::
-
-  west init -m https://example.com/your-manifest-repository.git zephyrproject
-
-After ``init`` time, you can hack on the west tree in
-``zephyrproject/.west/west``.
-
-Using a Custom West Bootstrapper
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-To package and install the west bootstrapper from a west repository
-checkout, `wheel`_ must be installed. It probably already is, but see
-"Installing Wheel" below if these instructions fail.
-
-To build the west bootstrapper wheel file::
-
+  # macOS, Linux
   python3 setup.py bdist_wheel
 
-On Windows::
-
+  # Windows
   py -3 setup.py bdist_wheel
 
 This will create a file named ``dist/west-x.y.z-py3-none-any.whl``,
-where ``x.y.z`` is the current version in setup.py. Install it with::
+where ``x.y.z`` is the current version in setup.py.
+
+To install the wheel::
 
   pip3 install -U dist/west-x.y.z-py3-none-any.whl
 
-You can then run ``west init`` with a bootstrapper created from the
-current repository contents.  (On Linux, make sure ``~/.local/bin`` is
-in your ``PATH``.)
+You can ``pip3 uninstall west`` to remove this wheel before re-installing the
+version from PyPI, etc.
 
-To uninstall this bootstrapper, use::
+Editable Install
+~~~~~~~~~~~~~~~~
 
-  pip3 uninstall west
+To run west "live" from the current source code tree, run this command from the
+top level directory in the west repository::
 
-You can then reinstall the mainline version from PyPI, etc.
+  pip3 install -e .
+
+This is useful if you are actively working on west and don't want to re-package
+and install a wheel each time you run it.
 
 Installing Wheel
 ~~~~~~~~~~~~~~~~
