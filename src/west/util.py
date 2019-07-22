@@ -32,7 +32,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-'''Miscellaneous utilities used by west
+'''Miscellaneous utilities.
 '''
 
 import os
