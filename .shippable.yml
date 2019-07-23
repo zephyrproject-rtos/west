@@ -9,7 +9,7 @@ python:
 
 build:
   ci:
-    - pip install --upgrade pip
+    - pip install --upgrade pip setuptools
     - pip install tox
     - mkdir -p shippable/{testresults,codecoverage}
     - tox -- --junitxml=$PWD/shippable/testresults/nosetests.xml --cov=west --cov-report=xml:$PWD/shippable/codecoverage/coverage.xml tests

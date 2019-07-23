@@ -35,6 +35,7 @@ setuptools.setup(
         'PyYAML',
         'pykwalify',
         'configobj',
+        'setuptools>=v40.1.0',  # for find_namespace_packages
     ],
     python_requires='>=3.4',
     entry_points={'console_scripts': ('west = west.main:main',)},
