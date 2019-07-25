@@ -56,15 +56,23 @@ mapping:
     sequence:
       - type: map
         mapping:
-          # remote.url-base + / + name is the fetch URL
+          # Project's unique name.
           name:
             required: true
             type: str
-          # Name of the project remote
+          # Name of the project's remote. May not be combined with "url".
           remote:
             required: false
             type: str
-          # Explicit project URL (may not be given with a remote as well)
+          # If a remote is given, the project is fetched from this URL:
+          #
+          # remote.url-base + / + repo-path
+          #
+          # "repo-path" defaults to "name".
+          repo-path:
+            required: false
+            type: str
+          # Explicit project fetch URL. May not be combined with "remote".
           url:
             required: false
             type: str

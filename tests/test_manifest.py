@@ -123,6 +123,75 @@ def test_defaults_and_url(west_topdir):
     manifest = Manifest.from_data(yaml.safe_load(content))
     assert manifest.projects[1].url == 'https://url2.com/testproject'
 
+@patch('west.util.west_topdir', return_value='/west_top')
+def test_repo_path(west_topdir):
+    # a project's fetch URL may be specified by combining a remote and
+    # repo-path. this overrides the default use of the project's name
+    # as the repo-path.
+
+    # default remote + repo-path
+    content = '''\
+    manifest:
+      defaults:
+        remote: remote1
+      remotes:
+        - name: remote1
+          url-base: https://example.com
+      projects:
+        - name: testproject
+          repo-path: some/path
+    '''
+    manifest = Manifest.from_data(yaml.safe_load(content))
+    assert manifest.projects[1].url == 'https://example.com/some/path'
+
+    # non-default remote + repo-path
+    content = '''\
+    manifest:
+      defaults:
+        remote: remote1
+      remotes:
+        - name: remote1
+          url-base: https://url1.com
+        - name: remote2
+          url-base: https://url2.com
+      projects:
+        - name: testproject
+          remote: remote2
+          repo-path: path
+    '''
+    manifest = Manifest.from_data(yaml.safe_load(content))
+    assert manifest.projects[1].url == 'https://url2.com/path'
+
+    # same project checked out under two different names
+    content = '''\
+    manifest:
+      defaults:
+        remote: remote1
+      remotes:
+        - name: remote1
+          url-base: https://url1.com
+      projects:
+        - name: testproject_v1
+          revision: v1.0
+          repo-path: testproject
+        - name: testproject_v2
+          revision: v2.0
+          repo-path: testproject
+    '''
+    manifest = Manifest.from_data(yaml.safe_load(content))
+    p1, p2 = manifest.projects[1:]
+    r = Remote('remote1', 'https://url1.com')
+    assert p1.url == 'https://url1.com/testproject'
+    assert p1.url == p2.url
+    expected1 = Project('testproject_v1', defaults=None, path='testproject_v1',
+                        clone_depth=None, revision='v1.0', west_commands=None,
+                        remote=r, repo_path='testproject', url=None)
+    expected2 = Project('testproject_v2', defaults=None, path='testproject_v2',
+                        clone_depth=None, revision='v2.0', west_commands=None,
+                        remote=r, repo_path='testproject', url=None)
+    deep_eq_check(p1, expected1)
+    deep_eq_check(p2, expected2)
+
 def test_no_defaults(config_file_project_setup):
     # Manifests with no defaults should work.
     content = '''\

@@ -258,6 +258,7 @@ class Manifest:
             # Validate the project remote or URL.
             remote_name = mp.get('remote')
             url = mp.get('url')
+            repo_path = mp.get('repo-path')
             if remote_name is None and url is None:
                 if default_remote_name is None:
                     self._malformed(
@@ -282,6 +283,7 @@ class Manifest:
                                   revision=mp.get('revision'),
                                   west_commands=mp.get('west-commands'),
                                   remote=remote,
+                                  repo_path=repo_path,
                                   url=url)
             except ValueError as ve:
                 self._malformed(ve.args[0])
@@ -409,7 +411,8 @@ class Project:
                  'revision west_commands').split()
 
     def __init__(self, name, defaults=None, path=None, clone_depth=None,
-                 revision=None, west_commands=None, remote=None, url=None):
+                 revision=None, west_commands=None, remote=None,
+                 repo_path=None, url=None):
         '''Specify a Project by name, Remote, and optional information.
 
         :param name: Project's user-defined name in the manifest.
@@ -429,20 +432,33 @@ class Project:
         :param remote: Remote instance corresponding to this Project as
                        specified in the manifest. This is used to build
                        the project's URL, and is also stored as an attribute.
-        :param url: The project's fetch URL. This cannot be given with `remote`
-                    as well: choose one.
+        :param repo_path: If this and *remote* are not None, then
+                          ``remote.url_base + repo_path`` (instead of
+                          ``remote.url_base + name``) is used as the project's
+                          fetch URL.
+        :param url: The project's fetch URL. This cannot be given with *remote*
+                    or *repo_path*.
         '''
         if remote and url:
-            raise ValueError('got remote={} and url={}'.format(remote, url))
+            raise ValueError('got both remote={} and url={}'.
+                             format(remote, url))
+        if repo_path and not remote:
+            raise ValueError('got repo_path={} but no remote'.
+                             format(repo_path, remote))
+        if repo_path and url:
+            raise ValueError('got both repo_path={} and url={}'.
+                             format(repo_path, url))
         if not (remote or url):
             raise ValueError('got neither a remote nor a URL')
 
         if defaults is None:
             defaults = _DEFAULTS
+        if repo_path is None:
+            repo_path = name
 
         self.name = name
         '''Project name as it appears in the manifest.'''
-        self.url = url or (remote.url_base + '/' + name)
+        self.url = url or (remote.url_base + '/' + repo_path)
         '''Complete fetch URL for the project, either as given by the url kwarg
         or computed from the remote URL base and the project name.'''
         self.path = os.path.normpath(path or name)
