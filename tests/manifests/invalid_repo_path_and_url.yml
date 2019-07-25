@@ -1,0 +1,11 @@
+# No project element may explicitly specify both a URL and a repo-name.
+manifest:
+  defaults:
+    remote: remote1
+  remotes:
+    - name: remote1
+      url-base: https://example.com
+  projects:
+    - name: project1
+      repo-path: explicit-project-url
+      url: https://example.com/explicit-project-url
