@@ -256,11 +256,15 @@ class Manifest:
             name = mp['name']
 
             # Validate the project remote or URL.
-            remote_name = mp.get('remote', default_remote_name)
+            remote_name = mp.get('remote')
             url = mp.get('url')
             if remote_name is None and url is None:
-                self._malformed('project {} does not specify a remote or URL'.
-                                format(name))
+                if default_remote_name is None:
+                    self._malformed(
+                        'project {} has no remote or URL (no default is set)'.
+                        format(name))
+                else:
+                    remote_name = default_remote_name
             if remote_name:
                 if remote_name not in remotes_dict:
                     self._malformed('project {} remote {} is not defined'.

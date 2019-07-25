@@ -105,6 +105,24 @@ def test_no_remote_ok(west_topdir):
     manifest = Manifest.from_data(yaml.safe_load(content))
     assert manifest.projects[1].url == 'https://example.com/my-project'
 
+@patch('west.util.west_topdir', return_value='/west_top')
+def test_defaults_and_url(west_topdir):
+    # an explicit URL overrides the defaults attribute.
+
+    content = '''\
+    manifest:
+      defaults:
+        remote: remote1
+      remotes:
+        - name: remote1
+          url-base: https://url1.com/
+      projects:
+        - name: testproject
+          url: https://url2.com/testproject
+    '''
+    manifest = Manifest.from_data(yaml.safe_load(content))
+    assert manifest.projects[1].url == 'https://url2.com/testproject'
+
 def test_no_defaults(config_file_project_setup):
     # Manifests with no defaults should work.
     content = '''\
