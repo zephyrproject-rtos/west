@@ -15,6 +15,7 @@ import colorama
 from functools import partial
 from io import StringIO
 import itertools
+import logging
 import os
 import shutil
 import sys
@@ -532,6 +533,11 @@ def dump_traceback():
 
 
 def main(argv=None):
+    # Silence validation errors from pykwalify, which are logged at
+    # logging.ERROR level. We want to handle those ourselves as
+    # needed.
+    logging.getLogger('pykwalify').setLevel(logging.CRITICAL)
+
     # Makes ANSI color escapes work on Windows, and strips them when
     # stdout/stderr isn't a terminal
     colorama.init()
