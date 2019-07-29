@@ -144,8 +144,9 @@ class WestArgumentParser(argparse.ArgumentParser):
             if self.west_extensions is None:
                 # This only happens when there is an error.
                 # If there are simply no extensions, it's an empty dict.
-                append('cannot load extension commands; '
-                       'help for them is not available')
+                append('Cannot load extension commands; '
+                       'help for them is not available.')
+                append('(To debug, try: "west manifest --validate".)')
                 append('')
             else:
                 # TODO we may want to be more aggressive about loading
