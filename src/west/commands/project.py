@@ -357,6 +357,9 @@ class ManifestCommand(WestCommand):
         group = parser.add_mutually_exclusive_group(required=True)
         group.add_argument('--freeze', action='store_true',
                            help='emit a manifest with SHAs for each revision')
+        group.add_argument('--validate', action='store_true',
+                           help='''validate the current manifest,
+                           exiting with an error if there are issues''')
 
         group = parser.add_argument_group('options for --freeze')
         group.add_argument('-o', '--out',
@@ -365,6 +368,13 @@ class ManifestCommand(WestCommand):
         return parser
 
     def do_run(self, args, user_args):
+        if args.freeze:
+            self._freeze(args)
+        else:
+            # --validate. The exception block in main() handles errors.
+            Manifest.from_file()
+
+    def _freeze(self, args):
         # We assume --freeze here. Future extensions to the group
         # --freeze is part of can move this code around.
         frozen = Manifest.from_file().as_frozen_dict()
@@ -384,7 +394,6 @@ class ManifestCommand(WestCommand):
         # See https://yaml.org/type/map.html for details on the tag.
         return util._represent_ordered_dict(dumper, 'tag:yaml.org,2002:map',
                                             value)
-
 
 class Diff(WestCommand):
     def __init__(self):
