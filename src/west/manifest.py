@@ -17,6 +17,7 @@ such as the default project revision, may be supplied by this module
 if they are not present in the manifest data.'''
 
 import collections
+import errno
 import os
 import shutil
 import shlex
@@ -54,14 +55,20 @@ QUAL_MANIFEST_REV_BRANCH = 'refs/heads/' + MANIFEST_REV_BRANCH
 def manifest_path():
     '''Return the path to the manifest file.
 
-    Raises WestNotFound if called from outside of a west working directory.'''
+    Raises: WestNotFound if called from outside of a west working directory,
+    MalformedConfig if the configuration file is missing a manifest.path key,
+    and FileNotFoundError if the manifest.path file doesn't exist.'''
     try:
-        return os.path.join(util.west_topdir(),
-                            config.get('manifest', 'path'),
-                            'west.yml')
+        ret = os.path.join(util.west_topdir(),
+                           config.get('manifest', 'path'),
+                           'west.yml')
     except (configparser.NoOptionError, configparser.NoSectionError) as e:
-        raise MalformedConfig('missing key: \'{}\' in west config file'
-                              .format(e.args[0])) from e
+        raise MalformedConfig('no "manifest.path" config option is set') from e
+    # It's kind of annoying to manually instantiate a FileNotFoundError.
+    # This seems to be the best way.
+    if not os.path.isfile(ret):
+        raise OSError(errno.ENOENT, os.strerror(errno.ENOENT), ret)
+    return ret
 
 
 class Manifest:
