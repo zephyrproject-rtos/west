@@ -30,7 +30,7 @@ from west.commands import extension_commands, \
 from west.commands.project import List, ManifestCommand, Diff, Status, \
     SelfUpdate, ForAll, Init, Update
 from west.commands.config import Config
-from west.manifest import Manifest, MalformedConfig
+from west.manifest import Manifest, MalformedConfig, MalformedManifest
 from west.util import quote_sh_list, west_topdir, WestNotFound
 from west.version import __version__
 
@@ -550,7 +550,7 @@ def main(argv=None):
     if topdir:
         try:
             extensions = get_extension_commands()
-        except (MalformedConfig, FileNotFoundError):
+        except (MalformedManifest, MalformedConfig, FileNotFoundError):
             extensions = {}
     else:
         extensions = {}
@@ -587,6 +587,8 @@ def main(argv=None):
         # No need to dump_traceback() here. The command is responsible
         # for logging its own errors.
         sys.exit(ce.returncode)
+    except (MalformedManifest, MalformedConfig) as malformed:
+        log.die("can't load west manifest:", malformed)
 
 
 if __name__ == "__main__":
