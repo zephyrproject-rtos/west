@@ -136,7 +136,7 @@ class Manifest:
             pykwalify.core.Core(source_data=data,
                                 schema_files=[_SCHEMA_PATH]).validate()
         except pykwalify.errors.SchemaError as se:
-            self._malformed('schema error', parent=se)
+            self._malformed(se._msg, parent=se)
 
         self.defaults = None
         '''west.manifest.Defaults object representing default values
