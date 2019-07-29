@@ -279,7 +279,8 @@ help on each command.''',
                         help='''Display verbose output. May be given
                         multiple times to increase verbosity.''')
 
-    parser.add_argument('-V', '--version', action='store_true',
+    parser.add_argument('-V', '--version', action='version',
+                        version='West version: v{}'.format(__version__),
                         help='print the program version and exit')
 
     subparser_gen = parser.add_subparsers(metavar='<command>', dest='command')
@@ -475,10 +476,6 @@ def parse_args(argv, extensions, topdir):
 
     # Parse arguments.
     args, unknown = west_parser.parse_known_args(args=argv)
-
-    if args.version:
-        print('West version: v{}'.format(__version__))
-        sys.exit(0)
 
     # Set up logging verbosity before running the command, so
     # e.g. verbose messages related to argument handling errors work
