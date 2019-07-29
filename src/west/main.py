@@ -141,17 +141,23 @@ class WestArgumentParser(argparse.ArgumentParser):
                     self.format_command(append, command, width)
                 append('')
 
-            # TODO we may want to be more aggressive about loading
-            # command modules by default: the current implementation
-            # prevents us from formatting one-line help here.
-            #
-            # Perhaps a commands.extension_paranoid that if set, uses
-            # thunks, and otherwise just loads the modules and
-            # provides help for each command.
-            #
-            # This has its own wrinkle: we can't let a failed
-            # import break the built-in commands.
-            if self.west_extensions:
+            if self.west_extensions is None:
+                # This only happens when there is an error.
+                # If there are simply no extensions, it's an empty dict.
+                append('cannot load extension commands; '
+                       'help for them is not available')
+                append('')
+            else:
+                # TODO we may want to be more aggressive about loading
+                # command modules by default: the current implementation
+                # prevents us from formatting one-line help here.
+                #
+                # Perhaps a commands.extension_paranoid that if set, uses
+                # thunks, and otherwise just loads the modules and
+                # provides help for each command.
+                #
+                # This has its own wrinkle: we can't let a failed
+                # import break the built-in commands.
                 for path, specs in self.west_extensions.items():
                     # This may occur in case a project defines commands already
                     # defined, in which case it has been filtered out.
@@ -557,7 +563,7 @@ def main(argv=None):
         try:
             extensions = get_extension_commands()
         except (MalformedManifest, MalformedConfig, FileNotFoundError):
-            extensions = {}
+            extensions = None
     else:
         extensions = {}
 
