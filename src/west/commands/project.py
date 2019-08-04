@@ -722,60 +722,6 @@ def _all_projects():
         log.die(m.args[0])
 
 
-def _fetch(project):
-    # Fetches upstream changes for 'project' and updates the 'manifest-rev'
-    # branch to point to the revision specified in the manifest. If the
-    # project's repository does not already exist, it is created first.
-
-    if not _cloned(project):
-        _msg(project.format('{name}: cloning and initializing'))
-        _git(project, 'init {abspath}', cwd=util.west_topdir())
-        # This remote is only added for the user's convenience. We always fetch
-        # directly from the URL specified in the manifest.
-        _git(project, 'remote add -- {remote_name} {url}')
-
-    # Fetch the revision specified in the manifest into the manifest-rev branch
-
-    msg = "{name}: fetching changes"
-    if project.clone_depth:
-        fetch_cmd = "fetch --depth={clone_depth}"
-        msg += " with --depth {clone_depth}"
-    else:
-        fetch_cmd = "fetch"
-
-    _msg(project.format(msg))
-    # This two-step approach avoids a "trying to write non-commit object" error
-    # when the revision is an annotated tag. ^{commit} type peeling isn't
-    # supported for the <src> in a <src>:<dst> refspec, so we have to do it
-    # separately.
-    #
-    # --tags is required to get tags when the remote is specified as an URL.
-    if _is_sha(project.revision):
-        # Don't fetch a SHA directly, as server may restrict from doing so.
-        _git(project, fetch_cmd + ' -f --tags '
-             '-- {url} refs/heads/*:refs/west/*')
-        _git(project, 'update-ref ' + QUAL_MANIFEST_REV + ' {revision}')
-    else:
-        _git(project, fetch_cmd + ' -f --tags -- {url} {revision}')
-        _git(project,
-             'update-ref ' + QUAL_MANIFEST_REV + ' FETCH_HEAD^{{commit}}')
-
-    if not _head_ok(project):
-        # If nothing it checked out (which would usually only happen just after
-        # we initialize the repository), check out 'manifest-rev' in a detached
-        # HEAD state.
-        #
-        # Otherwise, the initial state would have nothing checked out, and HEAD
-        # would point to a non-existent refs/heads/master branch (that would
-        # get created if the user makes an initial commit). That state causes
-        # e.g. 'west rebase' to fail, and might look confusing.
-        #
-        # The --detach flag is strictly redundant here, because the
-        # refs/heads/<branch> form already detaches HEAD, but it avoids a
-        # spammy detached HEAD warning from Git.
-        _git(project, 'checkout --detach ' + QUAL_MANIFEST_REV)
-
-
 def _rebase(project, **kwargs):
     # Rebases the project against the manifest-rev branch
     #
@@ -892,6 +838,60 @@ def _update(project, rebase, keep_descendants):
         _checkout_detach(project, MANIFEST_REV)
         _post_checkout_help(project, branch, sha, is_ancestor)
     return 0
+
+
+def _fetch(project):
+    # Fetches upstream changes for 'project' and updates the 'manifest-rev'
+    # branch to point to the revision specified in the manifest. If the
+    # project's repository does not already exist, it is created first.
+
+    if not _cloned(project):
+        _msg(project.format('{name}: cloning and initializing'))
+        _git(project, 'init {abspath}', cwd=util.west_topdir())
+        # This remote is only added for the user's convenience. We always fetch
+        # directly from the URL specified in the manifest.
+        _git(project, 'remote add -- {remote_name} {url}')
+
+    # Fetch the revision specified in the manifest into the manifest-rev branch
+
+    msg = "{name}: fetching changes"
+    if project.clone_depth:
+        fetch_cmd = "fetch --depth={clone_depth}"
+        msg += " with --depth {clone_depth}"
+    else:
+        fetch_cmd = "fetch"
+
+    _msg(project.format(msg))
+    # This two-step approach avoids a "trying to write non-commit object" error
+    # when the revision is an annotated tag. ^{commit} type peeling isn't
+    # supported for the <src> in a <src>:<dst> refspec, so we have to do it
+    # separately.
+    #
+    # --tags is required to get tags when the remote is specified as an URL.
+    if _is_sha(project.revision):
+        # Don't fetch a SHA directly, as server may restrict from doing so.
+        _git(project, fetch_cmd + ' -f --tags '
+             '-- {url} refs/heads/*:refs/west/*')
+        _git(project, 'update-ref ' + QUAL_MANIFEST_REV + ' {revision}')
+    else:
+        _git(project, fetch_cmd + ' -f --tags -- {url} {revision}')
+        _git(project,
+             'update-ref ' + QUAL_MANIFEST_REV + ' FETCH_HEAD^{{commit}}')
+
+    if not _head_ok(project):
+        # If nothing it checked out (which would usually only happen just after
+        # we initialize the repository), check out 'manifest-rev' in a detached
+        # HEAD state.
+        #
+        # Otherwise, the initial state would have nothing checked out, and HEAD
+        # would point to a non-existent refs/heads/master branch (that would
+        # get created if the user makes an initial commit). That state causes
+        # e.g. 'west rebase' to fail, and might look confusing.
+        #
+        # The --detach flag is strictly redundant here, because the
+        # refs/heads/<branch> form already detaches HEAD, but it avoids a
+        # spammy detached HEAD warning from Git.
+        _git(project, 'checkout --detach ' + QUAL_MANIFEST_REV)
 
 
 def _post_checkout_help(project, branch, sha, is_ancestor):
