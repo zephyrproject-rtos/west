@@ -18,6 +18,7 @@ if they are not present in the manifest data.'''
 
 import collections
 import errno
+from functools import lru_cache
 import os
 import shutil
 import shlex
@@ -556,9 +557,7 @@ class Project:
         :param cwd: directory to run command in (default: self.abspath)
 
         Returns a CompletedProcess (which is back-ported for Python 3.4).'''
-        # TODO: Run once somewhere?
-        if shutil.which('git') is None:
-            log.wrn('Git is not installed or cannot be found')
+        _warn_once_if_no_git()
 
         if isinstance(cmd, str):
             cmd_list = shlex.split(cmd)
@@ -705,3 +704,12 @@ class ManifestProject(Project):
 
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
 _DEFAULTS = Defaults()
+
+
+@lru_cache(maxsize=1)
+def _warn_once_if_no_git():
+    # Using an LRU cache means this gets called once. Afterwards, the
+    # (nonexistent) memoized result is simply returned from the cache,
+    # so the warning is emitted only once per process invocation.
+    if shutil.which('git') is None:
+        log.wrn('Git is not installed or cannot be found')
