@@ -539,8 +539,8 @@ class Project:
         ret.update(kwargs)
         return ret
 
-    def git(self, cmd, extra_args=(), capture_stdout=False, check=True,
-            cwd=None):
+    def git(self, cmd, extra_args=(), capture_stdout=False,
+            capture_stderr=False, check=True, cwd=None):
         '''Helper for running a git command using metadata from a Project
         instance.
 
@@ -550,8 +550,9 @@ class Project:
                            command (useful mostly if cmd is a string).
         :param capture_stdout: True if stdout should be captured into the
                                returned object instead of being printed.
-                               The stderr output is never captured,
-                               to prevent error messages from being eaten.
+        :param capture_stderr: Like capture_stdout, but for stderr. Use with
+                               caution as it prevents error messages from being
+                               shown to the user.
         :param check: True if a subprocess.CalledProcessError should be raised
                       if the git command finishes with a non-zero return code.
         :param cwd: directory to run command in (default: self.abspath)
@@ -575,22 +576,26 @@ class Project:
         log.dbg("running '{}'".format(cmd_str), 'in', cwd,
                 level=log.VERBOSE_VERY)
         popen = subprocess.Popen(
-            args, stdout=subprocess.PIPE if capture_stdout else None, cwd=cwd)
+            args, cwd=cwd,
+            stdout=subprocess.PIPE if capture_stdout else None,
+            stderr=subprocess.PIPE if capture_stderr else None)
 
-        stdout, _ = popen.communicate()
+        stdout, stderr = popen.communicate()
 
         dbg_msg = "'{}' in {} finished with exit status {}".format(
             cmd_str, cwd, popen.returncode)
         if capture_stdout:
             dbg_msg += " and wrote {} to stdout".format(stdout)
+        if capture_stderr:
+            dbg_msg += " and wrote {} to stderr".format(stderr)
         log.dbg(dbg_msg, level=log.VERBOSE_VERY)
 
-        # stderr is None because this method never captures it.
         if check and popen.returncode:
             raise subprocess.CalledProcessError(popen.returncode, cmd_list,
-                                                output=stdout, stderr=None)
+                                                output=stdout, stderr=stderr)
         else:
-            return CompletedProcess(popen.args, popen.returncode, stdout, None)
+            return CompletedProcess(popen.args, popen.returncode,
+                                    stdout, stderr)
 
     def sha(self, rev):
         '''Returns the SHA of the given revision in the current project.
