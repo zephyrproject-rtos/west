@@ -29,7 +29,137 @@ from urllib.parse import urlparse
 import posixpath
 
 
-class Init(WestCommand):
+class _ProjectCommand(WestCommand):
+    # Helper class which contains common code needed by various commands
+    # in this file.
+
+    def _parser(self, parser_adder, **kwargs):
+        # Create and return a "standard" parser.
+
+        kwargs['help'] = self.help
+        kwargs['description'] = self.description
+        kwargs['formatter_class'] = argparse.RawDescriptionHelpFormatter
+        return parser_adder.add_parser(self.name, **kwargs)
+
+    def _add_projects_arg(self, parser):
+        # Adds a "projects" argument to the given parser.
+
+        parser.add_argument('projects', metavar='PROJECT', nargs='*',
+                            help='''projects (by name or path) to operate on;
+                            defaults to all projects in the manifest''')
+
+    def _all_projects(self):
+        # Get a list of project objects from the manifest.
+        #
+        # If the manifest is malformed, a fatal error occurs and the
+        # command aborts.
+
+        try:
+            return list(Manifest.from_file().projects)
+        except MalformedManifest as m:
+            log.die(m.args[0])
+
+    def _cloned_projects(self, args):
+        # Returns _projects(args, listed_must_be_cloned=True) if a
+        # list of projects was given by the user (i.e., listed
+        # projects are required to be cloned).  If no projects were
+        # listed, returns all cloned projects.
+
+        # This approach avoids redundant _cloned() checks
+        return self._projects(args) if args.projects else \
+            [project for project in self._all_projects() if _cloned(project)]
+
+    def _projects(self, args, listed_must_be_cloned=True,
+                  exclude_manifest=False):
+        # Returns a list of project instances for the projects
+        # requested in 'args' (the command-line arguments), in the
+        # same order that they were listed by the user. If
+        # args.projects is empty, no projects were listed, and all
+        # projects will be returned. If a non-existent project was
+        # listed by the user, an error is raised.
+        #
+        # Before the manifest is parsed, it is validated agains a
+        # pykwalify schema.  An error is raised on validation errors.
+        #
+        # listed_must_be_cloned (default: True):
+        #   If True, an error is raised if an uncloned project was listed. This
+        #   only applies to projects listed explicitly on the command line.
+        #
+        # exclude_manifest (default: False):
+        #   If True, the manifest project will not be included in the returned
+        #   list.
+
+        projects = self._all_projects()
+
+        if exclude_manifest:
+            projects.pop(MANIFEST_PROJECT_INDEX)
+
+        if not args.projects:
+            # No projects specified. Return all projects.
+            return projects
+
+        # Sort the projects by the length of their absolute paths,
+        # with the longest path first. That way, projects within
+        # projects (e.g., for submodules) are tried before their
+        # parent projects, when projects are specified via their path.
+        projects.sort(key=lambda project: len(project.abspath), reverse=True)
+
+        # Listed but missing projects. Used for error reporting.
+        missing_projects = []
+
+        def normalize(path):
+            # Returns a case-normalized canonical absolute version of
+            # 'path', for comparisons. The normcase() is a no-op on
+            # platforms on case-sensitive filesystems.
+            return normcase(realpath(path))
+
+        res = []
+        uncloned = []
+        for project_arg in args.projects:
+            for project in projects:
+                if project.name == project_arg:
+                    # The argument is a project name
+                    res.append(project)
+                    if listed_must_be_cloned and not _cloned(project):
+                        uncloned.append(project.name)
+                    break
+            else:
+                # The argument is not a project name. See if it specifies
+                # an absolute or relative path to a project.
+                proj_arg_norm = normalize(project_arg)
+                for project in projects:
+                    if proj_arg_norm == normalize(project.abspath):
+                        res.append(project)
+                        break
+                else:
+                    # Neither a project name nor a project path. We
+                    # will report an error below.
+                    missing_projects.append(project_arg)
+
+        if missing_projects:
+            log.die(
+                'Unknown project name{0}/path{0} {1} (available projects: {2})'
+                .format('s' if len(missing_projects) > 1 else '',
+                        ', '.join(missing_projects),
+                        ', '.join(project.name for project in projects)))
+
+        # Check that all listed repositories are cloned, if requested.
+        if listed_must_be_cloned and uncloned:
+            plural = len(uncloned) > 1
+            log.die(textwrap.dedent('''\
+            The following project{} not cloned: {}.
+            Please clone {} first, with:
+                west update {}
+            then retry.'''
+                                    .format('s are' if plural else ' is',
+                                            ", ".join(uncloned),
+                                            'them' if plural else 'it',
+                                            " ".join(uncloned))))
+
+        return res
+
+
+class Init(_ProjectCommand):
 
     def __init__(self):
         super().__init__(
@@ -38,46 +168,80 @@ class Init(WestCommand):
             textwrap.dedent('''\
             Creates a west installation as follows:
 
-              1. Creates a .west directory and clones the manifest repository
-                 to a temporary subdirectory of it
-              2. Creates a local configuration file (.west/config)
-              3. Parses west.yml in the manifest repository and moves that
-                 repository to the correct location in the installation.'''),
+              1. Creates a .west directory and clones a manifest repository
+                 from a git URL to a temporary subdirectory of .west,
+                 .west/<tmpdir>.
+              2. Parses the manifest file, .west/<tmpdir>/west.yml.
+                 This file's contents can specify manifest.path, the location
+                 of the manifest repository in the installation, like so:
+
+                 manifest:
+                    self:
+                      path: <manifest.path value>
+
+                 If left unspecified, the basename of the manifest
+                 repository URL is used as manifest.path (so for example,
+                 "http://.../foo/bar" results in "bar").
+              3. Creates a local west configuration file, .west/config,
+                 and sets the manifest.path option there to the value
+                 from step 2. (Run "west config -h" for details on west
+                 configuration files.)
+              4. Moves the manifest repository from .west/<tmpdir> to
+                 manifest.path, next to the .west directory.
+
+            The default manifest repository URL is:
+
+            {}
+
+            This can be overridden using -m.
+
+            The default revision in this repository to check out is "{}";
+            override with --mr.'''.format(MANIFEST_URL_DEFAULT,
+                                          MANIFEST_REV_DEFAULT)),
             requires_installation=False)
 
     def do_add_parser(self, parser_adder):
-        parser = parser_adder.add_parser(
-            self.name, help=self.help, description=self.description,
-            formatter_class=argparse.RawDescriptionHelpFormatter)
+        parser = self._parser(parser_adder)
 
-        mutualex_group = parser.add_mutually_exclusive_group()
-        mutualex_group.add_argument(
-            '-m', '--manifest-url',
-            help='Manifest repository URL (default: {})'
-                 .format(MANIFEST_URL_DEFAULT))
-        mutualex_group.add_argument(
-            '-l', '--local', action='store_true',
-            help='''Use an existing local manifest repository instead of
-                 cloning one. The local repository will not be modified.
-                 Cannot be combined with -m or --mr.''')
+        parser.add_argument('-m', '--manifest-url',
+                            help='''manifest repository URL to clone;
+                            cannot be combined with -l''')
+        parser.add_argument('--mr', '--manifest-rev', dest='manifest_rev',
+                            help='''manifest revision to check out and use;
+                            cannot be combined with -l''')
+        parser.add_argument('-l', '--local', action='store_true',
+                            help='''use an existing local manifest repository
+                            instead of cloning one; cannot be combined with
+                            -m or --mr.''')
 
-        parser.add_argument(
-            '--mr', '--manifest-rev', dest='manifest_rev',
-            help='''Manifest revision to fetch (default: {}). Cannot be combined
-                 with --local'''
-                 .format(MANIFEST_REV_DEFAULT))
         parser.add_argument(
             'directory', nargs='?', default=None,
-            help='''Directory to create the installation in (default: cwd).
-                 Missing directories will be created. If -l is given, this is
-                 the path to the manifest repository to use instead.''')
+            help='''Directory to create the installation in (default: current
+                 directory). Missing intermediate directories will be created.
+                 If -l is given, this is the path to the manifest repository to
+                 use instead.''')
 
         return parser
 
     def do_run(self, args, ignored):
         if self.topdir:
-            log.die('already in an installation ({}), aborting'.
-                    format(self.topdir))
+            zb = os.environ.get('ZEPHYR_BASE')
+            if zb:
+                msg = textwrap.dedent('''
+                Note:
+                    In your environment, ZEPHYR_BASE is set to:
+                    {}
+
+                    This forces west to search for an installation there.
+                    Try unsetting ZEPHYR_BASE and re-running this command.'''.
+                                      format(zb))
+            else:
+                msg = ''
+            log.die('already initialized in {}, aborting.{}'.
+                    format(self.topdir, msg))
+
+        if args.local and (args.manifest_url or args.manifest_rev):
+            log.die('-l cannot be combined with -m or --mr')
 
         if shutil.which('git') is None:
             log.die("can't find git; install it or ensure it's on your PATH")
@@ -229,38 +393,22 @@ class Init(WestCommand):
             subprocess.check_call(('git', 'checkout', 'FETCH_HEAD'), cwd=dest)
 
 
-class List(WestCommand):
+class List(_ProjectCommand):
     def __init__(self):
         super().__init__(
             'list',
             'print information about projects in the west manifest',
-            _wrap('''
-            List projects.
-
-            Individual projects can be specified by name.
-
-            By default, lists all project names in the manifest, along with
-            each project's path, revision, URL, and whether it has been cloned.
-
-            The west repository in the top-level west directory is not included
-            by default. Use --all or the name "west" to include it.'''))
+            textwrap.dedent('''\
+            Print information about projects in the west manifest,
+            using format strings.'''))
 
     def do_add_parser(self, parser_adder):
         default_fmt = '{name:12} {path:28} {revision:40} {url}'
-        return _add_parser(
-            parser_adder, self,
-            _arg('-a', '--all', action='store_true',
-                 help='''Do not ignore repositories in west/ (i.e. west and the
-                 manifest) in the output. Since these are not part of
-                 the manifest, some of their format values (like "revision")
-                 come from other sources. The behavior of this option is
-                 modeled after the Unix ls -a option.'''),
-            _arg('-f', '--format', default=default_fmt,
-                 help='''Format string to use to list each project; see
-                 FORMAT STRINGS below.'''),
-            _project_list_arg,
+        parser = self._parser(
+            parser_adder,
             epilog=textwrap.dedent('''\
             FORMAT STRINGS
+            --------------
 
             Projects are listed using a Python 3 format string. Arguments
             to the format string are accessed by name.
@@ -284,6 +432,15 @@ class List(WestCommand):
               otherwise
             - clone_depth: project clone depth if specified, "None" otherwise
             '''.format(default_fmt)))
+        parser.add_argument('-a', '--all', action='store_true',
+                            help='ignored for backwards compatibility'),
+        parser.add_argument('-f', '--format', default=default_fmt,
+                            help='''format string to use to list each
+                            project; see FORMAT STRINGS below.''')
+
+        self._add_projects_arg(parser)
+
+        return parser
 
     def do_run(self, args, user_args):
         def sha_thunk(project):
@@ -298,7 +455,7 @@ class List(WestCommand):
         def delay(func, project):
             return DelayFormat(partial(func, project))
 
-        for project in _projects(args):
+        for project in self._projects(args):
             # Spelling out the format keys explicitly here gives us
             # future-proofing if the internal Project representation
             # ever changes.
@@ -330,7 +487,7 @@ class List(WestCommand):
             log.inf(result, colorize=False)  # don't use _msg()!
 
 
-class ManifestCommand(WestCommand):
+class ManifestCommand(_ProjectCommand):
     # The slightly weird naming is to avoid a conflict with
     # west.manifest.Manifest.
 
@@ -338,21 +495,20 @@ class ManifestCommand(WestCommand):
         super(ManifestCommand, self).__init__(
             'manifest',
             'manage the west manifest',
-            _wrap('''
+            textwrap.dedent('''\
             Manages the west manifest.
 
-            Currently, only one operation on the manifest is
-            implemented, namely --freeze. This outputs the manifest
-            with all project-related values fully specified: defaults
-            are applied, and all revisions are converted to SHAs based
-            on the current manifest-rev branches.'''),
+            The --freeze operation outputs the manifest with all
+            project-related values fully specified: defaults are
+            applied, and all revisions are converted to SHAs based on
+            the current manifest-rev branches.
+
+            The --validate operation validates the current manifest,
+            printing an error if it cannot be successfully parsed.'''),
             accepts_unknown_args=False)
 
     def do_add_parser(self, parser_adder):
-        parser = parser_adder.add_parser(
-            self.name,
-            help=self.help,
-            description=self.description)
+        parser = self._parser(parser_adder)
 
         group = parser.add_mutually_exclusive_group(required=True)
         group.add_argument('--freeze', action='store_true',
@@ -395,102 +551,90 @@ class ManifestCommand(WestCommand):
         return util._represent_ordered_dict(dumper, 'tag:yaml.org,2002:map',
                                             value)
 
-class Diff(WestCommand):
+class Diff(_ProjectCommand):
     def __init__(self):
         super().__init__(
             'diff',
             '"git diff" for one or more projects',
-            _wrap('''
-            'git diff' projects.
-
-            Runs 'git diff' for each of the specified projects (default: all
-            cloned projects).
-
-            Extra arguments are passed as-is to 'git diff'.
-            '''),
-            accepts_unknown_args=True)
+            'Runs "git diff" on each of the specified projects.')
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(parser_adder, self, _project_list_arg)
+        parser = self._parser(parser_adder)
+        self._add_projects_arg(parser)
+        return parser
 
-    def do_run(self, args, user_args):
-        for project in _cloned_projects(args):
+    def do_run(self, args, ignored):
+        for project in self._cloned_projects(args):
             _banner(project.format('diff for {name_and_path}:'))
             # Use paths that are relative to the base directory to make it
             # easier to see where the changes are
-            _git(project, 'diff --src-prefix={path}/ --dst-prefix={path}/',
-                 extra_args=user_args)
+            _git(project, 'diff --src-prefix={path}/ --dst-prefix={path}/')
 
 
-class Status(WestCommand):
+class Status(_ProjectCommand):
     def __init__(self):
         super().__init__(
             'status',
             '"git status" for one or more projects',
-            _wrap('''
-            Runs 'git status' for each of the specified projects (default: all
-            cloned projects). Extra arguments are passed as-is to 'git status'.
-            '''),
-            accepts_unknown_args=True)
+            "Runs 'git status' for each of the specified projects.")
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(parser_adder, self, _project_list_arg)
+        parser = self._parser(parser_adder)
+        self._add_projects_arg(parser)
+        return parser
 
     def do_run(self, args, user_args):
-        for project in _cloned_projects(args):
+        for project in self._cloned_projects(args):
             _banner(project.format('status of {name_and_path}:'))
             _git(project, 'status', extra_args=user_args)
 
 
-class Update(WestCommand):
-    # Commit comment
+class Update(_ProjectCommand):
+
     def __init__(self):
         super().__init__(
             'update',
             'update projects described in west.yml',
-            _wrap('''
-            Updates all project repositories according to the
-            manifest file, `west.yml`, in the manifest repository.
+            textwrap.dedent('''\
+            Updates each project repository to the revision specified in
+            the manifest file, west.yml, as follows:
 
-            By default:
+              1. Fetch the project's remote to ensure the manifest
+                 revision is available locally
+              2. Reset the manifest-rev branch to the revision in
+                 west.yml
+              3. Check out the new manifest-rev commit as a detached HEAD
+                 (but see "checked out branches")
 
-            1. The revisions in the manifest file are fetched.
-            2. The local manifest-rev branches in each repository
-               are reset to the updated revisions.
-            3. All repositories will have detached HEADs checked out
-               at the new manifest-rev commits.
+            You must have already created a west installation with "west init".
 
-            You can influence the behavior when local branches are
-            checked out using --keep-descendants and/or --rebase.
-
-            This command does not change the contents of the manifest
-            repository.'''))
+            This command does not alter the manifest repository's contents.''')
+        )
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(parser_adder, self,
-                           _arg('-x', '--exclude-west',
-                                action='store_true',
-                                help='''deprecated and ignored; exists
-                                for backwards compatibility'''),
-                           _arg('-k', '--keep-descendants',
-                                action='store_true',
-                                help=_wrap('''
-                                If a local branch is checked out and is a
-                                descendant commit of the new manifest-rev,
-                                then keep that descendant branch checked out
-                                instead of detaching HEAD. This takes priority
-                                over --rebase when possible if both are given.
-                                ''')),
-                           _arg('-r', '--rebase',
-                                action='store_true',
-                                help=_wrap('''
-                                If a local branch is checked out, try
-                                to rebase it onto the new HEAD and
-                                leave the rebased branch checked
-                                out. If this fails, you will need to
-                                clean up the rebase yourself manually.
-                                ''')),
-                           _project_list_arg)
+        parser = self._parser(parser_adder)
+
+        group = parser.add_argument_group(
+            title='checked out branches',
+            description=textwrap.dedent('''\
+            By default, locally checked out branches are left behind
+            when manifest-rev commits are checked out.'''))
+        group.add_argument('-k', '--keep-descendants', action='store_true',
+                           help='''if a checked out branch is a descendant
+                           of the new manifest-rev, leave it checked out
+                           instead (takes priority over --rebase)''')
+        group.add_argument('-r', '--rebase', action='store_true',
+                           help='''rebase any checked out branch onto the new
+                           manifest-rev instead (leaving behind partial
+                           rebases on error)''')
+
+        group = parser.add_argument_group('deprecated options')
+        group.add_argument('-x', '--exclude-west', action='store_true',
+                           help='ignored for backwards compatibility')
+
+        self._add_projects_arg(parser)
+
+        return parser
 
     def do_run(self, args, user_args):
         if args.exclude_west:
@@ -498,8 +642,8 @@ class Update(WestCommand):
 
         failed_rebases = []
 
-        for project in _projects(args, listed_must_be_cloned=False,
-                                 exclude_manifest=True):
+        for project in self._projects(args, listed_must_be_cloned=False,
+                                      exclude_manifest=True):
             _banner(project.format('updating {name_and_path}:'))
 
             returncode = _update(project, args.rebase, args.keep_descendants)
@@ -519,38 +663,36 @@ class Update(WestCommand):
             raise CommandError(1)
 
 
-class ForAll(WestCommand):
+class ForAll(_ProjectCommand):
     def __init__(self):
         super().__init__(
             'forall',
             'run a command in one or more local projects',
-            _wrap('''
-            Runs a shell (Linux) or batch (Windows) command within the
-            repository of each of the specified projects (default: all cloned
-            projects). Note that you have to quote the command if it consists
-            of more than one word, to prevent the shell you use to run 'west'
-            from splitting it up.
+            textwrap.dedent('''\
+            Runs a shell (on a Unix OS) or batch (on Windows) command
+            within the repository of each of the specified PROJECTs.
 
-            Since the command is run through the shell, you can use wildcards
-            and the like.
+            If the command has multiple words, you must quote the -c
+            option to prevent the shell from splitting it up. Since
+            the command is run through the shell, you can use
+            wildcards and the like.
 
-            For example, the following command will list the contents of
-            proj-1's and proj-2's repositories on Linux, in long form:
+            For example, the following command will list the contents
+            of proj-1's and proj-2's repositories on Linux and macOS,
+            in long form:
 
-              west forall -c 'ls -l' proj-1 proj-2
+                west forall -c "ls -l" proj-1 proj-2
             '''))
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(
-            parser_adder, self,
-            _arg('-c',
-                 dest='command',
-                 metavar='COMMAND',
-                 required=True),
-            _project_list_arg)
+        parser = self._parser(parser_adder)
+        parser.add_argument('-c', dest='command', metavar='COMMAND',
+                            required=True)
+        self._add_projects_arg(parser)
+        return parser
 
     def do_run(self, args, user_args):
-        for project in _cloned_projects(args):
+        for project in self._cloned_projects(args):
             _banner(project.format('running "{c}" in {name_and_path}:',
                                    c=args.command))
 
@@ -558,7 +700,7 @@ class ForAll(WestCommand):
                 .wait()
 
 
-class SelfUpdate(WestCommand):
+class SelfUpdate(_ProjectCommand):
     def __init__(self):
         super().__init__(
             'selfupdate',
@@ -566,160 +708,10 @@ class SelfUpdate(WestCommand):
             'Do not use. You can upgrade west with pip only from v0.6.0.')
 
     def do_add_parser(self, parser_adder):
-        return _add_parser(parser_adder, self)
+        return self._parser(parser_adder)
 
     def do_run(self, args, user_args):
         log.die(self.description)
-
-
-def _arg(*args, **kwargs):
-    # Helper for creating a new argument parser for a single argument,
-    # later passed in parents= to add_parser()
-
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument(*args, **kwargs)
-    return parser
-
-
-# Arguments shared between more than one command
-
-# List of projects
-_project_list_arg = _arg('projects', metavar='PROJECT', nargs='*')
-
-
-def _add_parser(parser_adder, cmd, *extra_args, **kwargs):
-    # Adds and returns a subparser for the project-related WestCommand 'cmd'.
-    # Any defaults can be overridden with kwargs.
-
-    if 'help' not in kwargs:
-        kwargs['help'] = cmd.help
-    if 'description' not in kwargs:
-        kwargs['description'] = cmd.description
-    if 'formatter_class' not in kwargs:
-        kwargs['formatter_class'] = argparse.RawDescriptionHelpFormatter
-    if 'parents' not in kwargs:
-        kwargs['parents'] = extra_args
-
-    return parser_adder.add_parser(cmd.name, **kwargs)
-
-
-def _wrap(s):
-    # Wraps help texts for commands. Some of them have variable length (due to
-    # MANIFEST_REV), so just a textwrap.dedent() can look a bit wonky.
-
-    # [1:] gets rid of the initial newline. It's turned into a space by
-    # textwrap.fill() otherwise.
-    paragraphs = textwrap.dedent(s[1:]).split("\n\n")
-
-    return "\n\n".join(textwrap.fill(paragraph) for paragraph in paragraphs)
-
-
-_MANIFEST_REV_HELP = """
-The '{}' branch points to the revision that the manifest specified for the
-project as of the most recent 'west fetch'/'west pull'.
-""".format(MANIFEST_REV)[1:].replace("\n", " ")
-
-
-def _cloned_projects(args):
-    # Returns _projects(args, listed_must_be_cloned=True) if a list of projects
-    # was given by the user (i.e., listed projects are required to be cloned).
-    # If no projects were listed, returns all cloned projects.
-
-    # This approach avoids redundant _cloned() checks
-    return _projects(args) if args.projects else \
-        [project for project in _all_projects() if _cloned(project)]
-
-
-def _projects(args, listed_must_be_cloned=True, exclude_manifest=False):
-    # Returns a list of project instances for the projects requested in 'args'
-    # (the command-line arguments), in the same order that they were listed by
-    # the user. If args.projects is empty, no projects were listed, and all
-    # projects will be returned. If a non-existent project was listed by the
-    # user, an error is raised.
-    #
-    # Before the manifest is parsed, it is validated agains a pykwalify schema.
-    # An error is raised on validation errors.
-    #
-    # listed_must_be_cloned (default: True):
-    #   If True, an error is raised if an uncloned project was listed. This
-    #   only applies to projects listed explicitly on the command line.
-    #
-    # exclude_manifest (default: False):
-    #   If True, the manifest project will not be included in the returned
-    #   list.
-
-    projects = _all_projects()
-
-    if exclude_manifest:
-        projects.pop(MANIFEST_PROJECT_INDEX)
-
-    if not args.projects:
-        # No projects specified. Return all projects.
-        return projects
-
-    # Sort the projects by the length of their absolute paths, with the longest
-    # path first. That way, projects within projects (e.g., for submodules) are
-    # tried before their parent projects, when projects are specified via their
-    # path.
-    projects.sort(key=lambda project: len(project.abspath), reverse=True)
-
-    # Listed but missing projects. Used for error reporting.
-    missing_projects = []
-
-    def normalize(path):
-        # Returns a case-normalized canonical absolute version of 'path', for
-        # comparisons. The normcase() is a no-op on platforms on case-sensitive
-        # filesystems.
-        return normcase(realpath(path))
-
-    res = []
-    uncloned = []
-    for project_arg in args.projects:
-        for project in projects:
-            if project.name == project_arg:
-                # The argument is a project name
-                res.append(project)
-                if listed_must_be_cloned and not _cloned(project):
-                    uncloned.append(project.name)
-                break
-        else:
-            # The argument is not a project name. See if it specifies
-            # an absolute or relative path to a project.
-            proj_arg_norm = normalize(project_arg)
-            for project in projects:
-                if proj_arg_norm == normalize(project.abspath):
-                    res.append(project)
-                    break
-            else:
-                # Neither a project name nor a project path. We will report an
-                # error below.
-                missing_projects.append(project_arg)
-
-    if missing_projects:
-        log.die('Unknown project name{0}/path{0} {1} (available projects: {2})'
-                .format('s' if len(missing_projects) > 1 else '',
-                        ', '.join(missing_projects),
-                        ', '.join(project.name for project in projects)))
-
-    # Check that all listed repositories are cloned, if requested.
-    if listed_must_be_cloned and uncloned:
-        log.die('The following projects are not cloned: {}. Please clone '
-                "them first with 'west clone'."
-                .format(", ".join(uncloned)))
-
-    return res
-
-
-def _all_projects():
-    # Get a list of project objects from the manifest.
-    #
-    # If the manifest is malformed, a fatal error occurs and the
-    # command aborts.
-
-    try:
-        return list(Manifest.from_file().projects)
-    except MalformedManifest as m:
-        log.die(m.args[0])
 
 
 def _rebase(project, **kwargs):
