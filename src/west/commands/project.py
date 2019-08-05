@@ -200,8 +200,8 @@ class Init(WestCommand):
         subprocess.check_call(('git', 'init', dest))
         subprocess.check_call(('git', 'remote', 'add', 'origin', '--', url),
                               cwd=dest)
-        is_sha = _is_sha(rev)
-        if is_sha:
+        maybe_sha = _maybe_sha(rev)
+        if maybe_sha:
             # Fetch the ref-space and hope the SHA is contained in
             # that ref-space
             subprocess.check_call(('git', 'fetch', 'origin', '--tags',
@@ -223,7 +223,7 @@ class Init(WestCommand):
         except subprocess.CalledProcessError:
             local_rev = False
 
-        if local_rev or is_sha:
+        if local_rev or maybe_sha:
             subprocess.check_call(('git', 'checkout', rev), cwd=dest)
         else:
             subprocess.check_call(('git', 'checkout', 'FETCH_HEAD'), cwd=dest)
@@ -868,7 +868,7 @@ def _fetch(project):
     # separately.
     #
     # --tags is required to get tags when the remote is specified as an URL.
-    if _is_sha(project.revision):
+    if _maybe_sha(project.revision):
         # Don't fetch a SHA directly, as server may restrict from doing so.
         _git(project, fetch_cmd + ' -f --tags '
              '-- {url} refs/heads/*:refs/west/*')
@@ -927,13 +927,15 @@ def _post_checkout_help(project, branch, sha, is_ancestor):
                 'use "west update --rebase".)')
 
 
-def _is_sha(s):
+def _maybe_sha(rev):
+    # Return true if and only if the given revision might be a SHA.
+
     try:
-        int(s, 16)
+        int(rev, 16)
     except ValueError:
         return False
 
-    return len(s) == 40
+    return len(rev) <= 40
 
 
 def _git(project, cmd, extra_args=(), capture_stdout=False, check=True,
