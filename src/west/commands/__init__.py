@@ -88,8 +88,10 @@ class WestCommand(ABC):
         self.description = description
         self.accepts_unknown_args = accepts_unknown_args
         self.requires_installation = requires_installation
+        self.topdir = None
+        self.manifest = None
 
-    def run(self, args, unknown, topdir):
+    def run(self, args, unknown, topdir, manifest=None):
         '''Run the command.
 
         This raises `CommandContextError` if the command cannot be run
@@ -103,12 +105,16 @@ class WestCommand(ABC):
         :param topdir: top level directory of west installation, or None;
                        this is stored as an attribute before do_run() is
                        called.
+        :param manifest: A pre-parsed west.manifest.Manifest, or None.
+                         This will be saved in the self.manifest
+                         field before do_run() is called.
         '''
         if unknown and not self.accepts_unknown_args:
             self.parser.error('unexpected arguments: {}'.format(unknown))
         if not topdir and self.requires_installation:
             log.die(_NO_TOPDIR_MSG_FMT.format(os.getcwd(), self.name))
         self.topdir = topdir
+        self.manifest = manifest
         self.do_run(args, unknown)
 
     def add_parser(self, parser_adder):
@@ -156,6 +162,33 @@ class WestCommand(ABC):
                         this object, this parameter is an empty sequence.
                         Otherwise, it is an iterable containing all unknown
                         arguments present on the command line.'''
+
+    #
+    # Public API, mostly for subclasses.
+    #
+    # These are meant to be useful to subclasses during their do_run()
+    # calls. Using this functionality outside of a WestCommand
+    # subclass leads to undefined results.
+    #
+
+    @property
+    def manifest(self):
+        '''Property for the manifest which was passed to run().
+
+        If the manifest kwarg passed to do_run was not None, it is
+        returned. Otherwise the access fails with a fatal error. This
+        is meant to be used by a command to access the west manifest
+        when it is required, and the command can't proceed
+        successfully without it. The property is writeable.'''
+        if self._manifest is None:
+            log.die("can't run west {};".format(self.name),
+                    "it requires the manifest, which was not available.",
+                    'Try "west manifest --validate" to debug.')
+        return self._manifest
+
+    @manifest.setter
+    def manifest(self, manifest):
+        self._manifest = manifest
 
 class WestExtCommandSpec:
     '''An object which allows instantiating an extension west command.'''
