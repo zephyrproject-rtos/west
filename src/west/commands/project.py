@@ -934,9 +934,6 @@ def _git(project, cmd, extra_args=(), capture_stdout=False, check=True,
          cwd=None):
     # Wrapper for project.git() that by default calls log.die() with a
     # message about the command that failed if CalledProcessError is raised.
-    #
-    # If the global error context value is set, it is appended to the
-    # message.
 
     try:
         res = project.git(cmd, extra_args=extra_args,
@@ -945,9 +942,6 @@ def _git(project, cmd, extra_args=(), capture_stdout=False, check=True,
         msg = project.format(
             "Command '{c}' failed with code {rc} for {name_and_path}",
             c=cmd, rc=e.returncode)
-
-        if _error_context_msg:
-            msg += _error_context_msg.replace('\n', ' ')
 
         log.die(msg)
 
@@ -963,34 +957,6 @@ def _git(project, cmd, extra_args=(), capture_stdout=False, check=True,
             res.stdout.decode('utf-8').splitlines()).rstrip("\n")
 
     return res
-
-
-# Some Python shenanigans to be able to set up a context with
-#
-#   with _error_context("Doing stuff"):
-#       Do the stuff
-#
-# The _error_context() argument is extra text that gets printed in the
-# log.die() call made by _git() in case of errors.
-#
-# Note: If we ever need to support nested contexts, _error_context_msg could be
-# turned into a stack.
-
-_error_context_msg = None
-
-
-class _error_context:
-    def __init__(self, msg):
-        self.msg = msg
-
-    def __enter__(self):
-        global _error_context_msg
-        _error_context_msg = self.msg
-
-    def __exit__(self, *args):
-        global _error_context_msg
-        _error_context_msg = None
-
 
 def _banner(msg):
     # Prints "msg" as a "banner", i.e. prefixed with '=== ' and colorized.
