@@ -296,8 +296,8 @@ help on each command.''',
     return parser, subparser_gen
 
 
-def command_handler(command, topdir, known_args, unknown_args):
-    command.run(known_args, unknown_args, topdir)
+def command_handler(command, topdir, manifest, known_args, unknown_args):
+    command.run(known_args, unknown_args, topdir, manifest=manifest)
 
 
 def add_ext_command_parser(subparser_gen, spec):
@@ -309,7 +309,7 @@ def add_ext_command_parser(subparser_gen, spec):
     return parser
 
 
-def ext_command_handler(spec, topdir, argv, *ignored):
+def ext_command_handler(spec, topdir, argv, manifest, *ignored):
     # Deferred creation, argument parsing, and handling for extension
     # commands. We go to the extra effort because we don't want to
     # import any extern classes until the user has specifically
@@ -331,7 +331,7 @@ def ext_command_handler(spec, topdir, argv, *ignored):
 
     # Handle the instantiated command in the usual way.
     args, unknown = west_parser.parse_known_args(argv)
-    command.run(args, unknown, topdir)
+    command.run(args, unknown, topdir, manifest=manifest)
 
 
 def help_command_handler(west_parser, topdir, help_parser, extensions, args,
@@ -458,13 +458,14 @@ def set_zephyr_base(args):
         log.dbg('ZEPHYR_BASE={} (origin: {})'.format(zb, zb_origin))
 
 
-def parse_args(argv, extensions, topdir):
+def parse_args(argv, extensions, topdir, manifest):
     west_parser, subparser_gen = _make_parsers()
 
     # Add handlers for the built-in commands.
     for command in itertools.chain(*BUILTIN_COMMANDS.values()):
         parser = command.add_parser(subparser_gen)
-        parser.set_defaults(handler=partial(command_handler, command, topdir))
+        parser.set_defaults(handler=partial(command_handler, command, topdir,
+                                            manifest))
 
     # Add handlers for extension commands, and finalize the list with
     # our parser.
@@ -473,7 +474,8 @@ def parse_args(argv, extensions, topdir):
             for spec in specs:
                 parser = add_ext_command_parser(subparser_gen, spec)
                 parser.set_defaults(handler=partial(ext_command_handler,
-                                                    spec, topdir, argv))
+                                                    spec, topdir, argv,
+                                                    manifest))
     west_parser.set_extensions(extensions)
 
     help_parser = subparser_gen.add_parser('help',
@@ -503,8 +505,8 @@ def parse_args(argv, extensions, topdir):
     return args, unknown
 
 
-def get_extension_commands():
-    extensions = extension_commands()
+def get_extension_commands(manifest):
+    extensions = extension_commands(manifest=manifest)
     extension_names = set()
 
     for path, specs in extensions.items():
@@ -559,18 +561,23 @@ def main(argv=None):
     # We need this to find the manifest path in order to load extensions.
     config.read_config()
 
-    # Load any extension command specs if we're in an installation.
+    # Parse the manifest and create extension command thunks. We'll
+    # pass the saved manifest around so it doesn't have to be
+    # re-parsed.
     if topdir:
         try:
-            extensions = get_extension_commands()
+            manifest = Manifest.from_file()
+            extensions = get_extension_commands(manifest)
         except (MalformedManifest, MalformedConfig, FileNotFoundError):
+            manifest = None
             extensions = None
     else:
+        manifest = None
         extensions = {}
 
     if argv is None:
         argv = sys.argv[1:]
-    args, unknown = parse_args(argv, extensions, topdir)
+    args, unknown = parse_args(argv, extensions, topdir, manifest)
 
     try:
         args.handler(args, unknown)
