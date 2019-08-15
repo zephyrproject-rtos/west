@@ -22,7 +22,7 @@ from west import log
 from west import util
 from west.commands import WestCommand, CommandError
 from west.manifest import Manifest, MalformedManifest, MalformedConfig, \
-    MANIFEST_PROJECT_INDEX
+    MANIFEST_PROJECT_INDEX, ManifestProject
 from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
 from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
 from urllib.parse import urlparse
@@ -55,32 +55,29 @@ class _ProjectCommand(WestCommand):
         # listed, returns all cloned projects.
 
         # This approach avoids redundant _cloned() checks
-        return self._projects(args) if args.projects else \
+        return self._projects(args.projects) if args.projects else \
             [project for project in self.manifest.projects if _cloned(project)]
 
-    def _projects(self, args, listed_must_be_cloned=True,
-                  exclude_manifest=False):
+    def _projects(self, ids, listed_must_be_cloned=True):
         # Returns a list of project instances for the projects
-        # requested in 'args' (the command-line arguments), in the
-        # same order that they were listed by the user. If
-        # args.projects is empty, no projects were listed, and all
-        # projects will be returned. If a non-existent project was
-        # listed by the user, an error is raised.
+        # requested in *ids* in the same order that they are specified
+        # there.
+        #
+        # If *ids* is empty all the manifest's projects will be
+        # returned. If a non-existent project was listed by the user,
+        # an error is raised.
+        #
+        # ids:
+        #   A sequence of projects, identified by name (at first priority)
+        #   or path (as a fallback).
         #
         # listed_must_be_cloned (default: True):
         #   If True, an error is raised if an uncloned project was listed. This
         #   only applies to projects listed explicitly on the command line.
-        #
-        # exclude_manifest (default: False):
-        #   If True, the manifest project will not be included in the returned
-        #   list.
 
         projects = list(self.manifest.projects)
 
-        if exclude_manifest:
-            projects.pop(MANIFEST_PROJECT_INDEX)
-
-        if not args.projects:
+        if not ids:
             # No projects specified. Return all projects.
             return projects
 
@@ -101,9 +98,9 @@ class _ProjectCommand(WestCommand):
 
         res = []
         uncloned = []
-        for project_arg in args.projects:
+        for proj_id in ids:
             for project in projects:
-                if project.name == project_arg:
+                if project.name == proj_id:
                     # The argument is a project name
                     res.append(project)
                     if listed_must_be_cloned and not _cloned(project):
@@ -112,7 +109,7 @@ class _ProjectCommand(WestCommand):
             else:
                 # The argument is not a project name. See if it specifies
                 # an absolute or relative path to a project.
-                proj_arg_norm = normalize(project_arg)
+                proj_arg_norm = normalize(proj_id)
                 for project in projects:
                     if proj_arg_norm == normalize(project.abspath):
                         res.append(project)
@@ -120,7 +117,7 @@ class _ProjectCommand(WestCommand):
                 else:
                     # Neither a project name nor a project path. We
                     # will report an error below.
-                    missing_projects.append(project_arg)
+                    missing_projects.append(proj_id)
 
         if missing_projects:
             log.die(
@@ -444,7 +441,7 @@ class List(_ProjectCommand):
         def delay(func, project):
             return DelayFormat(partial(func, project))
 
-        for project in self._projects(args):
+        for project in self._projects(args.projects):
             # Spelling out the format keys explicitly here gives us
             # future-proofing if the internal Project representation
             # ever changes.
@@ -631,8 +628,11 @@ class Update(_ProjectCommand):
 
         failed_rebases = []
 
-        for project in self._projects(args, listed_must_be_cloned=False,
-                                      exclude_manifest=True):
+        for project in self._projects(args.projects,
+                                      listed_must_be_cloned=False):
+            if isinstance(project, ManifestProject):
+                continue
+
             _banner(project.format('updating {name_and_path}:'))
 
             returncode = _update(project, args.rebase, args.keep_descendants)
