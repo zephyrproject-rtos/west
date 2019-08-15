@@ -127,7 +127,6 @@ def test_diff(west_init_tmpdir):
     cmd('diff')
 
     cmd('update Kconfiglib')
-    cmd('diff --cached')  # Pass a custom flag too
 
 
 def test_status(west_init_tmpdir):
@@ -143,7 +142,6 @@ def test_status(west_init_tmpdir):
     cmd('status')
 
     cmd('update Kconfiglib')
-    cmd('status --long')  # Pass a custom flag too
 
 
 def test_forall(west_init_tmpdir):
