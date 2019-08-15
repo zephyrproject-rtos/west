@@ -9,8 +9,7 @@ import argparse
 import collections
 from functools import partial
 import os
-from os.path import join, abspath, relpath, realpath, normpath, \
-    basename, dirname, normcase, exists, isdir
+from os.path import join, relpath, basename, dirname, exists, isdir
 import shutil
 import subprocess
 import sys
@@ -90,12 +89,6 @@ class _ProjectCommand(WestCommand):
         # Listed but missing projects. Used for error reporting.
         missing_projects = []
 
-        def normalize(path):
-            # Returns a case-normalized canonical absolute version of
-            # 'path', for comparisons. The normcase() is a no-op on
-            # platforms on case-sensitive filesystems.
-            return normcase(realpath(path))
-
         res = []
         uncloned = []
         for proj_id in ids:
@@ -109,9 +102,9 @@ class _ProjectCommand(WestCommand):
             else:
                 # The argument is not a project name. See if it specifies
                 # an absolute or relative path to a project.
-                proj_arg_norm = normalize(proj_id)
+                proj_arg_norm = util.canon_path(proj_id)
                 for project in projects:
-                    if proj_arg_norm == normalize(project.abspath):
+                    if proj_arg_norm == util.canon_path(project.abspath):
                         res.append(project)
                         break
                 else:
@@ -249,7 +242,7 @@ class Init(_ProjectCommand):
         if args.manifest_rev is not None:
             log.die('--mr cannot be used with -l')
 
-        manifest_dir = canonical(args.directory or os.getcwd())
+        manifest_dir = util.canon_path(args.directory or os.getcwd())
         manifest_file = join(manifest_dir, 'west.yml')
         topdir = dirname(manifest_dir)
         rel_manifest = basename(manifest_dir)
@@ -276,7 +269,7 @@ class Init(_ProjectCommand):
     def bootstrap(self, args):
         manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
         manifest_rev = args.manifest_rev or MANIFEST_REV_DEFAULT
-        topdir = canonical(args.directory or os.getcwd())
+        topdir = util.canon_path(args.directory or os.getcwd())
         west_dir = join(topdir, WEST_DIR)
 
         _banner('Initializing in ' + topdir)
@@ -955,9 +948,6 @@ def _msg(msg):
     # Prints "msg" as a smaller banner, i.e. prefixed with '-- ' and
     # not colorized.
     log.inf('--- ' + msg, colorize=False)
-
-def canonical(path):
-    return normpath(abspath(path))
 
 
 #
