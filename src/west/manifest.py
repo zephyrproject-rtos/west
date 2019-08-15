@@ -172,6 +172,69 @@ class Manifest:
         '''Get a manifest Remote, given its name.'''
         return self._remotes_dict[name]
 
+    def get_projects(self, project_ids, allow_paths=True, only_cloned=False):
+        '''Get a list of Projects in the manifest from given *project_ids*.
+
+        If *project_ids* is empty, a list containing all the
+        manifest's projects is returned. The manifest is present
+        as a project in this list at *MANIFEST_PROJECT_INDEX*, and the
+        other projects follow in the order they appear in the manifest
+        file.
+
+        Otherwise, projects in the returned list are in the same order
+        as specified in *project_ids*.
+
+        Either of these situations raises a ValueError:
+
+        - One or more non-existent projects is in *project_ids*
+        - only_cloned is True, and the returned list would have
+          contained one or more uncloned projects
+
+        On error, the *args* attribute of the ValueError is a 2-tuple,
+        containing a list of unknown project_ids at index 0, and a
+        list of uncloned Projects at index 1.
+
+        :param project_ids: A sequence of projects, identified by name
+                            (at first priority) or path (as a
+                            fallback, when allow_paths=True).
+        :param allow_paths: If False, project_ids must be a sequence of
+                            project names only; paths are not allowed.
+        :param only_cloned: If True, ValueError is raised if an
+                            uncloned project would have been returned.
+
+        '''
+        projects = list(self.projects)
+        unknown = []   # all project_ids which don't resolve to a Project
+        uncloned = []  # if only_cloned, resolved Projects which aren't cloned
+        ret = []       # result list of resolved Projects
+
+        # If no project_ids are specified, use all projects.
+        if not project_ids:
+            if only_cloned:
+                uncloned = [p for p in projects if not p.is_cloned()]
+                if uncloned:
+                    raise ValueError(unknown, uncloned)
+            return projects
+
+        # Otherwise, resolve each of the project_ids to a project,
+        # returning the result or raising ValueError.
+        for pid in project_ids:
+            project = self._proj_name_map.get(pid)
+            if project is None and allow_paths:
+                project = self._proj_canon_path_map.get(util.canon_path(pid))
+
+            if project is None:
+                unknown.append(pid)
+            else:
+                ret.append(project)
+
+            if only_cloned and not project.is_cloned():
+                uncloned.append(project)
+
+        if unknown or (only_cloned and uncloned):
+            raise ValueError(unknown, uncloned)
+        return ret
+
     def as_frozen_dict(self):
         '''Returns an OrderedDict representing this manifest, frozen.
 
@@ -317,6 +380,9 @@ class Manifest:
         self.remotes = remotes
         self._remotes_dict = remotes_dict
         self.projects = tuple(projects)
+        self._proj_name_map = {p.name: p for p in self.projects}
+        self._proj_canon_path_map = {util.canon_path(p.abspath): p
+                                     for p in self.projects}
 
 
 class MalformedManifest(Exception):
