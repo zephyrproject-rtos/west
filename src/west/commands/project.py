@@ -48,17 +48,6 @@ class _ProjectCommand(WestCommand):
                             help='''projects (by name or path) to operate on;
                             defaults to all projects in the manifest''')
 
-    def _all_projects(self):
-        # Get a list of project objects from the manifest.
-        #
-        # If the manifest is malformed, a fatal error occurs and the
-        # command aborts.
-
-        try:
-            return list(Manifest.from_file().projects)
-        except MalformedManifest as m:
-            log.die(m.args[0])
-
     def _cloned_projects(self, args):
         # Returns _projects(args, listed_must_be_cloned=True) if a
         # list of projects was given by the user (i.e., listed
@@ -67,7 +56,7 @@ class _ProjectCommand(WestCommand):
 
         # This approach avoids redundant _cloned() checks
         return self._projects(args) if args.projects else \
-            [project for project in self._all_projects() if _cloned(project)]
+            [project for project in self.manifest.projects if _cloned(project)]
 
     def _projects(self, args, listed_must_be_cloned=True,
                   exclude_manifest=False):
@@ -78,9 +67,6 @@ class _ProjectCommand(WestCommand):
         # projects will be returned. If a non-existent project was
         # listed by the user, an error is raised.
         #
-        # Before the manifest is parsed, it is validated agains a
-        # pykwalify schema.  An error is raised on validation errors.
-        #
         # listed_must_be_cloned (default: True):
         #   If True, an error is raised if an uncloned project was listed. This
         #   only applies to projects listed explicitly on the command line.
@@ -89,7 +75,7 @@ class _ProjectCommand(WestCommand):
         #   If True, the manifest project will not be included in the returned
         #   list.
 
-        projects = self._all_projects()
+        projects = list(self.manifest.projects)
 
         if exclude_manifest:
             projects.pop(MANIFEST_PROJECT_INDEX)
@@ -279,7 +265,10 @@ class Init(_ProjectCommand):
 
         self.create(west_dir)
         os.chdir(topdir)
-        projects = self.projects(manifest_file)  # This validates the manifest.
+        # This validates the manifest. Note we cannot use
+        # self.manifest from west init, as we are in the middle of
+        # creating the installation right now.
+        projects = self.projects(manifest_file)
         _msg('Creating {} and local configuration'.format(west_dir))
         update_config('manifest', 'path', rel_manifest)
 
