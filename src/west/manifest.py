@@ -650,6 +650,23 @@ class Project:
         '''Returns is_up_to_date_with(self.revision).'''
         return self.is_up_to_date_with(self.revision)
 
+    def is_cloned(self):
+        '''Returns True if the project's path is a directory that looks
+        like the top-level directory of a Git repository, and False
+        otherwise.'''
+        if not os.path.isdir(self.abspath):
+            return False
+
+        # --is-inside-work-tree doesn't require that the directory is
+        # the top-level directory of a Git repository. Use --show-cdup
+        # instead, which prints an empty string (i.e., just a newline,
+        # which we strip) for the top-level directory.
+        res = self.git('rev-parse --show-cdup', check=False,
+                       capture_stderr=True, capture_stdout=True)
+
+        return not (res.returncode or res.stdout.strip())
+
+
 class ManifestProject(Project):
     '''Represents the manifest as a project.'''
 

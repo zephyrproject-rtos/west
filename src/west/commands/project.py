@@ -53,9 +53,9 @@ class _ProjectCommand(WestCommand):
         # projects are required to be cloned).  If no projects were
         # listed, returns all cloned projects.
 
-        # This approach avoids redundant _cloned() checks
+        # This approach avoids redundant project.is_cloned() checks
         return self._projects(args.projects) if args.projects else \
-            [project for project in self.manifest.projects if _cloned(project)]
+            [p for p in self.manifest.projects if p.is_cloned()]
 
     def _projects(self, ids, listed_must_be_cloned=True):
         # Returns a list of project instances for the projects
@@ -96,7 +96,7 @@ class _ProjectCommand(WestCommand):
                 if project.name == proj_id:
                     # The argument is a project name
                     res.append(project)
-                    if listed_must_be_cloned and not _cloned(project):
+                    if listed_must_be_cloned and not project.is_cloned():
                         uncloned.append(project.name)
                     break
             else:
@@ -429,7 +429,7 @@ class List(_ProjectCommand):
                 return '{:40}'.format('N/A')
 
         def cloned_thunk(project):
-            return "cloned" if _cloned(project) else "not-cloned"
+            return "cloned" if project.is_cloned() else "not-cloned"
 
         def delay(func, project):
             return DelayFormat(partial(func, project))
@@ -717,33 +717,9 @@ def _sha(project, rev):
             r=rev))
 
 
-def _cloned(project):
-    # Returns True if the project's path is a directory that looks
-    # like the top-level directory of a Git repository, and False
-    # otherwise.
-
-    def handle(result):
-        log.dbg('project', project.name,
-                'is {}cloned'.format('' if result else 'not '),
-                level=log.VERBOSE_EXTREME)
-        return result
-
-    if not isdir(project.abspath):
-        return handle(False)
-
-    # --is-inside-work-tree doesn't require that the directory is the top-level
-    # directory of a Git repository. Use --show-cdup instead, which prints an
-    # empty string (i.e., just a newline, which we strip) for the top-level
-    # directory.
-    res = _git(project, 'rev-parse --show-cdup', capture_stdout=True,
-               check=False)
-
-    return handle(not (res.returncode or res.stdout))
-
-
 def _current_branch(project):
     # Determine if project is currently on a branch
-    if not _cloned(project):
+    if not project.is_cloned():
         return None
 
     branch = _git(project, 'rev-parse --abbrev-ref HEAD',
@@ -819,7 +795,7 @@ def _fetch(project):
     # branch to point to the revision specified in the manifest. If the
     # project's repository does not already exist, it is created first.
 
-    if not _cloned(project):
+    if not project.is_cloned():
         _msg(project.format('{name}: cloning and initializing'))
         _git(project, 'init {abspath}', cwd=util.west_topdir())
         # This remote is only added for the user's convenience. We always fetch
