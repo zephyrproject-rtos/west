@@ -249,6 +249,9 @@ class Manifest:
         del projects[MANIFEST_PROJECT_INDEX]
         frozen_projects = []
         for project in projects:
+            if not project.is_cloned():
+                raise RuntimeError('cannot freeze; project {} is uncloned'.
+                                   format(project.name))
             sha = project.sha(QUAL_MANIFEST_REV_BRANCH)
             d = project.as_dict()
             d['revision'] = sha
