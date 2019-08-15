@@ -78,6 +78,19 @@ def inf(*args, colorize=False):
         _reset_colors(sys.stdout)
 
 
+def banner(*args):
+    '''Prints args as a "banner" at inf() level.
+
+    The args are prefixed with '=== ' and colorized by default.'''
+    inf('===', *args, colorize=True)
+
+
+def small_banner(*args):
+    '''Prints args as a smaller banner(), i.e. prefixed with '-- ' and
+    not colorized.'''
+    inf('---', *args, colorize=False)
+
+
 def wrn(*args):
     '''Print a warning.
 
