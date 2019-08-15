@@ -48,92 +48,44 @@ class _ProjectCommand(WestCommand):
                             defaults to all projects in the manifest''')
 
     def _cloned_projects(self, args):
-        # Returns _projects(args, listed_must_be_cloned=True) if a
-        # list of projects was given by the user (i.e., listed
-        # projects are required to be cloned).  If no projects were
-        # listed, returns all cloned projects.
+        # Returns _projects(args.projects, only_cloned=True) if
+        # args.projects is not empty (i.e., explicitly given projects
+        # are required to be cloned). Otherwise, returns all cloned
+        # projects.
+        if args.projects:
+            return self._projects(args.projects, only_cloned=True)
+        else:
+            return [p for p in self.manifest.projects if p.is_cloned()]
 
-        # This approach avoids redundant project.is_cloned() checks
-        return self._projects(args.projects) if args.projects else \
-            [p for p in self.manifest.projects if p.is_cloned()]
+    def _projects(self, ids, only_cloned=False):
+        try:
+            return self.manifest.get_projects(ids, only_cloned=only_cloned)
+        except ValueError as ve:
+            if len(ve.args) != 2:
+                raise          # not directly raised by get_projects()
 
-    def _projects(self, ids, listed_must_be_cloned=True):
-        # Returns a list of project instances for the projects
-        # requested in *ids* in the same order that they are specified
-        # there.
-        #
-        # If *ids* is empty all the manifest's projects will be
-        # returned. If a non-existent project was listed by the user,
-        # an error is raised.
-        #
-        # ids:
-        #   A sequence of projects, identified by name (at first priority)
-        #   or path (as a fallback).
-        #
-        # listed_must_be_cloned (default: True):
-        #   If True, an error is raised if an uncloned project was listed. This
-        #   only applies to projects listed explicitly on the command line.
-
-        projects = list(self.manifest.projects)
-
-        if not ids:
-            # No projects specified. Return all projects.
-            return projects
-
-        # Sort the projects by the length of their absolute paths,
-        # with the longest path first. That way, projects within
-        # projects (e.g., for submodules) are tried before their
-        # parent projects, when projects are specified via their path.
-        projects.sort(key=lambda project: len(project.abspath), reverse=True)
-
-        # Listed but missing projects. Used for error reporting.
-        missing_projects = []
-
-        res = []
-        uncloned = []
-        for proj_id in ids:
-            for project in projects:
-                if project.name == proj_id:
-                    # The argument is a project name
-                    res.append(project)
-                    if listed_must_be_cloned and not project.is_cloned():
-                        uncloned.append(project.name)
-                    break
+            # Die with an error message on unknown or uncloned projects.
+            unknown, uncloned = ve.args
+            if unknown:
+                log.die('Unknown project name{s}/path{s}: {unknown} '
+                        '(use "west list" to list all projects)'
+                        .format(s='s' if len(unknown) > 1 else '',
+                                unknown=', '.join(unknown)))
+            elif only_cloned and uncloned:
+                plural = len(uncloned) > 1
+                names = [p.name for p in uncloned]
+                log.die(textwrap.dedent('''\
+                The following project{} not cloned: {}.
+                Please clone {} first, with:
+                    west update {}
+                then retry.'''.format('s are' if plural else ' is',
+                                      ", ".join(names),
+                                      'them' if plural else 'it',
+                                      " ".join(names))))
             else:
-                # The argument is not a project name. See if it specifies
-                # an absolute or relative path to a project.
-                proj_arg_norm = util.canon_path(proj_id)
-                for project in projects:
-                    if proj_arg_norm == util.canon_path(project.abspath):
-                        res.append(project)
-                        break
-                else:
-                    # Neither a project name nor a project path. We
-                    # will report an error below.
-                    missing_projects.append(proj_id)
-
-        if missing_projects:
-            log.die(
-                'Unknown project name{0}/path{0} {1} (available projects: {2})'
-                .format('s' if len(missing_projects) > 1 else '',
-                        ', '.join(missing_projects),
-                        ', '.join(project.name for project in projects)))
-
-        # Check that all listed repositories are cloned, if requested.
-        if listed_must_be_cloned and uncloned:
-            plural = len(uncloned) > 1
-            log.die(textwrap.dedent('''\
-            The following project{} not cloned: {}.
-            Please clone {} first, with:
-                west update {}
-            then retry.'''
-                                    .format('s are' if plural else ' is',
-                                            ", ".join(uncloned),
-                                            'them' if plural else 'it',
-                                            " ".join(uncloned))))
-
-        return res
-
+                # Should never happen, but re-raise to fail fast and
+                # preserve a stack trace, to encourage a bug report.
+                raise
 
 class Init(_ProjectCommand):
 
@@ -439,8 +391,7 @@ class List(_ProjectCommand):
         def delay(func, project):
             return DelayFormat(partial(func, project))
 
-        for project in self._projects(args.projects,
-                                      listed_must_be_cloned=False):
+        for project in self._projects(args.projects):
             # Spelling out the format keys explicitly here gives us
             # future-proofing if the internal Project representation
             # ever changes.
@@ -627,8 +578,7 @@ class Update(_ProjectCommand):
 
         failed_rebases = []
 
-        for project in self._projects(args.projects,
-                                      listed_must_be_cloned=False):
+        for project in self._projects(args.projects):
             if isinstance(project, ManifestProject):
                 continue
 
