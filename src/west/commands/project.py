@@ -406,7 +406,8 @@ class List(_ProjectCommand):
             - posixpath: like abspath, but in posix style, that is, with '/'
               as the separator character instead of '\\'
             - revision: project's revision as it appears in the manifest
-            - sha: project's revision as a SHA
+            - sha: project's revision as a SHA. Note that use of this requires
+              that the project has been cloned.
             - cloned: "cloned" if the project has been cloned, "not-cloned"
               otherwise
             - clone_depth: project clone depth if specified, "None" otherwise
@@ -423,7 +424,11 @@ class List(_ProjectCommand):
 
     def do_run(self, args, user_args):
         def sha_thunk(project):
-            if project.revision:
+            if not project.is_cloned():
+                log.die('cannot get sha for uncloned project {0}; '
+                        'run "west update {0}" and retry'.
+                        format(project.name))
+            elif project.revision:
                 return _sha(project, MANIFEST_REV)
             else:
                 return '{:40}'.format('N/A')
@@ -434,7 +439,8 @@ class List(_ProjectCommand):
         def delay(func, project):
             return DelayFormat(partial(func, project))
 
-        for project in self._projects(args.projects):
+        for project in self._projects(args.projects,
+                                      listed_must_be_cloned=False):
             # Spelling out the format keys explicitly here gives us
             # future-proofing if the internal Project representation
             # ever changes.
