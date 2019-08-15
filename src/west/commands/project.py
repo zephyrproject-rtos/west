@@ -439,7 +439,8 @@ class ManifestCommand(_ProjectCommand):
             The --freeze operation outputs the manifest with all
             project-related values fully specified: defaults are
             applied, and all revisions are converted to SHAs based on
-            the current manifest-rev branches.
+            the current manifest-rev branches. Note that all projects
+            must be cloned for this to work.
 
             The --validate operation validates the current manifest,
             printing an error if it cannot be successfully parsed.'''),
@@ -469,9 +470,10 @@ class ManifestCommand(_ProjectCommand):
             Manifest.from_file()
 
     def _freeze(self, args):
-        # We assume --freeze here. Future extensions to the group
-        # --freeze is part of can move this code around.
-        frozen = Manifest.from_file().as_frozen_dict()
+        try:
+            frozen = Manifest.from_file().as_frozen_dict()
+        except RuntimeError as re:
+            log.die(*(list(re.args) + ['(run "west update" and retry)']))
 
         # This is a destructive operation, so it's done here to avoid
         # impacting code which doesn't expect this representer to be
