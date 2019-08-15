@@ -187,8 +187,8 @@ class Init(_ProjectCommand):
 
         self.fixup_zephyr_base(projects)
 
-        _banner('Initialized. Now run "west update" inside {}.'.
-                format(self.topdir))
+        log.banner('Initialized. Now run "west update" inside {}.'.
+                   format(self.topdir))
 
     def local(self, args):
         if args.manifest_rev is not None:
@@ -200,8 +200,8 @@ class Init(_ProjectCommand):
         rel_manifest = basename(manifest_dir)
         west_dir = os.path.join(topdir, WEST_DIR)
 
-        _banner('Initializing from existing manifest repository ' +
-                rel_manifest)
+        log.banner('Initializing from existing manifest repository',
+                   rel_manifest)
         if not exists(manifest_file):
             log.die('No "west.yml" found in {}'.format(manifest_dir))
 
@@ -211,7 +211,8 @@ class Init(_ProjectCommand):
         # self.manifest from west init, as we are in the middle of
         # creating the installation right now.
         projects = self.projects(manifest_file)
-        _msg('Creating {} and local configuration'.format(west_dir))
+        log.small_banner('Creating {} and local configuration'.
+                         format(west_dir))
         update_config('manifest', 'path', rel_manifest)
 
         self.topdir = topdir
@@ -224,7 +225,7 @@ class Init(_ProjectCommand):
         topdir = util.canon_path(args.directory or os.getcwd())
         west_dir = join(topdir, WEST_DIR)
 
-        _banner('Initializing in ' + topdir)
+        log.banner('Initializing in', topdir)
         if not isdir(topdir):
             self.create(topdir, exist_ok=False)
         os.chdir(topdir)
@@ -288,7 +289,8 @@ class Init(_ProjectCommand):
             log.die("Can't create directory {}: {}".format(directory, e.args))
 
     def clone_manifest(self, url, rev, dest, exist_ok=False):
-        _msg('Cloning manifest repository from {}, rev. {}'.format(url, rev))
+        log.small_banner('Cloning manifest repository from {}, rev. {}'.
+                         format(url, rev))
         if not exist_ok and exists(dest):
             log.die('refusing to clone into existing location ' + dest)
 
@@ -420,7 +422,7 @@ class List(_ProjectCommand):
                 self.parser.print_usage()
                 log.die('invalid format string', args.format)
 
-            log.inf(result, colorize=False)  # don't use _msg()!
+            log.inf(result, colorize=False)
 
 
 class ManifestCommand(_ProjectCommand):
@@ -501,7 +503,7 @@ class Diff(_ProjectCommand):
 
     def do_run(self, args, ignored):
         for project in self._cloned_projects(args):
-            _banner(project.format('diff for {name_and_path}:'))
+            log.banner(project.format('diff for {name_and_path}:'))
             # Use paths that are relative to the base directory to make it
             # easier to see where the changes are
             _git(project, 'diff --src-prefix={path}/ --dst-prefix={path}/')
@@ -521,7 +523,7 @@ class Status(_ProjectCommand):
 
     def do_run(self, args, user_args):
         for project in self._cloned_projects(args):
-            _banner(project.format('status of {name_and_path}:'))
+            log.banner(project.format('status of {name_and_path}:'))
             _git(project, 'status', extra_args=user_args)
 
 
@@ -582,7 +584,7 @@ class Update(_ProjectCommand):
             if isinstance(project, ManifestProject):
                 continue
 
-            _banner(project.format('updating {name_and_path}:'))
+            log.banner(project.format('updating {name_and_path}:'))
 
             returncode = _update(project, args.rebase, args.keep_descendants)
             if returncode:
@@ -631,8 +633,8 @@ class ForAll(_ProjectCommand):
 
     def do_run(self, args, user_args):
         for project in self._cloned_projects(args):
-            _banner(project.format('running "{c}" in {name_and_path}:',
-                                   c=args.command))
+            log.banner(project.format('running "{c}" in {name_and_path}:',
+                                      c=args.command))
 
             subprocess.Popen(args.command, shell=True, cwd=project.abspath) \
                 .wait()
@@ -658,7 +660,7 @@ def _rebase(project, **kwargs):
     # Any kwargs are passed on to the underlying _git() call for the
     # rebase operation. A CompletedProcess instance is returned for
     # the git rebase.
-    _msg(project.format('{name}: rebasing to ' + MANIFEST_REV))
+    log.small_banner(project.format('{name}: rebasing to ' + MANIFEST_REV))
     return _git(project, 'rebase ' + QUAL_MANIFEST_REV, **kwargs)
 
 
@@ -705,8 +707,8 @@ def _head_ok(project):
 
 def _checkout_detach(project, revision):
     _git(project, 'checkout --detach --quiet ' + revision)
-    _msg(project.format("{name}: checked out {r} as detached HEAD",
-                        r=_sha(project, revision)))
+    log.small_banner(project.format("{name}: checked out {r} as detached HEAD",
+                                    r=_sha(project, revision)))
 
 
 def _update(project, rebase, keep_descendants):
@@ -726,7 +728,7 @@ def _update(project, rebase, keep_descendants):
     if keep_descendants and is_ancestor:
         # A descendant is currently checked out and keep_descendants was
         # given, so there's nothing more to do.
-        _msg(project.format(
+        log.small_banner(project.format(
             '{name}: left descendant branch "{b}" checked out',
             b=branch))
     elif try_rebase:
@@ -752,7 +754,7 @@ def _fetch(project):
     # project's repository does not already exist, it is created first.
 
     if not project.is_cloned():
-        _msg(project.format('{name}: cloning and initializing'))
+        log.small_banner(project.format('{name}: cloning and initializing'))
         _git(project, 'init {abspath}', cwd=util.west_topdir())
         # This remote is only added for the user's convenience. We always fetch
         # directly from the URL specified in the manifest.
@@ -767,7 +769,7 @@ def _fetch(project):
     else:
         fetch_cmd = "fetch"
 
-    _msg(project.format(msg))
+    log.small_banner(project.format(msg))
     # This two-step approach avoids a "trying to write non-commit object" error
     # when the revision is an annotated tag. ^{commit} type peeling isn't
     # supported for the <src> in a <src>:<dst> refspec, so we have to do it
@@ -871,15 +873,6 @@ def _git(project, cmd, extra_args=(), capture_stdout=False, check=True,
             res.stdout.decode('utf-8').splitlines()).rstrip("\n")
 
     return res
-
-def _banner(msg):
-    # Prints "msg" as a "banner", i.e. prefixed with '=== ' and colorized.
-    log.inf('=== ' + msg, colorize=True)
-
-def _msg(msg):
-    # Prints "msg" as a smaller banner, i.e. prefixed with '-- ' and
-    # not colorized.
-    log.inf('--- ' + msg, colorize=False)
 
 
 #
