@@ -589,7 +589,18 @@ class Update(_ProjectCommand):
         parser = self._parser(parser_adder)
 
         group = parser.add_argument_group(
-            title='checked out branches',
+            title='fetching behavior',
+            description='By default, west update tries to avoid fetching.')
+        group.add_argument('-f', '--fetch', dest='fetch_strategy',
+                           choices=['always', 'smart'],
+                           help='''how to fetch projects when updating:
+                           "always" fetches every project before update,
+                           while "smart" (default) skips fetching projects
+                           whose revisions are SHAs or tags available
+                           locally''')
+
+        group = parser.add_argument_group(
+            title='checked out branch behavior',
             description=textwrap.dedent('''\
             By default, locally checked out branches are left behind
             when manifest-rev commits are checked out.'''))
@@ -613,6 +624,7 @@ class Update(_ProjectCommand):
     def do_run(self, args, user_args):
         if args.exclude_west:
             log.wrn('ignoring --exclude-west')
+        fs = self._fetch_strategy(args)
 
         failed = []
         for project in self._projects(args.projects):
@@ -620,10 +632,24 @@ class Update(_ProjectCommand):
                 continue
             log.banner(project.format('updating {name_and_path}:'))
             try:
-                _update(project, args.rebase, args.keep_descendants)
+                _update(project, fs, args.rebase, args.keep_descendants)
             except subprocess.CalledProcessError:
                 failed.append(project)
         self._handle_failed(args, failed)
+
+    def _fetch_strategy(self, args):
+        cfg = config.get('update', 'fetch', fallback=None)
+        if cfg is not None and cfg not in ('always', 'smart'):
+            log.wrn('ignoring invalid config update.fetch={}; '
+                    'choices: always, smart'.format(cfg))
+            cfg = None
+        if args.fetch_strategy:
+            return args.fetch_strategy
+        elif cfg:
+            return cfg
+        else:
+            return 'smart'
+
 
 class ForAll(_ProjectCommand):
     def __init__(self):
@@ -693,8 +719,14 @@ def _maybe_sha(rev):
     return len(rev) <= 40
 
 
-def _update(project, rebase, keep_descendants):
-    _fetch(project)
+def _update(project, fetch, rebase, keep_descendants):
+    if not project.is_cloned():
+        _clone(project)
+
+    if fetch == 'always' or _rev_type(project) not in ('tag', 'commit'):
+        _fetch(project)
+    else:
+        log.dbg('skipping unnecessary fetch')
 
     try:
         sha = project.sha(QUAL_MANIFEST_REV)
@@ -734,17 +766,66 @@ def _update(project, rebase, keep_descendants):
         _post_checkout_help(project, current_branch, sha, is_ancestor)
 
 
+def _clone(project):
+    log.small_banner(project.format('{name}: cloning and initializing'))
+    project.git('init {abspath}', cwd=util.west_topdir())
+    # This remote is only added for the user's convenience. We always fetch
+    # directly from the URL specified in the manifest.
+    project.git('remote add -- {remote_name} {url}')
+
+
+def _rev_type(project):
+    # Returns a "refined" revision type of project.revision as of the
+    # following strings: 'tag', 'tree', 'blob', 'commit', 'branch',
+    # 'other'.
+    #
+    # The approach combines git cat-file -t and git rev-parse because,
+    # while cat-file can for sure tell us a blob, tree, or tag, it
+    # doesn't have a way to disambiguate between branch names and
+    # other types of commit-ishes, like SHAs, things like "HEAD" or
+    # "HEAD~2", etc.
+    #
+    # We need this extra layer of refinement to be able to avoid
+    # fetching SHAs that are already available locally.
+    #
+    # This doesn't belong in manifest.py because it contains "west
+    # update" specific logic.
+
+    cp = project.git('cat-file -t {revision}', check=False,
+                     capture_stdout=True, capture_stderr=True)
+    stdout = cp.stdout.decode('utf-8').strip()
+    if cp.returncode:
+        return 'other'
+    elif stdout in ('blob', 'tree', 'tag'):
+        return stdout
+    elif stdout != 'commit':    # just future-proofing
+        return 'other'
+
+    # to tell branches apart from commits, we need rev-parse.
+    cp = project.git('rev-parse --verify --symbolic-full-name {revision}',
+                     check=False, capture_stdout=True, capture_stderr=True)
+    if cp.returncode:
+        # This can happen if the ref name is ambiguous, e.g.:
+        #
+        # $ git update-ref ambiguous-ref HEAD~2
+        # $ git checkout -B ambiguous-ref
+        #
+        # Which creates both .git/ambiguous-ref and
+        # .git/refs/heads/ambiguous-ref.
+        return 'other'
+
+    stdout = cp.stdout.decode('utf-8').strip()
+    if stdout.startswith('refs/heads'):
+        return 'branch'
+    elif not stdout:
+        return 'commit'
+    else:
+        return 'other'
+
+
 def _fetch(project):
     # Fetches upstream changes for 'project' and updates the 'manifest-rev'
-    # branch to point to the revision specified in the manifest. If the
-    # project's repository does not already exist, it is created first.
-
-    if not project.is_cloned():
-        log.small_banner(project.format('{name}: cloning and initializing'))
-        project.git('init {abspath}', cwd=util.west_topdir())
-        # This remote is only added for the user's convenience. We always fetch
-        # directly from the URL specified in the manifest.
-        project.git('remote add -- {remote_name} {url}')
+    # branch to point to the revision specified in the manifest.
 
     # Fetch the revision specified in the manifest into the local ref space.
     #
@@ -752,7 +833,7 @@ def _fetch(project):
     # non-commit object" error when the revision is an annotated
     # tag. ^{commit} type peeling isn't supported for the <src> in a
     # <src>:<dst> refspec, so we have to do it separately.
-    msg = "{name}: fetching changes"
+    msg = "{name}: fetching, need revision {revision}"
     if project.clone_depth:
         msg += " with --depth {clone_depth}"
     # -f is needed to avoid errors in case multiple remotes are present,
