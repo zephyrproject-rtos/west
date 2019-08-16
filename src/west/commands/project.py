@@ -27,6 +27,10 @@ from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
 from urllib.parse import urlparse
 import posixpath
 
+#
+# Project-related or multi-repo commands, like "init", "update",
+# "diff", etc.
+#
 
 class _ProjectCommand(WestCommand):
     # Helper class which contains common code needed by various commands
@@ -86,6 +90,23 @@ class _ProjectCommand(WestCommand):
                 # Should never happen, but re-raise to fail fast and
                 # preserve a stack trace, to encourage a bug report.
                 raise
+
+    def _handle_failed(self, args, failed):
+        # Shared code for commands (like status, diff, update) that need
+        # to do the same thing to multiple projects, but collect
+        # and report errors if anything failed.
+
+        if not failed:
+            return
+        elif len(failed) < 20:
+            log.err('{command} failed for project{s} {projects}'.
+                    format(command=self.name,
+                           s='s:' if len(failed) > 1 else '',
+                           projects=', '.join(p.format('{name}')
+                                              for p in failed)))
+        else:
+            log.err('{command} failed for multiple projects; see above')
+        raise CommandError(1)
 
 class Init(_ProjectCommand):
 
@@ -383,7 +404,7 @@ class List(_ProjectCommand):
                         'run "west update {0}" and retry'.
                         format(project.name))
             elif project.revision:
-                return _sha(project, MANIFEST_REV)
+                return project.sha(MANIFEST_REV)
             else:
                 return '{:40}'.format('N/A')
 
@@ -421,6 +442,9 @@ class List(_ProjectCommand):
             except IndexError:
                 self.parser.print_usage()
                 log.die('invalid format string', args.format)
+            except subprocess.CalledProcessError:
+                log.die('subprocess error while listing project',
+                        project.name)
 
             log.inf(result, colorize=False)
 
@@ -504,11 +528,16 @@ class Diff(_ProjectCommand):
         return parser
 
     def do_run(self, args, ignored):
+        failed = []
         for project in self._cloned_projects(args):
             log.banner(project.format('diff for {name_and_path}:'))
             # Use paths that are relative to the base directory to make it
             # easier to see where the changes are
-            _git(project, 'diff --src-prefix={path}/ --dst-prefix={path}/')
+            try:
+                project.git('diff --src-prefix={path}/ --dst-prefix={path}/')
+            except subprocess.CalledProcessError:
+                failed.append(project)
+        self._handle_failed(args, failed)
 
 
 class Status(_ProjectCommand):
@@ -524,9 +553,14 @@ class Status(_ProjectCommand):
         return parser
 
     def do_run(self, args, user_args):
+        failed = []
         for project in self._cloned_projects(args):
             log.banner(project.format('status of {name_and_path}:'))
-            _git(project, 'status', extra_args=user_args)
+            try:
+                project.git('status', extra_args=user_args)
+            except subprocess.CalledProcessError:
+                failed.append(project)
+        self._handle_failed(args, failed)
 
 
 class Update(_ProjectCommand):
@@ -580,30 +614,16 @@ class Update(_ProjectCommand):
         if args.exclude_west:
             log.wrn('ignoring --exclude-west')
 
-        failed_rebases = []
-
+        failed = []
         for project in self._projects(args.projects):
             if isinstance(project, ManifestProject):
                 continue
-
             log.banner(project.format('updating {name_and_path}:'))
-
-            returncode = _update(project, args.rebase, args.keep_descendants)
-            if returncode:
-                failed_rebases.append(project)
-                log.err(project.format('{name_and_path} failed to rebase'))
-
-        if failed_rebases:
-            # Avoid printing this message if exactly one project
-            # was specified on the command line.
-            if len(args.projects) != 1:
-                log.err(('The following project{} failed to rebase; '
-                        'see above for details: {}').format(
-                            's' if len(failed_rebases) > 1 else '',
-                            ', '.join(p.format('{name_and_path}')
-                                      for p in failed_rebases)))
-            raise CommandError(1)
-
+            try:
+                _update(project, args.rebase, args.keep_descendants)
+            except subprocess.CalledProcessError:
+                failed.append(project)
+        self._handle_failed(args, failed)
 
 class ForAll(_ProjectCommand):
     def __init__(self):
@@ -634,12 +654,15 @@ class ForAll(_ProjectCommand):
         return parser
 
     def do_run(self, args, user_args):
+        failed = []
         for project in self._cloned_projects(args):
             log.banner(project.format('running "{c}" in {name_and_path}:',
                                       c=args.command))
-
-            subprocess.Popen(args.command, shell=True, cwd=project.abspath) \
-                .wait()
+            rc = subprocess.Popen(args.command, shell=True,
+                                  cwd=project.abspath).wait()
+            if rc:
+                failed.append(project)
+        self._handle_failed(args, failed)
 
 
 class SelfUpdate(_ProjectCommand):
@@ -655,73 +678,38 @@ class SelfUpdate(_ProjectCommand):
     def do_run(self, args, user_args):
         log.die(self.description)
 
+#
+# Private helper routines.
+#
 
-def _rebase(project, **kwargs):
-    # Rebases the project against the manifest-rev branch
-    #
-    # Any kwargs are passed on to the underlying _git() call for the
-    # rebase operation. A CompletedProcess instance is returned for
-    # the git rebase.
-    log.small_banner(project.format('{name}: rebasing to ' + MANIFEST_REV))
-    return _git(project, 'rebase ' + QUAL_MANIFEST_REV, **kwargs)
-
-
-def _sha(project, rev):
-    # Returns project.sha(rev), aborting the program on CalledProcessError.
+def _maybe_sha(rev):
+    # Return true if and only if the given revision might be a SHA.
 
     try:
-        return project.sha(rev)
-    except subprocess.CalledProcessError:
-        log.die(project.format(
-            "failed to get SHA for revision '{r}' in {name_and_path}",
-            r=rev))
+        int(rev, 16)
+    except ValueError:
+        return False
 
-
-def _current_branch(project):
-    # Determine if project is currently on a branch
-    if not project.is_cloned():
-        return None
-
-    branch = _git(project, 'rev-parse --abbrev-ref HEAD',
-                  capture_stdout=True).stdout
-
-    if branch == 'HEAD':
-        return None
-    else:
-        return branch
-
-
-def _head_ok(project):
-    # Returns True if the reference 'HEAD' exists and is not a tag or remote
-    # ref (e.g. refs/remotes/origin/HEAD).
-    # Some versions of git will report 1, when doing
-    # 'git show-ref --verify HEAD' even if HEAD is valid, see #119.
-    # 'git show-ref --head <reference>' will always return 0 if HEAD or
-    # <reference> is valid.
-    # We are only interested in HEAD, thus we must avoid <reference> being
-    # valid. '/' can never point to valid reference, thus 'show-ref --head /'
-    # will return:
-    # - 0 if HEAD is present
-    # - 1 otherwise
-    return _git(project, 'show-ref --quiet --head /', check=False) \
-           .returncode == 0
-
-
-def _checkout_detach(project, revision):
-    _git(project, 'checkout --detach --quiet ' + revision)
-    log.small_banner(project.format("{name}: checked out {r} as detached HEAD",
-                                    r=_sha(project, revision)))
+    return len(rev) <= 40
 
 
 def _update(project, rebase, keep_descendants):
     _fetch(project)
 
-    branch = _current_branch(project)
-    sha = _sha(project, MANIFEST_REV)
-    if branch is not None:
-        is_ancestor = project.is_ancestor_of(sha, branch)
+    try:
+        sha = project.sha(QUAL_MANIFEST_REV)
+    except subprocess.CalledProcessError:
+        # This is a sign something's really wrong. Add more help.
+        log.err(project.format("no SHA for branch {mr} in {name_and_path}; "
+                               'was the branch deleted?', mr=MANIFEST_REV))
+        raise
+
+    cp = project.git('rev-parse --abbrev-ref HEAD', capture_stdout=True)
+    current_branch = cp.stdout.decode('utf-8').strip()
+    if current_branch != 'HEAD':
+        is_ancestor = project.is_ancestor_of(sha, current_branch)
         try_rebase = rebase
-    else:
+    else:  # HEAD means no branch is checked out.
         # If no branch is checked out, 'rebase' and 'keep_descendants' don't
         # matter.
         is_ancestor = False
@@ -732,22 +720,18 @@ def _update(project, rebase, keep_descendants):
         # given, so there's nothing more to do.
         log.small_banner(project.format(
             '{name}: left descendant branch "{b}" checked out',
-            b=branch))
+            b=current_branch))
     elif try_rebase:
-        # Attempt a rebase. Don't exit the program on error;
-        # instead, append to the list of failed rebases and
-        # continue trying to update the other projects. We'll
-        # tell the user a complete list of errors when we're done.
-        cp = _rebase(project, check=False)
-        return cp.returncode
+        # Attempt a rebase.
+        log.small_banner(project.format('{name}: rebasing to ' + MANIFEST_REV))
+        project.git('rebase ' + QUAL_MANIFEST_REV)
     else:
         # We can't keep a descendant or rebase, so just check
-        # out the new detached HEAD and print helpful
-        # information about things they can do with any
-        # locally checked out branch.
-        _checkout_detach(project, MANIFEST_REV)
-        _post_checkout_help(project, branch, sha, is_ancestor)
-    return 0
+        # out the new detached HEAD, then print some helpful context.
+        project.git('checkout --detach --quiet ' + sha)
+        log.small_banner(project.format(
+            "{name}: checked out {r} as detached HEAD", r=sha))
+        _post_checkout_help(project, current_branch, sha, is_ancestor)
 
 
 def _fetch(project):
@@ -757,36 +741,42 @@ def _fetch(project):
 
     if not project.is_cloned():
         log.small_banner(project.format('{name}: cloning and initializing'))
-        _git(project, 'init {abspath}', cwd=util.west_topdir())
+        project.git('init {abspath}', cwd=util.west_topdir())
         # This remote is only added for the user's convenience. We always fetch
         # directly from the URL specified in the manifest.
-        _git(project, 'remote add -- {remote_name} {url}')
+        project.git('remote add -- {remote_name} {url}')
 
-    # Fetch the revision specified in the manifest into the manifest-rev branch
-
+    # Fetch the revision specified in the manifest into the local ref space.
+    #
+    # The following two-step approach avoids a "trying to write
+    # non-commit object" error when the revision is an annotated
+    # tag. ^{commit} type peeling isn't supported for the <src> in a
+    # <src>:<dst> refspec, so we have to do it separately.
     msg = "{name}: fetching changes"
     if project.clone_depth:
-        fetch_cmd = "fetch --depth={clone_depth}"
         msg += " with --depth {clone_depth}"
-    else:
-        fetch_cmd = "fetch"
-
-    log.small_banner(project.format(msg))
-    # This two-step approach avoids a "trying to write non-commit object" error
-    # when the revision is an annotated tag. ^{commit} type peeling isn't
-    # supported for the <src> in a <src>:<dst> refspec, so we have to do it
-    # separately.
+    # -f is needed to avoid errors in case multiple remotes are present,
+    # at least one of which contains refs that can't be fast-forwarded to our
+    # local ref space.
     #
-    # --tags is required to get tags when the remote is specified as an URL.
+    # --tags is required to get tags when the remote is specified as a URL.
+    fetch_cmd = ('fetch -f --tags' +
+                 ('--depth={clone_depth} ' if project.clone_depth else ' ') +
+                 '-- {url} ')
+    update_cmd = 'update-ref ' + QUAL_MANIFEST_REV + ' '
     if _maybe_sha(project.revision):
         # Don't fetch a SHA directly, as server may restrict from doing so.
-        _git(project, fetch_cmd + ' -f --tags '
-             '-- {url} refs/heads/*:refs/west/*')
-        _git(project, 'update-ref ' + QUAL_MANIFEST_REV + ' {revision}')
+        fetch_cmd += 'refs/heads/*:refs/west/*'
+        update_cmd += '{revision}'
     else:
-        _git(project, fetch_cmd + ' -f --tags -- {url} {revision}')
-        _git(project,
-             'update-ref ' + QUAL_MANIFEST_REV + ' FETCH_HEAD^{{commit}}')
+        # The revision is definitely not a SHA, so it's safe to fetch directly.
+        # This avoids fetching unnecessary ref space from the remote.
+        fetch_cmd += '{revision}'
+        update_cmd += 'FETCH_HEAD^{{commit}}'
+
+    log.small_banner(project.format(msg))
+    project.git(fetch_cmd)
+    project.git(update_cmd)
 
     if not _head_ok(project):
         # If nothing it checked out (which would usually only happen just after
@@ -801,14 +791,30 @@ def _fetch(project):
         # The --detach flag is strictly redundant here, because the
         # refs/heads/<branch> form already detaches HEAD, but it avoids a
         # spammy detached HEAD warning from Git.
-        _git(project, 'checkout --detach ' + QUAL_MANIFEST_REV)
+        project.git('checkout --detach ' + QUAL_MANIFEST_REV)
+
+
+def _head_ok(project):
+    # Returns True if the reference 'HEAD' exists and is not a tag or remote
+    # ref (e.g. refs/remotes/origin/HEAD).
+    # Some versions of git will report 1, when doing
+    # 'git show-ref --verify HEAD' even if HEAD is valid, see #119.
+    # 'git show-ref --head <reference>' will always return 0 if HEAD or
+    # <reference> is valid.
+    # We are only interested in HEAD, thus we must avoid <reference> being
+    # valid. '/' can never point to valid reference, thus 'show-ref --head /'
+    # will return:
+    # - 0 if HEAD is present
+    # - 1 otherwise
+    return project.git('show-ref --quiet --head /',
+                       check=False).returncode == 0
 
 
 def _post_checkout_help(project, branch, sha, is_ancestor):
     # Print helpful information to the user about a project that
     # might have just left a branch behind.
 
-    if branch is None:
+    if branch == 'HEAD':
         # If there was no branch checked out, there are no
         # additional diagnostics that need emitting.
         return
@@ -835,46 +841,6 @@ def _post_checkout_help(project, branch, sha, is_ancestor):
             b=branch, rp=rel, sh=sha))
         log.dbg('(To do this automatically in the future,',
                 'use "west update --rebase".)')
-
-
-def _maybe_sha(rev):
-    # Return true if and only if the given revision might be a SHA.
-
-    try:
-        int(rev, 16)
-    except ValueError:
-        return False
-
-    return len(rev) <= 40
-
-
-def _git(project, cmd, extra_args=(), capture_stdout=False, check=True,
-         cwd=None):
-    # Wrapper for project.git() that by default calls log.die() with a
-    # message about the command that failed if CalledProcessError is raised.
-
-    try:
-        res = project.git(cmd, extra_args=extra_args,
-                          capture_stdout=capture_stdout, check=check, cwd=cwd)
-    except subprocess.CalledProcessError as e:
-        msg = project.format(
-            "Command '{c}' failed with code {rc} for {name_and_path}",
-            c=cmd, rc=e.returncode)
-
-        log.die(msg)
-
-    if capture_stdout:
-        # Manual UTF-8 decoding and universal newlines. Before Python 3.6,
-        # Popen doesn't seem to allow using universal newlines mode (which
-        # enables decoding) with a specific encoding (because the encoding=
-        # parameter is missing).
-        #
-        # Also strip all trailing newlines as convenience. The splitlines()
-        # already means we lose a final '\n' anyway.
-        res.stdout = "\n".join(
-            res.stdout.decode('utf-8').splitlines()).rstrip("\n")
-
-    return res
 
 
 #
