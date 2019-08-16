@@ -34,12 +34,6 @@ from west.backports import CompletedProcess
 from west.configuration import config
 
 
-# Todo: take from _bootstrap?
-# Default west repository URL.
-WEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/west'
-# Default revision to check out of the west repository.
-WEST_REV_DEFAULT = 'master'
-
 #: Index in projects where the project with contains project manifest file is
 #: located
 MANIFEST_PROJECT_INDEX = 0
