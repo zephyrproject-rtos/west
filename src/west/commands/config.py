@@ -200,8 +200,8 @@ class Config(WestCommand):
     def _sk(self, args):
         name_list = args.name.split(".", 1)
         if len(name_list) != 2:
-            self.parser.error('name {} should be in the form <section>.<key>',
-                              exit_code=3)
+            self.parser.error("name '{}' should be in the form "
+                              "<section>.<key>".format(args.name))
         return name_list[0], name_list[1]
 
     def _perm_error(self, pe, what, section, key):
