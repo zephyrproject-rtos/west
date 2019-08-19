@@ -222,8 +222,8 @@ class Manifest:
             else:
                 ret.append(project)
 
-            if only_cloned and not project.is_cloned():
-                uncloned.append(project)
+                if only_cloned and not project.is_cloned():
+                    uncloned.append(project)
 
         if unknown or (only_cloned and uncloned):
             raise ValueError(unknown, uncloned)

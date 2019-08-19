@@ -403,6 +403,19 @@ def test_west_is_ok():
     assert manifest.projects[1].name == 'west'
 
 
+def test_get_projects_unknown():
+    content = '''\
+    manifest:
+      projects:
+        - name: foo
+          url: https://foo.com
+    '''
+    with patch('west.util.west_topdir', return_value='/west_top'):
+        manifest = Manifest.from_data(yaml.safe_load(content))
+        with pytest.raises(ValueError):
+            manifest.get_projects(['unknown'])
+
+
 # Invalid manifests should raise MalformedManifest.
 @pytest.mark.parametrize('invalid',
                          glob(os.path.join(THIS_DIRECTORY, 'manifests',
