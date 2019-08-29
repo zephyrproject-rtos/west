@@ -1,0 +1,4 @@
+manifest:
+  projects:
+    - name: manifest
+      url: no-way
