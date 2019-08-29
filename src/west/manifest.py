@@ -31,7 +31,7 @@ from pathlib import PurePath
 
 from west import util, log
 from west.backports import CompletedProcess
-from west.configuration import config
+import west.configuration as cfg
 
 
 #: Index in projects where the project with contains project manifest file is
@@ -53,12 +53,7 @@ def manifest_path():
     Raises: WestNotFound if called from outside of a west installation,
     MalformedConfig if the configuration file is missing a manifest.path key,
     and FileNotFoundError if the manifest.path file doesn't exist.'''
-    try:
-        ret = os.path.join(util.west_topdir(),
-                           config.get('manifest', 'path'),
-                           'west.yml')
-    except (configparser.NoOptionError, configparser.NoSectionError) as e:
-        raise MalformedConfig('no "manifest.path" config option is set') from e
+    ret = os.path.join(util.west_topdir(), _mpath(), 'west.yml')
     # It's kind of annoying to manually instantiate a FileNotFoundError.
     # This seems to be the best way.
     if not os.path.isfile(ret):
@@ -73,64 +68,163 @@ class Manifest:
     from_file and from_data helper methods.'''
 
     @staticmethod
-    def from_file(source_file=None):
+    def from_file(source_file=None, topdir=None):
         '''Create and return a new Manifest object given a source YAML file.
 
         :param source_file: Path to a YAML file containing the manifest.
+        :param topdir: If given, the returned Manifest has a project
+                       hierarchy rooted at this directory.
 
-        If source_file is None, the value returned by `manifest_path()`
-        is used.
+        If neither *source_file* nor *topdir* is given, a search is
+        performed in the filesystem for a west installation, which is
+        used as topdir. Its manifest.path configuration option is used
+        to find source_file, ``topdir/<manifest.path>/west.yml``.
 
-        Raises `MalformedManifest` in case of validation errors.
-        Raises `MalformedConfig` in case of missing configuration settings.'''
-        if source_file is None:
-            source_file = manifest_path()
-        return Manifest(source_file=source_file)
+        If only *source_file* is given, the search for the
+        corresponding topdir is done starting from its parent
+        directory.  This directory containing *source_file* does NOT
+        have to be manifest.path in this case, allowing parsing of
+        additional manifest files besides the "main" one in an
+        installation.
+
+        If only *topdir* is given, that directory must be a west
+        installation root, and its manifest.path will be used to find
+        the source file.
+
+        If both *source_file* and *topdir* are given, the returned
+        Manifest object is based on the data in *source_file*, rooted
+        at *topdir*. The configuration files are not read in this
+        case.  This allows parsing a manifest file "as if" its project
+        hierarchy were rooted at another location in the system.
+
+        Exceptions raised:
+
+        - `west.util.WestNotFound` if a .west directory is
+          needed but cannot be found.
+        - `MalformedManifest` in case of validation errors.
+        - `MalformedConfig` in case of a missing manifest.path
+          configuration option or otherwise malformed configuration.
+        - `ValueError` if topdir is not a west installation root
+          and needs to be
+
+        '''
+        if source_file is None and topdir is None:
+            # neither source_file nor topdir: search the filesystem
+            # for the installation and use its manifest.path.
+            topdir = util.west_topdir()
+            source_file = _west_yml(topdir)
+            return Manifest(source_file=source_file, topdir=topdir)
+        elif source_file is not None and topdir is None:
+            # just source_file: find topdir starting there.
+            # fall_back is the default value -- this is just for emphasis.
+            topdir = util.west_topdir(start=os.path.dirname(source_file),
+                                      fall_back=True)
+        elif topdir is not None and source_file is None:
+            # just topdir. verify it's a real west installation root.
+            msg = 'topdir {} is not a west installation root'.format(topdir)
+            try:
+                real_topdir = util.west_topdir(start=topdir, fall_back=False)
+            except util.WestNotFound:
+                raise ValueError(msg)
+            if PurePath(topdir) != PurePath(real_topdir):
+                raise ValueError(msg + '; but {} is'.format(real_topdir))
+            # find west.yml based on manifest.path.
+            source_file = _west_yml(topdir)
+        else:
+            # both source_file and topdir. nothing more to do, but
+            # let's check the invariant.
+            assert source_file
+            assert topdir
+
+        return Manifest(source_file=source_file, topdir=topdir)
 
     @staticmethod
-    def from_data(source_data):
+    def from_data(source_data, manifest_path=None, topdir=None):
         '''Create and return a new Manifest object given parsed YAML data.
 
         :param source_data: Parsed YAML data as a Python object.
+        :param manifest_path: fallback ManifestProject path attribute
+        :param topdir: If given, absolute paths in the result will be
+                       rooted here.
+
+        This factory allows construction of Manifest objects
+        without needing an on-disk west installation to exist.
+        This can be useful when creating new ones, for example,
+        or thinking about what a new one would look like.
+        It does not read any west configuration files on disk.
+
+        Unless *topdir* is given, any values in the returned `Manifest`
+        which are absolute paths will be None. Relative paths, such as
+        `Project` path attributes, will be parsed from the manifest.
+
+        If ``source_data['manifest']['self']['path']`` is not set, the
+        `ManifestProject` path attribute in the returned Manifest is
+        *manifest_path*.
 
         Raises MalformedManifest in case of validation errors.
-        Raises MalformedConfig in case of missing configuration settings.'''
-        return Manifest(source_data=source_data)
+        '''
+        return Manifest(source_data=source_data, topdir=topdir,
+                        manifest_path=manifest_path)
 
-    def __init__(self, source_file=None, source_data=None):
+    def __init__(self, source_file=None, source_data=None,
+                 manifest_path=None, topdir=None):
         '''Create a new Manifest object.
 
         :param source_file: Path to a YAML file containing the manifest.
         :param source_data: Parsed YAML data as a Python object.
+        :param manifest_path: fallback ManifestProject path attribute if
+                              *source_data* is given, ignored otherwise
+        :param topdir: If given, absolute paths in the manifest will be
+                       rooted here, as if *topdir* contained the .west
+                       directory.
 
-        Normally, it is more convenient to use the `from_file` and
-        `from_data` convenience factories than calling the constructor
-        directly.
+        It is usually more convenient to use the `from_file` and
+        `from_data` factories than to call this constructor directly.
 
-        Exactly one of the source_file and source_data parameters must
+        Exactly one of the *source_file* and *source_data* parameters must
         be given.
 
-        Raises MalformedManifest in case of validation errors.
-        Raises MalformedConfig in case of missing configuration settings.'''
+        If *source_file* is given:
+
+        - If *topdir* is also given, the Project hierarchy will be
+          rooted there.
+        - Otherwise, topdir is discovered by searching the file system
+          for a west installation root, starting at the directory containing
+          *source_file*. The Project hierarchy will be rooted at the discovered
+          location.
+
+        Otherwise (*source_data* must be given):
+
+        - If *topdir* is given, the Project hierarchy is rooted there.
+        - Otherwise, the hierarchy will have no root: all absolute path
+          attributes will be None.
+
+        If *source_data* does not specify the manifest repository
+        path, *manifest_path* is the fallback value if given.
+
+        - `MalformedManifest` in case of validation errors.
+        - `WestNotFound` in case a west installation search was
+          performed, and failed.
+        - `ValueError`: on invalid arguments
+        '''
         if source_file and source_data:
             raise ValueError('both source_file and source_data were given')
+
+        self.path = None
+        '''Path to the file containing the manifest, or None if created
+        from data rather than the file system.'''
 
         if source_file:
             with open(source_file, 'r') as f:
                 self._data = yaml.safe_load(f.read())
-            path = source_file
+            self.path = os.path.abspath(source_file)
         else:
             self._data = source_data
-            path = None
-
-        self.path = path
-        '''Path to the file containing the manifest, or None if created
-        from data rather than the file system.'''
 
         if not self._data:
             self._malformed('manifest contains no data')
 
-        if 'manifest' not in self._data:
+        if self._data.get('manifest') is None:
             self._malformed('manifest contains no manifest element')
         data = self._data['manifest']
 
@@ -160,7 +254,7 @@ class Manifest:
 
         # Set up the public attributes documented above, as well as
         # any internal attributes needed to implement the public API.
-        self._load(self._data)
+        self._load(self._data, topdir, manifest_path)
 
     def get_remote(self, name):
         '''Get a manifest Remote, given its name.'''
@@ -274,24 +368,29 @@ class Manifest:
         else:
             raise exc
 
-    def _load(self, data):
+    def _load(self, data, topdir, path_hint):
         # Initialize this instance's fields from values given in the
         # manifest data, which must be validated according to the schema.
         projects = []
         project_names = set()
-        project_abspaths = set()
+        project_paths = set()
 
+        # Create the ManifestProject instance and install it into the
+        # Project hierarchy.
         manifest = data.get('manifest')
+        slf = manifest.get('self', dict())  # the self name is already taken
+        if self.path:
+            # We're parsing a real file on disk. We currently require
+            # that we are able to resolve a topdir. We may lift this
+            # restriction in the future.
+            assert topdir
+        mproj = ManifestProject(path=slf.get('path', path_hint),
+                                topdir=topdir,
+                                west_commands=slf.get('west-commands'))
+        projects.insert(MANIFEST_PROJECT_INDEX, mproj)
 
-        path = config.get('manifest', 'path', fallback=None)
-
-        self_tag = manifest.get('self')
-        if path is None:
-            path = self_tag.get('path') if self_tag else ''
-        west_commands = self_tag.get('west-commands') if self_tag else None
-
-        project = ManifestProject(path=path, west_commands=west_commands)
-        projects.insert(MANIFEST_PROJECT_INDEX, project)
+        # Set the topdir attribute based on the results of the above.
+        self.topdir = topdir
 
         # Map from each remote's name onto that remote's data in the manifest.
         remotes = tuple(Remote(r['name'], r['url-base']) for r in
@@ -317,16 +416,16 @@ class Manifest:
             default_remote_name = None
         defaults = Defaults(remote=default_remote, revision=md.get('revision'))
 
-        # mp = manifest project (dictionary with values parsed from
-        # the manifest)
-        for mp in manifest['projects']:
+        # pdata = project data (dictionary of project information parsed from
+        # the manifest file)
+        for pdata in manifest['projects']:
             # Validate the project name.
-            name = mp['name']
+            name = pdata['name']
 
             # Validate the project remote or URL.
-            remote_name = mp.get('remote')
-            url = mp.get('url')
-            repo_path = mp.get('repo-path')
+            remote_name = pdata.get('remote')
+            url = pdata.get('url')
+            repo_path = pdata.get('repo-path')
             if remote_name is None and url is None:
                 if default_remote_name is None:
                     self._malformed(
@@ -346,31 +445,37 @@ class Manifest:
             try:
                 project = Project(name,
                                   defaults,
-                                  path=mp.get('path'),
-                                  clone_depth=mp.get('clone-depth'),
-                                  revision=mp.get('revision'),
-                                  west_commands=mp.get('west-commands'),
+                                  path=pdata.get('path'),
+                                  clone_depth=pdata.get('clone-depth'),
+                                  revision=pdata.get('revision'),
+                                  west_commands=pdata.get('west-commands'),
                                   remote=remote,
                                   repo_path=repo_path,
+                                  topdir=topdir,
                                   url=url)
             except ValueError as ve:
                 self._malformed(ve.args[0])
 
+            # The name "manifest" cannot be used as a project name; it
+            # is reserved to refer to the manifest repository itself
+            # (e.g. from "west list"). Note that this has not always
+            # been enforced, but it is part of the documentation.
+            if project.name == 'manifest':
+                self._malformed('no project can be named "manifest"')
             # Project names must be unique.
             if project.name in project_names:
                 self._malformed('project name {} is already used'.
                                 format(project.name))
-            # Two projects cannot have the same path. We use absolute
-            # paths to check for collisions to ensure paths are
-            # normalized (e.g. for case-insensitive file systems or
-            # in cases like on Windows where / or \ may serve as a
-            # path component separator).
-            if project.abspath in project_abspaths:
+            # Two projects cannot have the same path. We use a PurePath
+            # comparison here to ensure that platform-specific canonicalization
+            # rules are handled correctly.
+            if PurePath(project.path) in project_paths:
                 self._malformed('project {} path {} is already in use'.
                                 format(project.name, project.path))
+            else:
+                project_paths.add(PurePath(project.path))
 
             project_names.add(project.name)
-            project_abspaths.add(project.abspath)
             projects.append(project)
 
         self.defaults = defaults
@@ -378,8 +483,14 @@ class Manifest:
         self._remotes_dict = remotes_dict
         self.projects = tuple(projects)
         self._proj_name_map = {p.name: p for p in self.projects}
-        self._proj_canon_path_map = {util.canon_path(p.abspath): p
-                                     for p in self.projects}
+        pmap = dict()
+        if self.topdir:
+            if mproj.abspath:
+                pmap[util.canon_path(mproj.abspath)] = mproj
+            for p in self.projects[MANIFEST_PROJECT_INDEX + 1:]:
+                assert p.abspath  # sanity check a program invariant
+                pmap[util.canon_path(p.abspath)] = p
+        self._proj_canon_path_map = pmap
 
 
 class MalformedManifest(Exception):
@@ -478,13 +589,13 @@ class Project:
 
     Projects are neither comparable nor hashable.'''
 
-    __slots__ = ('name remote url path abspath posixpath clone_depth '
+    __slots__ = ('name remote url path topdir abspath posixpath clone_depth '
                  'revision west_commands').split()
 
-    def __init__(self, name, defaults=None, path=None, clone_depth=None,
-                 revision=None, west_commands=None, remote=None,
-                 repo_path=None, url=None):
-        '''Specify a Project by name, Remote, and optional information.
+    def __init__(self, name, defaults=None, path=None,
+                 clone_depth=None, revision=None, west_commands=None,
+                 remote=None, repo_path=None, url=None, topdir=None):
+        '''Specify a Project by name and other optional information.
 
         :param name: Project's user-defined name in the manifest.
         :param defaults: If the revision parameter is not given, the project's
@@ -509,6 +620,9 @@ class Project:
                           fetch URL.
         :param url: The project's fetch URL. This cannot be given with *remote*
                     or *repo_path*.
+        :param topdir: Root of the west installation the Project is inside.
+                       If not given, all absolute path attributes (abspath
+                       and posixpath) will be None.
         '''
         if remote and url:
             raise ValueError('got both remote={} and url={}'.
@@ -529,35 +643,43 @@ class Project:
 
         self.name = name
         '''Project name as it appears in the manifest.'''
+
+        # Path related attributes
+        self.path = os.path.normpath(path or name)
+        '''Relative path to the project in the installation.'''
+        self.topdir = topdir
+        '''Root directory of the west installation this project is inside,
+        or None.'''
+        self.abspath = (os.path.realpath(os.path.join(topdir, self.path))
+                        if topdir else None)
+        '''Absolute path to the project on disk, or None.'''
+        self.posixpath = (PurePath(self.abspath).as_posix()
+                          if topdir else None)
+        '''Absolute path to the project, POSIX style (with forward slashes).'''
+
+        # Git related attributes
         self.url = url or (remote.url_base + '/' + repo_path)
         '''Complete fetch URL for the project, either as given by the url kwarg
         or computed from the remote URL base and the project name.'''
-        self.path = os.path.normpath(path or name)
-        '''Relative path to the project in the installation.'''
-        self.abspath = os.path.realpath(os.path.join(util.west_topdir(),
-                                                     self.path))
-        '''Absolute path to the project.'''
-        self.posixpath = PurePath(self.abspath).as_posix()
-        '''Absolute path to the project, POSIX style (with forward slashes).'''
         self.clone_depth = clone_depth
         '''Project's clone depth, or None'''
         self.revision = revision or defaults.revision
         '''Revision to check out for this project, as given in the manifest,
         from manifest defaults, or from the default supplied by west.'''
-        self.west_commands = west_commands
-        '''Path to project's "west-commands", or None.'''
         self.remote = remote
         '''`Remote` instance corresponding to the project's remote, or None.'''
+
+        # Extension commands in the project
+        self.west_commands = west_commands
+        '''Path to project's "west-commands", or None.'''
 
     def __eq__(self, other):
         return NotImplemented
 
     def __repr__(self):
-        reprs = [repr(x) for x in
-                 (self.name, self.remote, self.url, self.path,
-                  self.abspath, self.clone_depth, self.revision)]
-        return ('Project(name={}, remote={}, url={}, path={}, abspath={}, '
-                'clone_depth={}, revision={})').format(*reprs)
+        reprs = ['{}={}'.format(s, repr(getattr(self, s)))
+                 for s in self.__slots__]
+        return 'Project(' + ', '.join(reprs) + ')'
 
     def as_dict(self):
         '''Return a representation of this object as a dict, as it would be
@@ -631,7 +753,10 @@ class Project:
         extra_args = list(extra_args)
 
         if cwd is None:
-            cwd = self.abspath
+            if self.abspath is not None:
+                cwd = self.abspath
+            else:
+                raise ValueError('no abspath; cwd must be given')
 
         args = ['git'] + [self.format(arg) for arg in cmd_list] + extra_args
         cmd_str = util.quote_sh_list(args)
@@ -660,21 +785,23 @@ class Project:
             return CompletedProcess(popen.args, popen.returncode,
                                     stdout, stderr)
 
-    def sha(self, rev):
+    def sha(self, rev, cwd=None):
         '''Returns the SHA of the given revision in the current project.
 
         :param rev: git revision (HEAD, v2.0.0, etc.) as a string
+        :param cwd: directory to run command in (default: self.abspath)
         '''
-        cp = self.git('rev-parse ' + rev, capture_stdout=True)
+        cp = self.git('rev-parse ' + rev, capture_stdout=True, cwd=cwd)
         # Assumption: SHAs are hex values and thus safe to decode in ASCII.
         # It'll be fun when we find out that was wrong and how...
         return cp.stdout.decode('ascii').strip()
 
-    def is_ancestor_of(self, rev1, rev2):
+    def is_ancestor_of(self, rev1, rev2, cwd=None):
         '''Check if 'rev1' is an ancestor of 'rev2' in this project.
 
         :param rev1: commit that could be the ancestor
         :param rev2: commit that could be a descendant
+        :param cwd: directory to run command in (default: self.abspath)
 
         Returns True if rev1 is an ancestor commit of rev2 in the
         given project; rev1 and rev2 can be anything that resolves to
@@ -683,7 +810,7 @@ class Project:
         of itself.) Returns False otherwise.'''
         returncode = self.git('merge-base --is-ancestor {} {}'.
                               format(rev1, rev2),
-                              check=False).returncode
+                              check=False, cwd=cwd).returncode
 
         if returncode == 0:
             return True
@@ -696,10 +823,11 @@ class Project:
                 rc=returncode, r1=rev1, r2=rev2))
             return False
 
-    def is_up_to_date_with(self, rev):
+    def is_up_to_date_with(self, rev, cwd=None):
         '''Check if a project is up to date with revision 'rev'.
 
         :param rev: base revision to check if project is up to date with.
+        :param cwd: directory to run command in (default: self.abspath)
 
         Returns True if all commits in 'rev' are also in HEAD. This
         can be used to check if this project needs updates, rebasing,
@@ -707,16 +835,22 @@ class Project:
 
         This is a special case of is_ancestor_of() provided for convenience.
         '''
-        return self.is_ancestor_of(rev, 'HEAD')
+        return self.is_ancestor_of(rev, 'HEAD', cwd=cwd)
 
-    def is_up_to_date(self):
-        '''Returns is_up_to_date_with(self.revision).'''
-        return self.is_up_to_date_with(self.revision)
+    def is_up_to_date(self, cwd=None):
+        '''Returns is_up_to_date_with(self.revision).
 
-    def is_cloned(self):
+        :param cwd: directory to run command in (default: self.abspath)
+        '''
+        return self.is_up_to_date_with(self.revision, cwd=cwd)
+
+    def is_cloned(self, cwd=None):
         '''Returns True if the project's path is a directory that looks
         like the top-level directory of a Git repository, and False
-        otherwise.'''
+        otherwise.
+
+        :param cwd: directory to run command in (default: self.abspath)
+        '''
         if not os.path.isdir(self.abspath):
             return False
 
@@ -731,49 +865,58 @@ class Project:
 
 
 class ManifestProject(Project):
-    '''Represents the manifest as a project.'''
+    '''Represents the manifest repository as a Project.
+
+    The different role of the manifest repository within an
+    installation means it won't be perfectly representable as such,
+    but several attributes also available for ordinary projects
+    are also available.
+    '''
 
     def __init__(self, path=None, revision=None, url=None,
-                 west_commands=None):
-        '''Specify a Special Project by name, and url, and optional information.
-
+                 west_commands=None, topdir=None):
+        '''
         :param path: Relative path to the project in the west
                      installation, if present in the manifest. If None,
                      the project's ``name`` is used.
-        :param revision: manifest project revision, or None
-        :param url: Complete URL for the manifest project, or None
-        :param west_commands: path to a YAML file in the project containing
-                              a description of west extension commands provided
-                              by the project, if given. This obviously only
-                              makes sense for the manifest project, not west.
+        :param revision: deprecated and ignored; do not use
+        :param url: deprecated and ignored; do not use
+        :param west_commands: path to the YAML file in the manifest repository
+                              configuring its extension commands, if any.
+        :param topdir: Root of the west installation the manifest project
+                       is inside. If not given, all absolute path attributes
+                       (abspath and posixpath) will be None.
         '''
-        self.name = path or 'manifest'
-        '''Project's name (path or default "manifest").'''
+        self.name = 'manifest'
+        '''Name given to the manifest repository (the string "manifest").'''
 
-        self.url = url
-        '''Complete fetch URL for the project.'''
+        # Path related attributes
+        self.path = os.path.normpath(path) if path else None
+        '''Normalized relative path to the manifest repository in the
+        installation, or None.'''
+        self.topdir = topdir
+        '''Root directory of the west installation, or None.'''
+        self.abspath = (os.path.realpath(os.path.join(topdir, self.path))
+                        if topdir and path else None)
+        '''Absolute path to the manifest repository, or None.'''
+        self.posixpath = (PurePath(self.abspath).as_posix()
+                          if self.abspath else None)
+        '''Absolute path, POSIX style (with forward slashes).'''
 
-        self.path = path or self.name
-        '''Relative path to the project in the installation.'''
-
-        self.abspath = os.path.realpath(os.path.join(util.west_topdir(),
-                                                     self.path))
-        '''Absolute path to the project.'''
-
-        self.posixpath = PurePath(self.abspath).as_posix()
-        '''Absolute path to the project, POSIX style (with forward slashes).'''
-
-        self.revision = revision
-        '''Revision to check out for the west project, as given in the manifest,
-        from manifest defaults, or from the default supplied by west. Undefined
-        for the manifest project.'''
-
-        self.remote = None
-        '''None, provided for analogy with Project.'''
-
+        # Git related attributes.
+        self.url = None
+        '''None; the manifest URL is not defined, as it's not saved by west
+        init, and west init -l initializes from a local repository.'''
         self.clone_depth = None
-        '''None, provided for analogy with Project.'''
+        '''None; the manifest history is always cloned in its entirety.'''
+        self.revision = 'HEAD'
+        '''The string "HEAD"; provided for analogy with Project.
+        Commands which operate on the manifest repository always
+        use it as-is on disk and do not change its contents.'''
+        self.remote = None
+        '''None, for the same reason the url attribute is.'''
 
+        # Extension commands in the manifest repository.
         self.west_commands = west_commands
         '''Path to project's "west-commands", for the manifest project, or
         None.'''
@@ -798,3 +941,24 @@ def _warn_once_if_no_git():
     # so the warning is emitted only once per process invocation.
     if shutil.which('git') is None:
         log.wrn('Git is not installed or cannot be found')
+
+def _mpath(cp=None, topdir=None):
+    # Return the value of the manifest.path configuration option
+    # in *cp*, a ConfigParser. If not given, create a new one and
+    # load configuration options with the given *topdir* as west
+    # installation root.
+    #
+    # TODO: write a cfg.get(section, key)
+    # wrapper, with friends for update and delete, to avoid
+    # requiring this boilerplate.
+    if cp is None:
+        cp = cfg._configparser()
+    cfg.read_config(configfile=cfg.ConfigFile.LOCAL, config=cp, topdir=topdir)
+
+    try:
+        return cp.get('manifest', 'path')
+    except (configparser.NoOptionError, configparser.NoSectionError) as e:
+        raise MalformedConfig('no "manifest.path" config option is set') from e
+
+def _west_yml(topdir):
+    return os.path.join(topdir, _mpath(topdir=topdir), 'west.yml')
