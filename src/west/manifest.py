@@ -50,7 +50,7 @@ QUAL_MANIFEST_REV_BRANCH = 'refs/heads/' + MANIFEST_REV_BRANCH
 def manifest_path():
     '''Return the path to the manifest file.
 
-    Raises: WestNotFound if called from outside of a west working directory,
+    Raises: WestNotFound if called from outside of a west installation,
     MalformedConfig if the configuration file is missing a manifest.path key,
     and FileNotFoundError if the manifest.path file doesn't exist.'''
     try:
