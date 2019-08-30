@@ -97,7 +97,8 @@ class Config(WestCommand):
         super().__init__(
             'config',
             'get or set configuration settings in west config files',
-            CONFIG_DESCRIPTION)
+            CONFIG_DESCRIPTION,
+            requires_installation=False)
 
     def do_add_parser(self, parser_adder):
         parser = parser_adder.add_parser(
