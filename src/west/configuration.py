@@ -45,6 +45,9 @@ import configobj
 
 from west.util import west_dir, WestNotFound, canon_path
 
+def _configparser():            # for internal use
+    return configparser.ConfigParser(allow_no_value=True)
+
 
 # Configuration values.
 #
@@ -52,7 +55,7 @@ from west.util import west_dir, WestNotFound, canon_path
 # nice in case something checks configuration values before the configuration
 # file has been read (e.g. the log.py functions, to check color settings, and
 # tests).
-config = configparser.ConfigParser(allow_no_value=True)
+config = _configparser()
 
 class ConfigFile(Enum):
     '''Types of west configuration file.
@@ -69,11 +72,13 @@ class ConfigFile(Enum):
     GLOBAL = 3
     LOCAL = 4
 
-def read_config(configfile=None, config=config, config_file=None):
+def read_config(configfile=None, config=config, topdir=None,
+                config_file=None):
     '''Read configuration files into *config*.
 
     :param configfile: a `west.configuration.ConfigFile`
     :param config: configuration object to read into
+    :param topdir: west installation root to read local config options from
     :param config_file: deprecated alternative spelling for *configfile*
 
     Reads the files given by *configfile*, storing the values into
@@ -82,6 +87,15 @@ def read_config(configfile=None, config=config, config_file=None):
 
     If *configfile* is given, only the files implied by its value are
     read. If not given, ``ConfigFile.ALL`` is used.
+
+    If *configfile* requests local configuration options (i.e. if it
+    is ``ConfigFile.LOCAL`` or ``ConfigFile.ALL`:
+
+    - If *topdir* is given, topdir/.west/config is read
+    - Next, if WEST_CONFIG_LOCAL is set in the environment, its contents
+      (a file) are used.
+    - Otherwise, the file system is searched for a local configuration
+      file, and a failure to find one is ignored.
     '''
     if configfile is not None and config_file is not None:
         raise ValueError('use "configfile" or "config_file"; not both')
@@ -89,35 +103,41 @@ def read_config(configfile=None, config=config, config_file=None):
         configfile = ConfigFile.ALL
     if config_file is not None:
         configfile = config_file
-    config.read(_gather_configs(configfile), encoding='utf-8')
+    config.read(_gather_configs(configfile, topdir), encoding='utf-8')
 
 
-def update_config(section, key, value, configfile=ConfigFile.LOCAL):
+def update_config(section, key, value, configfile=ConfigFile.LOCAL,
+                  topdir=None):
     '''Sets ``section.key`` to *value* in the given configuration file.
 
     :param section: config section; will be created if it does not exist
     :param key: key to set in the given section
     :param value: value to set the key to
     :param configfile: `west.configuration.ConfigFile`, must not be ALL
+    :param topdir: west installation root to write local config options to
 
     The destination file to write is given by *configfile*. The
-    default value (``ConfigFile.LOCAL``) writes to the per-installation
-    file .west/config. This function must therefore be called from a
-    west installation if this default is used, or WestNotFound will be
-    raised.
+    default value (``ConfigFile.LOCAL``) writes to the local
+    configuration file given by:
+
+    - topdir/.west/config, if topdir is given, or
+    - the value of 'WEST_CONFIG_LOCAL' in the environment, if set, or
+    - the local configuration file in the west installation
+      found by searching the file system (raising WestNotFound if
+      one is not found).
     '''
     if configfile == ConfigFile.ALL:
         # Not possible to update ConfigFile.ALL, needs specific conf file here.
         raise ValueError('invalid configfile: {}'.format(configfile))
 
-    filename = _ensure_config(configfile)
+    filename = _ensure_config(configfile, topdir)
     updater = configobj.ConfigObj(filename)
     if section not in updater:
         updater[section] = {}
     updater[section][key] = value
     updater.write()
 
-def delete_config(section, key, configfile=None):
+def delete_config(section, key, configfile=None, topdir=None):
     '''Delete the option section.key from the given file or files.
 
     :param section: section whose key to delete
@@ -130,22 +150,33 @@ def delete_config(section, key, configfile=None):
                        If a list of ConfigFile enumerators, delete
                        from those files.
                        Otherwise, delete from the given ConfigFile.
+    :param topdir: west installation root to delete local options from
 
     Deleting the only key in a section deletes the entire section.
 
-    If the option is not set, KeyError is raised.'''
+    If the option is not set, KeyError is raised.
+
+    If an option is to be deleted from the local configuration file,
+    it is:
+
+    - topdir/.west/config, if topdir is given, or
+    - the value of 'WEST_CONFIG_LOCAL' in the environment, if set, or
+    - the local configuration file in the west installation
+      found by searching the file system (raising WestNotFound if
+      one is not found).
+    '''
     stop = False
     if configfile is None:
-        to_check = [_location(x) for x in
+        to_check = [_location(x, topdir=topdir) for x in
                     [ConfigFile.LOCAL, ConfigFile.GLOBAL]]
         stop = True
     elif configfile == ConfigFile.ALL:
-        to_check = [_location(x) for x in
+        to_check = [_location(x, topdir=topdir) for x in
                     [ConfigFile.SYSTEM, ConfigFile.GLOBAL, ConfigFile.LOCAL]]
     elif isinstance(configfile, ConfigFile):
-        to_check = [_location(configfile)]
+        to_check = [_location(configfile, topdir=topdir)]
     else:
-        to_check = [_location(x) for x in configfile]
+        to_check = [_location(x, topdir=topdir) for x in configfile]
 
     found = False
     for path in to_check:
@@ -164,19 +195,22 @@ def delete_config(section, key, configfile=None):
     if not found:
         raise KeyError('{}.{}'.format(section, key))
 
-def _location(cfg):
+def _location(cfg, topdir=None):
     # Making this a function that gets called each time you ask for a
     # configuration file makes it respect updated environment
     # variables (such as XDG_CONFIG_HOME, PROGRAMDATA) if they're set
-    # during the program lifetime. It also makes it easier to
-    # monkey-patch for testing :).
+    # during the program lifetime.
+    #
+    # Its existence is also relied on in the test cases, to ensure
+    # that the WEST_CONFIG_xyz variables are respected and we're not about
+    # to clobber the user's own configuration files.
     env = os.environ
 
     if cfg == ConfigFile.ALL:
         raise ValueError('ConfigFile.ALL has no location')
     elif cfg == ConfigFile.SYSTEM:
-        if 'WEST_CONFIG_SYSTEM' in os.environ:
-            return os.environ['WEST_CONFIG_SYSTEM']
+        if 'WEST_CONFIG_SYSTEM' in env:
+            return env['WEST_CONFIG_SYSTEM']
 
         plat = platform.system()
         if plat == 'Linux':
@@ -190,46 +224,48 @@ def _location(cfg):
         else:
             raise ValueError('unsupported platform ' + plat)
     elif cfg == ConfigFile.GLOBAL:
-        if 'WEST_CONFIG_GLOBAL' in os.environ:
-            return os.environ['WEST_CONFIG_GLOBAL']
+        if 'WEST_CONFIG_GLOBAL' in env:
+            return env['WEST_CONFIG_GLOBAL']
         elif platform.system() == 'Linux' and 'XDG_CONFIG_HOME' in env:
             return os.path.join(env['XDG_CONFIG_HOME'], 'west', 'config')
         else:
             return canon_path(
                 os.path.join(os.path.expanduser('~'), '.westconfig'))
     elif cfg == ConfigFile.LOCAL:
-        if 'WEST_CONFIG_LOCAL' in os.environ:
-            return os.environ['WEST_CONFIG_LOCAL']
+        if topdir:
+            return os.path.join(topdir, '.west', 'config')
+        elif 'WEST_CONFIG_LOCAL' in env:
+            return env['WEST_CONFIG_LOCAL']
         else:
             # Might raise WestNotFound!
             return os.path.join(west_dir(), 'config')
     else:
         raise ValueError('invalid configuration file {}'.format(cfg))
 
-def _gather_configs(cfg):
+def _gather_configs(cfg, topdir):
     # Find the paths to the given configuration files, in increasing
     # precedence order.
     ret = []
 
     if cfg == ConfigFile.ALL or cfg == ConfigFile.SYSTEM:
-        ret.append(_location(ConfigFile.SYSTEM))
+        ret.append(_location(ConfigFile.SYSTEM, topdir=topdir))
     if cfg == ConfigFile.ALL or cfg == ConfigFile.GLOBAL:
-        ret.append(_location(ConfigFile.GLOBAL))
+        ret.append(_location(ConfigFile.GLOBAL, topdir=topdir))
     if cfg == ConfigFile.ALL or cfg == ConfigFile.LOCAL:
         try:
-            ret.append(_location(ConfigFile.LOCAL))
+            ret.append(_location(ConfigFile.LOCAL, topdir=topdir))
         except WestNotFound:
             pass
 
     return ret
 
 
-def _ensure_config(configfile):
+def _ensure_config(configfile, topdir):
     # Ensure the given configfile exists, returning its path. May
     # raise permissions errors, WestNotFound, etc.
     #
     # Uses pathlib as this is hard to implement correctly without it.
-    loc = _location(configfile)
+    loc = _location(configfile, topdir=topdir)
     path = pathlib.Path(loc)
 
     if path.is_file():
