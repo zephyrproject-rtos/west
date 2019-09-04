@@ -727,6 +727,8 @@ def _update(project, fetch, rebase, keep_descendants):
         _fetch(project)
     else:
         log.dbg('skipping unnecessary fetch')
+        project.git('update-ref ' + QUAL_MANIFEST_REV +
+                    ' {revision}^{{commit}}')
 
     try:
         sha = project.sha(QUAL_MANIFEST_REV)
