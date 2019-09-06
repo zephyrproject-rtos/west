@@ -288,11 +288,11 @@ def test_init_local_missing_west_yml_failure(repos_tmpdir):
 
 def test_extension_command_execution(west_init_tmpdir):
     with pytest.raises(subprocess.CalledProcessError):
-        cmd('test')
+        cmd('test-extension')
 
     cmd('update')
 
-    actual = cmd('test')
+    actual = cmd('test-extension')
     assert actual.rstrip() == 'Testing test command 1'
 
 
@@ -367,10 +367,10 @@ def test_extension_command_multiproject(repos_tmpdir):
         '  kconfigtest:          (no help provided; try "west kconfigtest -h")',  # noqa: E501
         '',
         'commands from project at "net-tools":',
-        '  test:                 test-help'])
+        '  test-extension:       test-extension-help'])
     assert expected in help_text, help_text
 
-    actual = cmd('test')
+    actual = cmd('test-extension')
     assert actual.rstrip() == 'Testing test command 1'
 
     actual = cmd('kconfigtest')
@@ -414,7 +414,7 @@ def test_extension_command_duplicate(repos_tmpdir):
                       west-commands:
                         - file: scripts/test.py
                           commands:
-                            - name: test
+                            - name: test-extension
                               class: Test
                       '''),
                       'scripts/test.py': textwrap.dedent('''\
@@ -422,7 +422,7 @@ def test_extension_command_duplicate(repos_tmpdir):
                       class Test(WestCommand):
                           def __init__(self):
                               super(Test, self).__init__(
-                                  'test',
+                                  'test-extension',
                                   'test application',
                                   '')
                           def do_add_parser(self, parser_adder):
@@ -439,9 +439,9 @@ def test_extension_command_duplicate(repos_tmpdir):
     config.read_config()
     cmd('update')
 
-    actual = cmd('test', stderr=subprocess.STDOUT).splitlines()
+    actual = cmd('test-extension', stderr=subprocess.STDOUT).splitlines()
     expected = [
-        'WARNING: ignoring project net-tools extension command "test"; command "test" already defined as extension command',  # noqa: E501
+        'WARNING: ignoring project net-tools extension command "test-extension"; command "test-extension" already defined as extension command',  # noqa: E501
         'Testing kconfig test command',
     ]
 
