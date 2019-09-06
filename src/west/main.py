@@ -334,8 +334,8 @@ def ext_command_handler(spec, topdir, argv, manifest, *ignored):
     command.run(args, unknown, topdir, manifest=manifest)
 
 
-def help_command_handler(west_parser, topdir, help_parser, extensions, args,
-                         *ignored):
+def help_command_handler(west_parser, topdir, help_parser, extensions,
+                         manifest, args, *ignored):
     command_name = args.command
     if not command_name:
         west_parser.print_help(top_level=True)
@@ -356,7 +356,8 @@ def help_command_handler(west_parser, topdir, help_parser, extensions, args,
                 if spec.name != command_name:
                     continue
                 # ext_command_handler() does not return
-                ext_command_handler(spec, topdir, [command_name, '--help'])
+                ext_command_handler(spec, topdir, [command_name, '--help'],
+                                    manifest)
         else:
             west_parser.print_help(top_level=True)
 
@@ -482,7 +483,8 @@ def parse_args(argv, extensions, topdir, manifest):
                                            help='get help on a west command')
     help_parser.add_argument('command', nargs='?')
     help_parser.set_defaults(handler=partial(help_command_handler, west_parser,
-                                             topdir, help_parser, extensions))
+                                             topdir, help_parser, extensions,
+                                             manifest))
 
     # Parse arguments.
     args, unknown = west_parser.parse_known_args(args=argv)
