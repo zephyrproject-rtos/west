@@ -74,18 +74,17 @@ def _session_repos():
                       west-commands:
                         - file: scripts/test.py
                           commands:
-                            - name: test
-                              class: Test
-                              help: test-help
+                            - name: test-extension
+                              class: TestExtension
+                              help: test-extension-help
                       '''),
                       'scripts/test.py': textwrap.dedent('''\
                       from west.commands import WestCommand
-                      class Test(WestCommand):
+                      class TestExtension(WestCommand):
                           def __init__(self):
-                              super(Test, self).__init__(
-                                  'test',
-                                  'test application',
-                                  '')
+                              super().__init__('test-extension',
+                                               'test-extension-help',
+                                               '')
                           def do_add_parser(self, parser_adder):
                               parser = parser_adder.add_parser(self.name)
                               return parser
