@@ -30,6 +30,15 @@ VERBOSE_EXTREME = 3
 VERBOSE = VERBOSE_NONE
 '''Global verbosity level. VERBOSE_NONE is the default.'''
 
+#: Color used (when applicable) for printing with inf()
+INF_COLOR = colorama.Fore.LIGHTGREEN_EX
+
+#: Color used (when applicable) for printing with wrn()
+WRN_COLOR = colorama.Fore.LIGHTYELLOW_EX
+
+#: Color used (when applicable) for printing with err() and die()
+ERR_COLOR = colorama.Fore.LIGHTRED_EX
+
 
 def set_verbosity(value):
     '''Set the logging verbosity level.
@@ -70,7 +79,7 @@ def inf(*args, colorize=False):
     # colorama automatically strips the ANSI escapes when stdout isn't a
     # terminal (by wrapping sys.stdout).
     if colorize:
-        print(colorama.Fore.LIGHTGREEN_EX, end='')
+        print(INF_COLOR, end='')
 
     print(*args)
 
@@ -102,7 +111,7 @@ def wrn(*args):
     stdout is a terminal, then the message is printed in yellow.'''
 
     if _use_colors():
-        print(colorama.Fore.LIGHTYELLOW_EX, end='', file=sys.stderr)
+        print(WRN_COLOR, end='', file=sys.stderr)
 
     print('WARNING: ', end='', file=sys.stderr)
     print(*args, file=sys.stderr)
@@ -124,7 +133,7 @@ def err(*args, fatal=False):
     stdout is a terminal, then the message is printed in red.'''
 
     if _use_colors():
-        print(colorama.Fore.LIGHTRED_EX, end='', file=sys.stderr)
+        print(ERR_COLOR, end='', file=sys.stderr)
 
     print('FATAL ERROR: ' if fatal else 'ERROR: ', end='', file=sys.stderr)
     print(*args, file=sys.stderr)
@@ -143,6 +152,28 @@ def die(*args, exit_code=1):
     abort with the given *exit_code*.'''
     err(*args, fatal=True)
     sys.exit(exit_code)
+
+
+def msg(*args, color=None, stream=sys.stdout):
+    '''Print a message using a color.
+
+    :param args: sequence of arguments to print.
+    :param color: color to print in (e.g. INF_COLOR), must be given
+    :param stream: file to print to (default is stdout)
+
+    If color.ui is disabled, the message will still be printed, but
+    without color.
+    '''
+    if color is None:
+        raise ValueError('no color was given')
+
+    if _use_colors():
+        print(color, end='', file=stream)
+
+    print(*args, file=stream)
+
+    if _use_colors():
+        _reset_colors(stream)
 
 
 _COLOR_UI_WARNED = False
