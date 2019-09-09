@@ -791,7 +791,15 @@ class Project:
         :param rev: git revision (HEAD, v2.0.0, etc.) as a string
         :param cwd: directory to run command in (default: self.abspath)
         '''
-        cp = self.git('rev-parse ' + rev, capture_stdout=True, cwd=cwd)
+        # Though we capture stderr, it will be available as the stderr
+        # attribute in the CalledProcessError raised by git() in
+        # Python 3.5 and above if this call fails.
+        #
+        # That's missing for Python 3.4, which at time of writing is
+        # still supported by west, but since 3.4 has hit EOL as a
+        # mainline Python version, that's an acceptable tradeoff.
+        cp = self.git('rev-parse ' + rev, capture_stdout=True, cwd=cwd,
+                      capture_stderr=True)
         # Assumption: SHAs are hex values and thus safe to decode in ASCII.
         # It'll be fun when we find out that was wrong and how...
         return cp.stdout.decode('ascii').strip()
