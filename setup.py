@@ -2,17 +2,23 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+
 import setuptools
 
 with open('README.rst', 'r') as f:
     long_description = f.read()
 
 with open('src/west/version.py', 'r') as f:
+    __version__ = None
     exec(f.read())
+    assert __version__ is not None
+
+version = os.environ.get('WEST_VERSION', __version__)
 
 setuptools.setup(
     name='west',
-    version=__version__,
+    version=version,
     author='Zephyr Project',
     author_email='devel@lists.zephyrproject.org',
     description='Zephyr RTOS Project meta-tool',
