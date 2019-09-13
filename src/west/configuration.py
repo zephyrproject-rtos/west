@@ -221,6 +221,16 @@ def _location(cfg, topdir=None):
             return os.path.expandvars('%PROGRAMDATA%\\west\\config')
         elif 'BSD' in plat:
             return '/etc/westconfig'
+        elif 'CYGWIN' in plat:
+            # Cygwin can handle windows style paths, so make sure we
+            # return one. We don't want to use os.path.join because
+            # that uses '/' as separator character, and the ProgramData
+            # variable is likely to be something like r'C:\ProgramData'.
+            #
+            # See https://github.com/zephyrproject-rtos/west/issues/300
+            # for details.
+            pd = pathlib.PureWindowsPath(os.environ['ProgramData'])
+            return str(pd / 'west' / 'config')
         else:
             raise ValueError('unsupported platform ' + plat)
     elif cfg == ConfigFile.GLOBAL:
