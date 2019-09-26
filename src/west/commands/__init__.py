@@ -50,6 +50,7 @@ class ExtensionCommandError(CommandError):
 _NO_TOPDIR_MSG_FMT = '''\
 no west installation found from "{}"; "west {}" requires one.
 Things to try:
+ - Change directory to a west installation and retry.
  - Set ZEPHYR_BASE to a zephyr repository path in a west installation.
  - Run "west init" to set up an installation here.
  - Run "west init -h" for additional information.
