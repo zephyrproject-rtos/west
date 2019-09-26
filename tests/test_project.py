@@ -362,11 +362,11 @@ def test_extension_command_multiproject(repos_tmpdir):
     # The newline shenanigans are for Windows.
     help_text = '\n'.join(cmd('-h').splitlines())
     expected = '\n'.join([
-        'commands from project at "{}":'.format(os.path.join('subdir',
-                                                             'Kconfiglib')),
+        'extension commands from project Kconfiglib (path: {}):'.
+        format(os.path.join('subdir', 'Kconfiglib')),
         '  kconfigtest:          (no help provided; try "west kconfigtest -h")',  # noqa: E501
         '',
-        'commands from project at "net-tools":',
+        'extension commands from project net-tools (path: net-tools):',
         '  test-extension:       test-extension-help'])
     assert expected in help_text, help_text
 
