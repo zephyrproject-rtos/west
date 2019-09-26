@@ -168,8 +168,10 @@ class WestArgumentParser(argparse.ArgumentParser):
                     if not specs:
                         continue
 
-                    append('commands from project at "{}":'.
-                           format(path))
+                    project = specs[0].project  # they're all from this project
+                    append(project.format(
+                        'extension commands from project '
+                        '{name} (path: {path}):'))
 
                     for spec in specs:
                         self.format_extension_spec(append, spec, width)
