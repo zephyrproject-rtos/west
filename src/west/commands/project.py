@@ -691,6 +691,25 @@ class ForAll(_ProjectCommand):
         self._handle_failed(args, failed)
 
 
+class Topdir(_ProjectCommand):
+    def __init__(self):
+        super().__init__(
+            'topdir',
+            'print the top level directory of the installation',
+            textwrap.dedent('''\
+            Prints the absolute path of the current west installation's
+            top directory.
+
+            This is the directory containing .west. All project
+            paths in the manifest are relative to this top directory.'''))
+
+    def do_add_parser(self, parser_adder):
+        return self._parser(parser_adder)
+
+    def do_run(self, args, user_args):
+        log.inf(self.topdir)
+
+
 class SelfUpdate(_ProjectCommand):
     def __init__(self):
         super().__init__(

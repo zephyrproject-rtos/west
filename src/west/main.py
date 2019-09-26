@@ -29,14 +29,14 @@ from west import configuration as config
 from west.commands import extension_commands, \
     CommandError, CommandContextError, ExtensionCommandError
 from west.commands.project import List, ManifestCommand, Diff, Status, \
-    SelfUpdate, ForAll, Init, Update
+    SelfUpdate, ForAll, Init, Update, Topdir
 from west.commands.config import Config
 from west.manifest import Manifest, MalformedConfig, MalformedManifest
 from west.util import quote_sh_list, west_topdir, WestNotFound
 from west.version import __version__
 
 BUILTIN_COMMANDS = {
-    'commands for managing multiple git repositories': [
+    'built-in commands for managing git repositories': [
         Init(),
         Update(),
         List(),
@@ -46,7 +46,10 @@ BUILTIN_COMMANDS = {
         ForAll(),
     ],
 
-    'configuring west': [Config()],
+    'other built-in commands': [
+        Config(),
+        Topdir(),
+    ],
 
     # None is for hidden commands we don't want to show to the user.
     None: [SelfUpdate()]
