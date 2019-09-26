@@ -447,6 +447,31 @@ def test_extension_command_duplicate(repos_tmpdir):
 
     assert actual == expected
 
+def test_topdir_none(tmpdir):
+    # Running west topdir outside of any installation ought to fail.
+
+    tmpdir.chdir()
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('topdir')
+
+def test_topdir_in_installation(west_init_tmpdir):
+    # Running west topdir anywhere inside of an installation ought to
+    # work, and return the same thing.
+
+    expected = str(west_init_tmpdir)
+
+    # This should be available immediately after west init.
+    assert cmd('topdir').strip() == expected
+
+    # After west update, it should continue to work, and return the
+    # same thing (not getting confused when called from within a
+    # project directory or a random user-created subdirectory, e.g.)
+    cmd('update')
+    assert cmd('topdir', cwd=str(west_init_tmpdir / 'subdir' /
+                                 'Kconfiglib')).strip() == expected
+    west_init_tmpdir.mkdir('pytest-foo')
+    assert cmd('topdir', cwd=str(west_init_tmpdir /
+                                 'pytest-foo')).strip() == expected
 
 #
 # Helper functions used by the test cases and fixtures.
