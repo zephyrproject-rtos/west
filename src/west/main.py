@@ -399,9 +399,11 @@ def set_zephyr_base(args):
         zb_env = os.environ.get('ZEPHYR_BASE')
         zb_prefer = config.config.get('zephyr', 'base-prefer',
                                       fallback=None)
-        zb_config = config.config.get('zephyr', 'base', fallback=None)
-        if zb_config is not None:
-            zb_config = os.path.join(west_topdir(), zb_config)
+        rel_zb_config = config.config.get('zephyr', 'base', fallback=None)
+        if rel_zb_config is not None:
+            zb_config = os.path.join(west_topdir(), rel_zb_config)
+        else:
+            zb_config = None
 
         if zb_prefer == 'env' and zb_env is not None:
             zb = zb_env
@@ -427,9 +429,11 @@ def set_zephyr_base(args):
                 # zephyr-env.sh/cmd was run in some other zephyr installation,
                 # and the user forgot about that.
                 log.wrn('ZEPHYR_BASE={}'.format(zb_env),
-                        'in the calling environment will be used, but was set '
-                        'to', zb_config, 'in west config.\n To disable this '
-                        'warning, execute '
+                        'in the calling environment will be used,\n'
+                        'but the zephyr.base config option in {} is "{}"\n'
+                        'which implies ZEPHYR_BASE={}'
+                        '\n'.format(west_topdir(), rel_zb_config, zb_config) +
+                        'To disable this warning, execute '
                         '\'west config --global zephyr.base-prefer env\'')
         elif zb_config is not None:
             zb = zb_config
