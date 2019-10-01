@@ -14,6 +14,8 @@ from west import configuration as config
 import pytest
 
 GIT = shutil.which('git')
+
+# If you change this, keep the docstring in repos_tmpdir() updated also.
 MANIFEST_TEMPLATE = '''\
 manifest:
   defaults:
@@ -28,6 +30,7 @@ manifest:
       revision: zephyr
       path: subdir/Kconfiglib
     - name: net-tools
+      clone-depth: 1
       west-commands: scripts/west-commands.yml
   self:
     path: zephyr
@@ -132,13 +135,13 @@ def repos_tmpdir(tmpdir, _session_repos):
         remote: test-local
       remotes:
         - name: test-local
-          url-base: <tmpdir>/repos
+          url-base: file://<tmpdir>/repos
       projects:
         - name: Kconfiglib
           revision: zephyr
           path: subdir/Kconfiglib
         - name: net-tools
-          clone_depth: 1
+          clone-depth: 1
           west-commands: scripts/west-commands.yml
       self:
         path: zephyr

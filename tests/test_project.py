@@ -51,7 +51,7 @@ def test_list(west_update_tmpdir):
     expected = ['manifest HEAD zephyr cloned None',
                 'Kconfiglib zephyr {} cloned None'.format(
                     os.path.join('subdir', 'Kconfiglib')),
-                'net-tools master net-tools cloned None']
+                'net-tools master net-tools cloned 1']
     assert actual.splitlines() == expected
 
     # We should be able to find projects by absolute or relative path
@@ -106,6 +106,7 @@ def test_manifest_freeze(west_update_tmpdir):
                     '^  - name: net-tools$',
                     '^    remote: test-local$',
                     '^    revision: [a-f0-9]{40}$',
+                    '^    clone-depth: 1$',
                     '^    west-commands: scripts/west-commands.yml$',
                     '^  self:$',
                     '^    path: zephyr$']

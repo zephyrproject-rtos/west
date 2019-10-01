@@ -862,7 +862,7 @@ def _fetch(project):
     # local ref space.
     #
     # --tags is required to get tags when the remote is specified as a URL.
-    fetch_cmd = ('fetch -f --tags' +
+    fetch_cmd = ('fetch -f --tags ' +
                  ('--depth={clone_depth} ' if project.clone_depth else ' ') +
                  '-- {url} ')
     update_cmd = 'update-ref ' + QUAL_MANIFEST_REV + ' '
