@@ -340,7 +340,13 @@ class Manifest:
             if not project.is_cloned():
                 raise RuntimeError('cannot freeze; project {} is uncloned'.
                                    format(project.name))
-            sha = project.sha(QUAL_MANIFEST_REV_BRANCH)
+            try:
+                sha = project.sha(QUAL_MANIFEST_REV_BRANCH)
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError('cannot freeze; project {} ref {} '
+                                   'cannot be resolved to a SHA'.
+                                   format(project.name,
+                                          QUAL_MANIFEST_REV_BRANCH)) from e
             d = project.as_dict()
             d['revision'] = sha
             frozen_projects.append(d)
