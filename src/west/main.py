@@ -452,9 +452,14 @@ def set_zephyr_base(args):
                         zb_origin = 'manifest file {}'.format(manifest.path)
                         break
                 else:
-                    log.err('no --zephyr-base given, ZEPHYR_BASE is unset,',
-                            'west config contains no zephyr.base setting,',
-                            'and no manifest project has path "zephyr"')
+                    log.wrn("can't find the zephyr repository:\n"
+                            '  - no --zephyr-base given\n'
+                            '  - ZEPHYR_BASE is unset\n'
+                            '  - west config contains no zephyr.base setting\n'
+                            '  - no manifest project has path "zephyr"\n'
+                            "If this isn't a Zephyr installation, you can "
+                            "silence this warning with something like this:\n"
+                            '  west config zephyr.base not-using-zephyr')
             except MalformedConfig as e:
                 log.wrn("Can't set ZEPHYR_BASE:",
                         'parsing of manifest file failed during command',
