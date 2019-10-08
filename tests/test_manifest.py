@@ -757,6 +757,17 @@ def test_get_projects_unknown():
     with pytest.raises(ValueError):
         manifest.get_projects(['unknown'])
 
+def test_load_str():
+    # We can load manifest data as a string.
+
+    manifest = Manifest.from_data('''\
+    manifest:
+      projects:
+        - name: foo
+          url: https://foo.com
+    ''')
+    assert manifest.projects[-1].name == 'foo'
+
 
 # Invalid manifests should raise MalformedManifest.
 @pytest.mark.parametrize('invalid',

@@ -142,7 +142,8 @@ class Manifest:
     def from_data(source_data, manifest_path=None, topdir=None):
         '''Create and return a new Manifest object given parsed YAML data.
 
-        :param source_data: Parsed YAML data as a Python object.
+        :param source_data: Parsed YAML data as a Python object,
+                            or a string with YAML data inside.
         :param manifest_path: fallback ManifestProject path attribute
         :param topdir: If given, absolute paths in the result will be
                        rooted here.
@@ -163,6 +164,8 @@ class Manifest:
 
         Raises MalformedManifest in case of validation errors.
         '''
+        if isinstance(source_data, str):
+            source_data = yaml.safe_load(source_data)
         return Manifest(source_data=source_data, topdir=topdir,
                         manifest_path=manifest_path)
 
