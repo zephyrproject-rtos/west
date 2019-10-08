@@ -17,6 +17,20 @@
 
 type: map
 mapping:
+  # The "version" key is optional, and specifies a minimum version of
+  # west (in semantic versioning, so X.Y <= X.Y.0 < X.Y.1 < (X+1).Y,
+  # etc.) that is required to correctly parse the manifest data.
+  #
+  # This is supported starting with west v0.7 (i.e. it was added after
+  # 0.6 was released). Earlier versions of west will treat manifest
+  # data with a version key as malformed, so it can reliably be used
+  # to prevent parsing on west v0.5 and v0.6 as well, though the error
+  # messages users will receive will be a bit more confusing in that
+  # case.
+  version:
+    required: false
+    type: text
+
   # The "defaults" key specifies some default values used in the
   # rest of the manifest.
   defaults:

@@ -11,7 +11,8 @@ import pytest
 import yaml
 
 from west.manifest import Manifest, Defaults, Remote, Project, \
-    ManifestProject, MalformedManifest, manifest_path
+    ManifestProject, MalformedManifest, ManifestVersionError, \
+    manifest_path
 
 THIS_DIRECTORY = os.path.dirname(__file__)
 
@@ -768,6 +769,64 @@ def test_load_str():
     ''')
     assert manifest.projects[-1].name == 'foo'
 
+def test_version_check_failure():
+    # Check that the manifest.version key causes manifest parsing to
+    # fail when it should.
+
+    valid_fmt = '''\
+    manifest:
+      version: {}
+      projects:
+        - name: foo
+          url: https://foo.com
+    '''
+    invalid_fmt = '''\
+    manifest:
+      version: {}
+      projects:
+        - name: foo
+          url: https://foo.com
+      pytest-invalid-key: a-value
+    '''
+
+    # Parsing a well-formed manifest for a version of west greater
+    # than our own should raise ManifestVersionError.
+    #
+    # This should be the case whether the version is a string (as is
+    # usual) or, as a special case to work around YAML syntax rules, a
+    # float.
+    with pytest.raises(ManifestVersionError):
+        Manifest.from_data(valid_fmt.format('"99.0"'))
+    with pytest.raises(ManifestVersionError):
+        Manifest.from_data(valid_fmt.format('99.0'))
+
+    # Parsing Manifests with unsatisfiable version requirements should
+    # *not* raise MalformedManifest, even if they have unrecognized keys.
+    with pytest.raises(ManifestVersionError):
+        Manifest.from_data(invalid_fmt.format('"99.0"'))
+    with pytest.raises(ManifestVersionError):
+        Manifest.from_data(invalid_fmt.format('99.0'))
+
+@pytest.mark.parametrize(
+    'ver', ['0.6', '0.6.2', '0.6.0.dev1', '0.6.0rc1', '0.6.99'])
+def test_version_check_success(ver):
+    # Test that version checking succeeds when it should.
+    #
+    # Parsing a well-formed manifest for a version of west no greater
+    # than this one, including RC and dev versions used for
+    # pre-releases, should not raise this error.
+
+    fmt = '''\
+    manifest:
+      version: {}
+      projects:
+        - name: foo
+          url: https://foo.com
+    '''
+    manifest = Manifest.from_data(fmt.format(ver))
+    assert manifest.projects[-1].name == 'foo'
+    manifest = Manifest.from_data(fmt.format('"' + ver + '"'))
+    assert manifest.projects[-1].name == 'foo'
 
 # Invalid manifests should raise MalformedManifest.
 @pytest.mark.parametrize('invalid',
