@@ -42,6 +42,7 @@ setuptools.setup(
         'pykwalify',
         'configobj',
         'setuptools>=v40.1.0',  # for find_namespace_packages
+        'packaging',
     ],
     python_requires='>=3.4',
     entry_points={'console_scripts': ('west = west.main:main',)},

@@ -26,12 +26,14 @@ import shutil
 import shlex
 import subprocess
 
+from packaging.version import parse as parse_version
 import pykwalify.core
 import yaml
 
 from west import util, log
 from west.backports import CompletedProcess
 import west.configuration as cfg
+from west.version import __version__ as west_version
 
 
 #: Index in projects where the project with contains project manifest file is
@@ -230,6 +232,24 @@ class Manifest:
         if self._data.get('manifest') is None:
             self._malformed('manifest contains no manifest element')
         data = self._data['manifest']
+
+        # Make sure this version of west can load this manifest data.
+        # This has to happen before the schema check -- later schemas
+        # are likely to incompatibly extend our own.
+        if 'version' in data:
+            min_version = data['version']
+            # As a convenience for the user, convert floats to strings.
+            # This avoids forcing them to write:
+            #
+            #  version: "1.0"
+            #
+            # by explicitly allowing:
+            #
+            #  version: 1.0
+            if isinstance(min_version, float):
+                min_version = str(min_version)
+            if parse_version(min_version) > _WEST_VERSION:
+                raise ManifestVersionError(min_version, file=source_file)
 
         try:
             pykwalify.core.Core(source_data=data,
@@ -511,6 +531,17 @@ class MalformedConfig(Exception):
     '''Exception indicating that west config is malformed and thus causing west
        manifest parsing to fail.'''
 
+class ManifestVersionError(Exception):
+    '''The manifest required a version of west more recent than the
+    current running version.
+    '''
+
+    def __init__(self, version, file=None):
+        self.version = version
+        '''The minimum version of west that was required.'''
+
+        self.file = file
+        '''The file that required this version of west.'''
 
 # Definitions for Manifest attribute types.
 
@@ -949,7 +980,7 @@ class ManifestProject(Project):
 
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
 _DEFAULTS = Defaults()
-
+_WEST_VERSION = parse_version(west_version)
 
 @lru_cache(maxsize=1)
 def _warn_once_if_no_git():
