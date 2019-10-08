@@ -17,17 +17,17 @@ such as the default project revision, may be supplied by this module
 if they are not present in the manifest data.'''
 
 import collections
+import configparser
 import errno
 from functools import lru_cache
 import os
+from pathlib import PurePath
 import shutil
 import shlex
 import subprocess
 
-import configparser
 import pykwalify.core
 import yaml
-from pathlib import PurePath
 
 from west import util, log
 from west.backports import CompletedProcess
