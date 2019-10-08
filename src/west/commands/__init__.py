@@ -15,7 +15,7 @@ import yaml
 
 from west import log
 from west.configuration import config as _config
-from west.manifest import Manifest
+from west.manifest import Manifest, ManifestVersionError
 from west.util import escapes_directory
 
 '''\
@@ -91,8 +91,10 @@ class WestCommand(ABC):
         self.requires_installation = requires_installation
         self.topdir = None
         self.manifest = None
+        self._manifest_err = None
 
-    def run(self, args, unknown, topdir, manifest=None):
+    def run(self, args, unknown, topdir, manifest=None,
+            manifest_err=None):
         '''Run the command.
 
         This raises `CommandContextError` if the command cannot be run
@@ -109,6 +111,9 @@ class WestCommand(ABC):
         :param manifest: A pre-parsed west.manifest.Manifest, or None.
                          This will be saved in the self.manifest
                          field before do_run() is called.
+        :param manifest_err: if *manifest* is None, an additional exception
+                             that will be used to print user diagnostics
+                             if self.manifest is read during the run.
         '''
         if unknown and not self.accepts_unknown_args:
             self.parser.error('unexpected arguments: {}'.format(unknown))
@@ -116,6 +121,7 @@ class WestCommand(ABC):
             log.die(_NO_TOPDIR_MSG_FMT.format(os.getcwd(), self.name))
         self.topdir = topdir
         self.manifest = manifest
+        self._manifest_err = manifest_err
         self.do_run(args, unknown)
 
     def add_parser(self, parser_adder):
@@ -182,9 +188,13 @@ class WestCommand(ABC):
         when it is required, and the command can't proceed
         successfully without it. The property is writeable.'''
         if self._manifest is None:
-            log.die("can't run west {};".format(self.name),
-                    "it requires the manifest, which was not available.",
-                    'Try "west manifest --validate" to debug.')
+            msg = ("can't run west {}: ".format(self.name) +
+                   'the manifest was required but could not be read.')
+            if isinstance(self._manifest_err, ManifestVersionError):
+                msg += '\n  You must upgrade west to run this command.'
+            else:
+                msg += '\n  Try "west manifest --validate" to debug.'
+            log.die(msg)
         return self._manifest
 
     @manifest.setter

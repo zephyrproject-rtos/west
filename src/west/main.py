@@ -31,7 +31,8 @@ from west.commands import extension_commands, \
 from west.commands.project import List, ManifestCommand, Diff, Status, \
     SelfUpdate, ForAll, Init, Update, Topdir
 from west.commands.config import Config
-from west.manifest import Manifest, MalformedConfig, MalformedManifest
+from west.manifest import Manifest, MalformedConfig, MalformedManifest, \
+    ManifestVersionError
 from west.util import quote_sh_list, west_topdir, WestNotFound
 from west.version import __version__
 
@@ -301,8 +302,10 @@ help on each command.''',
     return parser, subparser_gen
 
 
-def command_handler(command, topdir, manifest, known_args, unknown_args):
-    command.run(known_args, unknown_args, topdir, manifest=manifest)
+def command_handler(command, topdir, manifest, manifest_err,
+                    known_args, unknown_args):
+    command.run(known_args, unknown_args, topdir, manifest=manifest,
+                manifest_err=manifest_err)
 
 
 def add_ext_command_parser(subparser_gen, spec):
@@ -326,6 +329,12 @@ def ext_command_handler(spec, topdir, argv, manifest, *ignored):
     # The purpose of this handler is to create the "real" parser that
     # we need for the newly instantiated `command`, then re-parse the
     # original argv and run the command.
+
+    # Check a program invariant. We shouldn't hit this path
+    # unless we were able to parse the manifest, because extension
+    # commands are discovered via the manifest.
+    assert manifest, "can't happen: extension commands require a manifest"
+
     command = spec.factory()
 
     # Our original top level parser and subparser generator have some
@@ -473,14 +482,14 @@ def set_zephyr_base(args):
         log.dbg('ZEPHYR_BASE={} (origin: {})'.format(zb, zb_origin))
 
 
-def parse_args(argv, extensions, topdir, manifest):
+def parse_args(argv, extensions, topdir, manifest, manifest_err):
     west_parser, subparser_gen = _make_parsers()
 
     # Add handlers for the built-in commands.
     for command in itertools.chain(*BUILTIN_COMMANDS.values()):
         parser = command.add_parser(subparser_gen)
         parser.set_defaults(handler=partial(command_handler, command, topdir,
-                                            manifest))
+                                            manifest, manifest_err))
 
     # Add handlers for extension commands, and finalize the list with
     # our parser.
@@ -580,20 +589,30 @@ def main(argv=None):
     # Parse the manifest and create extension command thunks. We'll
     # pass the saved manifest around so it doesn't have to be
     # re-parsed.
+    exc = None
     if topdir:
         try:
             manifest = Manifest.from_file(topdir=topdir)
             extensions = get_extension_commands(manifest)
-        except (MalformedManifest, MalformedConfig, FileNotFoundError):
+        except (MalformedManifest, MalformedConfig, FileNotFoundError) as e:
             manifest = None
             extensions = None
+            exc = e
+        except ManifestVersionError as mve:
+            log.wrn('manifest "{}" requires west v{}; you have v{}.\n'
+                    '  This will fail if manifest data is required.\n'.
+                    format(mve.file, mve.version, __version__) +
+                    '  Upgrade west to silence this warning.')
+            manifest = None
+            extensions = None
+            exc = mve
     else:
         manifest = None
         extensions = {}
 
     if argv is None:
         argv = sys.argv[1:]
-    args, unknown = parse_args(argv, extensions, topdir, manifest)
+    args, unknown = parse_args(argv, extensions, topdir, manifest, exc)
 
     try:
         args.handler(args, unknown)
@@ -625,6 +644,8 @@ def main(argv=None):
         sys.exit(ce.returncode)
     except (MalformedManifest, MalformedConfig) as malformed:
         log.die("can't load west manifest:", malformed)
+    except ManifestVersionError as mve:
+        log.die("you must upgrade to west v{} or later".format(mve.version))
 
 
 if __name__ == "__main__":
