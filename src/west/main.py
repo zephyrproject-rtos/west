@@ -582,7 +582,7 @@ def main(argv=None):
     # re-parsed.
     if topdir:
         try:
-            manifest = Manifest.from_file()
+            manifest = Manifest.from_file(topdir=topdir)
             extensions = get_extension_commands(manifest)
         except (MalformedManifest, MalformedConfig, FileNotFoundError):
             manifest = None
