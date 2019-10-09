@@ -674,7 +674,7 @@ class ForAll(_ProjectCommand):
 
     def do_add_parser(self, parser_adder):
         parser = self._parser(parser_adder)
-        parser.add_argument('-c', dest='command', metavar='COMMAND',
+        parser.add_argument('-c', dest='subcommand', metavar='COMMAND',
                             required=True)
         self._add_projects_arg(parser)
         return parser
@@ -683,8 +683,8 @@ class ForAll(_ProjectCommand):
         failed = []
         for project in self._cloned_projects(args):
             log.banner(project.format('running "{c}" in {name_and_path}:',
-                                      c=args.command))
-            rc = subprocess.Popen(args.command, shell=True,
+                                      c=args.subcommand))
+            rc = subprocess.Popen(args.subcommand, shell=True,
                                   cwd=project.abspath).wait()
             if rc:
                 failed.append(project)
