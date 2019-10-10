@@ -30,7 +30,8 @@ from west.commands import WestCommand, extension_commands, \
 from west.commands.project import List, ManifestCommand, Diff, Status, \
     SelfUpdate, ForAll, Init, Update, Topdir
 from west.commands.config import Config
-from west.manifest import Manifest, MalformedConfig, MalformedManifest
+from west.manifest import Manifest, MalformedConfig, MalformedManifest, \
+    ManifestVersionError
 from west.util import quote_sh_list, west_topdir, WestNotFound
 from west.version import __version__
 
@@ -62,6 +63,8 @@ class WestArgumentParser(argparse.ArgumentParser):
         self.west_extensions = None
 
         super(WestArgumentParser, self).__init__(*args, **kwargs)
+
+        self.mve = None # a ManifestVersionError, if any
 
     def print_help(self, file=None, top_level=False):
         print(self.format_help(top_level=top_level),
@@ -113,12 +116,16 @@ class WestArgumentParser(argparse.ArgumentParser):
                 append('')
 
             if self.west_extensions is None:
-                # This only happens when there is an error.
-                # If there are simply no extensions, it's an empty dict.
-                append('Cannot load extension commands; '
-                       'help for them is not available.')
-                append('(To debug, try: "west manifest --validate".)')
-                append('')
+                if not self.mve:
+                    # This only happens when there is an error.
+                    # If there are simply no extensions, it's an empty dict.
+                    # If the user has already been warned about the error
+                    # because it's due to a ManifestVersionError, don't
+                    # warn them again.
+                    append('Cannot load extension commands; '
+                           'help for them is not available.')
+                    append('(To debug, try: "west manifest --validate".)')
+                    append('')
             else:
                 # TODO we may want to be more aggressive about loading
                 # command modules by default: the current implementation
@@ -230,8 +237,10 @@ class WestArgumentParser(argparse.ArgumentParser):
         # Let argparse handle the actual argument.
         super(WestArgumentParser, self).add_argument(*args, **kwargs)
 
-    def set_extensions(self, extensions):
-        self.west_extensions = extensions
+    def error(self, message):
+        if self.mve:
+            log.die(_mve_msg(self.mve))
+        super().error(message=message)
 
 class Help(WestCommand):
     '''west help [command-name] implementation.'''
@@ -282,6 +291,8 @@ class Help(WestCommand):
         self.west_parser.print_help(top_level=True)
 
 
+# If you add a command here, make sure to think about how it should be
+# handled in main() in case of ManifestVersionError.
 BUILTIN_COMMAND_GROUPS = {
     'built-in commands for managing git repositories': [
         Init(),
@@ -342,6 +353,12 @@ def _make_parsers():
 
     return parser, subparser_gen
 
+def _mve_msg(mve, suggest_ugprade=True):
+    return '\n  '.join(
+        ['west v{} or later is required by the manifest'.format(mve.version),
+         'West version: v{}'.format(__version__)] +
+        (['Manifest file: {}'.format(mve.file)] if mve.file else []) +
+        (['Please upgrade west and retry.'] if suggest_ugprade else []))
 
 def run_extension(spec, topdir, argv, manifest):
     # Deferred creation, argument parsing, and handling for extension
@@ -525,13 +542,17 @@ def main(argv=None):
     # Parse the manifest and create extension command thunks. We'll
     # pass the saved manifest around so it doesn't have to be
     # re-parsed.
+    mve = None
     if topdir:
         try:
             manifest = Manifest.from_file(topdir=topdir)
             extensions = get_extension_commands(manifest)
-        except (MalformedManifest, MalformedConfig, FileNotFoundError):
+        except (MalformedManifest, MalformedConfig, FileNotFoundError,
+                ManifestVersionError) as e:
             manifest = None
             extensions = None
+            if isinstance(e, ManifestVersionError):
+                mve = e
     else:
         manifest = None
         extensions = {}
@@ -542,7 +563,8 @@ def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
     west_parser, subparser_gen = _make_parsers()
-    west_parser.set_extensions(extensions)
+    west_parser.west_extensions = extensions
+    west_parser.mve = mve
 
     # Cache the parser in the global Help instance. Dirty, but it
     # needs this data as its parser attribute is not the parent
@@ -596,12 +618,34 @@ def main(argv=None):
     # Finally, run the command.
     try:
         if args.command in extensions_by_name:
+            # Check a program invariant. We should never get here
+            # unless we were able to parse the manifest. That's where
+            # information about extensions is gained.
+            assert mve is None, \
+                'internal error: running extension "{}" ' \
+                'but got ManifestVersionError'.format(args.command)
+
             # This does not return. get_extension_commands() ensures
             # that extensions do not shadow built-in command names, so
             # checking this first is safe.
             run_extension(extensions_by_name[args.command], topdir, argv,
                           manifest)
         else:
+            if mve:
+                if args.command == 'help':
+                    log.wrn(_mve_msg(mve, suggest_ugprade=False) +
+                            '\n  Cannot get extension command help, ' +
+                            "and most commands won't run." +
+                            '\n  To silence this warning, upgrade west.')
+                elif args.command in ['config', 'topdir']:
+                    # config and topdir are safe to run, but let's
+                    # warn the user that most other commands won't be.
+                    log.wrn(_mve_msg(mve, suggest_ugprade=False) +
+                            "\n  This should work, but most commands won't." +
+                            '\n  To silence this warning, upgrade west.')
+                elif args.command != 'init':
+                    log.die(_mve_msg(mve))
+
             cmd = BUILTIN_COMMANDS.get(args.command, BUILTIN_COMMANDS['help'])
             cmd.run(args, unknown, topdir, manifest=manifest)
     except KeyboardInterrupt:
