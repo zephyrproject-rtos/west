@@ -275,13 +275,16 @@ class Manifest:
         Note: The index MANIFEST_PROJECT_INDEX in sequence will hold the
         project which contains the project manifest file.'''
 
+        self.topdir = topdir
+        '''Topdir for this manifest's installation, or None.'''
+
         # Set up the public attributes documented above, as well as
         # any internal attributes needed to implement the public API.
-        self._load(self._data, topdir, manifest_path)
+        self._load(manifest_path)
 
     def get_remote(self, name):
         '''Get a manifest Remote, given its name.'''
-        return self._remotes_dict[name]
+        return self._remotes_by_name[name]
 
     def get_projects(self, project_ids, allow_paths=True, only_cloned=False):
         '''Get a list of Projects in the manifest from given *project_ids*.
@@ -330,9 +333,9 @@ class Manifest:
         # Otherwise, resolve each of the project_ids to a project,
         # returning the result or raising ValueError.
         for pid in project_ids:
-            project = self._proj_name_map.get(pid)
+            project = self._projects_by_name.get(pid)
             if project is None and allow_paths:
-                project = self._proj_canon_path_map.get(util.canon_path(pid))
+                project = self._projects_by_cpath.get(util.canon_path(pid))
 
             if project is None:
                 unknown.append(pid)
@@ -399,129 +402,135 @@ class Manifest:
         else:
             raise exc
 
-    def _load(self, data, topdir, path_hint):
+    def _load(self, path_hint):
         # Initialize this instance's fields from values given in the
         # manifest data, which must be validated according to the schema.
+
         projects = []
-        project_names = set()
-        project_paths = set()
+        projects_by_name = {}
+        projects_by_ppath = {}
+        manifest = self._data['manifest']
 
         # Create the ManifestProject instance and install it into the
-        # Project hierarchy.
-        manifest = data.get('manifest')
-        slf = manifest.get('self', dict())  # the self name is already taken
-        if self.path:
-            # We're parsing a real file on disk. We currently require
-            # that we are able to resolve a topdir. We may lift this
-            # restriction in the future.
-            assert topdir
-        mproj = ManifestProject(path=slf.get('path', path_hint),
-                                topdir=topdir,
-                                west_commands=slf.get('west-commands'))
-        projects.insert(MANIFEST_PROJECT_INDEX, mproj)
-
-        # Set the topdir attribute based on the results of the above.
-        self.topdir = topdir
+        # projects list.
+        assert MANIFEST_PROJECT_INDEX == 0
+        projects.append(self._load_self(path_hint))
 
         # Map from each remote's name onto that remote's data in the manifest.
-        remotes = tuple(Remote(r['name'], r['url-base']) for r in
-                        manifest.get('remotes', []))
-        remotes_dict = {r.name: r for r in remotes}
+        self.remotes = tuple(Remote(r['name'], r['url-base']) for r in
+                             manifest.get('remotes', []))
+        self._remotes_by_name = {r.name: r for r in self.remotes}
 
         # Get any defaults out of the manifest.
-        #
-        # md = manifest defaults (dictionary with values parsed from
-        # the manifest)
-        md = manifest.get('defaults', dict())
-        mdrem = md.get('remote')
-        if mdrem:
-            # The default remote name, if provided, must refer to a
-            # well-defined remote.
-            if mdrem not in remotes_dict:
-                self._malformed('default remote {} is not defined'.
-                                format(mdrem))
-            default_remote = remotes_dict[mdrem]
-            default_remote_name = mdrem
-        else:
-            default_remote = None
-            default_remote_name = None
-        defaults = Defaults(remote=default_remote, revision=md.get('revision'))
+        self.defaults = self._load_defaults()
 
         # pdata = project data (dictionary of project information parsed from
         # the manifest file)
         for pdata in manifest['projects']:
-            # Validate the project name.
-            name = pdata['name']
+            project = self._load_project(pdata)
 
-            # Validate the project remote or URL.
-            remote_name = pdata.get('remote')
-            url = pdata.get('url')
-            repo_path = pdata.get('repo-path')
-            if remote_name is None and url is None:
-                if default_remote_name is None:
-                    self._malformed(
-                        'project {} has no remote or URL (no default is set)'.
-                        format(name))
-                else:
-                    remote_name = default_remote_name
-            if remote_name:
-                if remote_name not in remotes_dict:
-                    self._malformed('project {} remote {} is not defined'.
-                                    format(name, remote_name))
-                remote = remotes_dict[remote_name]
-            else:
-                remote = None
-
-            # Create the project instance for final checking.
-            try:
-                project = Project(name,
-                                  defaults,
-                                  path=pdata.get('path'),
-                                  clone_depth=pdata.get('clone-depth'),
-                                  revision=pdata.get('revision'),
-                                  west_commands=pdata.get('west-commands'),
-                                  remote=remote,
-                                  repo_path=repo_path,
-                                  topdir=topdir,
-                                  url=url)
-            except ValueError as ve:
-                self._malformed(ve.args[0])
-
-            # The name "manifest" cannot be used as a project name; it
-            # is reserved to refer to the manifest repository itself
-            # (e.g. from "west list"). Note that this has not always
-            # been enforced, but it is part of the documentation.
-            if project.name == 'manifest':
-                self._malformed('no project can be named "manifest"')
             # Project names must be unique.
-            if project.name in project_names:
+            if project.name in projects_by_name:
                 self._malformed('project name {} is already used'.
                                 format(project.name))
             # Two projects cannot have the same path. We use a PurePath
             # comparison here to ensure that platform-specific canonicalization
             # rules are handled correctly.
-            if PurePath(project.path) in project_paths:
-                self._malformed('project {} path {} is already in use'.
-                                format(project.name, project.path))
+            ppath = PurePath(project.path)
+            other = projects_by_ppath.get(ppath)
+            if other:
+                self._malformed(
+                    'project {} path "{}" is already taken by project {}'.
+                    format(project.name, project.path, other.name))
             else:
-                project_paths.add(PurePath(project.path))
+                projects_by_ppath[ppath] = project
 
-            project_names.add(project.name)
             projects.append(project)
+            projects_by_name[project.name] = project
 
-        self.defaults = defaults
-        self.remotes = remotes
-        self._remotes_dict = remotes_dict
         self.projects = tuple(projects)
-        self._proj_name_map = {p.name: p for p in self.projects}
-        pmap = dict()
+        self._projects_by_name = projects_by_name
+        self._projects_by_cpath = {}
         if self.topdir:
-            if mproj.abspath:
-                pmap[util.canon_path(mproj.abspath)] = mproj
+            mp = self.projects[MANIFEST_PROJECT_INDEX]
+            if mp.abspath:
+                self._projects_by_cpath[util.canon_path(mp.abspath)] = mp
             for p in self.projects[MANIFEST_PROJECT_INDEX + 1:]:
                 assert p.abspath  # sanity check a program invariant
-                pmap[util.canon_path(p.abspath)] = p
-        self._proj_canon_path_map = pmap
+                self._projects_by_cpath[util.canon_path(p.abspath)] = p
+
+    def _load_self(self, path_hint):
+        # "slf" because "self" is already taken
+        slf = self._data['manifest'].get('self', dict())
+        if self.path:
+            # We're parsing a real file on disk. We currently require
+            # that we are able to resolve a topdir. We may lift this
+            # restriction in the future.
+            assert self.topdir
+
+        return ManifestProject(path=slf.get('path', path_hint),
+                               topdir=self.topdir,
+                               west_commands=slf.get('west-commands'))
+
+    def _load_defaults(self):
+        # md = manifest defaults (dictionary with values parsed from
+        # the manifest)
+        md = self._data['manifest'].get('defaults', dict())
+        mdrem = md.get('remote')
+        if mdrem:
+            # The default remote name, if provided, must refer to a
+            # well-defined remote.
+            if mdrem not in self._remotes_by_name:
+                self._malformed('default remote {} is not defined'.
+                                format(mdrem))
+            default_remote = self._remotes_by_name[mdrem]
+        else:
+            default_remote = None
+
+        return Defaults(remote=default_remote, revision=md.get('revision'))
+
+    def _load_project(self, pdata):
+        # Validate the project name.
+        name = pdata['name']
+
+        # Validate the project remote or URL.
+        remote_name = pdata.get('remote')
+        url = pdata.get('url')
+        repo_path = pdata.get('repo-path')
+        if remote_name is None and url is None:
+            if self.defaults.remote is None:
+                self._malformed(
+                    'project {} has no remote or URL (no default is set)'.
+                    format(name))
+            else:
+                remote_name = self.defaults.remote.name
+        if remote_name:
+            if remote_name not in self._remotes_by_name:
+                self._malformed('project {} remote {} is not defined'.
+                                format(name, remote_name))
+            remote = self._remotes_by_name[remote_name]
+        else:
+            remote = None
+
+        # Create the project instance for final checking.
+        try:
+            project = Project(name, self.defaults, path=pdata.get('path'),
+                              clone_depth=pdata.get('clone-depth'),
+                              revision=pdata.get('revision'),
+                              west_commands=pdata.get('west-commands'),
+                              remote=remote, repo_path=repo_path,
+                              topdir=self.topdir, url=url)
+        except ValueError as ve:
+            self._malformed(ve.args[0])
+
+        # The name "manifest" cannot be used as a project name; it
+        # is reserved to refer to the manifest repository itself
+        # (e.g. from "west list"). Note that this has not always
+        # been enforced, but it is part of the documentation.
+        if project.name == 'manifest':
+            self._malformed('no project can be named "manifest"')
+
+        return project
 
 
 class MalformedManifest(Exception):
