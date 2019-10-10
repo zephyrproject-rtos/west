@@ -2,23 +2,30 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-'''Common definitions for building Zephyr applications.
+'''Deprecated; do not use.
 
-This provides some default settings and convenience wrappers for
-building Zephyr applications needed by multiple commands.
-
-See west.cmd.build for the build command itself.
+Preserved for Zephyr v1.14 LTS compatibility only. This should never
+have been part of west, and will be removed when Zephyr v1.14 is
+obsoleted.
 '''
+
+import warnings
 
 from west import cmake
 from west import log
+
+# This has no effect by default from 'west build' unless explicitly
+# enabled, e.g. with PYTHONWARNINGS.
+warnings.warn(
+    'west.build was deprecated after west v0.6, and will be removed after '
+    'Zephyr v1.14 is obsoleted',
+    DeprecationWarning)
 
 DEFAULT_BUILD_DIR = 'build'
 '''Name of the default Zephyr build directory.'''
 
 DEFAULT_CMAKE_GENERATOR = 'Ninja'
 '''Name of the default CMake generator.'''
-
 
 def is_zephyr_build(path):
     '''Return true if and only if `path` appears to be a valid Zephyr

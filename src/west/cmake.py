@@ -2,16 +2,29 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-'''Helpers for dealing with CMake'''
+'''Deprecated; do not use.
+
+Preserved for Zephyr v1.14 LTS compatibility only. This should never
+have been part of west, and will be removed when Zephyr v1.14 is
+obsoleted.
+'''
 
 from collections import OrderedDict
 import os.path
 import re
 import subprocess
 import shutil
+import warnings
 
 from west import log
 from west.util import quote_sh_list
+
+# This has no effect by default from 'west build' unless explicitly
+# enabled, e.g. with PYTHONWARNINGS.
+warnings.warn(
+    'west.cmake was deprecated after west v0.6, and will be removed after '
+    'Zephyr v1.14 is obsoleted',
+    DeprecationWarning)
 
 __all__ = ['run_cmake', 'run_build',
            'make_c_identifier',
