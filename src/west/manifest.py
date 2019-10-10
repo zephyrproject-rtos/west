@@ -387,11 +387,13 @@ class Manifest:
         return r
 
     def _malformed(self, complaint, parent=None):
-        context = (' file {} '.format(self.path) if self.path
-                   else ' data:\n{}\n'.format(self._data))
-        exc = MalformedManifest('Malformed manifest{}(schema: {}):\n{}'
-                                .format(context, _SCHEMA_PATH,
-                                        complaint))
+        context = (' file: {} '.format(self.path) if self.path
+                   else ' data:\n{}'.format(self._data))
+        args = ['Malformed manifest{}'.format(context),
+                'Schema file: {}'.format(_SCHEMA_PATH)]
+        if complaint:
+            args.append('Hint: ' + complaint)
+        exc = MalformedManifest(*args)
         if parent:
             raise exc from parent
         else:
@@ -665,16 +667,17 @@ class Project:
                        and posixpath) will be None.
         '''
         if remote and url:
-            raise ValueError('got both remote={} and url={}'.
-                             format(remote, url))
+            raise ValueError('project {} has both "remote: {}" and "url: {}"'.
+                             format(name, remote.name, url))
         if repo_path and not remote:
-            raise ValueError('got repo_path={} but no remote'.
-                             format(repo_path, remote))
+            raise ValueError('project {} has repo_path={} but no remote'.
+                             format(name, repo_path, remote))
         if repo_path and url:
-            raise ValueError('got both repo_path={} and url={}'.
-                             format(repo_path, url))
+            raise ValueError('project {} has both repo_path={} and url={}'.
+                             format(name, repo_path, url))
         if not (remote or url):
-            raise ValueError('got neither a remote nor a URL')
+            raise ValueError('project {} has neither a remote nor a URL'.
+                             format(name))
 
         if defaults is None:
             defaults = _DEFAULTS
