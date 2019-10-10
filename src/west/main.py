@@ -675,7 +675,8 @@ def main(argv=None):
         # for logging its own errors.
         sys.exit(ce.returncode)
     except (MalformedManifest, MalformedConfig) as malformed:
-        log.die("can't load west manifest:", malformed)
+        log.die('\n  '.join(["can't load west manifest"] +
+                            list(malformed.args)))
 
 
 if __name__ == "__main__":
