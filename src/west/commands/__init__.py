@@ -25,8 +25,7 @@ west commands subclass.
 All built-in west commands are implemented as modules in this package.
 This package also provides support for extension commands.'''
 
-__all__ = ['CommandContextError', 'CommandError', 'WestCommand',
-           'extension_commands', 'WestExtCommandSpec', 'ExtensionCommandError']
+__all__ = ['CommandContextError', 'CommandError', 'WestCommand']
 
 class CommandError(RuntimeError):
     '''Indicates that a command failed.'''
@@ -62,26 +61,22 @@ class WestCommand(ABC):
                  requires_installation=True):
         '''Abstract superclass for a west command.
 
-        Some of the fields in a WestCommand (such as *name*, *help*, and
-        *description*) overlap with kwargs that should be passed to the
-        argparse.ArgumentParser which should be added in the
-        `WestCommand.add_parser()` method. This wart is by design: argparse
-        doesn't make many API stability guarantees, so some of this
-        information must be duplicated to work reliably in the future.
+        Some fields, such as *name*, *help*, and *description*,
+        overlap with kwargs that should be passed to the
+        ``argparse.ArgumentParser`` added by `add_parser`. This wart
+        is by design: ``argparse`` doesn't make many API stability
+        guarantees, so this information must be duplicated here for
+        future-proofing.
 
         :param name: the command's name, as entered by the user
         :param help: one-line command help text
         :param description: multi-line command description
         :param accepts_unknown_args: if true, the command can handle
-                                     arbitrary unknown command line arguments
-                                     in its run() method. Otherwise, passing
-                                     unknown arguments will cause
-                                     UnknownArgumentsError to be raised.
+            arbitrary unknown command line arguments in `run`.
+            Otherwise, it's a fatal to pass unknown arguments.
         :param requires_installation: if true, the command requires a
-                                      west installation to run. Running such a
-                                      command outside of any installation
-                                      (i.e. without a valid topdir) will exit
-                                      with an error.
+            west installation to run, and running it outside of one is
+            a fatal error.
         '''
         self.name = name
         self.help = help
@@ -98,16 +93,13 @@ class WestCommand(ABC):
         due to a context mismatch. Other exceptions may be raised as
         well.
 
-        :param args: known arguments parsed via `WestCommand.add_parser()`.
+        :param args: known arguments parsed via `add_parser`
         :param unknown: unknown arguments present on the command line;
-                        this must be empty if the constructor
-                        was passed accepts_unknown_args=False.
-        :param topdir: top level directory of west installation, or None;
-                       this is stored as an attribute before do_run() is
-                       called.
-        :param manifest: A pre-parsed west.manifest.Manifest, or None.
-                         This will be saved in the self.manifest
-                         field before do_run() is called.
+            must be empty unless ``accepts_unknown_args`` is true
+        :param topdir: west installation topdir, accessible as
+            ``self.topdir`` from `do_run`
+        :param manifest: `west.manifest.Manifest` or ``None``,
+            accessible as ``self.manifest`` from `do_run`
         '''
         if unknown and not self.accepts_unknown_args:
             self.parser.error('unexpected arguments: {}'.format(unknown))
@@ -120,16 +112,15 @@ class WestCommand(ABC):
     def add_parser(self, parser_adder):
         '''Registers a parser for this command, and returns it.
 
-        The parser object is stored in the ``parser`` attribute of this
-        WestCommand.
+        The parser object is stored in a ``parser`` attribute of.
 
         :param parser_adder: The return value of a call to
-                             argparse.ArgumentParser.add_subparsers()
+            ``argparse.ArgumentParser.add_subparsers()``
         '''
         self.parser = self.do_add_parser(parser_adder)
 
         if self.parser is None:
-            raise ValueError('no parser was returned')
+            raise ValueError('do_add_parser did not return a value')
 
         return self.parser
 
@@ -141,27 +132,25 @@ class WestCommand(ABC):
     def do_add_parser(self, parser_adder):
         '''Subclass method for registering command line arguments.
 
-        This is called by WestCommand.add_parser() to do the work of
-        adding the parser itself.
+        This is called by `add_parser` to register the command's
+        options and arguments.
 
-        The subclass should call parser_adder.add_parser() to add an
-        ArgumentParser for that subcommand, then add any
+        Subclasses should ``parser_adder.add_parser()`` to add an
+        ``ArgumentParser`` for that subcommand, then add any
         arguments. The final parser must be returned.
 
         :param parser_adder: The return value of a call to
-                             argparse.ArgumentParser.add_subparsers()
-
+            ``argparse.ArgumentParser.add_subparsers()``
         '''
 
     @abstractmethod
     def do_run(self, args, unknown):
-        '''Subclasses must implement; called when the command is run.
+        '''Subclasses must implement; called to run the command.
 
-        :param args: is the namespace of parsed known arguments.
-        :param unknown: If ``accepts_unknown_args`` was False when constructing
-                        this object, this parameter is an empty sequence.
-                        Otherwise, it is an iterable containing all unknown
-                        arguments present on the command line.'''
+        :param args: ``argparse.Namespace`` of parsed arguments
+        :param unknown: If ``accepts_unknown_args`` is true, a
+            sequence of un-parsed argument strings.
+        '''
 
     #
     # Public API, mostly for subclasses.
@@ -175,11 +164,9 @@ class WestCommand(ABC):
     def manifest(self):
         '''Property for the manifest which was passed to run().
 
-        If the manifest kwarg passed to do_run was not None, it is
-        returned. Otherwise the access fails with a fatal error. This
-        is meant to be used by a command to access the west manifest
-        when it is required, and the command can't proceed
-        successfully without it. The property is writeable.'''
+        If `do_run` was given a *manifest* kwarg, it is returned.
+        Otherwise, a fatal error occurs.
+        '''
         if self._manifest is None:
             log.die("can't run west {};".format(self.name),
                     "it requires the manifest, which was not available.",
@@ -190,8 +177,15 @@ class WestCommand(ABC):
     def manifest(self, manifest):
         self._manifest = manifest
 
+#
+# Private extension API
+#
+# This is used internally by main.py but should be considered an
+# implementation detail.
+#
+
 class WestExtCommandSpec:
-    '''An object which allows instantiating an extension west command.'''
+    # An object which allows instantiating a west extension.
 
     def __init__(self, name, project, help, factory):
         self.name = name
@@ -211,19 +205,19 @@ class WestExtCommandSpec:
         the command) before constructing it, however.'''
 
 def extension_commands(manifest=None):
-    '''Get descriptions of available extension commands.
+    # Get descriptions of available extension commands.
+    #
+    # The return value is an ordered map from project paths to lists of
+    # WestExtCommandSpec objects, for projects which define extension
+    # commands. The map's iteration order matches the manifest.projects
+    # order.
+    #
+    # The return value is empty if configuration option
+    # ``commands.allow_extensions`` is false.
+    #
+    # :param manifest: a parsed ``west.manifest.Manifest`` object, or None
+    #                  to reload a new one.
 
-    The return value is an ordered map from project paths to lists of
-    WestExtCommandSpec objects, for projects which define extension
-    commands. The map's iteration order matches the manifest.projects
-    order.
-
-    The return value is empty if configuration option
-    ``commands.allow_extensions`` is false.
-
-    :param manifest: a parsed ``west.manifest.Manifest`` object, or None
-                     to reload a new one.
-    '''
     allow_extensions = _config.getboolean('commands', 'allow_extensions',
                                           fallback=True)
     if not allow_extensions:
