@@ -75,26 +75,28 @@ def read_config(configfile=None, config=config, topdir=None,
                 config_file=None):
     '''Read configuration files into *config*.
 
-    :param configfile: a `west.configuration.ConfigFile`
-    :param config: configuration object to read into
-    :param topdir: west installation root to read local config options from
-    :param config_file: deprecated alternative spelling for *configfile*
-
-    Reads the files given by *configfile*, storing the values into
-    the configparser.ConfigParser object *config*. If *config* is not
+    Reads the files given by *configfile*, storing the values into the
+    configparser.ConfigParser object *config*. If *config* is not
     given, the global `west.configuration.config` object is used.
 
     If *configfile* is given, only the files implied by its value are
     read. If not given, ``ConfigFile.ALL`` is used.
 
     If *configfile* requests local configuration options (i.e. if it
-    is ``ConfigFile.LOCAL`` or ``ConfigFile.ALL`:
+    is ``ConfigFile.LOCAL`` or ``ConfigFile.ALL``:
 
-    - If *topdir* is given, topdir/.west/config is read
-    - Next, if WEST_CONFIG_LOCAL is set in the environment, its contents
-      (a file) are used.
-    - Otherwise, the file system is searched for a local configuration
-      file, and a failure to find one is ignored.
+        - If *topdir* is given, topdir/.west/config is read
+
+        - Next, if WEST_CONFIG_LOCAL is set in the environment, its
+          contents (a file) are used.
+
+        - Otherwise, the file system is searched for a local
+          configuration file, and a failure to find one is ignored.
+
+    :param configfile: a `west.configuration.ConfigFile`
+    :param config: configuration object to read into
+    :param topdir: west installation root to read local options from
+    :param config_file: deprecated alternative for *configfile*
     '''
     if configfile is not None and config_file is not None:
         raise ValueError('use "configfile" or "config_file"; not both')
