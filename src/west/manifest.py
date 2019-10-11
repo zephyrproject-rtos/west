@@ -35,7 +35,6 @@ from west.backports import CompletedProcess
 import west.configuration as cfg
 from west.version import __version__ as west_version
 
-
 #: Index in projects where the project with contains project manifest file is
 #: located
 MANIFEST_PROJECT_INDEX = 0
@@ -47,7 +46,6 @@ MANIFEST_REV_BRANCH = 'manifest-rev'
 #: A qualified reference to MANIFEST_REV_BRANCH, i.e.
 #: refs/heads/manifest-rev.
 QUAL_MANIFEST_REV_BRANCH = 'refs/heads/' + MANIFEST_REV_BRANCH
-
 
 def manifest_path():
     '''Return the path to the manifest file.
@@ -61,7 +59,6 @@ def manifest_path():
     if not os.path.isfile(ret):
         raise OSError(errno.ENOENT, os.strerror(errno.ENOENT), ret)
     return ret
-
 
 class Manifest:
     '''Represents the contents of a West manifest file.
@@ -532,11 +529,9 @@ class Manifest:
 
         return project
 
-
 class MalformedManifest(Exception):
     '''Exception indicating that west manifest parsing failed due to a
     malformed value.'''
-
 
 class MalformedConfig(Exception):
     '''Exception indicating that west config is malformed and thus causing west

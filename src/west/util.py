@@ -73,23 +73,19 @@ def escapes_directory(path, directory):
         ret = True
     return ret
 
-
 def quote_sh_list(cmd):
     '''Transform a command from list into shell string form.'''
     fmt = ' '.join('{}' for _ in cmd)
     args = [shlex.quote(s) for s in cmd]
     return fmt.format(*args)
 
-
 def wrap(text, indent):
     '''Convenience routine for wrapping text to a consistent indent.'''
     return textwrap.wrap(text, initial_indent=indent,
                          subsequent_indent=indent)
 
-
 class WestNotFound(RuntimeError):
     '''Neither the current directory nor any parent has a West installation.'''
-
 
 def west_dir(start=None):
     '''Returns the absolute path of the installation's .west directory.
@@ -101,7 +97,6 @@ def west_dir(start=None):
     Raises WestNotFound if no .west directory is found.
     '''
     return os.path.join(west_topdir(start), '.west')
-
 
 def west_topdir(start=None, fall_back=True):
     '''
@@ -127,7 +122,6 @@ def west_topdir(start=None, fall_back=True):
                 raise WestNotFound('Could not find a West installation '
                                    'in this or any parent directory')
         cur_dir = parent_dir
-
 
 def _represent_ordered_dict(dumper, tag, mapping, flow_style=None):
     # PyYAML representer for ordered dicts. Used internally.

@@ -39,7 +39,6 @@ WRN_COLOR = colorama.Fore.LIGHTYELLOW_EX
 #: Color used (when applicable) for printing with err() and die()
 ERR_COLOR = colorama.Fore.LIGHTRED_EX
 
-
 def set_verbosity(value):
     '''Set the logging verbosity level.
 
@@ -47,7 +46,6 @@ def set_verbosity(value):
     '''
     global VERBOSE
     VERBOSE = int(value)
-
 
 def dbg(*args, level=VERBOSE_NORMAL):
     '''Print a verbose debug logging message.
@@ -60,7 +58,6 @@ def dbg(*args, level=VERBOSE_NORMAL):
     if level > VERBOSE:
         return
     print(*args)
-
 
 def inf(*args, colorize=False):
     '''Print an informational message.
@@ -86,19 +83,16 @@ def inf(*args, colorize=False):
     if colorize:
         _reset_colors(sys.stdout)
 
-
 def banner(*args):
     '''Prints args as a "banner" at inf() level.
 
     The args are prefixed with '=== ' and colorized by default.'''
     inf('===', *args, colorize=True)
 
-
 def small_banner(*args):
     '''Prints args as a smaller banner(), i.e. prefixed with '-- ' and
     not colorized.'''
     inf('---', *args, colorize=False)
-
 
 def wrn(*args):
     '''Print a warning.
@@ -118,7 +112,6 @@ def wrn(*args):
 
     if _use_colors():
         _reset_colors(sys.stderr)
-
 
 def err(*args, fatal=False):
     '''Print an error.
@@ -141,7 +134,6 @@ def err(*args, fatal=False):
     if _use_colors():
         _reset_colors(sys.stderr)
 
-
 def die(*args, exit_code=1):
     '''Print a fatal error, and abort the program.
 
@@ -152,7 +144,6 @@ def die(*args, exit_code=1):
     abort with the given *exit_code*.'''
     err(*args, fatal=True)
     sys.exit(exit_code)
-
 
 def msg(*args, color=None, stream=sys.stdout):
     '''Print a message using a color.
@@ -175,7 +166,6 @@ def msg(*args, color=None, stream=sys.stdout):
     if _use_colors():
         _reset_colors(stream)
 
-
 _COLOR_UI_WARNED = False
 
 def _use_colors():
@@ -191,7 +181,6 @@ def _use_colors():
                   file=sys.stderr)
             _COLOR_UI_WARNED = True
         return False
-
 
 def _reset_colors(file):
     # The flush=True avoids issues with unrelated output from commands (usually

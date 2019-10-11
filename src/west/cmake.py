@@ -32,7 +32,6 @@ __all__ = ['run_cmake', 'run_build',
 
 DEFAULT_CACHE = 'CMakeCache.txt'
 
-
 def run_cmake(args, quiet=False):
     '''Run cmake to (re)generate a build system'''
     cmake = shutil.which('cmake')
@@ -47,11 +46,9 @@ def run_cmake(args, quiet=False):
     log.dbg('As command:', quote_sh_list(cmd), level=log.VERBOSE_VERY)
     subprocess.check_call(cmd, **kwargs)
 
-
 def run_build(build_directory, extra_args=(), quiet=False):
     '''Run cmake in build tool mode in `build_directory`'''
     run_cmake(['--build', build_directory] + list(extra_args), quiet=quiet)
-
 
 def make_c_identifier(string):
     '''Make a C identifier from a string in the same way CMake does.
@@ -75,7 +72,6 @@ def make_c_identifier(string):
             ret.append('_')
 
     return ''.join(ret)
-
 
 class CMakeCacheEntry:
     '''Represents a CMake cache entry.
@@ -169,7 +165,6 @@ class CMakeCacheEntry:
     def __str__(self):
         fmt = 'CMakeCacheEntry(name={}, value={})'
         return fmt.format(self.name, self.value)
-
 
 class CMakeCache:
     '''Parses and represents a CMake cache file.'''
