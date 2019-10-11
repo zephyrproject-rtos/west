@@ -346,7 +346,6 @@ class Init(_ProjectCommand):
         else:
             subprocess.check_call(('git', 'checkout', 'FETCH_HEAD'), cwd=dest)
 
-
 class List(_ProjectCommand):
     def __init__(self):
         super().__init__(
@@ -448,7 +447,6 @@ class List(_ProjectCommand):
 
             log.inf(result, colorize=False)
 
-
 class ManifestCommand(_ProjectCommand):
     # The slightly weird naming is to avoid a conflict with
     # west.manifest.Manifest.
@@ -539,7 +537,6 @@ class Diff(_ProjectCommand):
                 failed.append(project)
         self._handle_failed(args, failed)
 
-
 class Status(_ProjectCommand):
     def __init__(self):
         super().__init__(
@@ -561,7 +558,6 @@ class Status(_ProjectCommand):
             except subprocess.CalledProcessError:
                 failed.append(project)
         self._handle_failed(args, failed)
-
 
 class Update(_ProjectCommand):
 
@@ -650,7 +646,6 @@ class Update(_ProjectCommand):
         else:
             return 'smart'
 
-
 class ForAll(_ProjectCommand):
     def __init__(self):
         super().__init__(
@@ -690,7 +685,6 @@ class ForAll(_ProjectCommand):
                 failed.append(project)
         self._handle_failed(args, failed)
 
-
 class Topdir(_ProjectCommand):
     def __init__(self):
         super().__init__(
@@ -708,7 +702,6 @@ class Topdir(_ProjectCommand):
 
     def do_run(self, args, user_args):
         log.inf(self.topdir)
-
 
 class SelfUpdate(_ProjectCommand):
     def __init__(self):
@@ -736,7 +729,6 @@ def _maybe_sha(rev):
         return False
 
     return len(rev) <= 40
-
 
 def _update(project, fetch, rebase, keep_descendants):
     if not project.is_cloned():
@@ -786,14 +778,12 @@ def _update(project, fetch, rebase, keep_descendants):
             "{name}: checked out {r} as detached HEAD", r=sha))
         _post_checkout_help(project, current_branch, sha, is_ancestor)
 
-
 def _clone(project):
     log.small_banner(project.format('{name}: cloning and initializing'))
     project.git('init {abspath}', cwd=util.west_topdir())
     # This remote is only added for the user's convenience. We always fetch
     # directly from the URL specified in the manifest.
     project.git('remote add -- {remote_name} {url}')
-
 
 def _rev_type(project):
     # Returns a "refined" revision type of project.revision as of the
@@ -842,7 +832,6 @@ def _rev_type(project):
         return 'commit'
     else:
         return 'other'
-
 
 def _fetch(project):
     # Fetches upstream changes for 'project' and updates the 'manifest-rev'
@@ -895,7 +884,6 @@ def _fetch(project):
         # spammy detached HEAD warning from Git.
         project.git('checkout --detach ' + QUAL_MANIFEST_REV)
 
-
 def _head_ok(project):
     # Returns True if the reference 'HEAD' exists and is not a tag or remote
     # ref (e.g. refs/remotes/origin/HEAD).
@@ -910,7 +898,6 @@ def _head_ok(project):
     # - 1 otherwise
     return project.git('show-ref --quiet --head /',
                        check=False).returncode == 0
-
 
 def _post_checkout_help(project, branch, sha, is_ancestor):
     # Print helpful information to the user about a project that
@@ -943,7 +930,6 @@ def _post_checkout_help(project, branch, sha, is_ancestor):
             b=branch, rp=rel, sh=sha))
         log.dbg('(To do this automatically in the future,',
                 'use "west update --rebase".)')
-
 
 #
 # Special files and directories in the west installation.

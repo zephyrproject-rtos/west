@@ -46,7 +46,6 @@ class ExtensionCommandError(CommandError):
         self.hint = kwargs.pop('hint', None)
         super(ExtensionCommandError, self).__init__(**kwargs)
 
-
 _NO_TOPDIR_MSG_FMT = '''\
 no west installation found from "{}"; "west {}" requires one.
 Things to try:
@@ -335,7 +334,6 @@ def _commands_module_from_file(file):
     _EXT_MODULES_CACHE[file] = mod
 
     return mod
-
 
 _EXT_SCHEMA_PATH = os.path.join(os.path.dirname(__file__),
                                 'west-commands-schema.yml')

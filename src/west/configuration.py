@@ -48,7 +48,6 @@ from west.util import west_dir, WestNotFound, canon_path
 def _configparser():            # for internal use
     return configparser.ConfigParser(allow_no_value=True)
 
-
 # Configuration values.
 #
 # Initially empty, populated in read_config(). Always having this available is
@@ -104,7 +103,6 @@ def read_config(configfile=None, config=config, topdir=None,
     if config_file is not None:
         configfile = config_file
     config.read(_gather_configs(configfile, topdir), encoding='utf-8')
-
 
 def update_config(section, key, value, configfile=ConfigFile.LOCAL,
                   topdir=None):
@@ -268,7 +266,6 @@ def _gather_configs(cfg, topdir):
             pass
 
     return ret
-
 
 def _ensure_config(configfile, topdir):
     # Ensure the given configfile exists, returning its path. May

@@ -9,7 +9,6 @@
 '''Zephyr RTOS meta-tool (west) main module
 '''
 
-
 import argparse
 import colorama
 from io import StringIO
@@ -34,7 +33,6 @@ from west.manifest import Manifest, MalformedConfig, MalformedManifest, \
     ManifestVersionError
 from west.util import quote_sh_list, west_topdir, WestNotFound
 from west.version import __version__
-
 
 class WestHelpAction(argparse.Action):
 
@@ -290,7 +288,6 @@ class Help(WestCommand):
         log.wrn('unknown command "{}"'.format(args.command_name))
         self.west_parser.print_help(top_level=True)
 
-
 # If you add a command here, make sure to think about how it should be
 # handled in main() in case of ManifestVersionError.
 BUILTIN_COMMAND_GROUPS = {
@@ -377,7 +374,6 @@ def run_extension(spec, topdir, argv, manifest):
     # Handle the instantiated command in the usual way.
     args, unknown = west_parser.parse_known_args(argv)
     command.run(args, unknown, topdir, manifest=manifest)
-
 
 def set_zephyr_base(args):
     '''Ensure ZEPHYR_BASE is set
@@ -483,7 +479,6 @@ def set_zephyr_base(args):
     if zb is not None:
         os.environ['ZEPHYR_BASE'] = zb
         log.dbg('ZEPHYR_BASE={} (origin: {})'.format(zb, zb_origin))
-
 
 def get_extension_commands(manifest):
     extensions = extension_commands(manifest=manifest)
@@ -677,7 +672,6 @@ def main(argv=None):
     except (MalformedManifest, MalformedConfig) as malformed:
         log.die('\n  '.join(["can't load west manifest"] +
                             list(malformed.args)))
-
 
 if __name__ == "__main__":
     main()
