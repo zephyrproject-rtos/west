@@ -807,14 +807,22 @@ def test_version_check_failure():
     with pytest.raises(ManifestVersionError):
         Manifest.from_data(invalid_fmt.format('99.0'))
 
-@pytest.mark.parametrize(
-    'ver', ['0.6', '0.6.2', '0.6.0.dev1', '0.6.0rc1', '0.6.99'])
+    # Manifest versions below 0.6.99 are definitionally invalid,
+    # because we added the version feature itself after 0.6.
+    with pytest.raises(MalformedManifest):
+        Manifest.from_data(invalid_fmt.format('0.0.1'))
+    with pytest.raises(MalformedManifest):
+        Manifest.from_data(invalid_fmt.format('0.5.0'))
+    with pytest.raises(MalformedManifest):
+        Manifest.from_data(invalid_fmt.format('0.6'))
+    with pytest.raises(MalformedManifest):
+        Manifest.from_data(invalid_fmt.format('0.6.9'))
+    with pytest.raises(MalformedManifest):
+        Manifest.from_data(invalid_fmt.format('0.6.98'))
+
+@pytest.mark.parametrize('ver', ['0.6.99'])
 def test_version_check_success(ver):
     # Test that version checking succeeds when it should.
-    #
-    # Parsing a well-formed manifest for a version of west no greater
-    # than this one, including RC and dev versions used for
-    # pre-releases, should not raise this error.
 
     fmt = '''\
     manifest:
