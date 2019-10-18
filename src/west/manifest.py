@@ -24,7 +24,6 @@ import yaml
 from west import util, log
 from west.backports import CompletedProcess
 import west.configuration as cfg
-from west.version import __version__ as west_version
 
 #: Index in a Manifest.projects attribute where the `ManifestProject`
 #: instance for the installation is stored.
@@ -35,6 +34,14 @@ MANIFEST_REV_BRANCH = 'manifest-rev'
 
 #: A fully qualified reference to `MANIFEST_REV_BRANCH`.
 QUAL_MANIFEST_REV_BRANCH = 'refs/heads/' + MANIFEST_REV_BRANCH
+
+#: The latest manifest schema version supported by this west program.
+#:
+#: This value changes when a new version of west includes new manifest
+#: file features not supported by earlier versions of west.
+SCHEMA_VERSION = '0.6.99'
+# ^^ will be bumped to 0.7 for that release; this just marks that
+# there were changes since 0.6 and we're in a development tree.
 
 def manifest_path():
     '''Absolute path of the manifest file in the current installation.
@@ -241,9 +248,8 @@ class Manifest:
 
         # Make sure this version of west can load this manifest data.
         # This has to happen before the schema check -- later schemas
-        # are likely to incompatibly extend our own.
+        # may incompatibly extend this one.
         if 'version' in data:
-            min_version = data['version']
             # As a convenience for the user, convert floats to strings.
             # This avoids forcing them to write:
             #
@@ -252,10 +258,14 @@ class Manifest:
             # by explicitly allowing:
             #
             #  version: 1.0
-            if isinstance(min_version, float):
-                min_version = str(min_version)
-            if parse_version(min_version) > _WEST_VERSION:
+            min_version_str = str(data['version'])
+            min_version = parse_version(min_version_str)
+            if min_version > _SCHEMA_VER:
                 raise ManifestVersionError(min_version, file=source_file)
+            elif min_version < _EARLIEST_VER:
+                self._malformed(
+                    'invalid version {}; lowest schema version is {}'.
+                    format(min_version, _EARLIEST_VER_STR))
 
         try:
             pykwalify.core.Core(source_data=data,
@@ -1016,10 +1026,12 @@ class ManifestProject(Project):
             ret['west-commands'] = self.west_commands
         return ret
 
+_DEFAULTS = Defaults()
 
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
-_DEFAULTS = Defaults()
-_WEST_VERSION = parse_version(west_version)
+_SCHEMA_VER = parse_version(SCHEMA_VERSION)
+_EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
+_EARLIEST_VER = parse_version(_EARLIEST_VER_STR)
 
 @lru_cache(maxsize=1)
 def _warn_once_if_no_git():
