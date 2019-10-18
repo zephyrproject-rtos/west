@@ -309,42 +309,48 @@ class Init(_ProjectCommand):
         except Exception as e:
             log.die("Can't create directory {}: {}".format(directory, e.args))
 
+    def check_call(self, args, cwd=None):
+        cmd_str = util.quote_sh_list(args)
+        log.dbg("running '{}'".format(cmd_str), 'in', cwd or os.getcwd(),
+                level=log.VERBOSE_VERY)
+        subprocess.check_call(args, cwd=cwd)
+
     def clone_manifest(self, url, rev, dest, exist_ok=False):
         log.small_banner('Cloning manifest repository from {}, rev. {}'.
                          format(url, rev))
         if not exist_ok and exists(dest):
             log.die('refusing to clone into existing location ' + dest)
 
-        subprocess.check_call(('git', 'init', dest))
-        subprocess.check_call(('git', 'remote', 'add', 'origin', '--', url),
-                              cwd=dest)
+        self.check_call(('git', 'init', dest))
+        self.check_call(('git', 'remote', 'add', 'origin', '--', url),
+                        cwd=dest)
         maybe_sha = _maybe_sha(rev)
         if maybe_sha:
             # Fetch the ref-space and hope the SHA is contained in
             # that ref-space
-            subprocess.check_call(('git', 'fetch', 'origin', '--tags',
-                                   '--', 'refs/heads/*:refs/remotes/origin/*'),
-                                  cwd=dest)
+            self.check_call(('git', 'fetch', 'origin', '--tags',
+                             '--', 'refs/heads/*:refs/remotes/origin/*'),
+                            cwd=dest)
         else:
             # Fetch the ref-space similar to git clone plus the ref
             # given by user.  Redundancy is ok, for example if the user
             # specifies 'heads/master'. This allows users to specify:
             # pull/<no>/head for pull requests
-            subprocess.check_call(('git', 'fetch', 'origin', '--tags', '--',
-                                   rev, 'refs/heads/*:refs/remotes/origin/*'),
-                                  cwd=dest)
+            self.check_call(('git', 'fetch', 'origin', '--tags', '--',
+                             rev, 'refs/heads/*:refs/remotes/origin/*'),
+                            cwd=dest)
 
         try:
             # Using show-ref to determine if rev is available in local repo.
-            subprocess.check_call(('git', 'show-ref', '--', rev), cwd=dest)
+            self.check_call(('git', 'show-ref', '--', rev), cwd=dest)
             local_rev = True
         except subprocess.CalledProcessError:
             local_rev = False
 
         if local_rev or maybe_sha:
-            subprocess.check_call(('git', 'checkout', rev), cwd=dest)
+            self.check_call(('git', 'checkout', rev), cwd=dest)
         else:
-            subprocess.check_call(('git', 'checkout', 'FETCH_HEAD'), cwd=dest)
+            self.check_call(('git', 'checkout', 'FETCH_HEAD'), cwd=dest)
 
 class List(_ProjectCommand):
     def __init__(self):
