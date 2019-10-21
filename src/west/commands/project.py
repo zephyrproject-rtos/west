@@ -787,9 +787,11 @@ def _update(project, fetch, rebase, keep_descendants):
 def _clone(project):
     log.small_banner(project.format('{name}: cloning and initializing'))
     project.git('init {abspath}', cwd=util.west_topdir())
-    # This remote is only added for the user's convenience. We always fetch
-    # directly from the URL specified in the manifest.
-    project.git('remote add -- {remote_name} {url}')
+    # The "origin" remote is only added for the user's convenience. We
+    # always fetch directly from the URL specified in the manifest.
+    # Later changes to the manifest won't change this remote,
+    # unfortunately -- the user will have to fix that themselves.
+    project.git('remote add -- origin {url}')
 
 def _rev_type(project):
     # Returns a "refined" revision type of project.revision as of the
