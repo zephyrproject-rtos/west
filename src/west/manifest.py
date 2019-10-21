@@ -57,7 +57,7 @@ def manifest_path():
         - ``FileNotFoundError`` if no ``west.yml`` exists in
           ``manifest.path``
     '''
-    ret = os.path.join(util.west_topdir(), _mpath(), 'west.yml')
+    ret = os.path.join(util.west_topdir(), _mpath(), _WEST_YML)
     # It's kind of annoying to manually instantiate a FileNotFoundError.
     # This seems to be the best way.
     if not os.path.isfile(ret):
@@ -1059,6 +1059,7 @@ class ManifestProject(Project):
             ret['west-commands'] = self.west_commands
         return ret
 
+_WEST_YML = 'west.yml'
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
 _SCHEMA_VER = parse_version(SCHEMA_VERSION)
 _EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
@@ -1091,4 +1092,4 @@ def _mpath(cp=None, topdir=None):
         raise MalformedConfig('no "manifest.path" config option is set') from e
 
 def _west_yml(topdir):
-    return os.path.join(topdir, _mpath(topdir=topdir), 'west.yml')
+    return os.path.join(topdir, _mpath(topdir=topdir), _WEST_YML)
