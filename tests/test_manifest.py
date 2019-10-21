@@ -67,7 +67,6 @@ def check_proj_consistency(actual, expected):
         assert a_abs == e_abs
         assert a_psx == e_psx
 
-    assert actual.remote == expected.remote
     assert actual.url == expected.url
     assert actual.clone_depth == expected.clone_depth
     assert actual.revision == expected.revision
@@ -78,7 +77,6 @@ def test_init_with_url():
 
     p = Project('p', url='some-url')
     assert p.name == 'p'
-    assert p.remote is None
     assert p.url == 'some-url'
     assert p.path == 'p'
     assert p.topdir is None
@@ -96,7 +94,6 @@ def test_init_with_url_and_topdir():
 
     p = Project('p', url='some-url', topdir='/west_top')
     assert p.name == 'p'
-    assert p.remote is None
     assert p.url == 'some-url'
     assert p.path == 'p'
     assert p.topdir == '/west_top'
@@ -113,11 +110,9 @@ def test_remote_url_init():
 
     r1 = Remote('testremote1', 'https://example.com')
     p1 = Project('project1', remote=r1)
-    assert p1.remote is r1
     assert p1.url == 'https://example.com/project1'
 
     p2 = Project('project2', url='https://example.com/project2')
-    assert p2.remote is None
     assert p2.url == 'https://example.com/project2'
 
     with pytest.raises(ValueError):
@@ -158,7 +153,6 @@ def test_manifest_attrs():
     assert mp.abspath is None
     assert mp.posixpath is None
     assert mp.url is None
-    assert mp.remote is None
     assert mp.revision == 'HEAD'
     assert mp.clone_depth is None
 
@@ -181,7 +175,6 @@ def test_manifest_attrs():
     assert mp.abspath is None
     assert mp.posixpath is None
     assert mp.url is None
-    assert mp.remote is None
     assert mp.revision == 'HEAD'
     assert mp.clone_depth is None
 
@@ -206,7 +199,6 @@ def test_manifest_attrs():
     assert mp.posixpath is not None
     assert mp.west_commands == 'cmds.yml'
     assert mp.url is None
-    assert mp.remote is None
     assert mp.revision == 'HEAD'
     assert mp.clone_depth is None
 
@@ -577,9 +569,6 @@ def test_multiple_remotes():
                 Project('testproject2', remote=r2),
                 Project('testproject3', remote=r2)]
 
-    # Check the remotes are as expected.
-    assert list(manifest.remotes) == [r1, r2]
-
     # Check the projects are as expected.
     for p, e in zip(manifest.projects[1:], expected):
         check_proj_consistency(p, e)
@@ -621,9 +610,6 @@ def test_self_tag():
                 Project('testproject2', None, path='testproject2',
                         clone_depth=None, revision='master', remote=r2)]
 
-    # Check the remotes are as expected.
-    assert list(manifest.remotes) == [r1, r2]
-
     # Check the projects are as expected.
     for p, e in zip(manifest.projects, expected):
         check_proj_consistency(p, e)
@@ -659,13 +645,6 @@ def test_default_clone_depth():
                         clone_depth=None, revision=d.revision, remote=r1),
                 Project('testproject2', d, path='testproject2',
                         clone_depth=1, revision='rev', remote=r2)]
-
-    # Check that default attributes match.
-    assert manifest.defaults.remote == d.remote
-    assert manifest.defaults.revision == d.revision
-
-    # Check the remotes are as expected.
-    assert list(manifest.remotes) == [r1, r2]
 
     # Check that the projects are as expected.
     for p, e in zip(manifest.projects[1:], expected):
