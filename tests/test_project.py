@@ -92,22 +92,16 @@ def test_manifest_freeze(west_update_tmpdir):
     # YAML tag crap.
     kconfig_rel = os.path.join('subdir', 'Kconfiglib')
     expected_res = ['^manifest:$',
-                    '^  defaults:$',
-                    '^    remote: test-local$',
-                    '^    revision: master$',
-                    '^  remotes:$',
-                    '^  - name: test-local$',
-                    '^    url-base: .*$',
                     '^  projects:$',
                     '^  - name: Kconfiglib$',
-                    '^    remote: test-local$',
+                    '^    url: .*$',
                     '^    revision: [a-f0-9]{40}$',
                     '^    path: {}$'.format(re.escape(kconfig_rel)),
                     '^  - name: net-tools$',
-                    '^    remote: test-local$',
-                    '^    revision: [a-f0-9]{40}$',
+                    '^    url: .*$',
                     '^    clone-depth: 1$',
                     '^    west-commands: scripts/west-commands.yml$',
+                    '^    revision: [a-f0-9]{40}$',
                     '^  self:$',
                     '^    path: zephyr$']
 

@@ -181,10 +181,6 @@ class Manifest:
 
             - ``projects``: sequence of `Project`
 
-            - ``remotes``: sequence of `Remote`
-
-            - ``defaults``: a `Defaults` object
-
             - ``topdir``: west installation top level directory, or
               None
 
@@ -273,22 +269,9 @@ class Manifest:
         except pykwalify.errors.SchemaError as se:
             self._malformed(se._msg, parent=se)
 
-        self.defaults = None
-        '''`Defaults` object representing default values in the
-        manifest, either as specified by the user or west itself.
-        '''
-
-        self.remotes = None
-        '''Sequence of `Remote` objects representing manifest remotes.
-        Note that not all projects have a remote.
-        '''
-
         self.projects = None
         '''Sequence of `Project` objects representing manifest
         projects.
-
-        Each element is fully initialized; there is no need to consult
-        ``defaults`` for values missing from the manifest data.
 
         Index 0 (`MANIFEST_PROJECT_INDEX`) contains a
         `ManifestProject` representing the manifest repository. The
@@ -301,10 +284,6 @@ class Manifest:
         # Set up the public attributes documented above, as well as
         # any internal attributes needed to implement the public API.
         self._load(manifest_path)
-
-    def get_remote(self, name):
-        '''Get a `Remote` by name.'''
-        return self._remotes_by_name[name]
 
     def get_projects(self, project_ids, allow_paths=True, only_cloned=False):
         '''Get a list of `Project` objects in the manifest from
@@ -391,13 +370,8 @@ class Manifest:
             d['revision'] = sha
             frozen_projects.append(d)
 
-        # We include the defaults value here even though all projects
-        # are fully specified in order to make the resulting manifest
-        # easy to extend by users who want to reuse the defaults.
         r = collections.OrderedDict()
         r['manifest'] = collections.OrderedDict()
-        r['manifest']['defaults'] = self.defaults.as_dict()
-        r['manifest']['remotes'] = [r.as_dict() for r in self.remotes]
         r['manifest']['projects'] = frozen_projects
         r['manifest']['self'] = self.projects[MANIFEST_PROJECT_INDEX].as_dict()
 
@@ -431,12 +405,11 @@ class Manifest:
         projects.append(self._load_self(path_hint))
 
         # Map from each remote's name onto that remote's data in the manifest.
-        self.remotes = tuple(Remote(r['name'], r['url-base']) for r in
-                             manifest.get('remotes', []))
-        self._remotes_by_name = {r.name: r for r in self.remotes}
+        self._remotes_by_name = {r['name']: Remote(r['name'], r['url-base'])
+                                 for r in manifest.get('remotes', [])}
 
         # Get any defaults out of the manifest.
-        self.defaults = self._load_defaults()
+        self._defaults = self._load_defaults()
 
         # pdata = project data (dictionary of project information parsed from
         # the manifest file)
@@ -512,12 +485,12 @@ class Manifest:
         url = pdata.get('url')
         repo_path = pdata.get('repo-path')
         if remote_name is None and url is None:
-            if self.defaults.remote is None:
+            if self._defaults.remote is None:
                 self._malformed(
                     'project {} has no remote or URL (no default is set)'.
                     format(name))
             else:
-                remote_name = self.defaults.remote.name
+                remote_name = self._defaults.remote.name
         if remote_name:
             if remote_name not in self._remotes_by_name:
                 self._malformed('project {} remote {} is not defined'.
@@ -528,7 +501,8 @@ class Manifest:
 
         # Create the project instance for final checking.
         try:
-            project = Project(name, self.defaults, path=pdata.get('path'),
+            project = Project(name, defaults=self._defaults,
+                              path=pdata.get('path'),
                               clone_depth=pdata.get('clone-depth'),
                               revision=pdata.get('revision'),
                               west_commands=pdata.get('west-commands'),
@@ -653,11 +627,34 @@ class Remote:
 
 class Project:
     '''Represents a project defined in a west manifest.
-    Projects are neither comparable nor hashable.
+
+    Attributes:
+
+    - ``name``: project's unique name
+    - ``topdir``: the top level directory of the west installation
+      the project is part of, or ``None``
+    - ``path``: relative path to the project within the installation
+      (i.e. from ``topdir`` if that is set)
+    - ``abspath``: absolute path to the project in the native path name
+      format (or ``None`` if ``topdir`` is)
+    - ``posixpath``: like ``abspath``, but with slashes (``/``) as
+      path separators
+    - ``url``: project fetch URL
+    - ``revision``: revision to fetch from ``url`` when the
+      project is updated
+    - ``clone_depth``: clone depth to fetch when first cloning the
+      project, or ``None`` (the revision should not be a SHA
+      if this is used)
+    - ``west_commands``: project's ``west_commands:`` key in the
+      manifest data
     '''
 
-    __slots__ = ('name remote url path topdir abspath posixpath clone_depth '
-                 'revision west_commands').split()
+    def __eq__(self, other):
+        return NotImplemented
+
+    def __str__(self):
+        return '<Project {} at {}>'.format(
+            repr(self.name), repr(self.abspath or self.path))
 
     def __init__(self, name, defaults=None, path=None,
                  clone_depth=None, revision=None, west_commands=None,
@@ -665,32 +662,24 @@ class Project:
         '''
         Project constructor.
 
-        :param name: Project's user-defined name in the manifest.
-        :param defaults: If the revision parameter is not given, the
-            project's revision is set to defaults.revision if defaults
-            is not None, or the west-wide default otherwise.
-        :param path: Relative path to the project in the west
-            installation, if present in the manifest. If not given,
-            the project's ``name`` is used.
-        :param clone_depth: Nonnegative integer clone depth if present
-            in the manifest.
-        :param revision: Project revision as given in the manifest, if
-            present. If not given, defaults.revision is used instead.
-        :param west_commands: path to a YAML file in the project
-            containing a description of west extension commands
-            provided by the project, if given.
-        :param remote: Remote instance corresponding to this Project
-            as specified in the manifest. This is used to build the
-            project's URL, and is also stored as an attribute.
-        :param repo_path: If this and *remote* are not None, then
-            ``remote.url_base + repo_path`` (instead of
-            ``remote.url_base + name``) is used as the project's fetch
-            URL.
-        :param url: The project's fetch URL. This cannot be given with
-            *remote* or *repo_path*.
-        :param topdir: Root of the west installation the Project is
-            inside. If not given, all absolute path attributes
-            (abspath and posixpath) will be None.
+        Constructor arguments for project attributes should not be
+        given unless the project's manifest data contains them.
+
+        If *topdir* is ``None``, then absolute path attributes
+        (``abspath`` and ``posixpath``) will also be ``None``.
+
+        :param name: project's ``name:`` attribute in the manifest
+        :param defaults: a `Defaults` instance to use, if the manifest
+            has a ``defaults:``
+        :param path: ``path:`` attribute value
+        :param clone_depth: ``clone-depth:`` attribute value
+        :param revision: ``revision:`` attribute value
+        :param west_commands: ``west-commands:`` attribute value
+        :param remote: `Remote` instance to use, if there is a
+            ``remote:`` attribute
+        :param repo_path: ``repo-path:`` attribute value
+        :param url: ``url:`` attribute value
+        :param topdir: the west installation's top level directory
         '''
         if remote and url:
             raise ValueError('project {} has both "remote: {}" and "url: {}"'.
@@ -705,71 +694,68 @@ class Project:
             raise ValueError('project {} has neither a remote nor a URL'.
                              format(name))
 
-        if defaults is None:
-            defaults = _DEFAULTS
-        if repo_path is None:
-            repo_path = name
+        if not url:
+            url = remote.url_base + '/' + (repo_path or name)
 
         self.name = name
-        '''Project ``name`` as it appears in the manifest data.'''
-
-        # Path related attributes
-        self.path = os.path.normpath(path or name)
-        '''Relative path to the project in the installation.'''
+        self.url = url
+        self._revision = revision
+        self._default_rev = defaults.revision if defaults else 'master'
         self.topdir = topdir
-        '''Root directory of the west installation this project is
-        inside, or ``None``.
-        '''
-        self.abspath = (os.path.realpath(os.path.join(topdir, self.path))
-                        if topdir else None)
-        '''Absolute path to the project on disk, or ``None``.'''
-        self.posixpath = (PurePath(self.abspath).as_posix()
-                          if topdir else None)
-        '''Absolute path to the project, POSIX style (with forward
-        slashes).'''
-
-        # Git related attributes
-        self.url = url or (remote.url_base + '/' + repo_path)
-        '''Complete fetch URL for the project, either as given by the
-        *url* kwarg or computed from *remote.url_base* and *name* or
-        *repo_path*.
-        '''
+        self.path = path
         self.clone_depth = clone_depth
-        '''Project's git clone depth, or ``None``.'''
-        self.revision = revision or defaults.revision
-        '''Revision to fetch when updating this project. A git branch,
-        tag, or SHA.
-        '''
-        self.remote = remote
-        '''`Remote` instance or ``None``.'''
-
-        # Extension commands in the project
         self.west_commands = west_commands
-        '''The ``west-commands`` value in the manifest data, or None.
-        '''
 
-    def __eq__(self, other):
-        return NotImplemented
+    @property
+    def revision(self):
+        return self._revision or self._default_rev
 
-    def __repr__(self):
-        reprs = ['{}={}'.format(s, repr(getattr(self, s)))
-                 for s in self.__slots__]
-        return 'Project(' + ', '.join(reprs) + ')'
+    @revision.setter
+    def revision(self, revision):
+        self._revision = revision
+
+    @property
+    def path(self):
+        return self._path or self.name
+
+    @path.setter
+    def path(self, path):
+        self._path = path
+
+        # Invalidate the absolute path attributes. They'll get
+        # computed again next time they're accessed.
+        self._abspath = None
+        self._posixpath = None
+
+    @property
+    def abspath(self):
+        if self._abspath is None and self.topdir:
+            self._abspath = os.path.realpath(os.path.join(self.topdir,
+                                                          self.path))
+        return self._abspath
+
+    @property
+    def posixpath(self):
+        if self._posixpath is None and self.topdir:
+            self._posixpath = PurePath(self.abspath).as_posix()
+        return self._posixpath
 
     def as_dict(self):
         '''Return a representation of this object as a dict, as it
         would be parsed from an equivalent YAML manifest.
         '''
-        ret = collections.OrderedDict(
-            (('name', self.name),
-             ('remote', self.remote.name if self.remote else 'None'),
-             ('revision', self.revision)))
-        if self.path != self.name:
-            ret['path'] = self.path
+        ret = collections.OrderedDict()
+        ret['name'] = self.name
+        ret['url'] = self.url
+        if self._revision:
+            ret['revision'] = self.revision
         if self.clone_depth:
             ret['clone-depth'] = self.clone_depth
         if self.west_commands:
             ret['west-commands'] = self.west_commands
+        if self._path:
+            ret['path'] = self.path
+
         return ret
 
     def format(self, s, *args, **kwargs):
@@ -781,30 +767,33 @@ class Project:
         parameters to this method, and the following additional
         kwargs:
 
-            - ``self.__slots__`` and their values (``name=self.name``,
-              ``url=self.url``, etc.)
-
+            - ``name``
+            - ``url``
+            - ``revision``
+            - ``path``
+            - ``abspath``
+            - ``posixpath``
+            - ``clone_depth``
+            - ``west_commands``
+            - ``topdir``
             - ``name_and_path=f"{self.name} ({self.path})"`` (or its
               non-f-string equivalent)
-
-            - ``remote_name=self.remote.name`` (or ``None`` if
-              ``self.remote`` is ``None``)
 
         Any kwargs passed as parameters to this method override the
         above additional kwargs.
 
         :param s: string (or other object) to call ``format()`` on
         '''
-        kwargs = self._format_kwargs(kwargs)
-        return s.format(*args, **kwargs)
+        kw = {s: getattr(self, s) for s in
+              'name url revision path abspath posixpath '
+              'clone_depth west_commands topdir'.split()}
+        kw['name_and_path'] = '{} ({})'.format(self.name, self.path)
+        kw.update(kwargs)
+        return s.format(*args, **kw)
 
-    def _format_kwargs(self, kwargs):
-        ret = {s: getattr(self, s) for s in self.__slots__}
-        ret['name_and_path'] = '{} ({})'.format(self.name, self.path)
-        ret['remote_name'] = ('None' if self.remote is None
-                              else self.remote.name)
-        ret.update(kwargs)
-        return ret
+    #
+    # Git helpers
+    #
 
     def git(self, cmd, extra_args=(), capture_stdout=False,
             capture_stderr=False, check=True, cwd=None):
@@ -962,22 +951,37 @@ class Project:
 
         return not (res.returncode or res.stdout.strip())
 
-
+# FIXME: this whole class should just go away. See #327.
 class ManifestProject(Project):
     '''Represents the manifest repository as a `Project`.
 
-    This isn't perfect, and some Project attributes are always
-    ``None`` here.
+    Meaningful attributes:
+
+    - ``name``: the string ``"manifest"``
+    - ``topdir``: the top level directory of the west installation
+      the manifest project controls, or ``None``
+    - ``path``: relative path to the manifest repository within the
+      installation, or ``None`` (i.e. from ``topdir`` if that is set)
+    - ``abspath``: absolute path to the manifest repository in the
+      native path name format (or ``None`` if ``topdir`` is)
+    - ``posixpath``: like ``abspath``, but with slashes (``/``) as
+      path separators
+    - ``west_commands``:``west_commands:`` key in the manifest's
+      ``self:`` map
+
+    Other readable attributes included for Project compatibility:
+
+    - ``url``: always ``None``; the west manifest is not
+      version-controlled by west itself, even though 'west init'
+      can fetch a manifest repository from a Git remote
+    - ``revision``: ``"HEAD"``
+    - ``clone_depth``: ``None``, because ``url`` is
     '''
 
-    def __init__(self, path=None, revision=None, url=None,
-                 west_commands=None, topdir=None):
+    def __init__(self, path=None, west_commands=None, topdir=None):
         '''
-        :param path: Relative path to the project in the west
-            installation, if present in the manifest. If None, the
-            project's ``name`` is used.
-        :param revision: deprecated and ignored; do not use
-        :param url: deprecated and ignored; do not use
+        :param path: Relative path to the manifest repository in the
+            west installation, if known.
         :param west_commands: path to the YAML file in the manifest
             repository configuring its extension commands, if any.
         :param topdir: Root of the west installation the manifest
@@ -985,48 +989,75 @@ class ManifestProject(Project):
             attributes (abspath and posixpath) will be None.
         '''
         self.name = 'manifest'
-        '''Name given to the manifest repository (the string "manifest").'''
 
         # Path related attributes
-        self.path = os.path.normpath(path) if path else None
-        '''Normalized relative path to the manifest repository in the
-        installation, or None.'''
         self.topdir = topdir
-        '''Root directory of the west installation, or None.'''
-        self.abspath = (os.path.realpath(os.path.join(topdir, self.path))
-                        if topdir and path else None)
-        '''Absolute path to the manifest repository, or None.'''
-        self.posixpath = (PurePath(self.abspath).as_posix()
-                          if self.abspath else None)
-        '''Absolute path, POSIX style (with forward slashes).'''
+        self._abspath = None
+        self._posixpath = None
+        self._path = os.path.normpath(path) if path else None
 
-        # Git related attributes.
-        self.url = None
-        '''None; the manifest URL is not defined, as it's not saved by west
-        init, and west init -l initializes from a local repository.'''
-        self.clone_depth = None
-        '''None; the manifest history is always cloned in its entirety.'''
-        self.revision = 'HEAD'
-        '''The string "HEAD"; provided for analogy with Project.
-        Commands which operate on the manifest repository always
-        use it as-is on disk and do not change its contents.'''
-        self.remote = None
-        '''None, for the same reason the url attribute is.'''
-
-        # Extension commands in the manifest repository.
+        # Extension commands.
         self.west_commands = west_commands
-        '''Path to project's "west-commands", for the manifest project, or
-        None.'''
+
+    @property
+    def path(self):
+        return self._path
+
+    @path.setter
+    def path(self, path):
+        self._path = path
+
+        # Invalidate the absolute path attributes. They'll get
+        # computed again next time they're accessed.
+        self._abspath = None
+        self._posixpath = None
+
+    @property
+    def abspath(self):
+        if self._abspath is None and self.topdir and self.path:
+            self._abspath = os.path.realpath(os.path.join(self.topdir,
+                                                          self.path))
+        return self._abspath
+
+    @property
+    def posixpath(self):
+        if self._posixpath is None and self.abspath:
+            self._posixpath = PurePath(self.abspath).as_posix()
+        return self._posixpath
+
+    @property
+    def url(self):
+        return None
+
+    @url.setter
+    def url(self, url):
+        raise ValueError(url)
+
+    @property
+    def revision(self):
+        return 'HEAD'
+
+    @revision.setter
+    def revision(self, revision):
+        raise ValueError(revision)
+
+    @property
+    def clone_depth(self):
+        return None
+
+    @clone_depth.setter
+    def clone_depth(self, clone_depth):
+        raise ValueError(clone_depth)
 
     def as_dict(self):
         '''Return a representation of this object as a dict, as it would be
         parsed from an equivalent YAML manifest.'''
-        ret = collections.OrderedDict({'path': self.path})
+        ret = collections.OrderedDict()
+        if self.path:
+            ret['path'] = self.path
         if self.west_commands:
             ret['west-commands'] = self.west_commands
         return ret
-
-_DEFAULTS = Defaults()
 
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
 _SCHEMA_VER = parse_version(SCHEMA_VERSION)
