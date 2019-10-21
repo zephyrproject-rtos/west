@@ -103,6 +103,10 @@ mapping:
           west-commands:
             required: false
             type: str
+          # Additional manifest data to import from the project.
+          import:
+            required: false
+            type: any
 
   # The "self" key specifies values for the project containing the manifest
   # file (the "manifest repository").
@@ -118,3 +122,8 @@ mapping:
       west-commands:
         required: false
         type: str
+      # Additional manifest data to import from the manifest
+      # repository.
+      import:
+        required: false
+        type: any
