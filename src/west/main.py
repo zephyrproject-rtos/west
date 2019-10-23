@@ -645,6 +645,8 @@ def main(argv=None):
             cmd.run(args, unknown, topdir, manifest=manifest)
     except KeyboardInterrupt:
         sys.exit(0)
+    except BrokenPipeError:
+        sys.exit(0)
     except CalledProcessError as cpe:
         log.err('command exited with status {}: {}'.
                 format(cpe.returncode, quote_sh_list(cpe.cmd)))
