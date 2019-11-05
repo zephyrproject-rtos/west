@@ -7,12 +7,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 '''Zephyr RTOS meta-tool (west) main module
+
+Nothing in here is public API.
 '''
 
 import argparse
+from collections import OrderedDict
 import colorama
 from io import StringIO
-import itertools
 import logging
 import os
 import shutil
@@ -34,11 +36,346 @@ from west.manifest import Manifest, MalformedConfig, MalformedManifest, \
 from west.util import quote_sh_list, west_topdir, WestNotFound
 from west.version import __version__
 
+class WestApp:
+    # The west 'application' object.
+    #
+    # There's enough state to keep track of when building the final
+    # WestCommand we want to run that it's convenient to have an
+    # object to stash it all in.
+    #
+    # We could use globals, but that would make it harder to white-box
+    # test multiple main() invocations from the same Python process,
+    # which is a goal. See #149.
+
+    def __init__(self):
+        self.topdir = None          # west_topdir()
+        self.manifest = None        # west.manifest.Manifest
+        self.mve = None             # ManifestVersionError
+        self.builtins = {}          # command name -> WestCommand instance
+        self.extensions = {}        # extension command name -> spec
+        self.builtin_groups = OrderedDict()    # group name -> WestCommand list
+        self.extension_groups = OrderedDict()  # project path -> ext spec list
+        self.west_parser = None     # a WestArgumentParser
+        self.subparser_gen = None   # an add_subparsers() return value
+
+        for group, classes in BUILTIN_COMMAND_GROUPS.items():
+            lst = [cls() for cls in classes]
+            self.builtins.update({command.name: command for command in lst})
+            self.builtin_groups[group] = lst
+
+        # Give the help instance a back-pointer up here.
+        #
+        # A dirty layering violation, but it does need this data:
+        #
+        # - 'west help <command>' needs to call into <command>'s
+        #   parser's print_help()
+        # - 'west help' needs self.west_parser, which
+        #   the argparse API does not give us a future-proof way
+        #   to access from the Help object's parser attribute,
+        #   which comes from subparser_gen.
+        self.builtins['help'].app = self
+
+    def run(self, argv):
+        # Run the command-line application with argument list 'argv'.
+
+        # See if we're in an installation. It's fine if we're not.
+        # Note that this falls back on searching from ZEPHYR_BASE
+        # if the current directory isn't inside a west installation.
+        try:
+            self.topdir = west_topdir()
+        except WestNotFound:
+            pass
+
+        # Read the configuration files. We need this to get
+        # manifest.path to parse the manifest, etc.
+        #
+        # TODO: re-work to avoid global state (#149).
+        config.read_config(topdir=self.topdir)
+
+        # Set self.manifest and self.extensions.
+        self.load_manifest()
+        self.load_extension_specs()
+
+        # Set up initial argument parsers. This requires knowing
+        # self.extensions, so it can't happen before now.
+        self.setup_parsers()
+
+        # OK, we are all set. Run the command.
+        self.run_command(argv)
+
+    def load_manifest(self):
+        # Try to parse the manifest. We'll save it if that works, so
+        # it doesn't have to be re-parsed.
+
+        if not self.topdir:
+            return
+
+        try:
+            self.manifest = Manifest.from_file(topdir=self.topdir)
+        except ManifestVersionError as e:
+            # Some built-in commands, like 'config', or 'help' at
+            # least mostly, will still work.
+            #
+            # So don't give up yet, but remember that this happened so
+            # we can tell the user what went wrong at the appropriate
+            # level (log.wrn() or log.die()) when we figure out what
+            # command we're running.
+            log.dbg('manifest version error:', e, level=log.VERBOSE_EXTREME)
+            self.mve = e
+        except (MalformedManifest, MalformedConfig, FileNotFoundError) as e:
+            # Let WestCommand.run() decide what to do.
+            # We could be running 'west config manifest.path fixed-value',
+            # which would fix the MalformedConfig, for example.
+            log.dbg("can't parse manifest:", e, level=log.VERBOSE_EXTREME)
+
+    def load_extension_specs(self):
+        if self.manifest is None:
+            # "None" means "extensions could not be determined".
+            # Leaving this an empty dict would mean "there are no
+            # extensions", which is different.
+            self.extensions = None
+            return
+
+        path_specs = extension_commands(manifest=self.manifest)
+        extension_names = set()
+
+        for path, specs in path_specs.items():
+            # Filter out attempts to shadow built-in commands as well as
+            # command names which are already used.
+
+            filtered = []
+            for spec in specs:
+                if spec.name in self.builtins:
+                    log.wrn('ignoring project {} extension command "{}";'.
+                            format(spec.project.name, spec.name),
+                            'this is a built in command')
+                    continue
+                if spec.name in extension_names:
+                    log.wrn(
+                        'ignoring project {} extension command "{}";'.
+                        format(spec.project.name, spec.name),
+                        'command "{}" already defined as extension command'.
+                        format(spec.name))
+                    continue
+
+                filtered.append(spec)
+                extension_names.add(spec.name)
+                self.extensions[spec.name] = spec
+
+            self.extension_groups[path] = filtered
+
+    def setup_parsers(self):
+        # Set up and install command-line argument parsers.
+
+        west_parser, subparser_gen = self.make_parsers()
+
+        # Add sub-parsers for the built-in commands.
+        for command in self.builtins.values():
+            command.add_parser(subparser_gen)
+
+        # Add stub parsers for extensions.
+        #
+        # These just reserve the names of each extension. The real parser
+        # for each extension can't be added until we import the
+        # extension's code, which we won't do unless parse_known_args()
+        # says to run that extension.
+        if self.extensions:
+            for path, specs in self.extension_groups.items():
+                for spec in specs:
+                    subparser_gen.add_parser(spec.name, add_help=False)
+
+        # Save the instance state.
+        self.west_parser = west_parser
+        self.subparser_gen = subparser_gen
+
+    def make_parsers(self):
+        # Make a fresh instance of the top level argument parser
+        # and subparser generator, and return them in that order.
+
+        # The prog='west' override avoids the absolute path of the
+        # main.py script showing up when West is run via the wrapper
+        parser = WestArgumentParser(
+            prog='west', description='The Zephyr RTOS meta-tool.',
+            epilog='''Run "west help <command>" for help on each <command>.''',
+            add_help=False, west_app=self)
+
+        # Remember to update zephyr's west-completion.bash if you add or
+        # remove flags. This is currently the only place where shell
+        # completion is available.
+
+        parser.add_argument('-h', '--help', action=WestHelpAction, nargs=0,
+                            help='get help for west or a command')
+
+        parser.add_argument('-z', '--zephyr-base', default=None,
+                            help='''Override the Zephyr base directory. The
+                            default is the manifest project with path
+                            "zephyr".''')
+
+        parser.add_argument('-v', '--verbose', default=0, action='count',
+                            help='''Display verbose output. May be given
+                            multiple times to increase verbosity.''')
+
+        parser.add_argument('-V', '--version', action='version',
+                            version='West version: v{}'.format(__version__),
+                            help='print the program version and exit')
+
+        subparser_gen = parser.add_subparsers(metavar='<command>',
+                                              dest='command')
+
+        return parser, subparser_gen
+
+    def run_command(self, argv):
+        # Parse command line arguments and run the WestCommand.
+        # If we're running an extension, instantiate it from its
+        # spec and re-parse arguments before running.
+
+        args, unknown = self.west_parser.parse_known_args(args=argv)
+
+        # Set up logging verbosity before running the command, so e.g.
+        # verbose messages related to argument handling errors work
+        # properly.
+        log.set_verbosity(args.verbose)
+        log.dbg('args namespace:', args, level=log.VERBOSE_EXTREME)
+
+        # HACK: try to set ZEPHYR_BASE.
+        # FIXME: get rid of this. Instead:
+        #
+        # - support a WEST_DIR environment variable if we're not
+        #   running under topdir
+        # - make zephyr extensions that need ZEPHYR_BASE just set it
+        #   themselves.
+        if (args.command and args.command not in ['init', 'help'] and
+                not args.help):
+            set_zephyr_base(args)
+
+        # If we were run as 'west -h ...' or 'west --help ...',
+        # monkeypatch the args namespace so we end up running Help.  The
+        # user might have also provided a command. If so, print help about
+        # that command.
+        if args.help or args.command is None:
+            args.command_name = args.command
+            args.command = 'help'
+
+        # Finally, run the command.
+        try:
+            if args.command in self.builtins:
+                self.run_builtin(args, unknown)
+            else:
+                self.run_extension(args.command, argv)
+        except KeyboardInterrupt:
+            sys.exit(0)
+        except BrokenPipeError:
+            sys.exit(0)
+        except CalledProcessError as cpe:
+            log.err('command exited with status {}: {}'.
+                    format(cpe.returncode, quote_sh_list(cpe.cmd)))
+            if args.verbose:
+                traceback.print_exc()
+            sys.exit(cpe.returncode)
+        except ExtensionCommandError as ece:
+            msg = 'extension command "{}" could not be run{}.'.format(
+                args.command, ': ' + ece.hint if ece.hint else '')
+            if args.verbose:
+                log.err(msg)
+                traceback.print_exc()
+            else:
+                log.err(msg, 'See {} for a traceback.'.
+                             format(dump_traceback()))
+            sys.exit(ece.returncode)
+        except CommandContextError as cce:
+            log.err('command', args.command, 'cannot be run in this context:',
+                    *cce.args)
+            log.err('see {} for a traceback.'.format(dump_traceback()))
+            sys.exit(cce.returncode)
+        except CommandError as ce:
+            # No need to dump_traceback() here. The command is responsible
+            # for logging its own errors.
+            sys.exit(ce.returncode)
+        except (MalformedManifest, MalformedConfig) as malformed:
+            log.die('\n  '.join(["can't load west manifest"] +
+                                list(malformed.args)))
+
+    def run_builtin(self, args, unknown):
+        if self.mve:
+            if args.command == 'help':
+                log.wrn(mve_msg(self.mve, suggest_ugprade=False) +
+                        '\n  Cannot get extension command help, ' +
+                        "and most commands won't run." +
+                        '\n  To silence this warning, upgrade west.')
+            elif args.command in ['config', 'topdir']:
+                # config and topdir are safe to run, but let's
+                # warn the user that most other commands won't be.
+                log.wrn(mve_msg(self.mve, suggest_ugprade=False) +
+                        "\n  This should work, but most commands won't." +
+                        '\n  To silence this warning, upgrade west.')
+            elif args.command != 'init':
+                log.die(mve_msg(self.mve))
+
+        cmd = self.builtins.get(args.command, self.builtins['help'])
+        cmd.run(args, unknown, self.topdir, manifest=self.manifest)
+
+    def run_extension(self, name, argv):
+        # Check a program invariant. We should never get here
+        # unless we were able to parse the manifest. That's where
+        # information about extensions is gained.
+        assert self.mve is None, \
+            'internal error: running extension "{}" ' \
+            'but got ManifestVersionError'.format(name)
+
+        command = self.extensions[name].factory()
+
+        # Our original top level parser and subparser generator have some
+        # garbage state that prevents us from registering the 'real'
+        # command subparser. Just make new ones.
+        west_parser, subparser_gen = self.make_parsers()
+        command.add_parser(subparser_gen)
+
+        # Handle the instantiated command in the usual way.
+        args, unknown = west_parser.parse_known_args(argv)
+        command.run(args, unknown, self.topdir, manifest=self.manifest)
+
+class Help(WestCommand):
+    # west help <command> implementation.
+
+    def __init__(self):
+        super().__init__('help', 'get help for west or a command',
+                         textwrap.dedent('''\
+                         With an argument, prints help for that command.
+                         Without one, prints top-level help for west.'''),
+                         requires_installation=False)
+
+    def do_add_parser(self, parser_adder):
+        parser = parser_adder.add_parser(
+            self.name, help=self.help, description=self.description,
+            formatter_class=argparse.RawDescriptionHelpFormatter)
+        parser.add_argument('command_name', nargs='?', default=None,
+                            help='name of command to get help for')
+        return parser
+
+    def do_run(self, args, ignored):
+        assert self.app, "Help has no WestApp and can't do its job"
+        app = self.app
+        name = args.command_name
+
+        if not name:
+            app.west_parser.print_help(top_level=True)
+        elif name == 'help':
+            self.parser.print_help()
+        elif name in app.builtins:
+            app.builtins[name].parser.print_help()
+        elif app.extensions is not None and name in app.extensions:
+            # It's fine that we don't handle any errors here. The
+            # exception handling block in app.run_command is in a
+            # parent stack frame.
+            app.run_extension(name, [name, '--help'])
+        else:
+            log.wrn('unknown command "{}"'.format(name))
+            app.west_parser.print_help(top_level=True)
+
 class WestHelpAction(argparse.Action):
 
     def __call__(self, parser, namespace, values, option_string=None):
-        # Let main() know help was requested.
-
+        # Just mark that help was requested.
         namespace.help = True
 
 class WestArgumentParser(argparse.ArgumentParser):
@@ -58,11 +395,8 @@ class WestArgumentParser(argparse.ArgumentParser):
         # The super constructor calls add_argument(), so this has to
         # come first as our override of that method relies on it.
         self.west_optionals = []
-        self.west_extensions = None
-
+        self.west_app = kwargs.pop('west_app', None)
         super(WestArgumentParser, self).__init__(*args, **kwargs)
-
-        self.mve = None # a ManifestVersionError, if any
 
     def print_help(self, file=None, top_level=False):
         print(self.format_help(top_level=top_level), end='',
@@ -103,7 +437,7 @@ class WestArgumentParser(argparse.ArgumentParser):
                 self.format_west_optional(append, wo, width)
 
             append('')
-            for group, commands in BUILTIN_COMMAND_GROUPS.items():
+            for group, commands in self.west_app.builtin_groups.items():
                 if group is None:
                     # Skip hidden commands.
                     continue
@@ -113,8 +447,8 @@ class WestArgumentParser(argparse.ArgumentParser):
                     self.format_command(append, command, width)
                 append('')
 
-            if self.west_extensions is None:
-                if not self.mve:
+            if self.west_app.extensions is None:
+                if not self.west_app.mve:
                     # This only happens when there is an error.
                     # If there are simply no extensions, it's an empty dict.
                     # If the user has already been warned about the error
@@ -135,7 +469,7 @@ class WestArgumentParser(argparse.ArgumentParser):
                 #
                 # This has its own wrinkle: we can't let a failed
                 # import break the built-in commands.
-                for path, specs in self.west_extensions.items():
+                for path, specs in self.west_app.extension_groups.items():
                     # This may occur in case a project defines commands already
                     # defined, in which case it has been filtered out.
                     if not specs:
@@ -233,147 +567,20 @@ class WestArgumentParser(argparse.ArgumentParser):
         self.west_optionals.append(optional)
 
         # Let argparse handle the actual argument.
-        super(WestArgumentParser, self).add_argument(*args, **kwargs)
+        super().add_argument(*args, **kwargs)
 
     def error(self, message):
-        if self.mve:
-            log.die(_mve_msg(self.mve))
+        if self.west_app and self.west_app.mve:
+            log.die(mve_msg(self.west_app.mve))
         super().error(message=message)
 
-class Help(WestCommand):
-    '''west help [command-name] implementation.'''
-
-    # This is the exception to the rule that all built-in
-    # implementations live in west.commands, because it needs access to
-    # data only defined here.
-
-    def __init__(self):
-        super().__init__('help', 'get help for west or a command',
-                         textwrap.dedent('''\
-                         With an argument, prints help for that command.
-                         Without one, prints top-level help for west.'''),
-                         requires_installation=False)
-
-    def do_add_parser(self, parser_adder):
-        parser = parser_adder.add_parser(
-            self.name, help=self.help, description=self.description,
-            formatter_class=argparse.RawDescriptionHelpFormatter)
-        parser.add_argument('command_name', nargs='?', default=None,
-                            help='name of command to get help for')
-        return parser
-
-    def do_run(self, args, ignored):
-        # Here we rely on main() having set up the west_parser
-        # attribute before calling run().
-
-        global BUILTIN_COMMANDS
-
-        if not args.command_name:
-            self.west_parser.print_help(top_level=True)
-            return
-        elif args.command_name == 'help':
-            self.parser.print_help()
-            return
-        elif args.command_name in BUILTIN_COMMANDS:
-            BUILTIN_COMMANDS[args.command_name].parser.print_help()
-            return
-        elif self.west_parser.west_extensions is not None:
-            extensions = self.west_parser.west_extensions.values()
-            for spec in itertools.chain(*extensions):
-                if spec.name == args.command_name:
-                    # run_extension() does not return
-                    run_extension(spec, self.topdir,
-                                  [args.command_name, '--help'], self.manifest)
-
-        log.wrn('unknown command "{}"'.format(args.command_name))
-        self.west_parser.print_help(top_level=True)
-
-# If you add a command here, make sure to think about how it should be
-# handled in main() in case of ManifestVersionError.
-BUILTIN_COMMAND_GROUPS = {
-    'built-in commands for managing git repositories': [
-        Init(),
-        Update(),
-        List(),
-        ManifestCommand(),
-        Diff(),
-        Status(),
-        ForAll(),
-    ],
-
-    'other built-in commands': [
-        Help(),
-        Config(),
-        Topdir(),
-    ],
-
-    # None is for hidden commands we don't want to show to the user.
-    None: [SelfUpdate()]
-}
-
-BUILTIN_COMMANDS = {
-    c.name: c for c in itertools.chain(*BUILTIN_COMMAND_GROUPS.values())
-}
-
-def _make_parsers():
-    # Make a fresh instance of the top level argument parser,
-    # subparser generator, and return them in that order.
-
-    # The prog='west' override avoids the absolute path of the main.py script
-    # showing up when West is run via the wrapper
-    parser = WestArgumentParser(
-        prog='west', description='The Zephyr RTOS meta-tool.',
-        epilog='''Run "west help <command>" for help on each <command>.''',
-        add_help=False)
-
-    # Remember to update zephyr's west-completion.bash if you add or
-    # remove flags. This is currently the only place where shell
-    # completion is available.
-
-    parser.add_argument('-h', '--help', action=WestHelpAction, nargs=0,
-                        help='get help for west or a command')
-
-    parser.add_argument('-z', '--zephyr-base', default=None,
-                        help='''Override the Zephyr base directory. The
-                        default is the manifest project with path
-                        "zephyr".''')
-
-    parser.add_argument('-v', '--verbose', default=0, action='count',
-                        help='''Display verbose output. May be given
-                        multiple times to increase verbosity.''')
-
-    parser.add_argument('-V', '--version', action='version',
-                        version='West version: v{}'.format(__version__),
-                        help='print the program version and exit')
-
-    subparser_gen = parser.add_subparsers(metavar='<command>', dest='command')
-
-    return parser, subparser_gen
-
-def _mve_msg(mve, suggest_ugprade=True):
+def mve_msg(mve, suggest_ugprade=True):
     return '\n  '.join(
-        ['west v{} or later is required by the manifest'.format(mve.version),
+        ['west v{} or later is required by the manifest'.
+         format(mve.version),
          'West version: v{}'.format(__version__)] +
         (['Manifest file: {}'.format(mve.file)] if mve.file else []) +
         (['Please upgrade west and retry.'] if suggest_ugprade else []))
-
-def run_extension(spec, topdir, argv, manifest):
-    # Deferred creation, argument parsing, and handling for extension
-    # commands. We go to the extra effort because we don't want to
-    # import any extern classes until the user has specifically
-    # requested an extension command.
-
-    command = spec.factory()
-
-    # Our original top level parser and subparser generator have some
-    # garbage state that prevents us from registering the 'real'
-    # command subparser. Just make new ones.
-    west_parser, subparser_gen = _make_parsers()
-    command.add_parser(subparser_gen)
-
-    # Handle the instantiated command in the usual way.
-    args, unknown = west_parser.parse_known_args(argv)
-    command.run(args, unknown, topdir, manifest=manifest)
 
 def set_zephyr_base(args):
     '''Ensure ZEPHYR_BASE is set
@@ -480,32 +687,6 @@ def set_zephyr_base(args):
         os.environ['ZEPHYR_BASE'] = zb
         log.dbg('ZEPHYR_BASE={} (origin: {})'.format(zb, zb_origin))
 
-def get_extension_commands(manifest):
-    extensions = extension_commands(manifest=manifest)
-    extension_names = set()
-
-    for path, specs in extensions.items():
-        # Filter out attempts to shadow built-in commands as well as
-        # commands which have names which are already used.
-        filtered = []
-        for spec in specs:
-            if spec.name in BUILTIN_COMMANDS:
-                log.wrn('ignoring project {} extension command "{}";'.
-                        format(spec.project.name, spec.name),
-                        'this is a built in command')
-                continue
-            if spec.name in extension_names:
-                log.wrn('ignoring project {} extension command "{}";'.
-                        format(spec.project.name, spec.name),
-                        'command "{}" already defined as extension command'.
-                        format(spec.name))
-                continue
-            filtered.append(spec)
-            extension_names.add(spec.name)
-        extensions[path] = filtered
-
-    return extensions
-
 def dump_traceback():
     # Save the current exception to a file and return its path.
     fd, name = tempfile.mkstemp(prefix='west-exc-', suffix='.txt')
@@ -524,156 +705,32 @@ def main(argv=None):
     # stdout/stderr isn't a terminal
     colorama.init()
 
-    # See if we're in an installation.
-    try:
-        topdir = west_topdir()
-    except WestNotFound:
-        topdir = None
+    # Create the WestApp instance and let it run.
+    app = WestApp()
+    app.run(argv or sys.argv[1:])
 
-    # Read the configuration files before looking for extensions.
-    # We need this to find the manifest path in order to load extensions.
-    config.read_config(topdir=topdir)
+# If you add a command here, make sure to think about how it should be
+# handled in case of ManifestVersionError.
+BUILTIN_COMMAND_GROUPS = {
+    'built-in commands for managing git repositories': [
+        Init,
+        Update,
+        List,
+        ManifestCommand,
+        Diff,
+        Status,
+        ForAll,
+    ],
 
-    # Parse the manifest and create extension command thunks. We'll
-    # pass the saved manifest around so it doesn't have to be
-    # re-parsed.
-    mve = None
-    if topdir:
-        try:
-            manifest = Manifest.from_file(topdir=topdir)
-            extensions = get_extension_commands(manifest)
-        except (MalformedManifest, MalformedConfig, FileNotFoundError,
-                ManifestVersionError) as e:
-            manifest = None
-            extensions = None
-            if isinstance(e, ManifestVersionError):
-                mve = e
-    else:
-        manifest = None
-        extensions = {}
+    'other built-in commands': [
+        Help,
+        Config,
+        Topdir,
+    ],
 
-    # Create the initial set of parsers. We'll need to re-create these
-    # if we're running an extension command. Register extensions with
-    # the parser.
-    if argv is None:
-        argv = sys.argv[1:]
-    west_parser, subparser_gen = _make_parsers()
-    west_parser.west_extensions = extensions
-    west_parser.mve = mve
-
-    # Cache the parser in the global Help instance. Dirty, but it
-    # needs this data as its parser attribute is not the parent
-    # parser, but the return value of a subparser_gen.
-    BUILTIN_COMMANDS['help'].west_parser = west_parser
-
-    # Add sub-parsers for the built-in commands.
-    for command in BUILTIN_COMMANDS.values():
-        command.add_parser(subparser_gen)
-
-    # Add stub parsers for extensions.
-    #
-    # These just reserve the names of each extension. The real parser
-    # for each extension can't be added until we import the
-    # extension's code, which we won't do unless parse_known_args()
-    # says to run that extension.
-    extensions_by_name = {}
-    if extensions:
-        for path, specs in extensions.items():
-            for spec in specs:
-                subparser_gen.add_parser(spec.name, add_help=False)
-                extensions_by_name[spec.name] = spec
-
-    # Parse arguments for the first time. We'll need to do this again
-    # if we're running an extension.
-    args, unknown = west_parser.parse_known_args(args=argv)
-
-    # Set up logging verbosity before running the command, so
-    # e.g. verbose messages related to argument handling errors work
-    # properly. This works even for extension commands that haven't
-    # been instantiated yet, because --verbose is an option to the top
-    # level parser, and the command run() method doesn't get called
-    # until later.
-    log.set_verbosity(args.verbose)
-
-    log.dbg('args namespace:', args, level=log.VERBOSE_EXTREME)
-
-    # Try to set ZEPHYR_BASE. It would be nice to get rid of this
-    # someday and just have extensions that need it set this variable.
-    if args.command and args.command not in ['init', 'help'] and not args.help:
-        set_zephyr_base(args)
-
-    # If we were run as 'west -h ...' or 'west --help ...',
-    # monkeypatch the args namespace so we end up running Help.  The
-    # user might have also provided a command. If so, print help about
-    # that command.
-    if args.help or args.command is None:
-        args.command_name = args.command
-        args.command = 'help'
-
-    # Finally, run the command.
-    try:
-        if args.command in extensions_by_name:
-            # Check a program invariant. We should never get here
-            # unless we were able to parse the manifest. That's where
-            # information about extensions is gained.
-            assert mve is None, \
-                'internal error: running extension "{}" ' \
-                'but got ManifestVersionError'.format(args.command)
-
-            # This does not return. get_extension_commands() ensures
-            # that extensions do not shadow built-in command names, so
-            # checking this first is safe.
-            run_extension(extensions_by_name[args.command], topdir, argv,
-                          manifest)
-        else:
-            if mve:
-                if args.command == 'help':
-                    log.wrn(_mve_msg(mve, suggest_ugprade=False) +
-                            '\n  Cannot get extension command help, ' +
-                            "and most commands won't run." +
-                            '\n  To silence this warning, upgrade west.')
-                elif args.command in ['config', 'topdir']:
-                    # config and topdir are safe to run, but let's
-                    # warn the user that most other commands won't be.
-                    log.wrn(_mve_msg(mve, suggest_ugprade=False) +
-                            "\n  This should work, but most commands won't." +
-                            '\n  To silence this warning, upgrade west.')
-                elif args.command != 'init':
-                    log.die(_mve_msg(mve))
-
-            cmd = BUILTIN_COMMANDS.get(args.command, BUILTIN_COMMANDS['help'])
-            cmd.run(args, unknown, topdir, manifest=manifest)
-    except KeyboardInterrupt:
-        sys.exit(0)
-    except BrokenPipeError:
-        sys.exit(0)
-    except CalledProcessError as cpe:
-        log.err('command exited with status {}: {}'.
-                format(cpe.returncode, quote_sh_list(cpe.cmd)))
-        if args.verbose:
-            traceback.print_exc()
-        sys.exit(cpe.returncode)
-    except ExtensionCommandError as ece:
-        msg = 'extension command "{}" could not be run{}.'.format(
-            args.command, ': ' + ece.hint if ece.hint else '')
-        if args.verbose:
-            log.err(msg)
-            traceback.print_exc()
-        else:
-            log.err(msg, 'See {} for a traceback.'.format(dump_traceback()))
-        sys.exit(ece.returncode)
-    except CommandContextError as cce:
-        log.err('command', args.command, 'cannot be run in this context:',
-                *cce.args)
-        log.err('see {} for a traceback.'.format(dump_traceback()))
-        sys.exit(cce.returncode)
-    except CommandError as ce:
-        # No need to dump_traceback() here. The command is responsible
-        # for logging its own errors.
-        sys.exit(ce.returncode)
-    except (MalformedManifest, MalformedConfig) as malformed:
-        log.die('\n  '.join(["can't load west manifest"] +
-                            list(malformed.args)))
+    # None is for hidden commands we don't want to show to the user.
+    None: [SelfUpdate]
+}
 
 if __name__ == "__main__":
     main()

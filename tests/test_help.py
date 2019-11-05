@@ -1,11 +1,9 @@
-#
-# Test cases
-#
+import itertools
 
 import os
 import sys
 
-from west.main import BUILTIN_COMMANDS
+from west.main import BUILTIN_COMMAND_GROUPS
 from conftest import cmd
 
 def test_builtin_help_and_dash_h(west_init_tmpdir):
@@ -16,9 +14,10 @@ def test_builtin_help_and_dash_h(west_init_tmpdir):
     h2out = cmd('-h')
     assert h1out == h2out
 
-    for c in BUILTIN_COMMANDS.keys():
-        h1out = cmd('help {}'.format(c))
-        h2out = cmd('{} -h'.format(c))
+    for cls in itertools.chain(*BUILTIN_COMMAND_GROUPS.values()):
+        c = cls()
+        h1out = cmd('help {}'.format(c.name))
+        h2out = cmd('{} -h'.format(c.name))
         assert h1out == h2out
 
 def test_extension_help_and_dash_h(west_init_tmpdir):
