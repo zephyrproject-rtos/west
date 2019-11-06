@@ -859,7 +859,7 @@ class Project:
                                     stdout, stderr)
 
     def sha(self, rev, cwd=None):
-        '''Returns the project's current revision as a SHA.
+        '''Get the SHA for a project revision.
 
         :param rev: git revision (HEAD, v2.0.0, etc.) as a string
         :param cwd: directory to run command in (default:
