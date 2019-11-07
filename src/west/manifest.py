@@ -35,6 +35,11 @@ MANIFEST_REV_BRANCH = 'manifest-rev'
 #: A fully qualified reference to `MANIFEST_REV_BRANCH`.
 QUAL_MANIFEST_REV_BRANCH = 'refs/heads/' + MANIFEST_REV_BRANCH
 
+#: The west refs space used for current manifest revision.
+#: West ref space is temporary space for fetching of SHAs.
+#: The refspace also useable for future west operations, such as west rebase.
+WEST_REF_SPACE = 'refs/west/'
+
 #: The latest manifest schema version supported by this west program.
 #:
 #: This value changes when a new version of west includes new manifest

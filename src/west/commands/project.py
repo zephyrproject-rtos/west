@@ -24,6 +24,7 @@ from west.manifest import Manifest, MalformedManifest, MalformedConfig, \
     MANIFEST_PROJECT_INDEX, ManifestProject
 from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
 from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
+from west.manifest import WEST_REF_SPACE as WEST_REF
 from urllib.parse import urlparse
 import posixpath
 
@@ -726,6 +727,21 @@ class SelfUpdate(_ProjectCommand):
 # Private helper routines.
 #
 
+def _clean_west_refspace(project):
+    # Cleanup fetch if sha and everything != current revision.
+    west_refs_cmd = ('for-each-ref --format="%(refname)" -- ' +
+                     WEST_REF + '**')
+    cp = project.git(west_refs_cmd, capture_stdout=True)
+    west_references = cp.stdout.decode('utf-8').strip()
+
+    for ref in west_references.splitlines():
+        if ref != WEST_REF + project.revision:
+            update_ref_cmd = ('update-ref -m "west fetch: entry for ' +
+                              '{}" {} {}'.format(ref, QUAL_MANIFEST_REV, ref))
+            project.git(update_ref_cmd)
+            update_ref_cmd = 'update-ref -d ' + ref
+            project.git(update_ref_cmd)
+
 def _maybe_sha(rev):
     # Return true if and only if the given revision might be a SHA.
 
@@ -746,6 +762,8 @@ def _update(project, fetch, rebase, keep_descendants):
         log.dbg('skipping unnecessary fetch')
         project.git('update-ref ' + QUAL_MANIFEST_REV +
                     ' {revision}^{{commit}}')
+
+    _clean_west_refspace(project)
 
     try:
         sha = project.sha(QUAL_MANIFEST_REV)
@@ -865,12 +883,12 @@ def _fetch(project):
     update_cmd = 'update-ref ' + QUAL_MANIFEST_REV + ' '
     if _maybe_sha(project.revision):
         # Don't fetch a SHA directly, as server may restrict from doing so.
-        fetch_cmd += 'refs/heads/*:refs/west/*'
+        fetch_cmd += 'refs/heads/*:' + WEST_REF + '*'
         update_cmd += '{revision}'
     else:
         # The revision is definitely not a SHA, so it's safe to fetch directly.
         # This avoids fetching unnecessary ref space from the remote.
-        fetch_cmd += '{revision}'
+        fetch_cmd += '{revision}:' + WEST_REF + '{revision}'
         update_cmd += 'FETCH_HEAD^{{commit}}'
 
     log.small_banner(project.format(msg))
