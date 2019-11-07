@@ -24,6 +24,7 @@ from west.manifest import ImportFlag, Manifest, MANIFEST_PROJECT_INDEX, \
     ManifestProject, _manifest_content_at
 from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
 from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
+from west.manifest import QUAL_REFS_WEST as QUAL_REFS
 from urllib.parse import urlparse
 import posixpath
 
@@ -711,11 +712,21 @@ class Update(_ProjectCommand):
             _clone(project)
 
         if self.fs == 'always' or _rev_type(project) not in ('tag', 'commit'):
-            new_manifest_rev = _fetch(project)
+            _fetch(project)
         else:
             log.dbg('skipping unnecessary fetch')
-            new_manifest_rev = '{revision}^{{commit}}'
-        project.git(['update-ref', QUAL_MANIFEST_REV, new_manifest_rev])
+            _update_manifest_rev(project, '{revision}^{{commit}}')
+
+        # Head of manifest-rev is now pointing to current manifest revision.
+        # Thus it is safe to unconditionally clear out the refs/west space.
+        #
+        # Doing this here instead of in _fetch() ensures that it gets cleaned
+        # up when users upgrade from older versions of west (like 0.6.x) that
+        # didn't handle this properly.
+        # In future, this can be moved into _fetch() after the install base of
+        # older west versions is expected to be smaller.
+        _clean_west_refspace(project)
+
         if not _head_ok(project):
             # If nothing is checked out (which usually only happens if we
             # called _clone(project) above), check out 'manifest-rev' in a
@@ -845,6 +856,25 @@ class SelfUpdate(_ProjectCommand):
 # Private helper routines.
 #
 
+def _clean_west_refspace(project):
+    # Clean the refs/west space to ensure they do not show up in 'git log'.
+
+    # Get all the ref names that start with refs/west/.
+    list_refs_cmd = ('for-each-ref --format="%(refname)" -- ' +
+                     QUAL_REFS + '**')
+    cp = project.git(list_refs_cmd, capture_stdout=True)
+    west_references = cp.stdout.decode('utf-8').strip()
+
+    # Safely delete each one.
+    for ref in west_references.splitlines():
+        delete_ref_cmd = 'update-ref -d ' + ref
+        project.git(delete_ref_cmd)
+
+def _update_manifest_rev(project, new_manifest_rev):
+    project.git(['update-ref',
+                 '-m', f'west update: moving to {new_manifest_rev}',
+                 QUAL_MANIFEST_REV, new_manifest_rev])
+
 def _maybe_sha(rev):
     # Return true if and only if the given revision might be a SHA.
 
@@ -947,25 +977,22 @@ def _fetch(project, rev=None):
     fetch_cmd = ('fetch -f --tags ' +
                  ('--depth={clone_depth} ' if project.clone_depth else ' ') +
                  '-- {url} ')
+
+    log.small_banner(project.format(msg))
     if _maybe_sha(rev):
         # We can't in general fetch a SHA from a remote, as many hosts
         # (GitHub included) forbid it for security reasons. Let's hope
         # it's reachable from some branch.
-        fetch_cmd += 'refs/heads/*:refs/west/*'
-        ret = rev
+        fetch_cmd += 'refs/heads/*:' + QUAL_REFS + '*'
+        project.git(fetch_cmd)
+        _update_manifest_rev(project, '{revision}')
     else:
         # The revision is definitely not a SHA, so it's safe to fetch directly.
         # This avoids fetching unnecessary ref space from the remote.
         # We need {{commit}} instead of {commit} because everything gets run
         # through Project.format.
-        fetch_cmd += rev
-        ret = 'FETCH_HEAD^{{commit}}'
-
-    log.small_banner(project.format(msg))
-    project.git(fetch_cmd)
-
-    return ret
-
+        fetch_cmd += '{revision}:' + QUAL_MANIFEST_REV
+        project.git(fetch_cmd)
 
 def _head_ok(project):
     # Returns True if the reference 'HEAD' exists and is not a tag or remote

@@ -36,6 +36,9 @@ MANIFEST_REV_BRANCH = 'manifest-rev'
 #: A fully qualified reference to `MANIFEST_REV_BRANCH`.
 QUAL_MANIFEST_REV_BRANCH = 'refs/heads/' + MANIFEST_REV_BRANCH
 
+#: Git ref space used by west for internal purposes.
+QUAL_REFS_WEST = 'refs/west/'
+
 #: The latest manifest schema version supported by this west program.
 #:
 #: This value changes when a new version of west includes new manifest
