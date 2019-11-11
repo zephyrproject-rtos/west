@@ -100,6 +100,9 @@ class Manifest:
             - `MalformedManifest` if *source_file* contains invalid
               data
 
+            - `ManifestVersionError` if this version of west is too
+              old to parse the manifest.
+
             - `MalformedConfig` if ``manifest.path`` is needed and
               can't be read
 
@@ -160,6 +163,9 @@ class Manifest:
         Raises `MalformedManifest` if *source_data* is not a valid
         manifest.
 
+        Raises `ManifestVersionError` if this version of west is too
+        old to parse the manifest.
+
         :param source_data: parsed YAML data as a Python object, or a
             string with unparsed YAML data
         :param manifest_path: fallback `ManifestProject` path
@@ -207,6 +213,9 @@ class Manifest:
         Exceptions raised:
 
             - `MalformedManifest`: if the manifest data is invalid
+
+            - `ManifestVersionError`: if this version of west is too
+              old to parse the manifest
 
             - `WestNotFound`: if *topdir* was needed and not found
 
