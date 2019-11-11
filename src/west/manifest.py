@@ -326,7 +326,10 @@ class Manifest:
         # Otherwise, resolve each of the project_ids to a project,
         # returning the result or raising ValueError.
         for pid in project_ids:
-            project = self._projects_by_name.get(pid)
+            if pid == 'manifest':
+                project = self.projects[MANIFEST_PROJECT_INDEX]
+            else:
+                project = self._projects_by_name.get(pid)
             if project is None and allow_paths:
                 project = self._projects_by_cpath.get(util.canon_path(pid))
 
