@@ -85,10 +85,13 @@ def test_manifest_freeze(west_update_tmpdir):
     # so failing lines can be printed in the test output.
     #
     # Since the actual remote URLs and SHAs are not predictable, we
-    # don't match those precisely. However, we do expect the output to
-    # match project order as specified in our manifest, that all
-    # revisions are full 40-character SHAs, and there isn't any random
-    # YAML tag crap.
+    # don't match those precisely. However, we do expect:
+    #
+    # - the output to match project order as specified in our
+    #   manifest
+    # - attributes are listed in NURPCW order (name, url, ...)
+    # - all revisions are full 40-character SHAs
+    # - there isn't any random YAML tag crap
     expected_res = ['^manifest:$',
                     '^  projects:$',
                     '^  - name: Kconfiglib$',
@@ -97,9 +100,9 @@ def test_manifest_freeze(west_update_tmpdir):
                     '^    path: subdir/Kconfiglib$',
                     '^  - name: net-tools$',
                     '^    url: .*$',
+                    '^    revision: [a-f0-9]{40}$',
                     '^    clone-depth: 1$',
                     '^    west-commands: scripts/west-commands.yml$',
-                    '^    revision: [a-f0-9]{40}$',
                     '^  self:$',
                     '^    path: zephyr$']
 
