@@ -239,21 +239,18 @@ class Manifest:
 
         if source_file:
             with open(source_file, 'r') as f:
-                self._data = yaml.safe_load(f.read())
+                source_data = yaml.safe_load(f.read())
             self.path = os.path.abspath(source_file)
-        else:
-            self._data = source_data
 
-        if not self._data:
+        if not source_data:
             self._malformed('manifest contains no data')
-
-        if self._data.get('manifest') is None:
+        if source_data.get('manifest') is None:
             self._malformed('manifest contains no manifest element')
-        data = self._data['manifest']
 
         # Make sure this version of west can load this manifest data.
         # This has to happen before the schema check -- later schemas
         # may incompatibly extend this one.
+        data = source_data['manifest']
         if 'version' in data:
             # As a convenience for the user, convert floats to strings.
             # This avoids forcing them to write:
@@ -292,7 +289,7 @@ class Manifest:
 
         # Set up the public attributes documented above, as well as
         # any internal attributes needed to implement the public API.
-        self._load(manifest_path)
+        self._load(data, manifest_path)
 
     def get_projects(self, project_ids, allow_paths=True, only_cloned=False):
         '''Get a list of `Project` objects in the manifest from
@@ -390,9 +387,9 @@ class Manifest:
         return r
 
     def _malformed(self, complaint, parent=None):
-        context = (' file: {} '.format(self.path) if self.path
-                   else ' data:\n{}'.format(self._data))
-        args = ['Malformed manifest{}'.format(context),
+        context = ('file: {} '.format(self.path) if self.path
+                   else 'data')
+        args = ['Malformed manifest {}'.format(context),
                 'Schema file: {}'.format(_SCHEMA_PATH)]
         if complaint:
             args.append('Hint: ' + complaint)
@@ -402,31 +399,30 @@ class Manifest:
         else:
             raise exc
 
-    def _load(self, path_hint):
+    def _load(self, manifest, path_hint):
         # Initialize this instance's fields from values given in the
         # manifest data, which must be validated according to the schema.
 
         projects = []
         projects_by_name = {}
         projects_by_ppath = {}
-        manifest = self._data['manifest']
 
         # Create the ManifestProject instance and install it into the
         # projects list.
         assert MANIFEST_PROJECT_INDEX == 0
-        projects.append(self._load_self(path_hint))
+        projects.append(self._load_self(manifest, path_hint))
 
-        # Map from each remote's name onto that remote's data in the manifest.
-        self._remotes_by_name = {r['name']: Remote(r['name'], r['url-base'])
-                                 for r in manifest.get('remotes', [])}
+        # Map from each remote's name to its url-base.
+        url_bases = {r['name']: r['url-base']
+                     for r in manifest.get('remotes', [])}
 
-        # Get any defaults out of the manifest.
-        self._defaults = self._load_defaults()
+        # Default values, explicit or implicit.
+        defaults = self._load_defaults(manifest.get('defaults', {}), url_bases)
 
-        # pdata = project data (dictionary of project information parsed from
+        # pd = project data (dictionary of project information parsed from
         # the manifest file)
-        for pdata in manifest['projects']:
-            project = self._load_project(pdata)
+        for pd in manifest['projects']:
+            project = self._load_project(pd, url_bases, defaults)
 
             # Project names must be unique.
             if project.name in projects_by_name:
@@ -458,9 +454,9 @@ class Manifest:
                 assert p.abspath  # sanity check a program invariant
                 self._projects_by_cpath[util.canon_path(p.abspath)] = p
 
-    def _load_self(self, path_hint):
+    def _load_self(self, manifest, path_hint):
         # "slf" because "self" is already taken
-        slf = self._data['manifest'].get('self', dict())
+        slf = manifest.get('self', dict())
         if self.path:
             # We're parsing a real file on disk. We currently require
             # that we are able to resolve a topdir. We may lift this
@@ -471,66 +467,63 @@ class Manifest:
                                topdir=self.topdir,
                                west_commands=slf.get('west-commands'))
 
-    def _load_defaults(self):
+    def _load_defaults(self, md, url_bases):
         # md = manifest defaults (dictionary with values parsed from
         # the manifest)
-        md = self._data['manifest'].get('defaults', dict())
         mdrem = md.get('remote')
         if mdrem:
             # The default remote name, if provided, must refer to a
             # well-defined remote.
-            if mdrem not in self._remotes_by_name:
+            if mdrem not in url_bases:
                 self._malformed('default remote {} is not defined'.
                                 format(mdrem))
-            default_remote = self._remotes_by_name[mdrem]
-        else:
-            default_remote = None
+        return _defaults(mdrem, md.get('revision', _DEFAULT_REV))
 
-        return Defaults(remote=default_remote, revision=md.get('revision'))
+    def _load_project(self, pd, url_bases, defaults):
+        # pd = project data (dictionary with values parsed from the
+        # manifest)
 
-    def _load_project(self, pdata):
-        # Validate the project name.
-        name = pdata['name']
-
-        # Validate the project remote or URL.
-        remote_name = pdata.get('remote')
-        url = pdata.get('url')
-        repo_path = pdata.get('repo-path')
-        if remote_name is None and url is None:
-            if self._defaults.remote is None:
-                self._malformed(
-                    'project {} has no remote or URL (no default is set)'.
-                    format(name))
-            else:
-                remote_name = self._defaults.remote.name
-        if remote_name:
-            if remote_name not in self._remotes_by_name:
-                self._malformed('project {} remote {} is not defined'.
-                                format(name, remote_name))
-            remote = self._remotes_by_name[remote_name]
-        else:
-            remote = None
-
-        # Create the project instance for final checking.
-        try:
-            project = Project(name, defaults=self._defaults,
-                              path=pdata.get('path'),
-                              clone_depth=pdata.get('clone-depth'),
-                              revision=pdata.get('revision'),
-                              west_commands=pdata.get('west-commands'),
-                              remote=remote, repo_path=repo_path,
-                              topdir=self.topdir, url=url)
-        except ValueError as ve:
-            self._malformed(ve.args[0])
+        name = pd['name']
 
         # The name "manifest" cannot be used as a project name; it
         # is reserved to refer to the manifest repository itself
         # (e.g. from "west list"). Note that this has not always
         # been enforced, but it is part of the documentation.
-        if project.name == 'manifest':
+        if name == 'manifest':
             self._malformed('no project can be named "manifest"')
 
-        return project
+        # Figure out the project's fetch URL:
+        #
+        # - url is tested first (and can't be used with remote or repo-path)
+        # - remote is tested next (and must be defined if present)
+        # - default remote is tested last, if there is one
+        url = pd.get('url')
+        remote = pd.get('remote')
+        repo_path = pd.get('repo-path')
+        if remote and url:
+            self._malformed('project {} has both "remote: {}" and "url: {}"'.
+                            format(name, remote, url))
+        if defaults.remote and not (remote or url):
+            remote = defaults.remote
+
+        if url:
+            if repo_path:
+                self._malformed('project {} has "repo_path: {}" and "url: {}"'.
+                                format(name, repo_path, url))
+        elif remote:
+            if remote not in url_bases:
+                self._malformed('project {} remote {} is not defined'.
+                                format(name, remote))
+            url = url_bases[remote] + '/' + (repo_path or name)
+        else:
+            self._malformed(
+                'project {} has no remote or url and no default remote is set'.
+                format(name))
+
+        return Project(name, url, pd.get('revision', defaults.revision),
+                       pd.get('path', name), clone_depth=pd.get('clone-depth'),
+                       west_commands=pd.get('west-commands'),
+                       topdir=self.topdir)
 
 class MalformedManifest(Exception):
     '''Manifest parsing failed due to invalid data.
@@ -553,112 +546,28 @@ class ManifestVersionError(Exception):
         self.file = file
         '''The file that required this version of west.'''
 
-# Definitions for Manifest attribute types.
-
-class Defaults:
-    '''Represents default values in a manifest, either specified by
-    the user or supplied by west itself. Neither comparable nor
-    hashable.
-    '''
-
-    __slots__ = 'remote revision'.split()
-
-    def __init__(self, remote=None, revision=None):
-        '''Initialize a defaults value from manifest data.
-
-        :param remote: the default `Remote`, or ``None`` (a
-            ``west.manifest.Remote``, not the name of a remote).
-        :param revision: default project Git revision; 'master' if not
-            specified in the manifest.
-        '''
-        if remote is not None and not isinstance(remote, Remote):
-            raise ValueError('{} is not a Remote'.format(remote))
-        if revision is None:
-            revision = 'master'
-
-        self.remote = remote
-        '''`Remote` corresponding to the default remote, or ``None``.'''
-        self.revision = revision
-        '''Default Git revision to fetch when updating projects.'''
-
-    def __eq__(self, other):
-        return NotImplemented
-
-    def __repr__(self):
-        return 'Defaults(remote={}, revision={})'.format(repr(self.remote),
-                                                         repr(self.revision))
-
-    def as_dict(self):
-        '''Return a representation of this object as a dict, as it
-        would be parsed from manifest YAML data.
-        '''
-        ret = collections.OrderedDict()
-        if self.remote and isinstance(self.remote, Remote):
-            ret['remote'] = self.remote.name
-        if self.revision:
-            ret['revision'] = self.revision
-        return ret
-
-
-class Remote:
-    '''Represents a remote defined in a west manifest.
-    Remotes may be compared for equality, but are not hashable.'''
-
-    __slots__ = 'name url_base'.split()
-
-    def __init__(self, name, url_base):
-        '''Initialize a remote from manifest data.
-
-        :param name: remote's name
-        :param url_base: remote's URL base.
-        '''
-        if url_base.endswith('/'):
-            log.wrn('Remote', name, 'URL base', url_base,
-                    'ends with a slash ("/"); these are automatically',
-                    'appended by West')
-
-        self.name = name
-        '''Remote ``name`` as it appears in the manifest data.'''
-        self.url_base = url_base
-        '''Remote ``url-base`` as it appears in the manifest data.'''
-
-    def __eq__(self, other):
-        return self.name == other.name and self.url_base == other.url_base
-
-    def __repr__(self):
-        return 'Remote(name={}, url-base={})'.format(repr(self.name),
-                                                     repr(self.url_base))
-
-    def as_dict(self):
-        '''Return a representation of this object as a dict, as it
-        would be parsed from manifest YAML data.
-        '''
-        return collections.OrderedDict(
-            ((s.replace('_', '-'), getattr(self, s)) for s in self.__slots__))
-
-
 class Project:
     '''Represents a project defined in a west manifest.
 
     Attributes:
 
     - ``name``: project's unique name
-    - ``topdir``: the top level directory of the west installation
-      the project is part of, or ``None``
+    - ``url``: project fetch URL
+    - ``revision``: revision to fetch from ``url`` when the
+      project is updated
     - ``path``: relative path to the project within the installation
       (i.e. from ``topdir`` if that is set)
     - ``abspath``: absolute path to the project in the native path name
       format (or ``None`` if ``topdir`` is)
     - ``posixpath``: like ``abspath``, but with slashes (``/``) as
       path separators
-    - ``url``: project fetch URL
-    - ``revision``: revision to fetch from ``url`` when the
-      project is updated
     - ``clone_depth``: clone depth to fetch when first cloning the
       project, or ``None`` (the revision should not be a SHA
       if this is used)
     - ``west_commands``: project's ``west_commands:`` key in the
       manifest data
+    - ``topdir``: the top level directory of the west installation
+      the project is part of, or ``None``
     '''
 
     def __eq__(self, other):
@@ -668,67 +577,34 @@ class Project:
         return '<Project {} at {}>'.format(
             repr(self.name), repr(self.abspath or self.path))
 
-    def __init__(self, name, defaults=None, path=None,
-                 clone_depth=None, revision=None, west_commands=None,
-                 remote=None, repo_path=None, url=None, topdir=None):
-        '''
-        Project constructor.
-
-        Constructor arguments for project attributes should not be
-        given unless the project's manifest data contains them.
+    def __init__(self, name, url, revision=None, path=None,
+                 clone_depth=None, west_commands=None, topdir=None):
+        '''Project constructor.
 
         If *topdir* is ``None``, then absolute path attributes
         (``abspath`` and ``posixpath``) will also be ``None``.
 
         :param name: project's ``name:`` attribute in the manifest
-        :param defaults: a `Defaults` instance to use, if the manifest
-            has a ``defaults:``
-        :param path: ``path:`` attribute value
-        :param clone_depth: ``clone-depth:`` attribute value
-        :param revision: ``revision:`` attribute value
-        :param west_commands: ``west-commands:`` attribute value
-        :param remote: `Remote` instance to use, if there is a
-            ``remote:`` attribute
-        :param repo_path: ``repo-path:`` attribute value
-        :param url: ``url:`` attribute value
+        :param url: fetch URL
+        :param revision: fetch revision
+        :param path: path (relative to topdir), or None for *name*
+        :param clone_depth: depth to use for initial clone
+        :param west_commands: path to west commands directory in the
+            project, relative to its own base directory, topdir / path
         :param topdir: the west installation's top level directory
         '''
-        if remote and url:
-            raise ValueError('project {} has both "remote: {}" and "url: {}"'.
-                             format(name, remote.name, url))
-        if repo_path and not remote:
-            raise ValueError('project {} has repo_path={} but no remote'.
-                             format(name, repo_path, remote))
-        if repo_path and url:
-            raise ValueError('project {} has both repo_path={} and url={}'.
-                             format(name, repo_path, url))
-        if not (remote or url):
-            raise ValueError('project {} has neither a remote nor a URL'.
-                             format(name))
-
-        if not url:
-            url = remote.url_base + '/' + (repo_path or name)
 
         self.name = name
         self.url = url
-        self._revision = revision
-        self._default_rev = defaults.revision if defaults else 'master'
-        self.topdir = topdir
-        self.path = path
+        self.revision = revision or _DEFAULT_REV
+        self.path = path or name
         self.clone_depth = clone_depth
         self.west_commands = west_commands
-
-    @property
-    def revision(self):
-        return self._revision or self._default_rev
-
-    @revision.setter
-    def revision(self, revision):
-        self._revision = revision
+        self.topdir = topdir
 
     @property
     def path(self):
-        return self._path or self.name
+        return self._path
 
     @path.setter
     def path(self, path):
@@ -759,14 +635,13 @@ class Project:
         ret = collections.OrderedDict()
         ret['name'] = self.name
         ret['url'] = self.url
-        if self._revision:
-            ret['revision'] = self.revision
+        ret['revision'] = self.revision
+        if self.path != self.name:
+            ret['path'] = self.path
         if self.clone_depth:
             ret['clone-depth'] = self.clone_depth
         if self.west_commands:
             ret['west-commands'] = self.west_commands
-        if self._path:
-            ret['path'] = self.path
 
         return ret
 
@@ -1071,11 +946,13 @@ class ManifestProject(Project):
             ret['west-commands'] = self.west_commands
         return ret
 
+_defaults = collections.namedtuple('_defaults', 'remote revision')
 _WEST_YML = 'west.yml'
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
 _SCHEMA_VER = parse_version(SCHEMA_VERSION)
 _EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
 _EARLIEST_VER = parse_version(_EARLIEST_VER_STR)
+_DEFAULT_REV = 'master'
 
 @lru_cache(maxsize=1)
 def _warn_once_if_no_git():

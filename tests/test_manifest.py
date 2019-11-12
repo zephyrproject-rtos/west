@@ -10,7 +10,7 @@ import platform
 import pytest
 import yaml
 
-from west.manifest import Manifest, Defaults, Remote, Project, \
+from west.manifest import Manifest, Project, \
     ManifestProject, MalformedManifest, ManifestVersionError, \
     manifest_path
 
@@ -75,79 +75,366 @@ def check_proj_consistency(actual, expected):
 def nodrive(path):
     return os.path.splitdrive(path)[1]
 
-def test_init_with_url():
-    # Test the project constructor works as expected with a URL.
+def M(content, **kwargs):
+    # A convenience to save typing
+    return Manifest.from_data('manifest:\n' + content, **kwargs)
 
-    p = Project('p', url='some-url')
+#########################################
+# The very basics
+#
+# We need to be able to instantiate Projects and parse manifest data
+# from strings or dicts.
+
+def test_project_init():
+    # Basic tests of the Project constructor and public attributes.
+
+    p = Project('p', 'some-url', revision='v1.2')
     assert p.name == 'p'
     assert p.url == 'some-url'
+    assert p.revision == 'v1.2'
     assert p.path == 'p'
-    assert p.topdir is None
     assert p.abspath is None
     assert p.posixpath is None
     assert p.clone_depth is None
-    assert p.revision == 'master'
     assert p.west_commands is None
+    assert p.topdir is None
 
-def test_init_with_url_and_topdir():
-    # Test the project constructor works as expected with a URL
-    # and explicit top level directory.
-
-    p = Project('p', url='some-url', topdir='/west_top')
-    assert p.name == 'p'
-    assert p.url == 'some-url'
-    assert p.path == 'p'
-    assert p.topdir == '/west_top'
     if platform.system() == 'Windows':
-        posixpath = os.path.splitdrive(p.posixpath)[1]
-        assert posixpath == '/west_top/p'
-    assert p.clone_depth is None
-    assert p.revision == 'master'
-    assert p.west_commands is None
+        topdir = 'C:\\topdir'
+    else:
+        topdir = '/topdir'
+    p = Project('p', 'some-url', clone_depth=4, west_commands='foo',
+                topdir=topdir)
+    assert p.clone_depth == 4
+    assert p.west_commands == 'foo'
+    assert p.topdir == topdir
+    assert p.abspath == os.path.join(topdir, 'p')
+    if platform.system() == 'Windows':
+        assert p.posixpath == 'C:/topdir/p'
+    else:
+        assert p.posixpath == '/topdir/p'
 
-def test_remote_url_init():
+def test_manifest_from_data():
+    # We can load manifest data as a dict or a string.
+
+    manifest = Manifest.from_data('''\
+    manifest:
+      projects:
+        - name: foo
+          url: https://foo.com
+    ''')
+    assert manifest.projects[-1].name == 'foo'
+
+    manifest = Manifest.from_data({'manifest':
+                                   {'projects':
+                                    [{'name': 'foo',
+                                      'url': 'https:foo.com'}]}})
+    assert manifest.projects[-1].name == 'foo'
+
+
+#########################################
+# Project parsing tests
+#
+# Tests for validating and parsing project data, including:
+#
+# - names
+# - URLs
+# - revisions
+# - paths
+# - clone depths
+# - west commands
+def test_projects_must_have_name():
+    # A project must have a name. Names must be unique.
+
+    with pytest.raises(MalformedManifest):
+        M('''\
+        projects:
+        - url: foo
+        ''')
+
+    with pytest.raises(MalformedManifest):
+        M('''\
+        projects:
+        - name: foo
+          url: u1
+        - name: foo
+          url: u2
+        ''')
+
+    m = M('''\
+    projects:
+    - name: foo
+      url: u1
+    - name: bar
+      url: u2
+    ''')
+    assert m.projects[1].name == 'foo'
+    assert m.projects[2].name == 'bar'
+
+def test_no_project_named_manifest():
+    # The name 'manifest' is reserved.
+
+    with pytest.raises(MalformedManifest):
+        M('''\
+        projects:
+        - name: manifest
+          url: u
+        ''')
+
+def test_project_named_west():
+    # A project named west is allowed now, even though it was once an error.
+
+    m = M('''\
+    projects:
+      - name: west
+        url: https://foo.com
+    ''')
+    assert m.projects[1].name == 'west'
+
+def test_project_urls():
     # Projects must be initialized with a remote or a URL, but not both.
     # The resulting URLs must behave as documented.
 
-    r1 = Remote('testremote1', 'https://example.com')
-    p1 = Project('project1', remote=r1)
-    assert p1.url == 'https://example.com/project1'
+    # The following cases are valid:
+    # - explicit url
+    # - explicit remote, no repo-path
+    # - explicit remote + repo-path
+    # - default remote, no repo-path
+    # - default remote + repo-path
+    ps = M('''\
+    defaults:
+      remote: r2
+    remotes:
+    - name: r1
+      url-base: https://foo.com
+    - name: r2
+      url-base: https://baz.com
+    projects:
+    - name: project1
+      url: https://bar.com/project1
+    - name: project2
+      remote: r1
+    - name: project3
+      remote: r1
+      repo-path: project3-path
+    - name: project4
+    - name: project5
+      repo-path: subdir/project-five
+    ''').projects
+    assert ps[1].url == 'https://bar.com/project1'
+    assert ps[2].url == 'https://foo.com/project2'
+    assert ps[3].url == 'https://foo.com/project3-path'
+    assert ps[4].url == 'https://baz.com/project4'
+    assert ps[5].url == 'https://baz.com/subdir/project-five'
 
-    p2 = Project('project2', url='https://example.com/project2')
-    assert p2.url == 'https://example.com/project2'
+    # A remotes section isn't required in a manifest if all projects
+    # are specified by URL.
+    ps = M('''\
+    projects:
+    - name: testproject
+      url: https://example.com/my-project
+    ''').projects
+    assert ps[1].url == 'https://example.com/my-project'
 
-    with pytest.raises(ValueError):
-        Project('project3', remote=r1, url='not-empty')
+    # Projects can't have both url and remote attributes.
+    with pytest.raises(MalformedManifest):
+        M('''\
+        remotes:
+        - name: r1
+          url-base: https://example.com
+        projects:
+        - name: project1
+          remote: r1
+          url: https://example.com/project2
+        ''')
 
-    with pytest.raises(ValueError):
-        Project('project4', remote=None, url=None)
+    # Projects can't combine url and repo-path.
+    with pytest.raises(MalformedManifest):
+        M('''\
+        projects:
+        - name: project1
+          repo-path: x
+          url: https://example.com/project2
+        ''')
 
-def test_no_remote_ok():
-    # remotes isn't required in a manifest if all projects are
-    # specified by URL.
+    # A remote or URL must be given if no default remote is set.
+    with pytest.raises(MalformedManifest):
+        M('''\
+        remotes:
+        - name: r1
+          url-base: https://example.com
+        projects:
+        - name: project1
+        ''')
 
+    # All remotes must be defined, even if there is a default.
+    with pytest.raises(MalformedManifest):
+        M('''\
+        defaults:
+          remote: r1
+        remotes:
+        - name: r1
+          url-base: https://example.com
+        projects:
+        - name: project1
+          remote: deadbeef
+        ''')
+
+def test_project_revisions():
+    # All projects have revisions.
+
+    # The default revision, if set, should take effect
+    # when not explicitly specified in a project.
+    m = M('''\
+    defaults:
+      revision: defaultrev
+    projects:
+    - name: p1
+      url: u1
+    - name: p2
+      url: u2
+      revision: rev
+    ''')
+    expected = [Project('p1', 'u1', revision='defaultrev'),
+                Project('p2', 'u2', revision='rev')]
+    for p, e in zip(m.projects[1:], expected):
+        check_proj_consistency(p, e)
+
+    # The default revision, if not given in a defaults section, is
+    # master.
+    m = M('''\
+    projects:
+    - name: p1
+      url: u1
+    ''')
+    assert m.projects[1].revision == 'master'
+
+def test_project_paths_explicit_implicit():
+    # Test project path parsing.
+
+    # Project paths may be explicitly given, or implicit.
+    ps = M('''\
+    projects:
+    - name: p
+      url: u
+      path: foo
+    - name: q
+      url: u
+    ''').projects
+    assert ps[1].path == 'foo'
+    assert ps[2].path == 'q'
+
+def test_project_paths_absolute():
+    # Absolute path attributes should work as documented.
+
+    ps = M('''\
+    remotes:
+    - name: testremote
+      url-base: https://example.com
+    projects:
+    - name: testproject
+      remote: testremote
+      path: sub/directory
+    ''', topdir='/west_top').projects
+    assert ps[1].path == 'sub/directory'
+    assert nodrive(ps[1].posixpath) == '/west_top/sub/directory'
+
+def test_project_paths_unique():
+    # No two projects may have the same path.
+
+    with pytest.raises(MalformedManifest):
+        M('''\
+        projects:
+        - name: a
+          path: p
+        - name: p
+        ''')
+    with pytest.raises(MalformedManifest):
+        M('''\
+        projects:
+        - name: a
+          path: p
+        - name: b
+          path: p
+        ''')
+
+def test_project_paths_with_repo_path():
+    # The same fetch URL may be checked out under two different
+    # names, as long as they end up in different places.
     content = '''\
-    manifest:
-      projects:
-        - name: testproject
-          url: https://example.com/my-project
+    defaults:
+      remote: remote1
+    remotes:
+    - name: remote1
+      url-base: https://url1.com
+    projects:
+    - name: testproject_v1
+      revision: v1.0
+      repo-path: testproject
+    - name: testproject_v2
+      revision: v2.0
+      repo-path: testproject
     '''
-    manifest = Manifest.from_data(yaml.safe_load(content))
-    assert manifest.projects[1].url == 'https://example.com/my-project'
 
-def test_manifest_attrs():
-    # test that the manifest repository, when represented as a project,
+    # Try this first without providing topdir.
+    m = M(content)
+    expected1 = Project('testproject_v1', 'https://url1.com/testproject',
+                        revision='v1.0')
+    expected2 = Project('testproject_v2', 'https://url1.com/testproject',
+                        revision='v2.0')
+    check_proj_consistency(m.projects[1], expected1)
+    check_proj_consistency(m.projects[2], expected2)
+
+    # Same again, but with topdir.
+    if platform.system() == 'Windows':
+        topdir = 'C:/'
+    else:
+        topdir = '/'
+    m = M(content, topdir=topdir)
+    expected1 = Project('testproject_v1', 'https://url1.com/testproject',
+                        revision='v1.0', topdir=topdir)
+    expected2 = Project('testproject_v2', 'https://url1.com/testproject',
+                        revision='v2.0', topdir=topdir)
+    check_proj_consistency(m.projects[1], expected1)
+    check_proj_consistency(m.projects[2], expected2)
+
+def test_project_clone_depth():
+    ps = M('''\
+    projects:
+    - name: foo
+      url: u1
+    - name: bar
+      url: u2
+      clone-depth: 4
+    ''').projects
+    assert ps[1].clone_depth is None
+    assert ps[2].clone_depth == 4
+
+def test_project_west_commands():
+    # Projects may also specify subdirectories with west commands.
+
+    m = M('''\
+    projects:
+    - name: zephyr
+      url: https://foo.com
+      west-commands: some-path/west-commands.yml
+    ''')
+    assert m.projects[1].west_commands == 'some-path/west-commands.yml'
+
+#########################################
+# Tests for the manifest repository
+
+def test_manifest_project():
+    # Basic test that the manifest repository, when represented as a project,
     # has attributes which make sense.
 
     # Case 1: everything at defaults
-    content = '''\
-    manifest:
-      projects:
-        - name: name
-          url: url
-    '''
-    manifest = Manifest.from_data(yaml.safe_load(content))
-    mp = manifest.projects[0]
+    m = M('''\
+    projects:
+    - name: name
+      url: url
+    ''')
+    mp = m.projects[0]
     assert mp.name == 'manifest'
     assert mp.path is None
     assert mp.topdir is None
@@ -158,17 +445,15 @@ def test_manifest_attrs():
     assert mp.clone_depth is None
 
     # Case 2: path etc. are specified, but not topdir
-    content = '''\
-    manifest:
-      projects:
-        - name: name
-          url: url
-      self:
-        path: my-path
-        west-commands: cmds.yml
-    '''
-    manifest = Manifest.from_data(yaml.safe_load(content))
-    mp = manifest.projects[0]
+    m = M('''\
+    projects:
+    - name: name
+      url: url
+    self:
+      path: my-path
+      west-commands: cmds.yml
+    ''')
+    mp = m.projects[0]
     assert mp.name == 'manifest'
     assert mp.path == 'my-path'
     assert mp.west_commands == 'cmds.yml'
@@ -180,19 +465,17 @@ def test_manifest_attrs():
     assert mp.clone_depth is None
 
     # Case 3: path etc. and topdir are all specified
-    content = '''\
-    manifest:
-      projects:
-        - name: name
-          url: url
-      self:
-        path: my-path
-        west-commands: cmds.yml
-    '''
-    manifest = Manifest.from_data(yaml.safe_load(content),
-                                  manifest_path='should-be-ignored',
-                                  topdir='/west_top')
-    mp = manifest.projects[0]
+    m = M('''\
+    projects:
+    - name: name
+      url: url
+    self:
+      path: my-path
+      west-commands: cmds.yml
+    ''',
+          manifest_path='should-be-ignored',
+          topdir='/west_top')
+    mp = m.projects[0]
     assert mp.name == 'manifest'
     assert mp.path == 'my-path'
     assert mp.topdir is not None
@@ -203,173 +486,131 @@ def test_manifest_attrs():
     assert mp.revision == 'HEAD'
     assert mp.clone_depth is None
 
-def test_defaults_and_url():
-    # an explicit URL overrides the defaults attribute.
+def test_self_tag():
+    # Manifests may contain a self section describing the manifest
+    # repository. It should work with multiple projects and remotes as
+    # expected.
 
-    content = '''\
-    manifest:
-      defaults:
-        remote: remote1
-      remotes:
-        - name: remote1
-          url-base: https://url1.com/
-      projects:
-        - name: testproject
-          url: https://url2.com/testproject
-    '''
-    manifest = Manifest.from_data(yaml.safe_load(content))
-    assert manifest.projects[1].url == 'https://url2.com/testproject'
+    m = M('''\
+    remotes:
+    - name: testremote1
+      url-base: https://example1.com
+    - name: testremote2
+      url-base: https://example2.com
 
-def test_repo_path():
-    # a project's fetch URL may be specified by combining a remote and
-    # repo-path. this overrides the default use of the project's name
-    # as the repo-path.
+    projects:
+    - name: testproject1
+      remote: testremote1
+      revision: rev1
+    - name: testproject2
+      remote: testremote2
 
-    # default remote + repo-path
-    content = '''\
-    manifest:
-      defaults:
-        remote: remote1
-      remotes:
-        - name: remote1
-          url-base: https://example.com
-      projects:
-        - name: testproject
-          repo-path: some/path
-    '''
-    manifest = Manifest.from_data(yaml.safe_load(content))
-    assert manifest.projects[1].url == 'https://example.com/some/path'
+    self:
+      path: the-manifest-path
+      west-commands: scripts/west_commands
+    ''')
 
-    # non-default remote + repo-path
-    content = '''\
-    manifest:
-      defaults:
-        remote: remote1
-      remotes:
-        - name: remote1
-          url-base: https://url1.com
-        - name: remote2
-          url-base: https://url2.com
-      projects:
-        - name: testproject
-          remote: remote2
-          repo-path: path
-    '''
-    manifest = Manifest.from_data(yaml.safe_load(content))
-    assert manifest.projects[1].url == 'https://url2.com/path'
+    expected = [ManifestProject(path='the-manifest-path',
+                                west_commands='scripts/west_commands'),
+                Project('testproject1', 'https://example1.com/testproject1',
+                        revision='rev1'),
+                Project('testproject2', 'https://example2.com/testproject2')]
 
-    # same project checked out under two different names
-    content = '''\
-    manifest:
-      defaults:
-        remote: remote1
-      remotes:
-        - name: remote1
-          url-base: https://url1.com
-      projects:
-        - name: testproject_v1
-          revision: v1.0
-          repo-path: testproject
-        - name: testproject_v2
-          revision: v2.0
-          repo-path: testproject
-    '''
-    manifest = Manifest.from_data(yaml.safe_load(content))
-    p1, p2 = manifest.projects[1:]
-    r = Remote('remote1', 'https://url1.com')
-    d = Defaults(remote=r)
-    assert p1.url == 'https://url1.com/testproject'
-    assert p1.url == p2.url
-    expected1 = Project('testproject_v1', defaults=d, path='testproject_v1',
-                        revision='v1.0', remote=r, repo_path='testproject')
-    expected2 = Project('testproject_v2', defaults=d, path='testproject_v2',
-                        revision='v2.0', remote=r, repo_path='testproject')
-    check_proj_consistency(p1, expected1)
-    check_proj_consistency(p2, expected2)
+    # Check the projects are as expected.
+    for p, e in zip(m.projects, expected):
+        check_proj_consistency(p, e)
 
-def test_data_and_topdir(tmpdir):
+    # Absent a path and a path hint, the path attribute is None.
+    assert M('''\
+    projects:
+    - name: p
+      url: u
+    ''').projects[0].path is None
+
+    # With a path hint, the path attribute is not None.
+    assert M('''\
+    projects:
+    - name: p
+      url: u
+    ''', manifest_path='mpath').projects[0].path == 'mpath'
+
+#########################################
+# File system tests
+#
+# Parsing manifests from data is the base case that everything else
+# reduces to, but parsing may also be done from files on the file
+# system, or "as if" it were done from files on the file system.
+
+def test_from_data_with_topdir(tmpdir):
     # If you specify the topdir along with some source data, you will
     # get absolute paths, even if it doesn't exist.
+    #
+    # This is true of both projects and the manifest itself.
 
     topdir = str(tmpdir)
 
     # Case 1: manifest has no path (projects always have paths)
-    content = '''\
-    manifest:
-        projects:
-          - name: my-cool-project
-            url: from-manifest-dir
-    '''
-    manifest = Manifest.from_data(source_data=yaml.safe_load(content),
-                                  topdir=topdir)
-    assert manifest.topdir == topdir
-    mproj = manifest.projects[0]
+    m = M('''\
+    projects:
+    - name: my-cool-project
+      url: from-manifest-dir
+    ''', topdir=topdir)
+    assert m.topdir == topdir
+    mproj = m.projects[0]
     assert mproj.topdir == topdir
     assert mproj.path is None
-    p1 = manifest.projects[1]
+    p1 = m.projects[1]
     assert PurePath(p1.topdir) == PurePath(topdir)
     assert PurePath(p1.abspath) == PurePath(str(tmpdir / 'my-cool-project'))
 
     # Case 2: manifest path is provided programmatically
-    content = '''\
-    manifest:
-        projects:
-          - name: my-cool-project
-            url: from-manifest-dir
-    '''
-    manifest = Manifest.from_data(source_data=yaml.safe_load(content),
-                                  manifest_path='from-api',
-                                  topdir=topdir)
-    assert manifest.topdir == topdir
-    mproj = manifest.projects[0]
+    m = M('''\
+    projects:
+    - name: my-cool-project
+      url: from-manifest-dir
+    ''', manifest_path='from-api', topdir=topdir)
+    assert m.topdir == topdir
+    mproj = m.projects[0]
     assert PurePath(mproj.topdir).is_absolute()
     assert PurePath(mproj.topdir) == PurePath(topdir)
     assert mproj.path == 'from-api'
     assert PurePath(mproj.abspath).is_absolute()
     assert PurePath(mproj.abspath) == PurePath(str(tmpdir / 'from-api'))
-    p1 = manifest.projects[1]
+    p1 = m.projects[1]
     assert PurePath(p1.topdir) == PurePath(topdir)
     assert PurePath(p1.abspath) == PurePath(str(tmpdir / 'my-cool-project'))
 
     # Case 3: manifest has a self path. This must override the
     # manifest_path kwarg.
-    content = '''\
-    manifest:
-        projects:
-          - name: my-cool-project
-            url: from-manifest-dir
-        self:
-            path: from-content
-    '''
-    manifest = Manifest.from_data(source_data=yaml.safe_load(content),
-                                  manifest_path='should-be-ignored',
-                                  topdir=topdir)
-    assert manifest.topdir == topdir
-    mproj = manifest.projects[0]
+    m = M('''\
+    projects:
+    - name: my-cool-project
+      url: from-manifest-dir
+    self:
+        path: from-content
+    ''', manifest_path='should-be-ignored', topdir=topdir)
+    assert m.topdir == topdir
+    mproj = m.projects[0]
     assert mproj.path == 'from-content'
     assert PurePath(mproj.abspath) == PurePath(str(tmpdir / 'from-content'))
-    p1 = manifest.projects[1]
+    p1 = m.projects[1]
     assert p1.path == 'my-cool-project'
     assert PurePath(p1.abspath) == PurePath(str(tmpdir / 'my-cool-project'))
 
     # Case 4: project has a path.
-    content = '''\
-    manifest:
-        projects:
-          - name: my-cool-project
-            url: from-manifest-dir
-            path: project-path
-        self:
-            path: manifest-path
-    '''
-    manifest = Manifest.from_data(source_data=yaml.safe_load(content),
-                                  manifest_path='should-be-ignored',
-                                  topdir=topdir)
-    assert manifest.topdir == topdir
-    mproj = manifest.projects[0]
+    m = M('''\
+    projects:
+    - name: my-cool-project
+      url: from-manifest-dir
+      path: project-path
+    self:
+        path: manifest-path
+    ''', manifest_path='should-be-ignored', topdir=topdir)
+    assert m.topdir == topdir
+    mproj = m.projects[0]
     assert mproj.path == 'manifest-path'
     assert PurePath(mproj.abspath) == PurePath(str(tmpdir / 'manifest-path'))
-    p1 = manifest.projects[1]
+    p1 = m.projects[1]
     assert p1.path == 'project-path'
     assert PurePath(p1.abspath) == PurePath(str(tmpdir / 'project-path'))
 
@@ -380,9 +621,9 @@ def test_fs_topdir(fs_topdir):
 
     content = '''\
     manifest:
-        projects:
-          - name: project-from-manifest-dir
-            url: from-manifest-dir
+      projects:
+      - name: project-from-manifest-dir
+        url: from-manifest-dir
     '''
     west_yml = str(fs_topdir / 'mp' / 'west.yml')
     with open(west_yml, 'w') as f:
@@ -412,11 +653,11 @@ def test_fs_topdir_different_source(fs_topdir):
     topdir = str(fs_topdir)
     west_yml_content = '''\
     manifest:
-        projects:
-          - name: project-1
-            url: url-1
-          - name: project-2
-            url: url-2
+      projects:
+      - name: project-1
+        url: url-1
+      - name: project-2
+        url: url-2
     '''
     west_yml = str(fs_topdir / 'mp' / 'west.yml')
     with open(west_yml, 'w') as f:
@@ -424,12 +665,12 @@ def test_fs_topdir_different_source(fs_topdir):
 
     another_yml_content = '''\
     manifest:
-        projects:
-          - name: another-1
-            url: another-url-1
-          - name: another-2
-            url: another-url-2
-            path:  another/path
+      projects:
+      - name: another-1
+        url: another-url-1
+      - name: another-2
+        url: another-url-2
+        path:  another/path
     '''
     another_yml = str(fs_topdir / 'another.yml')
     with open(another_yml, 'w') as f:
@@ -437,11 +678,11 @@ def test_fs_topdir_different_source(fs_topdir):
 
     another_yml_with_path_content = '''\
     manifest:
-        projects:
-          - name: foo
-            url: bar
-        self:
-            path: with-path
+      projects:
+      - name: foo
+        url: bar
+      self:
+        path: with-path
     '''
     another_yml_with_path = str(fs_topdir / 'another-with-path.yml')
     with open(another_yml_with_path, 'w') as f:
@@ -508,8 +749,8 @@ def test_fs_topdir_freestanding_manifest(tmpdir, fs_topdir):
     content = '''\
     manifest:
       projects:
-        - name: name
-          url: url
+      - name: name
+        url: url
       self:
         path: my-path
     '''
@@ -526,8 +767,8 @@ def test_fs_topdir_freestanding_manifest(tmpdir, fs_topdir):
     content = '''\
     manifest:
       projects:
-        - name: name
-          url: url
+      - name: name
+        url: url
     '''
     yml = str(tmpdir / 'random.yml')
     with open(yml, 'w') as f:
@@ -538,138 +779,8 @@ def test_fs_topdir_freestanding_manifest(tmpdir, fs_topdir):
     assert mproj.path is None
     assert mproj.abspath is None
 
-def test_multiple_remotes():
-    # More than one remote may be used, and one of them may be used as
-    # the default.
-
-    content = '''\
-    manifest:
-      defaults:
-        remote: testremote2
-
-      remotes:
-        - name: testremote1
-          url-base: https://example1.com
-        - name: testremote2
-          url-base: https://example2.com
-
-      projects:
-        - name: testproject1
-          remote: testremote1
-          revision: rev1
-        - name: testproject2
-          remote: testremote2
-        - name: testproject3
-    '''
-    r1 = Remote('testremote1', 'https://example1.com')
-    r2 = Remote('testremote2', 'https://example2.com')
-
-    manifest = Manifest.from_data(yaml.safe_load(content))
-
-    expected = [Project('testproject1', revision='rev1', remote=r1),
-                Project('testproject2', remote=r2),
-                Project('testproject3', remote=r2)]
-
-    # Check the projects are as expected.
-    for p, e in zip(manifest.projects[1:], expected):
-        check_proj_consistency(p, e)
-
-    # Throw in an extra check that absolute paths are not available,
-    # just for fun.
-    assert all(p.abspath is None for p in manifest.projects)
-
-def test_self_tag():
-    # Manifests may contain a self section describing their behavior.
-    # It should work with multiple projects and remotes as expected.
-
-    content = '''\
-    manifest:
-      remotes:
-        - name: testremote1
-          url-base: https://example1.com
-        - name: testremote2
-          url-base: https://example2.com
-
-      projects:
-        - name: testproject1
-          remote: testremote1
-          revision: rev1
-        - name: testproject2
-          remote: testremote2
-
-      self:
-        path: the-manifest-path
-    '''
-    r1 = Remote('testremote1', 'https://example1.com')
-    r2 = Remote('testremote2', 'https://example2.com')
-
-    manifest = Manifest.from_data(yaml.safe_load(content))
-
-    expected = [ManifestProject(path='the-manifest-path'),
-                Project('testproject1', None, path='testproject1',
-                        clone_depth=None, revision='rev1', remote=r1),
-                Project('testproject2', None, path='testproject2',
-                        clone_depth=None, revision='master', remote=r2)]
-
-    # Check the projects are as expected.
-    for p, e in zip(manifest.projects, expected):
-        check_proj_consistency(p, e)
-
-def test_default_clone_depth():
-    # Defaults and clone depth should work as in this example.
-    content = '''\
-    manifest:
-      defaults:
-        remote: testremote1
-        revision: defaultrev
-
-      remotes:
-        - name: testremote1
-          url-base: https://example1.com
-        - name: testremote2
-          url-base: https://example2.com
-
-      projects:
-        - name: testproject1
-        - name: testproject2
-          remote: testremote2
-          revision: rev
-          clone-depth: 1
-    '''
-    r1 = Remote('testremote1', 'https://example1.com')
-    r2 = Remote('testremote2', 'https://example2.com')
-    d = Defaults(remote=r1, revision='defaultrev')
-
-    manifest = Manifest.from_data(yaml.safe_load(content))
-
-    expected = [Project('testproject1', d, path='testproject1',
-                        clone_depth=None, revision=d.revision, remote=r1),
-                Project('testproject2', d, path='testproject2',
-                        clone_depth=1, revision='rev', remote=r2)]
-
-    # Check that the projects are as expected.
-    for p, e in zip(manifest.projects[1:], expected):
-        check_proj_consistency(p, e)
-
-def test_path():
-    # Projects must be able to override their default paths.
-    # Absolute paths should reflect this setting.
-
-    content = '''\
-    manifest:
-      remotes:
-        - name: testremote
-          url-base: https://example.com
-      projects:
-        - name: testproject
-          remote: testremote
-          path: sub/directory
-    '''
-    p = Manifest.from_data(yaml.safe_load(content),
-                           topdir='/west_top').projects[1]
-    assert p.path == 'sub/directory'
-    assert nodrive(p.posixpath) == '/west_top/sub/directory'
-
+#########################################
+# Miscellaneous tests
 
 def test_ignore_west_section():
     # We no longer validate the west section, so things that would
@@ -683,12 +794,12 @@ def test_ignore_west_section():
       wrongfield: avalue
     manifest:
       remotes:
-        - name: testremote
-          url-base: https://example.com
+      - name: testremote
+        url-base: https://example.com
       projects:
-        - name: testproject
-          remote: testremote
-          path: sub/directory
+      - name: testproject
+        remote: testremote
+        path: sub/directory
     '''
     # Parsing manifest only, no exception raised
     manifest = Manifest.from_data(yaml.safe_load(content_wrong_west),
@@ -697,34 +808,6 @@ def test_ignore_west_section():
     assert PurePath(p1.path) == PurePath('sub', 'directory')
     assert PurePath(nodrive(p1.abspath)) == PurePath('/west_top/sub/directory')
 
-def test_project_west_commands():
-    # Projects may specify subdirectories containing west commands.
-
-    content = '''\
-    manifest:
-      projects:
-        - name: zephyr
-          url: https://foo.com
-          west-commands: some-path/west-commands.yml
-    '''
-    manifest = Manifest.from_data(yaml.safe_load(content))
-    assert len(manifest.projects) == 2
-    assert manifest.projects[1].west_commands == 'some-path/west-commands.yml'
-
-
-def test_project_named_west():
-    # A project named west is allowed now, even though it was once an error.
-
-    content = '''\
-    manifest:
-      projects:
-        - name: west
-          url: https://foo.com
-    '''
-    manifest = Manifest.from_data(yaml.safe_load(content))
-    assert manifest.projects[1].name == 'west'
-
-
 def test_get_projects_unknown():
     # Attempting to get an unknown project is an error.
     # TODO: add more testing for get_projects().
@@ -732,23 +815,12 @@ def test_get_projects_unknown():
     content = '''\
     manifest:
       projects:
-        - name: foo
-          url: https://foo.com
+      - name: foo
+        url: https://foo.com
     '''
     manifest = Manifest.from_data(yaml.safe_load(content))
     with pytest.raises(ValueError):
         manifest.get_projects(['unknown'])
-
-def test_load_str():
-    # We can load manifest data as a string.
-
-    manifest = Manifest.from_data('''\
-    manifest:
-      projects:
-        - name: foo
-          url: https://foo.com
-    ''')
-    assert manifest.projects[-1].name == 'foo'
 
 def test_version_check_failure():
     # Check that the manifest.version key causes manifest parsing to
@@ -758,15 +830,15 @@ def test_version_check_failure():
     manifest:
       version: {}
       projects:
-        - name: foo
-          url: https://foo.com
+      - name: foo
+        url: https://foo.com
     '''
     invalid_fmt = '''\
     manifest:
       version: {}
       projects:
-        - name: foo
-          url: https://foo.com
+      - name: foo
+        url: https://foo.com
       pytest-invalid-key: a-value
     '''
 
@@ -809,13 +881,16 @@ def test_version_check_success(ver):
     manifest:
       version: {}
       projects:
-        - name: foo
-          url: https://foo.com
+      - name: foo
+        url: https://foo.com
     '''
     manifest = Manifest.from_data(fmt.format(ver))
     assert manifest.projects[-1].name == 'foo'
     manifest = Manifest.from_data(fmt.format('"' + ver + '"'))
     assert manifest.projects[-1].name == 'foo'
+
+#########################################
+# Various invalid manifests
 
 # Invalid manifests should raise MalformedManifest.
 @pytest.mark.parametrize('invalid',
