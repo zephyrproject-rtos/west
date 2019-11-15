@@ -65,7 +65,7 @@ class WestArgumentParser(argparse.ArgumentParser):
         self.mve = None # a ManifestVersionError, if any
 
     def print_help(self, file=None, top_level=False):
-        print(self.format_help(top_level=top_level),
+        print(self.format_help(top_level=top_level), end='',
               file=file or sys.stdout)
 
     def format_help(self, top_level=False):
@@ -153,7 +153,7 @@ class WestArgumentParser(argparse.ArgumentParser):
             if self.epilog:
                 append(self.epilog)
 
-            return sio.getvalue().rstrip()
+            return sio.getvalue()
 
     def format_west_optional(self, append, wo, width):
         metavar = wo['metavar']
