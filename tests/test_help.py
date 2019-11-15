@@ -2,6 +2,9 @@
 # Test cases
 #
 
+import os
+import sys
+
 from west.main import BUILTIN_COMMANDS
 from conftest import cmd
 
@@ -25,8 +28,17 @@ def test_extension_help_and_dash_h(west_init_tmpdir):
     cmd('update')
     ext1out = cmd('help test-extension')
     ext2out = cmd('test-extension -h')
+
+    expected = EXTENSION_EXPECTED
+    if sys.platform == 'win32':
+        # Manage gratuitous incompatibilities:
+        #
+        # - multiline python strings are \n separated even on windows
+        # - the windows command help output gets an extra newline
+        expected = os.linesep.join(expected.splitlines()) + os.linesep
+
     assert ext1out == ext2out
-    assert ext1out == EXTENSION_EXPECTED
+    assert ext1out == expected
 
 
 EXTENSION_EXPECTED = '''\
