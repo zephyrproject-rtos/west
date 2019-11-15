@@ -236,35 +236,48 @@ def _ext_specs(project):
     # Get a list of WestExtCommandSpec objects for the given
     # west.manifest.Project.
 
-    spec_file = os.path.join(project.abspath, project.west_commands)
-
-    # Verify project.west_commands isn't trying a directory traversal
-    # outside of the project.
-    if escapes_directory(spec_file, project.abspath):
-        raise ExtensionCommandError(
-            'west-commands file {} escapes project path {}'.
-            format(project.west_commands, project.path))
-
-    # Project may not be cloned yet.
-    if not os.path.exists(spec_file):
-        return []
-
-    # Load the spec file and check the schema.
-    with open(spec_file, 'r') as f:
-        try:
-            commands_spec = yaml.safe_load(f.read())
-        except yaml.YAMLError as e:
-            raise ExtensionCommandError from e
-    try:
-        pykwalify.core.Core(
-            source_data=commands_spec,
-            schema_files=[_EXT_SCHEMA_PATH]).validate()
-    except pykwalify.errors.SchemaError as e:
-        raise ExtensionCommandError from e
-
     ret = []
-    for commands_desc in commands_spec['west-commands']:
-        ret.extend(_ext_specs_from_desc(project, commands_desc))
+
+    # As an internal implementation detail, we allow the internal
+    # representation of a project to have sequences as their
+    # west_commands attribute value. This is required for manifest
+    # imports, where e.g. the final ManifestProject.west_commands
+    # might contain the results of importing multiple repositories.
+    if isinstance(project.west_commands, str):
+        commands = [project.west_commands]
+    else:
+        commands = list(project.west_commands)
+    for cmd in commands:
+        spec_file = os.path.join(project.abspath, cmd)
+
+        # Verify project.west_commands isn't trying a directory traversal
+        # outside of the project.
+        if escapes_directory(spec_file, project.abspath):
+            raise ExtensionCommandError(
+                'west-commands file {} escapes project path {}'.
+                format(project.west_commands, project.path))
+
+        # The project may not be cloned yet, or this might be coming
+        # from a manifest that was copy/pasted into a self import
+        # location.
+        if not os.path.exists(spec_file):
+            continue
+
+        # Load the spec file and check the schema.
+        with open(spec_file, 'r') as f:
+            try:
+                commands_spec = yaml.safe_load(f.read())
+            except yaml.YAMLError as e:
+                raise ExtensionCommandError from e
+        try:
+            pykwalify.core.Core(
+                source_data=commands_spec,
+                schema_files=[_EXT_SCHEMA_PATH]).validate()
+        except pykwalify.errors.SchemaError as e:
+            raise ExtensionCommandError from e
+
+        for commands_desc in commands_spec['west-commands']:
+            ret.extend(_ext_specs_from_desc(project, commands_desc))
     return ret
 
 def _ext_specs_from_desc(project, commands_desc):
