@@ -49,8 +49,7 @@ def test_list(west_update_tmpdir):
     # Check the behavior for some format arguments of interest as well.
     actual = cmd('list -f "{name} {revision} {path} {cloned} {clone_depth}"')
     expected = ['manifest HEAD zephyr cloned None',
-                'Kconfiglib zephyr {} cloned None'.format(
-                    os.path.join('subdir', 'Kconfiglib')),
+                'Kconfiglib zephyr subdir/Kconfiglib cloned None',
                 'net-tools master net-tools cloned 1']
     assert actual.splitlines() == expected
 
@@ -90,13 +89,12 @@ def test_manifest_freeze(west_update_tmpdir):
     # match project order as specified in our manifest, that all
     # revisions are full 40-character SHAs, and there isn't any random
     # YAML tag crap.
-    kconfig_rel = os.path.join('subdir', 'Kconfiglib')
     expected_res = ['^manifest:$',
                     '^  projects:$',
                     '^  - name: Kconfiglib$',
                     '^    url: .*$',
                     '^    revision: [a-f0-9]{40}$',
-                    '^    path: {}$'.format(re.escape(kconfig_rel)),
+                    '^    path: subdir/Kconfiglib$',
                     '^  - name: net-tools$',
                     '^    url: .*$',
                     '^    clone-depth: 1$',
@@ -357,8 +355,7 @@ def test_extension_command_multiproject(repos_tmpdir):
     # The newline shenanigans are for Windows.
     help_text = '\n'.join(cmd('-h').splitlines())
     expected = '\n'.join([
-        'extension commands from project Kconfiglib (path: {}):'.
-        format(os.path.join('subdir', 'Kconfiglib')),
+        'extension commands from project Kconfiglib (path: subdir/Kconfiglib):',  # noqa: E501
         '  kconfigtest:          (no help provided; try "west kconfigtest -h")',  # noqa: E501
         '',
         'extension commands from project net-tools (path: net-tools):',
