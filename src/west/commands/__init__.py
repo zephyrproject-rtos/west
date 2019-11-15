@@ -63,8 +63,8 @@ class WestCommand(ABC):
 
         Some fields, such as *name*, *help*, and *description*,
         overlap with kwargs that should be passed to the
-        ``argparse.ArgumentParser`` added by `add_parser`. This wart
-        is by design: ``argparse`` doesn't make many API stability
+        ``argparse.ArgumentParser`` added by `WestCommand.add_parser`.
+        This wart is by design: ``argparse`` doesn't make many API stability
         guarantees, so this information must be duplicated here for
         future-proofing.
 
@@ -72,7 +72,7 @@ class WestCommand(ABC):
         :param help: one-line command help text
         :param description: multi-line command description
         :param accepts_unknown_args: if true, the command can handle
-            arbitrary unknown command line arguments in `run`.
+            arbitrary unknown command line arguments in `WestCommand.run`.
             Otherwise, it's a fatal to pass unknown arguments.
         :param requires_installation: if true, the command requires a
             west installation to run, and running it outside of one is
@@ -89,17 +89,17 @@ class WestCommand(ABC):
     def run(self, args, unknown, topdir, manifest=None):
         '''Run the command.
 
-        This raises `CommandContextError` if the command cannot be run
-        due to a context mismatch. Other exceptions may be raised as
-        well.
+        This raises `west.commands.CommandContextError` if the command
+        cannot be run due to a context mismatch. Other exceptions may
+        be raised as well.
 
-        :param args: known arguments parsed via `add_parser`
+        :param args: known arguments parsed via `WestCommand.add_parser`
         :param unknown: unknown arguments present on the command line;
             must be empty unless ``accepts_unknown_args`` is true
         :param topdir: west installation topdir, accessible as
-            ``self.topdir`` from `do_run`
+            ``self.topdir`` from `WestCommand.do_run`
         :param manifest: `west.manifest.Manifest` or ``None``,
-            accessible as ``self.manifest`` from `do_run`
+            accessible as ``self.manifest`` from `WestCommand.do_run`
         '''
         if unknown and not self.accepts_unknown_args:
             self.parser.error('unexpected arguments: {}'.format(unknown))
@@ -132,8 +132,8 @@ class WestCommand(ABC):
     def do_add_parser(self, parser_adder):
         '''Subclass method for registering command line arguments.
 
-        This is called by `add_parser` to register the command's
-        options and arguments.
+        This is called by `WestCommand.add_parser` to register the
+        command's options and arguments.
 
         Subclasses should ``parser_adder.add_parser()`` to add an
         ``ArgumentParser`` for that subcommand, then add any
