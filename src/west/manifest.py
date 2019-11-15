@@ -1,4 +1,4 @@
-# Copyright (c) 2018, Nordic Semiconductor ASA
+# Copyright (c) 2018, 2019 Nordic Semiconductor ASA
 # Copyright 2018, 2019 Foundries.io Ltd
 #
 # SPDX-License-Identifier: Apache-2.0
@@ -9,10 +9,11 @@ Parser and abstract data types for west manifests.
 
 import collections
 import configparser
+import enum
 import errno
 from functools import lru_cache
 import os
-from pathlib import PurePath
+from pathlib import PurePath, Path
 import shutil
 import shlex
 import subprocess
@@ -110,15 +111,34 @@ def validate(data):
     except pykwalify.errors.SchemaError as se:
         raise MalformedManifest(se._msg) from se
 
+# TODO rewrite without enum.IntFlag if we can't move to python 3.6+
+class ImportFlag(enum.IntFlag):
+    '''Bit flags for handling imports when resolving a manifest.
+
+    The DEFAULT (0) value allows reading the file system to resolve
+    "self: import:", and running git to resolve a "projects:" import.
+    Other flags:
+
+    - IGNORE: ignore all "import:" attributes in "self:" and "projects:"
+    - FORCE_PROJECTS: always invoke importer callback for "projects:" imports
+    '''
+
+    DEFAULT = 0
+    IGNORE = 1
+    FORCE_PROJECTS = 2
+
 class Manifest:
     '''The parsed contents of a west manifest file.
     '''
 
     @staticmethod
-    def from_file(source_file=None, topdir=None):
+    def from_file(source_file=None, **kwargs):
         '''Manifest object factory given a source YAML file.
 
-        Results depend on the parameters given:
+        The default behavior is to find the current west installation's
+        manifest file and resolve it.
+
+        Results depend on the keyword arguments given in *kwargs*:
 
             - If both *source_file* and *topdir* are given, the
               returned Manifest object is based on the data in
@@ -155,22 +175,33 @@ class Manifest:
             - ``ValueError`` if *topdir* is given but is not a west
               installation root
 
-        :param source_file: path to the manifest YAML file
-        :param topdir: west installation top level directory
+        :param source_file: source file to load
+        :param kwargs: Manifest.__init__ keyword arguments
         '''
-        if source_file is None and topdir is None:
-            # neither source_file nor topdir: search the filesystem
-            # for the installation and use its manifest.path.
-            topdir = util.west_topdir()
-            source_file = _west_yml(topdir)
-            return Manifest(source_file=source_file, topdir=topdir)
-        elif source_file is not None and topdir is None:
-            # just source_file: find topdir starting there.
-            # fall_back is the default value -- this is just for emphasis.
-            topdir = util.west_topdir(start=os.path.dirname(source_file),
-                                      fall_back=True)
-        elif topdir is not None and source_file is None:
-            # just topdir. verify it's a real west installation root.
+        topdir = kwargs.get('topdir')
+
+        if topdir is None:
+            if source_file is None:
+                # neither source_file nor topdir: search the filesystem
+                # for the installation and use its manifest.path.
+                topdir = util.west_topdir()
+                kwargs.update({
+                    'topdir': topdir,
+                    'source_file': os.path.join(topdir, _mpath(topdir=topdir),
+                                                _WEST_YML)
+                })
+            else:
+                # Just source_file: find topdir starting there.
+                # We need source_file in kwargs as that's what gets used below.
+                kwargs.update({
+                    'source_file': source_file,
+                    'topdir':
+                    util.west_topdir(start=os.path.dirname(source_file))
+                })
+        elif source_file is None:
+            # Just topdir.
+
+            # Verify topdir is a real west installation root.
             msg = 'topdir {} is not a west installation root'.format(topdir)
             try:
                 real_topdir = util.west_topdir(start=topdir, fall_back=False)
@@ -178,23 +209,29 @@ class Manifest:
                 raise ValueError(msg)
             if PurePath(topdir) != PurePath(real_topdir):
                 raise ValueError(msg + '; but {} is'.format(real_topdir))
-            # find west.yml based on manifest.path.
-            source_file = _west_yml(topdir)
-        else:
-            # both source_file and topdir. nothing more to do, but
-            # let's check the invariant.
-            assert source_file
-            assert topdir
 
-        return Manifest(source_file=source_file, topdir=topdir)
+            # Read manifest.path from topdir/.west/config, and use it
+            # to locate source_file.
+            mpath = _mpath(topdir=topdir)
+            source_file = os.path.join(topdir, mpath, _WEST_YML)
+            kwargs.update({
+                'source_file': source_file,
+                'manifest_path': mpath,
+            })
+        else:
+            # Both source_file and topdir.
+            kwargs['source_file'] = source_file
+
+        return Manifest(**kwargs)
 
     @staticmethod
-    def from_data(source_data, manifest_path=None, topdir=None):
+    def from_data(source_data, **kwargs):
         '''Manifest object factory given parsed YAML data.
 
         This factory does not read any configuration files.
 
-        Letting the return value be ``m``:
+        Letting the return value be ``m``. Results then depend on
+        keyword arguments in *kwargs*:
 
             - Unless *topdir* is given, all absolute paths in ``m``,
               like ``m.projects[1].abspath``, are ``None``.
@@ -204,25 +241,20 @@ class Manifest:
 
             - If ``source_data['manifest']['self']['path']`` is not
               set, then ``m.projects[MANIFEST_PROJECT_INDEX].abspath``
-              will be set to *manifest_path*.
+              will be set to *manifest_path* if given.
 
-        Raises `MalformedManifest` if *source_data* is not a valid
-        manifest.
-
-        Raises `ManifestVersionError` if this version of west is too
-        old to parse the manifest.
+        Returns the same exceptions as the Manifest constructor.
 
         :param source_data: parsed YAML data as a Python object, or a
             string with unparsed YAML data
-        :param manifest_path: fallback `ManifestProject` path
-            attribute
-        :param topdir: used as the installation's top level directory
+        :param kwargs: Manifest.__init__ keyword arguments
         '''
-        return Manifest(source_data=source_data, topdir=topdir,
-                        manifest_path=manifest_path)
+        kwargs.update({'source_data': source_data})
+        return Manifest(**kwargs)
 
     def __init__(self, source_file=None, source_data=None,
-                 manifest_path=None, topdir=None):
+                 manifest_path=None, topdir=None, importer=None,
+                 import_flags=0):
         '''
         Using `from_file` or `from_data` is usually easier than direct
         instantiation.
@@ -235,6 +267,10 @@ class Manifest:
               None
 
             - ``path``: path to the manifest file itself, or None
+
+            - ``has_imports``: bool, True if the manifest contains
+              an "import:" attribute in "self:" or "projects:"; False
+              otherwise
 
         Exactly one of *source_file* and *source_data* must be given.
 
@@ -254,6 +290,22 @@ class Manifest:
             - If ``source_data['manifest']['self']['path']`` is unset,
               *manifest_path* is used as a fallback.
 
+        The *importer* kwarg, if given, is a callable. It is called
+        when *source_file* requires importing manifest data that
+        aren't found locally. It will be called as:
+
+        ``importer(project, file)``
+
+        where ``project`` is a `Project` and ``file`` is the missing
+        file. The file's contents at refs/heads/manifest-rev should
+        usually be returned, potentially after fetching the project's
+        revision from its remote URL and updating that ref.
+
+        The return value should be a string containing manifest data,
+        or a list of strings if ``file`` is a directory containing
+        YAML files. A return value of None will cause the import to be
+        ignored.
+
         Exceptions raised:
 
             - `MalformedManifest`: if the manifest data is invalid
@@ -272,6 +324,9 @@ class Manifest:
             attribute
         :param topdir: used as the west installation top level
             directory
+        :param importer: callback to resolve missing manifest import
+            data
+        :param import_flags: bit mask, controls import resolution
         '''
         if source_file and source_data:
             raise ValueError('both source_file and source_data were given')
@@ -308,14 +363,19 @@ class Manifest:
 
         Index 0 (`MANIFEST_PROJECT_INDEX`) contains a
         `ManifestProject` representing the manifest repository. The
-        rest of the sequence contains projects in manifest file order.
+        rest of the sequence contains projects in manifest file order
+        (or resolution order if the manifest contains imports).
         '''
 
         self.topdir = topdir
         '''The west installation's top level directory, or None.'''
 
+        self.has_imports = False
+
         # Set up the public attributes documented above, as well as
         # any internal attributes needed to implement the public API.
+        self._importer = importer or _default_importer
+        self._import_flags = import_flags
         self._load(source_data['manifest'], manifest_path)
 
     def get_projects(self, project_ids, allow_paths=True, only_cloned=False):
@@ -430,69 +490,179 @@ class Manifest:
         # Initialize this instance's fields from values given in the
         # manifest data, which must be validated according to the schema.
 
-        projects = []
-        projects_by_name = {}
-        projects_by_ppath = {}
+        if self.path:
+            log.dbg('loading manifest file:',
+                    self.path, level=log.VERBOSE_EXTREME)
 
-        # Create the ManifestProject instance and install it into the
-        # projects list.
-        assert MANIFEST_PROJECT_INDEX == 0
-        projects.append(self._load_self(manifest, path_hint))
+        # We want to make an ordered map from project names to
+        # corresponding Project instances. Insertion order into this
+        # map should reflect the final project order including
+        # manifest import resolution, which is:
+        #
+        # 1. Imported projects from "manifest: self: import:"
+        # 2. "manifest: projects:"
+        # 3. Imported projects from "manifest: projects: ... import:"
+        projects = collections.OrderedDict()
 
-        # Map from each remote's name to its url-base.
-        url_bases = {r['name']: r['url-base']
-                     for r in manifest.get('remotes', [])}
+        # Create the ManifestProject, and import projects from "self:".
+        mp = self._load_self(manifest, path_hint, projects)
 
-        # Default values, explicit or implicit.
+        # Add this manifest's projects to the map, then project imports.
+        url_bases = {r['name']: r['url-base'] for r in
+                     manifest.get('remotes', [])}
         defaults = self._load_defaults(manifest.get('defaults', {}), url_bases)
+        self._load_projects(manifest, url_bases, defaults, projects)
 
-        # pd = project data (dictionary of project information parsed from
-        # the manifest file)
-        for pd in manifest['projects']:
-            project = self._load_project(pd, url_bases, defaults)
+        # The manifest is resolved. Make sure paths are unique.
+        self._check_paths_are_unique(mp, projects)
 
-            # Project names must be unique.
-            if project.name in projects_by_name:
-                self._malformed('project name {} is already used'.
-                                format(project.name))
-            # Two projects cannot have the same path. We use a PurePath
-            # comparison here to ensure that platform-specific canonicalization
-            # rules are handled correctly.
-            ppath = PurePath(project.path)
-            other = projects_by_ppath.get(ppath)
-            if other:
-                self._malformed(
-                    'project {} path "{}" is already taken by project {}'.
-                    format(project.name, project.path, other.name))
-            else:
-                projects_by_ppath[ppath] = project
-
-            projects.append(project)
-            projects_by_name[project.name] = project
-
-        self.projects = tuple(projects)
-        self._projects_by_name = projects_by_name
+        # Save the results.
+        self.projects = list(projects.values())
+        self.projects.insert(MANIFEST_PROJECT_INDEX, mp)
+        self._projects_by_name = {'manifest': mp}
+        self._projects_by_name.update(projects)
         self._projects_by_cpath = {}
         if self.topdir:
-            mp = self.projects[MANIFEST_PROJECT_INDEX]
-            if mp.abspath:
-                self._projects_by_cpath[util.canon_path(mp.abspath)] = mp
-            for p in self.projects[MANIFEST_PROJECT_INDEX + 1:]:
-                assert p.abspath  # sanity check a program invariant
+            for i, p in enumerate(self.projects):
+                if i == MANIFEST_PROJECT_INDEX and not p.abspath:
+                    # When from_data() is called without a path hint, mp
+                    # can have a topdir but no path, and thus no abspath.
+                    continue
                 self._projects_by_cpath[util.canon_path(p.abspath)] = p
 
-    def _load_self(self, manifest, path_hint):
-        # "slf" because "self" is already taken
-        slf = manifest.get('self', dict())
-        if self.path:
-            # We're parsing a real file on disk. We currently require
-            # that we are able to resolve a topdir. We may lift this
-            # restriction in the future.
-            assert self.topdir
+    def _load_self(self, manifest, path_hint, projects):
+        # Handle the "self:" section in the manifest data.
 
-        return ManifestProject(path=slf.get('path', path_hint),
-                               topdir=self.topdir,
-                               west_commands=slf.get('west-commands'))
+        slf = manifest.get('self', {})
+        path = slf.get('path', path_hint)
+        mp = ManifestProject(path=path, topdir=self.topdir,
+                             west_commands=slf.get('west-commands'))
+
+        imp = slf.get('import')
+        if imp is not None:
+            if self._import_flags & ImportFlag.IGNORE:
+                log.dbg('manifest {} self import {}: ignored'.
+                        format(mp, imp),
+                        level=log.VERBOSE_EXTREME)
+            else:
+                log.dbg('resolving self imports for:', self.path,
+                        level=log.VERBOSE_EXTREME)
+                self._import_from_self(mp, imp, projects)
+                log.dbg('done resolving self imports for:', self.path,
+                        level=log.VERBOSE_EXTREME)
+
+        return mp
+
+    def _assert_imports_ok(self):
+        # Sanity check that we aren't calling code that does importing
+        # if the flags tell us not to.
+        #
+        # Could be deleted if this feature stabilizes and we never hit
+        # this assertion.
+
+        assert not self._import_flags & ImportFlag.IGNORE
+
+    def _import_from_self(self, mp, imp, projects):
+        # Recursive helper to import projects from the manifest repository.
+        #
+        # - mp: the ManifestProject
+        # - imp: "self: import: <imp>" value from manifest data
+        # - projects: ordered map of Project instances we've already got
+        #
+        # All data is read from the file system. Requests to read
+        # files which don't exist or aren't ordinary files/directories
+        # raise MalformedManifest.
+        #
+        # This is unlike importing from projects -- for projects, data
+        # are read from Git (treating it as a content-addressable file
+        # system) with a fallback on self._importer.
+
+        self._assert_imports_ok()
+
+        self.has_imports = True
+
+        imptype = type(imp)
+        if imptype == bool:
+            self._malformed('got "self: import: {}" of boolean'.format(imp))
+        elif imptype == str:
+            self._import_path_from_self(mp, imp, projects)
+        elif imptype == list:
+            for subimp in imp:
+                self._import_from_self(mp, subimp, projects)
+        elif imptype == dict:
+            self._import_map_from_self(mp, imp, projects)
+        else:
+            self._malformed('{}: "self: import: {}" has invalid type {}'.
+                            format(mp.abspath, imp, imptype))
+
+    def _import_path_from_self(self, mp, imp, projects):
+        if mp.abspath:
+            # Fast path, when we're working inside a fully initialized
+            # topdir.
+            log.dbg('manifest repository root:', mp.abspath,
+                    level=log.VERBOSE_EXTREME)
+            repo_root = Path(mp.abspath)
+        else:
+            # Fallback path, which is needed by at least west init. If
+            # this happens too often, something may be wrong with how
+            # we've implemented this. We'd like to avoid too many git
+            # commands, as subprocesses are slow on windows.
+            log.dbg('searching for the manifest repository root',
+                    level=log.VERBOSE_EXTREME)
+            repo_root = Path(mp.git('rev-parse --show-toplevel',
+                                    capture_stdout=True,
+                                    cwd=str(Path(self.path).parent)).
+                             stdout[:-1].      # chop off newline
+                             decode('utf-8'))  # hopefully this is safe
+        p = Path(repo_root) / imp
+
+        if p.is_file():
+            log.dbg('found submanifest: {}'.format(p),
+                    level=log.VERBOSE_EXTREME)
+            self._import_pathobj_from_self(mp, p, projects)
+        elif p.is_dir():
+            log.dbg('found directory of submanifests: {}'.format(p),
+                    level=log.VERBOSE_EXTREME)
+            for yml in filter(_is_yml, sorted(p.iterdir())):
+                self._import_pathobj_from_self(mp, p / yml, projects)
+        else:
+            # This also happens for special files like character
+            # devices, but it doesn't seem worth handling that error
+            # separately. Who would call mknod in their manifest repo?
+            self._malformed('{}: "self: import: {}": file {} not found'.
+                            format(mp.abspath, imp, p))
+
+    def _import_map_from_self(self, mproject, map, projects):     # TODO
+        raise NotImplementedError('import: <map> is not yet implemented')
+
+    def _import_pathobj_from_self(self, mp, pathobj, projects):
+        # Import a Path object, which is a manifest file in the
+        # manifest repository whose ManifestProject is mp.
+
+        submp = Manifest(source_file=str(pathobj),
+                         manifest_path=mp.path,
+                         topdir=self.topdir,
+                         importer=self._importer,
+                         import_flags=self._import_flags)
+
+        for i, project in enumerate(submp.projects):
+            if i == MANIFEST_PROJECT_INDEX:
+                # If the submanifest has west commands, add them
+                # to mp's.
+                subcmds = project.west_commands
+                if not subcmds:
+                    continue
+
+                if isinstance(subcmds, str):
+                    subcmds = [subcmds]
+
+                if isinstance(mp.west_commands, str):
+                    mp.west_commands = [mp.west_commands]
+                elif not mp.west_commands:
+                    mp.west_commands = []
+                mp.west_commands.extend(project.west_commands)
+            else:
+                self._add_project(project, projects)
 
     def _load_defaults(self, md, url_bases):
         # md = manifest defaults (dictionary with values parsed from
@@ -505,6 +675,47 @@ class Manifest:
                 self._malformed('default remote {} is not defined'.
                                 format(mdrem))
         return _defaults(mdrem, md.get('revision', _DEFAULT_REV))
+
+    def _load_projects(self, manifest, url_bases, defaults, projects,
+                       path_hint=None):
+        # Load projects and add them to the list, returning
+        # information about which ones have imports that need to be
+        # processed next.
+
+        if not path_hint:
+            path_hint = self.path
+
+        have_imports = []
+        names = set()
+        for pd in manifest['projects']:
+            project = self._load_project(pd, url_bases, defaults)
+            name = project.name
+
+            if name in names:
+                # Project names must be unique within a manifest.
+                self._malformed('project name {} used twice in {}'.
+                                format(name, path_hint or 'the same manifest'))
+            names.add(name)
+
+            # Add the project to the map if it's new.
+            added = self._add_project(project, projects)
+            if added:
+                log.dbg('manifest file {}: added {}'.
+                        format(self.path, project),
+                        level=log.VERBOSE_EXTREME)
+                # Track project imports unless we are ignoring those.
+                imp = pd.get('import')
+                if imp:
+                    if self._import_flags & ImportFlag.IGNORE:
+                        log.dbg('project {} import {} ignored'.
+                                format(project, imp),
+                                level=log.VERBOSE_EXTREME)
+                    else:
+                        have_imports.append((project, imp))
+
+        # Handle imports from new projects in our "projects:" section.
+        for project, imp in have_imports:
+            self._import_from_project(project, imp, projects)
 
     def _load_project(self, pd, url_bases, defaults):
         # pd = project data (dictionary with values parsed from the
@@ -552,6 +763,137 @@ class Manifest:
                        west_commands=pd.get('west-commands'),
                        topdir=self.topdir)
 
+    def _import_from_project(self, project, imp, projects):
+        # Recursively resolve a manifest import from 'project'.
+        #
+        # - project: Project instance to import from
+        # - imp: the parsed value of project's import key (string, list, etc.)
+        # - projects: ordered dictionary of projects
+
+        self._assert_imports_ok()
+
+        self.has_imports = True
+
+        imptype = type(imp)
+        if imptype == bool:
+            if imp is False:
+                return
+            self._import_path_from_project(project, _WEST_YML, projects)
+        elif imptype == str:
+            self._import_path_from_project(project, imp, projects)
+        elif imptype == list:
+            for subimp in imp:
+                self._import_from_project(project, subimp, projects)
+        elif imptype == dict:
+            self._import_map_from_project(project, imp, projects)
+        else:
+            self._malformed(project.format(
+                '{name_and_path}: invalid import {imp} type: {imptype}',
+                imp=imp, imptype=imptype))
+
+    def _import_path_from_project(self, project, path, projects):
+        # Import data from git at the given path at revision manifest-rev.
+        # Fall back on self._importer if that fails.
+
+        imported = self._import_content_from_project(project, path)
+        if imported is None:
+            # This can happen if self._importer returns None.
+            # It means there's nothing to do.
+            return
+
+        has_wc = bool(project.west_commands)
+        inherited_wc = []
+        for data in imported:
+            if isinstance(data, str):
+                data = yaml.safe_load(data)
+            try:
+                # Force a fallback onto manifest_path=project.path.
+                # The subpath to the manifest file itself will not be
+                # available, so that's the best we can do.
+                del data['manifest']['self']['path']
+            except KeyError:
+                pass
+            submp = Manifest(source_data=data,
+                             manifest_path=project.path,
+                             topdir=self.topdir,
+                             importer=self._importer,
+                             import_flags=self._import_flags)
+
+            for i, subp in enumerate(submp.projects):
+                if i == MANIFEST_PROJECT_INDEX:
+                    # If the project has no west commands, inherit them
+                    # from imported manifest data inside the project.
+                    if not has_wc and subp.west_commands:
+                        if isinstance(subp.west_commands, str):
+                            inherited_wc.append(subp.west_commands)
+                        else:
+                            inherited_wc.extend(subp.west_commands)
+                else:
+                    self._add_project(subp, projects)
+        if not has_wc and inherited_wc:
+            project.west_commands = inherited_wc
+
+    def _import_content_from_project(self, project, path):
+        log.dbg(f'manifest file {self.path}: resolving import {path} '
+                f'for {project}',
+                level=log.VERBOSE_EXTREME)
+        if not (self._import_flags & ImportFlag.FORCE_PROJECTS) and \
+           project.is_cloned():
+            try:
+                content = _manifest_content_at(project, path)
+            except MalformedManifest as mm:
+                self._malformed(mm.args[0])
+            except FileNotFoundError:
+                # We may need to fetch a new manifest-rev, e.g. if
+                # revision is a branch that didn't used to have a
+                # west.yml, but now does.
+                content = self._importer(project, path)
+            except subprocess.CalledProcessError:
+                # We may need a new manifest-rev, e.g. if revision is
+                # a SHA we don't have yet.
+                content = self._importer(project, path)
+        else:
+            # We need to clone this project, or we were specifically
+            # asked to use the importer.
+            content = self._importer(project, path)
+
+        if isinstance(content, str):
+            content = [content]
+
+        return content
+
+    def _import_map_from_project(self, project, map, projects):  # TODO
+        raise NotImplementedError('import: <map> from project unimplemented')
+
+    def _add_project(self, project, projects):
+        # Add the project to our map if we don't already know about it.
+        # Return the result.
+
+        if project.name not in projects:
+            projects[project.name] = project
+            return True
+        else:
+            return False
+
+    def _check_paths_are_unique(self, mp, projects):
+        ppaths = {}
+        if mp.path:
+            mppath = PurePath(mp.path)
+        else:
+            mppath = None
+        for name, project in projects.items():
+            pp = PurePath(project.path)
+            if pp == mppath:
+                self._malformed('project {} path "{}" '
+                                'is taken by the manifest repository'.
+                                format(name, project.path))
+            other = ppaths.get(pp)
+            if other:
+                self._malformed('project {} path "{}" is taken by project {}'.
+                                format(name, project.path, other.name))
+            ppaths[pp] = project
+
+
 class MalformedManifest(Exception):
     '''Manifest parsing failed due to invalid data.
     '''
@@ -560,6 +902,19 @@ class MalformedConfig(Exception):
     '''The west configuration was malformed in a way that made a
     manifest operation fail.
     '''
+
+class ManifestImportFailed(Exception):
+    '''An operation required to resolve a manifest failed.
+
+    Attributes:
+
+    - ``project``: the Project instance with the missing manifest data
+    - ``filename``: the missing file
+    '''
+
+    def __init__(self, project, filename):
+        self.project = project
+        self.filename = filename
 
 class ManifestVersionError(Exception):
     '''The manifest required a version of west more recent than the
@@ -591,8 +946,8 @@ class Project:
     - ``clone_depth``: clone depth to fetch when first cloning the
       project, or ``None`` (the revision should not be a SHA
       if this is used)
-    - ``west_commands``: project's ``west_commands:`` key in the
-      manifest data
+    - ``west_commands``: list of places to find extension commands in
+      the project
     - ``topdir``: the top level directory of the west installation
       the project is part of, or ``None``
     '''
@@ -601,8 +956,8 @@ class Project:
         return NotImplemented
 
     def __repr__(self):
-        return ('Project("{}", "{}", revision="{}", path="{}", clone_depth={}, '
-                'west_commands={}, topdir={})').format(
+        return ('Project("{}", "{}", revision="{}", path="{}", '
+                'clone_depth={}, west_commands={}, topdir={})').format(
                     self.name, self.url, self.revision, self.path,
                     self.clone_depth, _quote_maybe(self.west_commands),
                     _quote_maybe(self.topdir))
@@ -624,7 +979,8 @@ class Project:
         :param path: path (relative to topdir), or None for *name*
         :param clone_depth: depth to use for initial clone
         :param west_commands: path to west commands directory in the
-            project, relative to its own base directory, topdir / path
+            project, relative to its own base directory, topdir / path,
+            or list of these
         :param topdir: the west installation's top level directory
         '''
 
@@ -867,10 +1223,55 @@ class Project:
         # the top-level directory of a Git repository. Use --show-cdup
         # instead, which prints an empty string (i.e., just a newline,
         # which we strip) for the top-level directory.
+        log.dbg(self.format('{name}: checking if cloned'),
+                level=log.VERBOSE_EXTREME)
         res = self.git('rev-parse --show-cdup', check=False,
                        capture_stderr=True, capture_stdout=True)
 
         return not (res.returncode or res.stdout.strip())
+
+    def read_at(self, path, rev=None, cwd=None):
+        '''Read file contents in the project at a specific revision.
+
+        The file contents are returned as a bytes object. The caller
+        should decode them if necessary.
+
+        :param path: relative path to file in this project
+        :param rev: revision to read *path* from (default: ``self.revision``)
+        :param cwd:  directory to run command in (default: ``self.abspath``)
+        '''
+        if rev is None:
+            rev = self.revision
+        cp = self.git(['show', rev + ':' + path], capture_stdout=True,
+                      capture_stderr=True, cwd=cwd)
+        return cp.stdout
+
+    def listdir_at(self, path, rev=None, cwd=None, encoding=None):
+        '''List directory contents in the project at a specific revision.
+
+        The return value is a list of the directory's contents as
+        strings.
+
+        :param path: relative path to file in this project
+        :param rev: revision to read *path* from (default: ``self.revision``)
+        :param cwd: directory to run command in (default: ``self.abspath``)
+        :param encoding: directory contents encoding (default: 'utf-8')
+        '''
+        if rev is None:
+            rev = self.revision
+        if encoding is None:
+            encoding = 'utf-8'
+
+        # git-ls-tree -z means we get NUL-separated output with no quoting
+        # of the file names. Using 'git-show' or 'git-cat-file -p'
+        # wouldn't work for files with special characters in their names.
+        out = self.git(['ls-tree', '-z', "{}:{}".format(rev, path)],
+                       capture_stdout=True, capture_stderr=True).stdout
+
+        # A tab character separates the SHA from the file name in each
+        # NUL-separated entry.
+        return [f.decode(encoding).split('\t', 1)[1:]
+                for f in out.split(b'\x00') if f]
 
 # FIXME: this whole class should just go away. See #327.
 class ManifestProject(Project):
@@ -888,7 +1289,8 @@ class ManifestProject(Project):
     - ``posixpath``: like ``abspath``, but with slashes (``/``) as
       path separators
     - ``west_commands``:``west_commands:`` key in the manifest's
-      ``self:`` map
+      ``self:`` map. This may be a list of such if the self
+      section imports multiple additional files with west commands.
 
     Other readable attributes included for Project compatibility:
 
@@ -985,6 +1387,7 @@ class ManifestProject(Project):
         return ret
 
 _defaults = collections.namedtuple('_defaults', 'remote revision')
+_YML_EXTS = ['yml', 'yaml']
 _WEST_YML = 'west.yml'
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
 _SCHEMA_VER = parse_version(SCHEMA_VERSION)
@@ -1026,3 +1429,55 @@ def _mpath(cp=None, topdir=None):
 
 def _west_yml(topdir):
     return os.path.join(topdir, _mpath(topdir=topdir), _WEST_YML)
+
+def _manifest_content_at(project, path, rev=QUAL_MANIFEST_REV_BRANCH):
+    # Get a list of manifest data from project at path
+    #
+    # The data are loaded from Git at ref QUAL_MANIFEST_REV_BRANCH,
+    # *NOT* the file system.
+    #
+    # If path is a tree at that ref, the contents of the YAML files
+    # inside path are returned, as strings. If it's a file at that
+    # ref, it's a string with its contents.
+    #
+    # Though this module and the "west update" implementation share
+    # this code, it's an implementation detail, not API.
+
+    log.dbg(project.format('{name}: looking up path {path} type at {rev}',
+                           path=path, rev=rev),
+            level=log.VERBOSE_EXTREME)
+
+    # Returns 'blob', 'tree', etc. for path at revision, if it exists.
+    out = project.git(['ls-tree', rev, path], capture_stdout=True,
+                      capture_stderr=True).stdout
+
+    if not out:
+        # It's a bit inaccurate to raise FileNotFoundError for
+        # something that isn't actually file, but this is internal
+        # API, and git is a content addressable file system, so close
+        # enough!
+        raise OSError(errno.ENOENT, os.strerror(errno.ENOENT), path)
+
+    ptype = out.decode('utf-8').split()[1]
+
+    if ptype == 'blob':
+        # Importing a file: just return its content.
+        return project.read_at(path, rev=rev).decode('utf-8')
+    elif ptype == 'tree':
+        # Importing a tree: return the content of the YAML files inside it.
+        ret = []
+        pathobj = PurePath(path)
+        for f in filter(_is_yml, project.listdir_at(path)):
+            ret.append(project.read_at(str(pathobj / f),
+                                       rev=rev).decode('utf-8'))
+        return ret
+    else:
+        raise MalformedManifest(
+            "can't decipher project {} path {} revision {} (git type: {})".
+            format(project.name, path, rev, ptype))
+
+def _is_yml(path):
+    return os.path.splitext(str(path))[1][1:] in _YML_EXTS
+
+def _default_importer(project, file):
+    raise ManifestImportFailed(project, file)

@@ -12,7 +12,16 @@ import yaml
 
 from west.manifest import Manifest, Project, \
     ManifestProject, MalformedManifest, ManifestVersionError, \
-    manifest_path
+    manifest_path, ImportFlag
+
+FPI = ImportFlag.FORCE_PROJECTS  # to force project imports to use the callback
+
+if platform.system() == 'Windows':
+    TOPDIR = 'C:\\topdir'
+    TOPDIR_POSIX = 'C:/topdir'
+else:
+    TOPDIR = '/topdir'
+    TOPDIR_POSIX = TOPDIR
 
 THIS_DIRECTORY = os.path.dirname(__file__)
 
@@ -99,20 +108,13 @@ def test_project_init():
     assert p.west_commands is None
     assert p.topdir is None
 
-    if platform.system() == 'Windows':
-        topdir = 'C:\\topdir'
-    else:
-        topdir = '/topdir'
     p = Project('p', 'some-url', clone_depth=4, west_commands='foo',
-                topdir=topdir)
+                topdir=TOPDIR)
     assert p.clone_depth == 4
     assert p.west_commands == 'foo'
-    assert p.topdir == topdir
-    assert p.abspath == os.path.join(topdir, 'p')
-    if platform.system() == 'Windows':
-        assert p.posixpath == 'C:/topdir/p'
-    else:
-        assert p.posixpath == '/topdir/p'
+    assert p.topdir == TOPDIR
+    assert p.abspath == os.path.join(TOPDIR, 'p')
+    assert p.posixpath == TOPDIR_POSIX + '/p'
 
 def test_manifest_from_data():
     # We can load manifest data as a dict or a string.
@@ -888,6 +890,351 @@ def test_version_check_success(ver):
     assert manifest.projects[-1].name == 'foo'
     manifest = Manifest.from_data(fmt.format('"' + ver + '"'))
     assert manifest.projects[-1].name == 'foo'
+
+#########################################
+# Manifest import tests
+
+def make_importer(import_map):
+    # Helper function for making a simple importer for test cases.
+    #
+    # The argument is a map from (project_name, path, revision) tuples
+    # to the manifest contents the importer should return.
+    #
+    # This, makes it easier to set up tests cases where import
+    # resolution can be done entirely with data in this file. That's
+    # faster (both when writing tests and running them) than setting
+    # up a west installation on the file system.
+
+    def importer(project, file):
+        return import_map[(project.name, file)]
+    return importer
+
+def test_import_false_ok():
+    # When it would have no effect, it's OK to parse manifest data
+    # with imports in it, even without an importer. The project data
+    # should be parsed as expected.
+
+    manifest = Manifest.from_data('''\
+    manifest:
+      projects:
+        - name: foo
+          url: https://foo.com
+          import: false
+    ''')
+    assert manifest.projects[-1].name == 'foo'
+
+# A stand-in for zephyr/west.yml to use when testing manifest imports.
+# This feature isn't tied to Zephyr in any way, but we write the tests
+# this way to make them easier to read and relate to Zephyr use cases.
+_UPSTREAM_WYML = '''\
+manifest:
+  defaults:
+    remote: up-rem
+  remotes:
+    - name: up-rem
+      url-base: upstream.com
+  projects:
+    - name: hal_nordic
+      revision: hal_nordic-upstream-rev
+      path: modules/hal/nordic
+    - name: segger
+      path: modules/debug/segger
+      revision: segger-upstream-rev
+'''
+
+_DOWNSTREAM_WYMLS = [
+    '''\
+    manifest:
+      projects:
+      - name: upstream
+        url: upstream.com/upstream
+        revision: refs/tags/v1.0
+        import: true
+    ''',
+    '''\
+    manifest:
+      projects:
+      - name: upstream
+        url: upstream.com/upstream
+        revision: refs/tags/v1.0
+        import: west.yml
+    ''',
+    '''\
+    manifest:
+      remotes:
+      - name: upstream-remote
+        url-base: upstream.com
+      projects:
+      - name: upstream
+        remote: upstream-remote
+        revision: refs/tags/v1.0
+        import: true
+    ''',
+    '''\
+    manifest:
+      remotes:
+      - name: upstream-remote
+        url-base: upstream.com
+      projects:
+      - name: upstream
+        remote: upstream-remote
+        revision: refs/tags/v1.0
+        import: west.yml
+    ''',
+    '''\
+    manifest:
+      defaults:
+        remote: upstream-remote
+      remotes:
+      - name: upstream-remote
+        url-base: upstream.com
+      projects:
+      - name: upstream
+        revision: refs/tags/v1.0
+        import: west.yml
+    '''
+]
+
+@pytest.mark.parametrize('content', _DOWNSTREAM_WYMLS,
+                         ids=['url-true', 'url-west',
+                              'remote-true', 'remote-west',
+                              'default-remote'])
+def test_import_basics(content):
+    # Test a downstream manifest, which simply imports a tag from an
+    # upstream manifest.
+    #
+    # This tests the import semantics for "Downstream of a fixed
+    # Zephyr release" in the documentation for this feature, in various ways.
+    #
+    # It of course doesn't test any file sytem or network related
+    # features required to make west update, west manifest --freeze,
+    # etc. work.
+    #
+    # Here, the main west.yml simply imports upstream/west.yml.
+    # We expect the projects list to be the same as upstream's,
+    # with the addition of one project (upstream itself).
+
+    importer = make_importer({('upstream', 'west.yml'): _UPSTREAM_WYML})
+    actual = Manifest.from_data(content, manifest_path='my-repo',
+                                topdir=TOPDIR, importer=importer,
+                                import_flags=FPI).projects
+
+    expected = [
+        ManifestProject(path='my-repo', topdir=TOPDIR),
+        Project('upstream', 'upstream.com/upstream', revision='refs/tags/v1.0',
+                path='upstream', topdir=TOPDIR),
+        Project('hal_nordic', 'upstream.com/hal_nordic',
+                revision='hal_nordic-upstream-rev',
+                path='modules/hal/nordic', topdir=TOPDIR),
+        Project('segger', 'upstream.com/segger',
+                revision='segger-upstream-rev',
+                path='modules/debug/segger', topdir=TOPDIR)]
+
+    for a, e in zip(actual, expected):
+        check_proj_consistency(a, e)
+
+def test_import_with_fork_and_proj():
+    # Downstream of fixed release, one forked project, and one
+    # additional non-forked project.
+    #
+    # This verifies that common projects are merged into the previous
+    # list, and downstream-only projects are appended onto it.
+
+    importer = make_importer({('upstream', 'west.yml'): _UPSTREAM_WYML})
+    actual = Manifest.from_data('''\
+    manifest:
+      projects:
+      - name: hal_nordic
+        path: modules/hal/nordic
+        url: downstream.com/hal_nordic
+        revision: my-branch
+      - name: my-proj
+        url: downstream.com/my-proj
+      - name: upstream
+        url: upstream.com/upstream
+        revision: refs/tags/v1.0
+        import: true
+     ''',
+                                manifest_path='my-repo',
+                                topdir=TOPDIR, importer=importer,
+                                import_flags=FPI).projects
+
+    expected = [
+        ManifestProject(path='my-repo', topdir=TOPDIR),
+        Project('hal_nordic', 'downstream.com/hal_nordic',
+                revision='my-branch', path='modules/hal/nordic',
+                topdir=TOPDIR),
+        Project('my-proj', 'downstream.com/my-proj', revision='master',
+                path='my-proj', topdir=TOPDIR),
+        Project('upstream', 'upstream.com/upstream', revision='refs/tags/v1.0',
+                path='upstream', topdir=TOPDIR),
+        Project('segger', 'upstream.com/segger',
+                revision='segger-upstream-rev',
+                path='modules/debug/segger', topdir=TOPDIR)]
+
+    for a, e in zip(actual, expected):
+        check_proj_consistency(a, e)
+
+# A manifest repository with a subdirectory containing multiple
+# additional files:
+#
+# split-manifest/
+# ├── west.d
+# │   ├── 01-libraries.yml
+# │   ├── 02-vendor-hals.yml
+# │   └── 03-applications.yml
+# └── west.yml
+#
+# This tests "Downstream with directory of manifest files" in the
+# documentation. We do the testing in a tmpdir with just enough
+# files to fake out an installation.
+_IMPORT_SELF_MANIFESTS = [
+    # as a directory:
+    '''\
+    manifest:
+      remotes:
+        - name: upstream
+          url-base: upstream.com
+      projects:
+        - name: upstream
+          remote: upstream
+          revision: refs/tags/v1.0
+          import: true
+      self:
+        import: west.d
+    ''',
+    # as an equivalent sequence of files:
+    '''\
+    manifest:
+      remotes:
+        - name: upstream
+          url-base: upstream.com
+      projects:
+        - name: upstream
+          remote: upstream
+          revision: refs/tags/v1.0
+          import: true
+      self:
+        import:
+          - west.d/01-libraries.yml
+          - west.d/02-vendor-hals.yml
+          - west.d/03-applications.yml
+    '''
+]
+
+_IMPORT_SELF_SUBMANIFESTS = {
+    'west.d/01-libraries.yml':
+    '''\
+    manifest:
+      defaults:
+        remote: my-downstream
+      remotes:
+      - name: my-downstream
+        url-base: downstream.com
+      projects:
+      - name: my-1
+        repo-path: my-lib-1
+        revision: my-1-rev
+        path: lib/my-1
+      - name: my-2
+        repo-path: my-lib-2
+        revision: my-2-rev
+        path: lib/my-2
+    ''',
+
+    'west.d/02-vendor-hals.yml':
+    '''\
+    manifest:
+      projects:
+      - name: hal_nordic
+        url: downstream.com/hal_nordic
+        revision: my-hal-rev
+        path: modules/hal/nordic
+      - name: hal_downstream_sauce
+        url: downstream.com/hal_downstream_only
+        revision: my-down-hal-rev
+        path: modules/hal/downstream_only
+    ''',
+
+    'west.d/03-applications.yml':
+    '''\
+    manifest:
+      projects:
+      - name: my-app
+        url: downstream.com/my-app
+        revision: my-app-rev
+        path: applications/my-app
+    '''
+}
+
+
+def _setup_import_self(tmpdir, manifests):
+    tmpdir.chdir()
+    (tmpdir / '.west').mkdir()
+    manifest_repo = tmpdir / 'split-manifest'
+    manifest_repo.mkdir()
+    (manifest_repo / 'west.d').mkdir()
+    for path, content in manifests.items():
+        with open(str(manifest_repo / path), 'w') as f:
+            f.write(content)
+
+@pytest.mark.parametrize('content', _IMPORT_SELF_MANIFESTS,
+                         ids=['dir', 'files'])
+def test_import_self_directory(content, tmpdir):
+    # Test a couple of different equivalent ways to import content
+    # from the manifest repository.
+
+    call_map = {('upstream', 'west.yml'): _UPSTREAM_WYML}
+
+    # Create tmpdir/.west and the manifest files.
+    manifests = {'west.yml': content}
+    manifests.update(_IMPORT_SELF_SUBMANIFESTS)
+    _setup_import_self(tmpdir, manifests)
+
+    # Resolve the manifest. The split-manifest/west.d content comes
+    # from the file system in this case.
+    topdir = str(tmpdir)
+    actual = Manifest.from_data(manifests['west.yml'],
+                                manifest_path='split-manifest', topdir=topdir,
+                                importer=make_importer(call_map),
+                                import_flags=FPI).projects
+
+    expected = [
+        ManifestProject(path='split-manifest', topdir=topdir),
+        # Projects from 01-libraries.yml come first.
+        Project('my-1', 'downstream.com/my-lib-1', revision='my-1-rev',
+                path='lib/my-1', topdir=topdir),
+        Project('my-2', 'downstream.com/my-lib-2', revision='my-2-rev',
+                path='lib/my-2', topdir=topdir),
+        # Next, projects from 02-vendor-hals.yml.
+        Project('hal_nordic', 'downstream.com/hal_nordic',
+                revision='my-hal-rev', path='modules/hal/nordic',
+                topdir=topdir),
+        Project('hal_downstream_sauce', 'downstream.com/hal_downstream_only',
+                revision='my-down-hal-rev', path='modules/hal/downstream_only',
+                topdir=topdir),
+        # After that, 03-applications.yml.
+        Project('my-app', 'downstream.com/my-app', revision='my-app-rev',
+                path='applications/my-app', topdir=topdir),
+        # upstream is the only element of our projects list, so it's
+        # after all the self-imports.
+        Project('upstream', 'upstream.com/upstream', revision='refs/tags/v1.0',
+                path='upstream', topdir=topdir),
+        # Projects we imported from upstream are last. Projects
+        # present upstream which we have already defined should be
+        # ignored and not appear here.
+        Project('segger', 'upstream.com/segger',
+                revision='segger-upstream-rev',
+                path='modules/debug/segger', topdir=topdir),
+    ]
+
+    # Since this test is a bit more complicated than some others,
+    # first check that we have all the projects in the right order.
+    assert [a.name for a in actual] == [e.name for e in expected]
+
+    # With the basic check done, do a more detailed check.
+    for a, e in zip(actual, expected):
+        check_proj_consistency(a, e)
 
 #########################################
 # Various invalid manifests
