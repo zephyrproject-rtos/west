@@ -72,6 +72,9 @@ def check_proj_consistency(actual, expected):
     assert actual.revision == expected.revision
     assert actual.west_commands == expected.west_commands
 
+def nodrive(path):
+    return os.path.splitdrive(path)[1]
+
 def test_init_with_url():
     # Test the project constructor works as expected with a URL.
 
@@ -81,9 +84,7 @@ def test_init_with_url():
     assert p.path == 'p'
     assert p.topdir is None
     assert p.abspath is None
-    if platform.system() == 'Windows':
-        posixpath = os.path.splitdrive(p.posixpath)[1]
-        assert posixpath == '/west_top/p'
+    assert p.posixpath is None
     assert p.clone_depth is None
     assert p.revision == 'master'
     assert p.west_commands is None
@@ -195,7 +196,7 @@ def test_manifest_attrs():
     assert mp.name == 'manifest'
     assert mp.path == 'my-path'
     assert mp.topdir is not None
-    assert PurePath(mp.abspath) == PurePath('/west_top/my-path')
+    assert PurePath(nodrive(mp.abspath)) == PurePath('/west_top/my-path')
     assert mp.posixpath is not None
     assert mp.west_commands == 'cmds.yml'
     assert mp.url is None
@@ -664,9 +665,10 @@ def test_path():
           remote: testremote
           path: sub/directory
     '''
-    manifest = Manifest.from_data(yaml.safe_load(content), topdir='/west_top')
-    assert manifest.projects[1].path == 'sub' + os.path.sep + 'directory'
-    assert manifest.projects[1].posixpath == '/west_top/sub/directory'
+    p = Manifest.from_data(yaml.safe_load(content),
+                           topdir='/west_top').projects[1]
+    assert p.path == 'sub/directory'
+    assert nodrive(p.posixpath) == '/west_top/sub/directory'
 
 
 def test_ignore_west_section():
@@ -693,7 +695,7 @@ def test_ignore_west_section():
                                   topdir='/west_top')
     p1 = manifest.projects[1]
     assert PurePath(p1.path) == PurePath('sub', 'directory')
-    assert PurePath(p1.abspath) == PurePath('/west_top/sub/directory')
+    assert PurePath(nodrive(p1.abspath)) == PurePath('/west_top/sub/directory')
 
 def test_project_west_commands():
     # Projects may specify subdirectories containing west commands.
