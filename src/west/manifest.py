@@ -573,6 +573,12 @@ class Project:
     def __eq__(self, other):
         return NotImplemented
 
+    def __repr__(self):
+        return ('Project({}, {}, revision={}, path={}, clone_depth={}, '
+                'west_commands={}, topdir={}').format(
+                    self.name, self.url, self.revision, self.path,
+                    self.clone_depth, self.west_commands, self.topdir)
+
     def __str__(self):
         return '<Project {} at {}>'.format(
             repr(self.name), repr(self.abspath or self.path))
@@ -864,6 +870,10 @@ class ManifestProject(Project):
     - ``revision``: ``"HEAD"``
     - ``clone_depth``: ``None``, because ``url`` is
     '''
+
+    def __repr__(self):
+        return 'ManifestProject({}, path={}, west_commands={}, topdir={})'. \
+            format(self.name, self.path, self.west_commands, self.topdir)
 
     def __init__(self, path=None, west_commands=None, topdir=None):
         '''
