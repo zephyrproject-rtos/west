@@ -20,8 +20,7 @@ from west.configuration import config, update_config
 from west import log
 from west import util
 from west.commands import WestCommand, CommandError
-from west.manifest import Manifest, MalformedManifest, MalformedConfig, \
-    MANIFEST_PROJECT_INDEX, ManifestProject
+from west.manifest import Manifest, MANIFEST_PROJECT_INDEX, ManifestProject
 from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
 from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
 from urllib.parse import urlparse
@@ -289,12 +288,7 @@ class Init(_ProjectCommand):
         return projects, manifest_project.abspath
 
     def projects(self, manifest_file):
-        try:
-            return Manifest.from_file(manifest_file).projects
-        except MalformedManifest as mm:
-            log.die(mm.args[0])
-        except MalformedConfig as mc:
-            log.die(mc.args[0])
+        return Manifest.from_file(manifest_file).projects
 
     def fixup_zephyr_base(self, projects):
         for project in projects:
