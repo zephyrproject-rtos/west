@@ -275,7 +275,11 @@ class Init(_ProjectCommand):
                 manifest_path = posixpath.basename(url_path)
                 manifest_abspath = join(topdir, manifest_path)
 
+            log.dbg('moving', tempdir, 'to', manifest_abspath,
+                    level=log.VERBOSE_EXTREME)
             shutil.move(tempdir, manifest_abspath)
+            log.dbg('setting manifest.path to', manifest_abspath,
+                    level=log.VERBOSE_EXTREME)
             update_config('manifest', 'path', manifest_path)
         finally:
             shutil.rmtree(tempdir, ignore_errors=True)
