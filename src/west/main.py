@@ -27,7 +27,7 @@ import traceback
 from west import log
 from west import configuration as config
 from west.commands import WestCommand, extension_commands, \
-    CommandError, CommandContextError, ExtensionCommandError
+    CommandError, ExtensionCommandError
 from west.commands.project import List, ManifestCommand, Diff, Status, \
     SelfUpdate, ForAll, Init, Update, Topdir
 from west.commands.config import Config
@@ -268,25 +268,25 @@ class WestApp:
             sys.exit(0)
         except CalledProcessError as cpe:
             log.err('command exited with status {}: {}'.
-                    format(cpe.returncode, quote_sh_list(cpe.cmd)))
-            if args.verbose:
+                    format(cpe.returncode, quote_sh_list(cpe.cmd)), fatal=True)
+            if args.verbose >= log.VERBOSE_EXTREME:
+                log.banner('Traceback (enabled by -vvv):')
                 traceback.print_exc()
             sys.exit(cpe.returncode)
         except ExtensionCommandError as ece:
-            msg = 'extension command "{}" could not be run{}.'.format(
-                args.command, ': ' + ece.hint if ece.hint else '')
-            if args.verbose:
-                log.err(msg)
+            msg = "extension command \"{}\" couldn't be run".format(
+                args.command)
+            if ece.hint:
+                msg += '\n  Hint: ' + ece.hint
+
+            if args.verbose >= log.VERBOSE_EXTREME:
+                log.err(msg, fatal=True)
+                log.banner('Traceback (enabled by -vvv):')
                 traceback.print_exc()
             else:
-                log.err(msg, 'See {} for a traceback.'.
-                             format(dump_traceback()))
+                msg += '\n  See {} for a traceback.'.format(dump_traceback())
+                log.err(msg, fatal=True)
             sys.exit(ece.returncode)
-        except CommandContextError as cce:
-            log.err('command', args.command, 'cannot be run in this context:',
-                    *cce.args)
-            log.err('see {} for a traceback.'.format(dump_traceback()))
-            sys.exit(cce.returncode)
         except CommandError as ce:
             # No need to dump_traceback() here. The command is responsible
             # for logging its own errors.
