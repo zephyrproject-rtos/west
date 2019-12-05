@@ -17,6 +17,7 @@ import colorama
 from io import StringIO
 import logging
 import os
+from pathlib import Path, PurePath
 import shutil
 import sys
 from subprocess import CalledProcessError
@@ -237,17 +238,6 @@ class WestApp:
         log.set_verbosity(args.verbose)
         log.dbg('args namespace:', args, level=log.VERBOSE_EXTREME)
 
-        # HACK: try to set ZEPHYR_BASE.
-        # FIXME: get rid of this. Instead:
-        #
-        # - support a WEST_DIR environment variable if we're not
-        #   running under topdir
-        # - make zephyr extensions that need ZEPHYR_BASE just set it
-        #   themselves.
-        if (args.command and args.command not in ['init', 'help'] and
-                not args.help):
-            set_zephyr_base(args)
-
         # If we were run as 'west -h ...' or 'west --help ...',
         # monkeypatch the args namespace so we end up running Help.  The
         # user might have also provided a command. If so, print help about
@@ -330,8 +320,22 @@ class WestApp:
         west_parser, subparser_gen = self.make_parsers()
         command.add_parser(subparser_gen)
 
-        # Handle the instantiated command in the usual way.
+        # Parse arguments again.
         args, unknown = west_parser.parse_known_args(argv)
+
+        # HACK: try to set ZEPHYR_BASE.
+        #
+        # Currently required by zephyr extensions like "west build".
+        #
+        # TODO: get rid of this. Instead:
+        #
+        # - support a WEST_DIR environment variable to specify the
+        #   workspace if we're not running under a .west directory
+        #   (controversial)
+        # - make zephyr extensions that need ZEPHYR_BASE just set it
+        #   themselves (easy if above is OK, unnecessary if it isn't)
+        set_zephyr_base(args, self.manifest, self.topdir)
+
         command.run(args, unknown, self.topdir, manifest=self.manifest)
 
 class Help(WestCommand):
@@ -582,19 +586,21 @@ def mve_msg(mve, suggest_ugprade=True):
         (['Manifest file: {}'.format(mve.file)] if mve.file else []) +
         (['Please upgrade west and retry.'] if suggest_ugprade else []))
 
-def set_zephyr_base(args):
+def set_zephyr_base(args, manifest, topdir):
     '''Ensure ZEPHYR_BASE is set
     Order of precedence:
     1) Value given as command line argument
     2) Value from environment setting: ZEPHYR_BASE
     3) Value of zephyr.base setting in west config file
+    4) Project in the manifest with name, or path, "zephyr" (will
+       be persisted as zephyr.base in the local config if found)
 
     Order of precedence between 2) and 3) can be changed with the setting
     zephyr.base-prefer.
     zephyr.base-prefer takes the values 'env' and 'configfile'
 
-    If 2) and 3) has different values and zephyr.base-prefer is unset a warning
-    is printed to the user.'''
+    If 2) and 3) have different values and zephyr.base-prefer is unset,
+    a warning is printed.'''
 
     if args.zephyr_base:
         # The command line --zephyr-base takes precedence over
@@ -605,8 +611,8 @@ def set_zephyr_base(args):
         # If the user doesn't specify it concretely, then use ZEPHYR_BASE
         # from the environment or zephyr.base from west.configuration.
         #
-        # `west init` will configure zephyr.base to the project that has path
-        # 'zephyr'.
+        # (We will configure zephyr.base to the project that has path
+        # 'zephyr' as a last resort here.)
         #
         # At some point, we need a more flexible way to set environment
         # variables based on manifest contents, but this is good enough
@@ -615,8 +621,18 @@ def set_zephyr_base(args):
         zb_prefer = config.config.get('zephyr', 'base-prefer',
                                       fallback=None)
         rel_zb_config = config.config.get('zephyr', 'base', fallback=None)
+        if rel_zb_config is None:
+            projects = None
+            try:
+                projects = manifest.get_projects(['zephyr'])
+            except ValueError:
+                pass
+            if projects:
+                zephyr = projects[0]
+                config.update_config('zephyr', 'base', zephyr.path)
+                rel_zb_config = zephyr.path
         if rel_zb_config is not None:
-            zb_config = os.path.join(west_topdir(), rel_zb_config)
+            zb_config = Path(topdir) / rel_zb_config
         else:
             zb_config = None
 
@@ -624,64 +640,46 @@ def set_zephyr_base(args):
             zb = zb_env
             zb_origin = 'env'
         elif zb_prefer == 'configfile' and zb_config is not None:
-            zb = zb_config
+            zb = str(zb_config)
             zb_origin = 'configfile'
         elif zb_env is not None:
             zb = zb_env
             zb_origin = 'env'
             try:
-                different = (zb_config is not None and
-                             not os.path.samefile(zb_config, zb_env))
+                different = (zb_config and not zb_config.samefile(zb_env))
             except FileNotFoundError:
-                different = (zb_config is not None and
-                             (os.path.normpath(os.path.abspath(zb_config)) !=
-                              os.path.normpath(os.path.abspath(zb_env))))
+                different = (zb_config and
+                             (PurePath(zb_config)) != PurePath(zb_env))
             if different:
                 # The environment ZEPHYR_BASE takes precedence over the config
-                # setting, but in normal multi-repo operation we shouldn't
-                # expect to need to set ZEPHYR_BASE.
-                # Therefore issue a warning as it might have happened that
-                # zephyr-env.sh/cmd was run in some other zephyr installation,
-                # and the user forgot about that.
+                # setting, but is different than the zephyr.base config value.
+                #
+                # Therefore, issue a warning as the user might have
+                # run zephyr-env.sh/cmd in some other zephyr
+                # installation and forgotten about it.
                 log.wrn('ZEPHYR_BASE={}'.format(zb_env),
                         'in the calling environment will be used,\n'
                         'but the zephyr.base config option in {} is "{}"\n'
-                        'which implies ZEPHYR_BASE={}'
-                        '\n'.format(west_topdir(), rel_zb_config, zb_config) +
-                        'To disable this warning, execute '
+                        'which implies a different ZEPHYR_BASE={}'
+                        '\n'.format(topdir, rel_zb_config, zb_config) +
+                        'To disable this warning in the future, execute '
                         '\'west config --global zephyr.base-prefer env\'')
-        elif zb_config is not None:
-            zb = zb_config
+        elif zb_config:
+            zb = str(zb_config)
             zb_origin = 'configfile'
         else:
             zb = None
             zb_origin = None
-            # No --zephyr-base, no ZEPHYR_BASE envronment and no zephyr.base
-            # Fallback to loop over projects, to identify if a project has path
-            # 'zephyr' for fallback.
-            try:
-                manifest = Manifest.from_file()
-                for project in manifest.projects:
-                    if project.path == 'zephyr':
-                        zb = project.abspath
-                        zb_origin = 'manifest file {}'.format(manifest.path)
-                        break
-                else:
-                    log.wrn("can't find the zephyr repository:\n"
-                            '  - no --zephyr-base given\n'
-                            '  - ZEPHYR_BASE is unset\n'
-                            '  - west config contains no zephyr.base setting\n'
-                            '  - no manifest project has path "zephyr"\n'
-                            "If this isn't a Zephyr installation, you can "
-                            "silence this warning with something like this:\n"
-                            '  west config zephyr.base not-using-zephyr')
-            except MalformedConfig as e:
-                log.wrn("Can't set ZEPHYR_BASE:",
-                        'parsing of manifest file failed during command',
-                        args.command, ':', *e.args)
-            except WestNotFound:
-                log.wrn("Can't set ZEPHYR_BASE:",
-                        'not currently in a west installation')
+            # No --zephyr-base, no ZEPHYR_BASE, and no zephyr.base.
+            log.wrn("can't find the zephyr repository\n"
+                    '  - no --zephyr-base given\n'
+                    '  - ZEPHYR_BASE is unset\n'
+                    '  - west config contains no zephyr.base setting\n'
+                    '  - no manifest project has name or path "zephyr"\n'
+                    '\n'
+                    "  If this isn't a Zephyr installation, you can "
+                    "  silence this warning with something like this:\n"
+                    '    west config zephyr.base not-using-zephyr')
 
     if zb is not None:
         os.environ['ZEPHYR_BASE'] = zb

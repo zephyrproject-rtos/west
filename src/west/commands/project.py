@@ -194,21 +194,13 @@ class Init(_ProjectCommand):
         if shutil.which('git') is None:
             log.die("can't find git; install it or ensure it's on your PATH")
 
-        # west.manifest will try to read manifest.path and use it when
-        # parsing the manifest. Clear it out for now so we can parse
-        # the manifest without it; local() or bootstrap() will set it
-        # properly.
-        if config.get('manifest', 'path', fallback=None) is not None:
-            config.remove_option('manifest', 'path')
         if args.local:
-            projects, manifest_dir = self.local(args)
+            topdir = self.local(args)
         else:
-            projects, manifest_dir = self.bootstrap(args)
-
-        self.fixup_zephyr_base(projects)
+            topdir = self.bootstrap(args)
 
         log.banner('Initialized. Now run "west update" inside {}.'.
-                   format(self.topdir))
+                   format(topdir))
 
     def local(self, args):
         if args.manifest_rev is not None:
@@ -220,24 +212,19 @@ class Init(_ProjectCommand):
         rel_manifest = basename(manifest_dir)
         west_dir = os.path.join(topdir, WEST_DIR)
 
+        if not exists(manifest_file):
+            log.die('can\'t init: no "west.yml" found in {}'.
+                    format(manifest_dir))
+
         log.banner('Initializing from existing manifest repository',
                    rel_manifest)
-        if not exists(manifest_file):
-            log.die('No "west.yml" found in {}'.format(manifest_dir))
-
+        log.small_banner('Creating {} and local configuration file'.
+                         format(west_dir))
         self.create(west_dir)
         os.chdir(topdir)
-        # This validates the manifest. Note we cannot use
-        # self.manifest from west init, as we are in the middle of
-        # creating the installation right now.
-        projects = self.projects(manifest_file)
-        log.small_banner('Creating {} and local configuration'.
-                         format(west_dir))
         update_config('manifest', 'path', rel_manifest)
 
-        self.topdir = topdir
-
-        return projects, manifest_dir
+        return topdir
 
     def bootstrap(self, args):
         manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
@@ -248,52 +235,44 @@ class Init(_ProjectCommand):
         log.banner('Initializing in', topdir)
         if not isdir(topdir):
             self.create(topdir, exist_ok=False)
-        os.chdir(topdir)
 
-        # Clone the manifest repository into a temporary directory. It's
-        # important that west_dir exists and we're under topdir, or we
-        # won't be able to call self.projects() without error later.
+        # Clone the manifest repository into a temporary directory.
         tempdir = join(west_dir, 'manifest-tmp')
         if exists(tempdir):
             log.dbg('removing existing temporary manifest directory', tempdir)
             shutil.rmtree(tempdir)
         try:
             self.clone_manifest(manifest_url, manifest_rev, tempdir)
-            temp_manifest_file = join(tempdir, 'west.yml')
-            if not exists(temp_manifest_file):
-                log.die('No "west.yml" in manifest repository ({})'.
-                        format(tempdir))
-
-            projects = self.projects(temp_manifest_file)
-            manifest_project = projects[MANIFEST_PROJECT_INDEX]
-            if manifest_project.path:
-                manifest_path = manifest_project.path
-                manifest_abspath = join(topdir, manifest_path)
-            else:
-                url_path = urlparse(manifest_url).path
-                manifest_path = posixpath.basename(url_path)
-                manifest_abspath = join(topdir, manifest_path)
-
-            log.dbg('moving', tempdir, 'to', manifest_abspath,
-                    level=log.VERBOSE_EXTREME)
-            shutil.move(tempdir, manifest_abspath)
-            log.dbg('setting manifest.path to', manifest_abspath,
-                    level=log.VERBOSE_EXTREME)
-            update_config('manifest', 'path', manifest_path)
-        finally:
+        except subprocess.CalledProcessError:
             shutil.rmtree(tempdir, ignore_errors=True)
+            raise
 
-        self.topdir = topdir
+        # Verify the manifest file exists.
+        temp_manifest = join(tempdir, 'west.yml')
+        if not exists(temp_manifest):
+            log.die('can\'t init: no "west.yml" found in {}\n'
+                    '  Hint: check --manifest-url={} and --manifest-rev={}\n'
+                    '  You may need to remove {} before retrying.'.
+                    format(tempdir, manifest_url, manifest_rev, west_dir))
 
-        return projects, manifest_project.abspath
+        # Parse the manifest to get the manifest path, if it declares one.
+        # Otherwise, use the URL.
+        projects = Manifest.from_file(temp_manifest, topdir=topdir).projects
+        manifest_project = projects[MANIFEST_PROJECT_INDEX]
+        if manifest_project.path:
+            manifest_path = manifest_project.path
+        else:
+            manifest_path = posixpath.basename(urlparse(manifest_url).path)
+        manifest_abspath = join(topdir, manifest_path)
 
-    def projects(self, manifest_file):
-        return Manifest.from_file(manifest_file).projects
+        log.dbg('moving', tempdir, 'to', manifest_abspath,
+                level=log.VERBOSE_EXTREME)
+        shutil.move(tempdir, manifest_abspath)
+        log.dbg('setting manifest.path to', manifest_path,
+                level=log.VERBOSE_EXTREME)
+        update_config('manifest', 'path', manifest_path, topdir=topdir)
 
-    def fixup_zephyr_base(self, projects):
-        for project in projects:
-            if project.path == 'zephyr':
-                update_config('zephyr', 'base', project.path)
+        return topdir
 
     def create(self, directory, exist_ok=True):
         try:
