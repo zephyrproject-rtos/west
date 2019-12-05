@@ -20,7 +20,8 @@ from west.configuration import config, update_config
 from west import log
 from west import util
 from west.commands import WestCommand, CommandError
-from west.manifest import Manifest, MANIFEST_PROJECT_INDEX, ManifestProject
+from west.manifest import ImportFlag, Manifest, MANIFEST_PROJECT_INDEX, \
+    ManifestProject, _manifest_content_at
 from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
 from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
 from urllib.parse import urlparse
@@ -256,8 +257,11 @@ class Init(_ProjectCommand):
                     format(tempdir, manifest_url, manifest_rev, west_dir))
 
         # Parse the manifest to get the manifest path, if it declares one.
-        # Otherwise, use the URL.
-        projects = Manifest.from_file(temp_manifest, topdir=topdir).projects
+        # Otherwise, use the URL. Ignore imports -- all we really
+        # want to know is if there's a "self: path:" or not.
+        projects = Manifest.from_file(temp_manifest,
+                                      import_flags=ImportFlag.IGNORE,
+                                      topdir=topdir).projects
         manifest_project = projects[MANIFEST_PROJECT_INDEX]
         if manifest_project.path:
             manifest_path = manifest_project.path
@@ -600,22 +604,90 @@ class Update(_ProjectCommand):
         return parser
 
     def do_run(self, args, user_args):
+        self.args = args
         if args.exclude_west:
             log.wrn('ignoring --exclude-west')
-        fs = self._fetch_strategy(args)
+
+        # We can't blindly call self._projects() here: manifests with
+        # imports are limited to plain 'west update', and cannot use
+        # 'west update PROJECT [...]'.
+        self.fs = self.fetch_strategy(args)
+        if not args.projects:
+            self.update_all(args)
+        else:
+            self.update_some(args)
+
+    def update_all(self, args):
+        # Plain 'west update' is the 'easy' case: since the user just
+        # wants us to update everything, we don't have to keep track
+        # of projects appearing or disappearing as a result of fetching
+        # new revisions from projects with imports.
+        #
+        # So we just re-parse the manifest, but force west.manifest to
+        # call our importer whenever it encounters an import statement
+        # in a project, allowing us to control the recursion so it
+        # always uses the latest manifest data.
+
+        manifest = Manifest.from_file(importer=self.update_importer,
+                                      import_flags=ImportFlag.FORCE_PROJECTS)
+
+        failed = []
+        for project in manifest.projects:
+            if isinstance(project, ManifestProject):
+                continue
+            try:
+                self.update(project)
+            except subprocess.CalledProcessError:
+                failed.append(project)
+        self._handle_failed(args, failed)
+
+    def update_importer(self, project, path):
+        self.update(project)
+        try:
+            return _manifest_content_at(project, path)
+        except FileNotFoundError:
+            # FIXME we need each project to have back-pointers
+            # to the manifest file where it was defined, so we can
+            # tell the user better context than just "run -vvv", which
+            # is a total fire hose.
+            name = project.name
+            sha = project.sha(QUAL_MANIFEST_REV)
+            if log.VERBOSE < log.VERBOSE_EXTREME:
+                suggest_vvv = ('\n'
+                               '        Use "west -vvv update" to debug.')
+            else:
+                suggest_vvv = ''
+            log.die(f"can't import from project {name}\n"
+                    f'  Expected to import from {path} at revision {sha}\n'
+                    f'  Hint: possible manifest file fixes for {name}:\n'
+                    f'          - set "revision:" to a git ref with this file '
+                    f'at URL {project.url}\n'
+                    '          - remove the "import:"' + suggest_vvv)
+
+    def update_some(self, args):
+        # The 'west update PROJECT [...]' style invocation is only
+        # possible for "flat" manifests, i.e. manifests without import
+        # statements.
+
+        if self.manifest.has_imports:
+            log.die("refusing to update just some projects because "
+                    "manifest imports are in use\n"
+                    '  Project arguments: {}\n'
+                    '  Manifest file with imports: {}\n'
+                    '  Please run "west update" (with no arguments) instead.'.
+                    format(' '.join(args.projects), self.manifest.path))
 
         failed = []
         for project in self._projects(args.projects):
             if isinstance(project, ManifestProject):
                 continue
-            log.banner(project.format('updating {name_and_path}:'))
             try:
-                _update(project, fs, args.rebase, args.keep_descendants)
+                self.update(project)
             except subprocess.CalledProcessError:
                 failed.append(project)
         self._handle_failed(args, failed)
 
-    def _fetch_strategy(self, args):
+    def fetch_strategy(self, args):
         cfg = config.get('update', 'fetch', fallback=None)
         if cfg is not None and cfg not in ('always', 'smart'):
             log.wrn('ignoring invalid config update.fetch={}; '
@@ -627,6 +699,77 @@ class Update(_ProjectCommand):
             return cfg
         else:
             return 'smart'
+
+    def fetch_missing_imports(self, args):
+        self.fs = 'always'      # just to be safe -- TODO needed?
+        self.manifest = Manifest.from_file(topdir=self.topdir,
+                                           importer=self.update_importer)
+
+    def update(self, project):
+        log.banner(project.format('updating {name_and_path}:'))
+        if not project.is_cloned():
+            _clone(project)
+
+        if self.fs == 'always' or _rev_type(project) not in ('tag', 'commit'):
+            new_manifest_rev = _fetch(project)
+        else:
+            log.dbg('skipping unnecessary fetch')
+            new_manifest_rev = '{revision}^{{commit}}'
+        project.git(['update-ref', QUAL_MANIFEST_REV, new_manifest_rev])
+        if not _head_ok(project):
+            # If nothing is checked out (which usually only happens if we
+            # called _clone(project) above), check out 'manifest-rev' in a
+            # detached HEAD state.
+            #
+            # Otherwise, the initial state would have nothing checked out,
+            # and HEAD would point to a non-existent refs/heads/master
+            # branch (that would get created if the user makes an initial
+            # commit). Among other things, this ensures the rev-parse
+            # --abbrev-ref HEAD below will always succeed.
+            #
+            # The --detach flag is strictly redundant here, because
+            # the refs/heads/<branch> form already detaches HEAD, but
+            # it avoids a spammy detached HEAD warning from Git.
+            project.git('checkout --detach ' + QUAL_MANIFEST_REV)
+
+        try:
+            sha = project.sha(QUAL_MANIFEST_REV)
+        except subprocess.CalledProcessError:
+            # This is a sign something's really wrong. Add more help.
+            log.err(project.format(
+                "no SHA for branch {mr} in {name_and_path}; "
+                'was the branch deleted?', mr=MANIFEST_REV))
+            raise
+
+        cp = project.git('rev-parse --abbrev-ref HEAD', capture_stdout=True)
+        current_branch = cp.stdout.decode('utf-8').strip()
+        if current_branch != 'HEAD':
+            is_ancestor = project.is_ancestor_of(sha, current_branch)
+            try_rebase = self.args.rebase
+        else:  # HEAD means no branch is checked out.
+            # If no branch is checked out, 'rebase' and
+            # 'keep_descendants' don't matter.
+            is_ancestor = False
+            try_rebase = False
+
+        if self.args.keep_descendants and is_ancestor:
+            # A descendant is currently checked out and keep_descendants was
+            # given, so there's nothing more to do.
+            log.small_banner(project.format(
+                '{name}: left descendant branch "{b}" checked out',
+                b=current_branch))
+        elif try_rebase:
+            # Attempt a rebase.
+            log.small_banner(project.format(
+                '{name}: rebasing to ' + MANIFEST_REV))
+            project.git('rebase ' + QUAL_MANIFEST_REV)
+        else:
+            # We can't keep a descendant or rebase, so just check
+            # out the new detached HEAD, then print some helpful context.
+            project.git('checkout --detach --quiet ' + sha)
+            log.small_banner(project.format(
+                "{name}: checked out {r} as detached HEAD", r=sha))
+            _post_checkout_help(project, current_branch, sha, is_ancestor)
 
 class ForAll(_ProjectCommand):
     def __init__(self):
@@ -712,67 +855,22 @@ def _maybe_sha(rev):
 
     return len(rev) <= 40
 
-def _update(project, fetch, rebase, keep_descendants):
-    if not project.is_cloned():
-        _clone(project)
-
-    if fetch == 'always' or _rev_type(project) not in ('tag', 'commit'):
-        _fetch(project)
-    else:
-        log.dbg('skipping unnecessary fetch')
-        project.git('update-ref ' + QUAL_MANIFEST_REV +
-                    ' {revision}^{{commit}}')
-
-    try:
-        sha = project.sha(QUAL_MANIFEST_REV)
-    except subprocess.CalledProcessError:
-        # This is a sign something's really wrong. Add more help.
-        log.err(project.format("no SHA for branch {mr} in {name_and_path}; "
-                               'was the branch deleted?', mr=MANIFEST_REV))
-        raise
-
-    cp = project.git('rev-parse --abbrev-ref HEAD', capture_stdout=True)
-    current_branch = cp.stdout.decode('utf-8').strip()
-    if current_branch != 'HEAD':
-        is_ancestor = project.is_ancestor_of(sha, current_branch)
-        try_rebase = rebase
-    else:  # HEAD means no branch is checked out.
-        # If no branch is checked out, 'rebase' and 'keep_descendants' don't
-        # matter.
-        is_ancestor = False
-        try_rebase = False
-
-    if keep_descendants and is_ancestor:
-        # A descendant is currently checked out and keep_descendants was
-        # given, so there's nothing more to do.
-        log.small_banner(project.format(
-            '{name}: left descendant branch "{b}" checked out',
-            b=current_branch))
-    elif try_rebase:
-        # Attempt a rebase.
-        log.small_banner(project.format('{name}: rebasing to ' + MANIFEST_REV))
-        project.git('rebase ' + QUAL_MANIFEST_REV)
-    else:
-        # We can't keep a descendant or rebase, so just check
-        # out the new detached HEAD, then print some helpful context.
-        project.git('checkout --detach --quiet ' + sha)
-        log.small_banner(project.format(
-            "{name}: checked out {r} as detached HEAD", r=sha))
-        _post_checkout_help(project, current_branch, sha, is_ancestor)
-
 def _clone(project):
     log.small_banner(project.format('{name}: cloning and initializing'))
     project.git('init {abspath}', cwd=util.west_topdir())
-    # The "origin" remote is only added for the user's convenience. We
-    # always fetch directly from the URL specified in the manifest.
-    # Later changes to the manifest won't change this remote,
-    # unfortunately -- the user will have to fix that themselves.
+    # The "origin" remote is added to follow the practice that 'origin'
+    # is the remote a Git repository was always cloned from.
+    #
+    # However, west doesn't fetch from this remote: it always forms
+    # a fetch URL from the manifest file and fetches that directly.
+    #
+    # The URL of this remote can thus be changed by the user at will.
     project.git('remote add -- origin {url}')
 
-def _rev_type(project):
-    # Returns a "refined" revision type of project.revision as of the
-    # following strings: 'tag', 'tree', 'blob', 'commit', 'branch',
-    # 'other'.
+def _rev_type(project, rev=None):
+    # Returns a "refined" revision type of rev (default:
+    # project.revision) as one of the following strings: 'tag', 'tree',
+    # 'blob', 'commit', 'branch', 'other'.
     #
     # The approach combines git cat-file -t and git rev-parse because,
     # while cat-file can for sure tell us a blob, tree, or tag, it
@@ -785,8 +883,9 @@ def _rev_type(project):
     #
     # This doesn't belong in manifest.py because it contains "west
     # update" specific logic.
-
-    cp = project.git('cat-file -t {revision}', check=False,
+    if not rev:
+        rev = project.revision
+    cp = project.git(['cat-file', '-t', rev], check=False,
                      capture_stdout=True, capture_stderr=True)
     stdout = cp.stdout.decode('utf-8').strip()
     if cp.returncode:
@@ -797,7 +896,7 @@ def _rev_type(project):
         return 'other'
 
     # to tell branches apart from commits, we need rev-parse.
-    cp = project.git('rev-parse --verify --symbolic-full-name {revision}',
+    cp = project.git(['rev-parse', '--verify', '--symbolic-full-name', rev],
                      check=False, capture_stdout=True, capture_stderr=True)
     if cp.returncode:
         # This can happen if the ref name is ambiguous, e.g.:
@@ -817,56 +916,56 @@ def _rev_type(project):
     else:
         return 'other'
 
-def _fetch(project):
-    # Fetches upstream changes for 'project' and updates the 'manifest-rev'
-    # branch to point to the revision specified in the manifest.
+def _fetch(project, rev=None):
+    # Fetches rev (or project.revision) from project.url in a way that
+    # guarantees any branch, tag, or SHA (that's reachable from a
+    # branch or a tag) available on project.url is part of what got
+    # fetched.
+    #
+    # Returns a git revision which hopefully can be peeled to the
+    # newly-fetched SHA corresponding to rev. "Hopefully" because
+    # there are many ways to spell a revision, and they haven't all
+    # been extensively tested.
 
-    # Fetch the revision specified in the manifest into the local ref space.
+    if not rev:
+        rev = project.revision
+
+    # Fetch the revision into the local ref space.
     #
     # The following two-step approach avoids a "trying to write
     # non-commit object" error when the revision is an annotated
     # tag. ^{commit} type peeling isn't supported for the <src> in a
     # <src>:<dst> refspec, so we have to do it separately.
-    msg = "{name}: fetching, need revision {revision}"
+    msg = "{name}: fetching, need revision " + rev
     if project.clone_depth:
         msg += " with --depth {clone_depth}"
     # -f is needed to avoid errors in case multiple remotes are present,
     # at least one of which contains refs that can't be fast-forwarded to our
     # local ref space.
     #
-    # --tags is required to get tags when the remote is specified as a URL.
+    # --tags is required to get tags, since the remote is specified as a URL.
     fetch_cmd = ('fetch -f --tags ' +
                  ('--depth={clone_depth} ' if project.clone_depth else ' ') +
                  '-- {url} ')
-    update_cmd = 'update-ref ' + QUAL_MANIFEST_REV + ' '
-    if _maybe_sha(project.revision):
-        # Don't fetch a SHA directly, as server may restrict from doing so.
+    if _maybe_sha(rev):
+        # We can't in general fetch a SHA from a remote, as many hosts
+        # (GitHub included) forbid it for security reasons. Let's hope
+        # it's reachable from some branch.
         fetch_cmd += 'refs/heads/*:refs/west/*'
-        update_cmd += '{revision}'
+        ret = rev
     else:
         # The revision is definitely not a SHA, so it's safe to fetch directly.
         # This avoids fetching unnecessary ref space from the remote.
-        fetch_cmd += '{revision}'
-        update_cmd += 'FETCH_HEAD^{{commit}}'
+        # We need {{commit}} instead of {commit} because everything gets run
+        # through Project.format.
+        fetch_cmd += rev
+        ret = 'FETCH_HEAD^{{commit}}'
 
     log.small_banner(project.format(msg))
     project.git(fetch_cmd)
-    project.git(update_cmd)
 
-    if not _head_ok(project):
-        # If nothing it checked out (which would usually only happen just after
-        # we initialize the repository), check out 'manifest-rev' in a detached
-        # HEAD state.
-        #
-        # Otherwise, the initial state would have nothing checked out, and HEAD
-        # would point to a non-existent refs/heads/master branch (that would
-        # get created if the user makes an initial commit). That state causes
-        # e.g. 'west rebase' to fail, and might look confusing.
-        #
-        # The --detach flag is strictly redundant here, because the
-        # refs/heads/<branch> form already detaches HEAD, but it avoids a
-        # spammy detached HEAD warning from Git.
-        project.git('checkout --detach ' + QUAL_MANIFEST_REV)
+    return ret
+
 
 def _head_ok(project):
     # Returns True if the reference 'HEAD' exists and is not a tag or remote
