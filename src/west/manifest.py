@@ -574,14 +574,15 @@ class Project:
         return NotImplemented
 
     def __repr__(self):
-        return ('Project({}, {}, revision={}, path={}, clone_depth={}, '
-                'west_commands={}, topdir={}').format(
+        return ('Project("{}", "{}", revision="{}", path="{}", clone_depth={}, '
+                'west_commands={}, topdir={})').format(
                     self.name, self.url, self.revision, self.path,
-                    self.clone_depth, self.west_commands, self.topdir)
+                    self.clone_depth, _quote_maybe(self.west_commands),
+                    _quote_maybe(self.topdir))
 
     def __str__(self):
-        return '<Project {} at {}>'.format(
-            repr(self.name), repr(self.abspath or self.path))
+        return '<Project {} ({}) at {}>'.format(
+            self.name, repr(self.abspath or self.path), self.revision)
 
     def __init__(self, name, url, revision=None, path=None,
                  clone_depth=None, west_commands=None, topdir=None):
@@ -963,6 +964,12 @@ _SCHEMA_VER = parse_version(SCHEMA_VERSION)
 _EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
 _EARLIEST_VER = parse_version(_EARLIEST_VER_STR)
 _DEFAULT_REV = 'master'
+
+def _quote_maybe(string):
+    if string:
+        return f'"{string}"'
+    else:
+        return None
 
 @lru_cache(maxsize=1)
 def _warn_once_if_no_git():
