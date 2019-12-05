@@ -64,6 +64,52 @@ def manifest_path():
         raise OSError(errno.ENOENT, os.strerror(errno.ENOENT), ret)
     return ret
 
+def validate(data):
+    '''Validate manifest data
+
+    Returns if the manifest data is valid and can be loaded by this
+    version of west (though this may fail if the manifest contains
+    imports which cannot be resolved).
+
+    Raises an exception otherwise.
+
+    :param data: YAML manifest data as a string or object
+    '''
+    if isinstance(data, str):
+        data = yaml.safe_load(data)
+
+    if 'manifest' not in data:
+        raise MalformedManifest('manifest data contains no "manifest" key')
+
+    data = data['manifest']
+
+    # Make sure this version of west can load this manifest data.
+    # This has to happen before the schema check -- later schemas
+    # may incompatibly extend this one.
+    if 'version' in data:
+        # As a convenience for the user, convert floats to strings.
+        # This avoids forcing them to write:
+        #
+        #  version: "1.0"
+        #
+        # by explicitly allowing:
+        #
+        #  version: 1.0
+        min_version_str = str(data['version'])
+        min_version = parse_version(min_version_str)
+        if min_version > _SCHEMA_VER:
+            raise ManifestVersionError(min_version)
+        elif min_version < _EARLIEST_VER:
+            raise MalformedManifest(
+                'invalid version {}; lowest schema version is {}'.
+                format(min_version, _EARLIEST_VER_STR))
+
+    try:
+        pykwalify.core.Core(source_data=data,
+                            schema_files=[_SCHEMA_PATH]).validate()
+    except pykwalify.errors.SchemaError as se:
+        raise MalformedManifest(se._msg) from se
+
 class Manifest:
     '''The parsed contents of a west manifest file.
     '''
@@ -172,8 +218,6 @@ class Manifest:
             attribute
         :param topdir: used as the installation's top level directory
         '''
-        if isinstance(source_data, str):
-            source_data = yaml.safe_load(source_data)
         return Manifest(source_data=source_data, topdir=topdir,
                         manifest_path=manifest_path)
 
@@ -239,41 +283,24 @@ class Manifest:
 
         if source_file:
             with open(source_file, 'r') as f:
-                source_data = yaml.safe_load(f.read())
+                source_data = f.read()
             self.path = os.path.abspath(source_file)
 
         if not source_data:
             self._malformed('manifest contains no data')
-        if source_data.get('manifest') is None:
-            self._malformed('manifest contains no manifest element')
 
-        # Make sure this version of west can load this manifest data.
-        # This has to happen before the schema check -- later schemas
-        # may incompatibly extend this one.
-        data = source_data['manifest']
-        if 'version' in data:
-            # As a convenience for the user, convert floats to strings.
-            # This avoids forcing them to write:
-            #
-            #  version: "1.0"
-            #
-            # by explicitly allowing:
-            #
-            #  version: 1.0
-            min_version_str = str(data['version'])
-            min_version = parse_version(min_version_str)
-            if min_version > _SCHEMA_VER:
-                raise ManifestVersionError(min_version, file=source_file)
-            elif min_version < _EARLIEST_VER:
-                self._malformed(
-                    'invalid version {}; lowest schema version is {}'.
-                    format(min_version, _EARLIEST_VER_STR))
+        if isinstance(source_data, str):
+            source_data = yaml.safe_load(source_data)
 
+        # Validate the manifest. Wrap a couple of the exceptions with
+        # extra context about the problematic file in case of errors,
+        # to help debugging.
         try:
-            pykwalify.core.Core(source_data=data,
-                                schema_files=[_SCHEMA_PATH]).validate()
-        except pykwalify.errors.SchemaError as se:
-            self._malformed(se._msg, parent=se)
+            validate(source_data)
+        except ManifestVersionError as mv:
+            raise ManifestVersionError(mv.version, file=source_file) from mv
+        except MalformedManifest as mm:
+            self._malformed(mm.args[0], parent=mm)
 
         self.projects = None
         '''Sequence of `Project` objects representing manifest
@@ -289,7 +316,7 @@ class Manifest:
 
         # Set up the public attributes documented above, as well as
         # any internal attributes needed to implement the public API.
-        self._load(data, manifest_path)
+        self._load(source_data['manifest'], manifest_path)
 
     def get_projects(self, project_ids, allow_paths=True, only_cloned=False):
         '''Get a list of `Project` objects in the manifest from
