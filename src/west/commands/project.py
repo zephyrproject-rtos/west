@@ -268,8 +268,7 @@ class Init(_ProjectCommand):
         log.dbg('moving', tempdir, 'to', manifest_abspath,
                 level=log.VERBOSE_EXTREME)
         shutil.move(tempdir, manifest_abspath)
-        log.dbg('setting manifest.path to', manifest_path,
-                level=log.VERBOSE_EXTREME)
+        log.small_banner('setting manifest.path to', manifest_path)
         update_config('manifest', 'path', manifest_path, topdir=topdir)
 
         return topdir
