@@ -477,7 +477,8 @@ class Manifest:
             if mdrem not in url_bases:
                 self._malformed('default remote {} is not defined'.
                                 format(mdrem))
-        return _defaults(mdrem, md.get('revision', _DEFAULT_REV))
+        return _defaults(mdrem, md.get('revision', _DEFAULT_REV),
+                         md.get('revision-ref'))
 
     def _load_project(self, pd, url_bases, defaults):
         # pd = project data (dictionary with values parsed from the
@@ -523,7 +524,9 @@ class Manifest:
         return Project(name, url, pd.get('revision', defaults.revision),
                        pd.get('path', name), clone_depth=pd.get('clone-depth'),
                        west_commands=pd.get('west-commands'),
-                       topdir=self.topdir)
+                       topdir=self.topdir,
+                       revision_ref=pd.get('revision-ref',
+                                           defaults.revision_ref))
 
 class MalformedManifest(Exception):
     '''Manifest parsing failed due to invalid data.
@@ -555,6 +558,8 @@ class Project:
     - ``url``: project fetch URL
     - ``revision``: revision to fetch from ``url`` when the
       project is updated
+    - ``revision_ref``: git ref which can be fetched to get ``revision``,
+      if it's a SHA
     - ``path``: relative path to the project within the installation
       (i.e. from ``topdir`` if that is set)
     - ``abspath``: absolute path to the project in the native path name
@@ -574,17 +579,19 @@ class Project:
         return NotImplemented
 
     def __repr__(self):
-        return ('Project({}, {}, revision={}, path={}, clone_depth={}, '
-                'west_commands={}, topdir={}').format(
-                    self.name, self.url, self.revision, self.path,
-                    self.clone_depth, self.west_commands, self.topdir)
+        return ('Project({}, {}, revision={}, revision_ref={}, '
+                'path={}, clone_depth={}, west_commands={}, topdir={}').format(
+                    self.name, self.url, self.revision, self.revision_rev,
+                    self.path, self.clone_depth, self.west_commands,
+                    self.topdir)
 
     def __str__(self):
         return '<Project {} at {}>'.format(
             repr(self.name), repr(self.abspath or self.path))
 
     def __init__(self, name, url, revision=None, path=None,
-                 clone_depth=None, west_commands=None, topdir=None):
+                 clone_depth=None, west_commands=None, topdir=None,
+                 revision_ref=None):
         '''Project constructor.
 
         If *topdir* is ``None``, then absolute path attributes
@@ -598,11 +605,13 @@ class Project:
         :param west_commands: path to west commands directory in the
             project, relative to its own base directory, topdir / path
         :param topdir: the west installation's top level directory
+        :param revision_ref: a ref which contains the fetch revision
         '''
 
         self.name = name
         self.url = url
         self.revision = revision or _DEFAULT_REV
+        self.revision_ref = revision_ref
         self.path = path or name
         self.clone_depth = clone_depth
         self.west_commands = west_commands
@@ -642,6 +651,8 @@ class Project:
         ret['name'] = self.name
         ret['url'] = self.url
         ret['revision'] = self.revision
+        if self.revision_ref:
+            ret['revision-ref'] = self.revision_ref
         if self.path != self.name:
             ret['path'] = self.path
         if self.clone_depth:
@@ -663,6 +674,7 @@ class Project:
             - ``name``
             - ``url``
             - ``revision``
+            - ``revision_ref``
             - ``path``
             - ``abspath``
             - ``posixpath``
@@ -678,7 +690,7 @@ class Project:
         :param s: string (or other object) to call ``format()`` on
         '''
         kw = {s: getattr(self, s) for s in
-              'name url revision path abspath posixpath '
+              'name url revision revision_ref path abspath posixpath '
               'clone_depth west_commands topdir'.split()}
         kw['name_and_path'] = '{} ({})'.format(self.name, self.path)
         kw.update(kwargs)
@@ -868,6 +880,7 @@ class ManifestProject(Project):
       version-controlled by west itself, even though 'west init'
       can fetch a manifest repository from a Git remote
     - ``revision``: ``"HEAD"``
+    - ``revision_ref``: ``"HEAD"``
     - ``clone_depth``: ``None``, because ``url`` is
     '''
 
@@ -939,6 +952,14 @@ class ManifestProject(Project):
         raise ValueError(revision)
 
     @property
+    def revision_ref(self):
+        return 'HEAD'
+
+    @revision_ref.setter
+    def revision_ref(self, revision_ref):
+        raise ValueError(revision_ref)
+
+    @property
     def clone_depth(self):
         return None
 
@@ -956,7 +977,7 @@ class ManifestProject(Project):
             ret['west-commands'] = self.west_commands
         return ret
 
-_defaults = collections.namedtuple('_defaults', 'remote revision')
+_defaults = collections.namedtuple('_defaults', 'remote revision revision_ref')
 _WEST_YML = 'west.yml'
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
 _SCHEMA_VER = parse_version(SCHEMA_VERSION)

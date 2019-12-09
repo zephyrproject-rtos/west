@@ -37,8 +37,12 @@ mapping:
       remote:
         required: false
         type: str
-      # The default revision (master if not given).
+      # The default project revision (master if not given).
       revision:
+        required: false
+        type: str
+      # The default project revision-ref value (none if not given).
+      revision-ref:
         required: false
         type: str
 
@@ -90,6 +94,15 @@ mapping:
           revision:
             required: false
             type: text        # SHAs could be only numbers
+          # If revision is a SHA, then revision-ref is an optional git
+          # ref which will be fetched to get the SHA when 'west
+          # update'-ing the project.
+          #
+          # This lets west avoid fetching the entire remote ref space
+          # just to get a SHA.
+          revision-ref:
+            required: false
+            type: str
           # Path to check out, relative to the west installation root.
           # The default is the name.
           path:

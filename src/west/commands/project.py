@@ -863,7 +863,11 @@ def _fetch(project):
     update_cmd = 'update-ref ' + QUAL_MANIFEST_REV + ' '
     if _maybe_sha(project.revision):
         # Don't fetch a SHA directly, as server may restrict from doing so.
-        fetch_cmd += 'refs/heads/*:refs/west/*'
+        # Respect the project's revision-ref if there is one.
+        if project.revision_ref:
+            fetch_cmd += '{revision_ref}:refs/west/{revision_ref}'
+        else:
+            fetch_cmd += 'refs/heads/*:refs/west/*'
         update_cmd += '{revision}'
     else:
         # The revision is definitely not a SHA, so it's safe to fetch directly.
