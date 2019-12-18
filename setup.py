@@ -44,6 +44,6 @@ setuptools.setup(
         'setuptools>=v40.1.0',  # for find_namespace_packages
         'packaging',
     ],
-    python_requires='>=3.4',
+    python_requires='>=3.6',
     entry_points={'console_scripts': ('west = west.main:main',)},
 )
