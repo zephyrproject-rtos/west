@@ -1,15 +1,21 @@
 language: python
-# TODO: 3.7 is failing. It'd be good to figure this out eventually as
-# it's the latest version which is likely what Windows and macOS users
-# run on, but is left out for now.
+# TODO: 3.7 and 3.8 need testing here.
 python:
-  - 3.4                         # minimum supported version
-  - 3.5                         # ubuntu 16.04
-  - 3.6                         # ubuntu 18.04
+  - 3.6                         # minimum supported version
 
 build:
+  pre_ci_boot:
+    image_name: zephyrprojectrtos/ci
+    image_tag: v0.10.1
+    pull: true
+    options: "-e HOME=/home/buildslave --privileged=true --tty --net=bridge --user buildslave"
   ci:
-    - pip install --upgrade pip setuptools
-    - pip install tox
+    - type -p python3
+    - python3 --version
+    - export PATH=$PATH:$HOME/.local/bin
+    - pip3 install tox
+    # This setuptools upgrade is only needed for find_namespace_packages().
+    # We can eliminate it if we make west a non-namespace package again.
+    - pip3 install --upgrade setuptools
     - mkdir -p shippable/{testresults,codecoverage}
     - tox -- --junitxml=$PWD/shippable/testresults/nosetests.xml --cov=west --cov-report=xml:$PWD/shippable/codecoverage/coverage.xml tests
