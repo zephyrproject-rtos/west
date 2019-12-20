@@ -33,7 +33,8 @@ from west.commands.project import List, ManifestCommand, Diff, Status, \
     SelfUpdate, ForAll, Init, Update, Topdir
 from west.commands.config import Config
 from west.manifest import Manifest, MalformedConfig, MalformedManifest, \
-    ManifestVersionError
+    ManifestVersionError, ManifestImportFailed, \
+    ManifestProject, MANIFEST_REV_BRANCH
 from west.util import quote_sh_list, west_topdir, WestNotFound
 from west.version import __version__
 
@@ -51,7 +52,7 @@ class WestApp:
     def __init__(self):
         self.topdir = None          # west_topdir()
         self.manifest = None        # west.manifest.Manifest
-        self.mve = None             # ManifestVersionError
+        self.mle = None             # saved exception if load_manifest() fails
         self.builtins = {}          # command name -> WestCommand instance
         self.extensions = {}        # extension command name -> spec
         self.builtin_groups = OrderedDict()    # group name -> WestCommand list
@@ -113,21 +114,91 @@ class WestApp:
 
         try:
             self.manifest = Manifest.from_file(topdir=self.topdir)
-        except ManifestVersionError as e:
-            # Some built-in commands, like 'config', or 'help' at
-            # least mostly, will still work.
+        except (ManifestVersionError, MalformedManifest, MalformedConfig,
+                FileNotFoundError, ManifestImportFailed) as e:
+            # Defer exception handling to WestCommand.run(), which uses
+            # handle_builtin_manifest_load_err() to decide what to do.
             #
-            # So don't give up yet, but remember that this happened so
-            # we can tell the user what went wrong at the appropriate
-            # level (log.wrn() or log.die()) when we figure out what
-            # command we're running.
-            log.dbg('manifest version error:', e, level=log.VERBOSE_EXTREME)
-            self.mve = e
-        except (MalformedManifest, MalformedConfig, FileNotFoundError) as e:
-            # Let WestCommand.run() decide what to do.
-            # We could be running 'west config manifest.path fixed-value',
-            # which would fix the MalformedConfig, for example.
-            log.dbg("can't parse manifest:", e, level=log.VERBOSE_EXTREME)
+            # Make sure to update that function if you change the
+            # exceptions caught here. Unexpected exceptions should
+            # propagate up and fail fast.
+            #
+            # This might be OK, e.g. if we're running 'west config
+            # manifest.path foo' to fix the MalformedConfig error, but
+            # there's no way to know until we've parsed the command
+            # line arguments.
+            self.mle = e
+
+    def handle_builtin_manifest_load_err(self, args):
+        # Deferred handling for expected load_manifest() exceptions.
+        # Called before attempting to run a built-in command. (No
+        # extension commands can be run, because we learn about them
+        # from the manifest itself, which we have failed to load.)
+
+        # A few commands are always safe to run without a manifest.
+        no_manifest_ok = ['help', 'config', 'topdir', 'init']
+
+        # Handle ManifestVersionError is a special case.
+        if isinstance(self.mle, ManifestVersionError):
+            if args.command == 'help':
+                log.wrn(mve_msg(self.mle, suggest_upgrade=False) +
+                        '\n  Cannot get extension command help, ' +
+                        "and most commands won't run." +
+                        '\n  To silence this warning, upgrade west.')
+                return
+            elif args.command in ['config', 'topdir']:
+                # config and topdir are safe to run, but let's
+                # warn the user that most other commands won't be.
+                log.wrn(mve_msg(self.mle, suggest_upgrade=False) +
+                        "\n  This should work, but most commands won't." +
+                        '\n  To silence this warning, upgrade west.')
+                return
+            elif args.command == 'init':
+                # init is fine to run -- it will print its own error,
+                # with context about where the installation was found,
+                # and what the user's choices are.
+                return
+            else:
+                assert args.command not in no_manifest_ok
+                log.die(mve_msg(self.mle))
+
+        # Other errors generally just fall back on no_manifest_ok.
+        def isinst(*args):
+            return any(isinstance(self.mle, t) for t in args)
+
+        if args.command not in no_manifest_ok:
+            if isinst(MalformedManifest, MalformedConfig):
+                log.die('\n  '.join(["can't load west manifest"] +
+                                    list(self.mle.args)))
+            elif isinst(FileNotFoundError):
+                # This should ordinarily only happen when the top
+                # level west.yml is not found.
+                log.die(f"file not found: {self.mle.filename}")
+            elif isinst(ManifestImportFailed):
+                if args.command == 'update':
+                    return      # that's fine
+
+                p, f = self.mle.project, self.mle.filename
+                ctxt = f'  Missing file: "{f}"'
+                if not isinstance(p, ManifestProject):
+                    # Try to be more helpful by explaining exactly
+                    # what west.manifest needs to happen before we can
+                    # resolve the missing import.
+                    rev = p.revision
+
+                    ctxt += f' from revision "{rev}"\n'
+                    ctxt += '  Hint: for this to work:\n'
+                    ctxt += f'          - {p.name} must be cloned\n'
+                    ctxt += (f'          - its {MANIFEST_REV_BRANCH} ref '
+                             'must point to a commit with the missing file\n')
+                    ctxt += '        To fix, run:\n'
+                    ctxt += '          west update'
+
+                log.die(p.format('failed manifest import in '
+                                 '{name_and_path}\n') + ctxt)
+            else:
+                log.die('internal error:',
+                        f'unhandled manifest load exception: {self.mle}')
 
     def load_extension_specs(self):
         if self.manifest is None:
@@ -249,7 +320,11 @@ class WestApp:
         # Finally, run the command.
         try:
             if args.command in self.builtins:
-                self.run_builtin(args, unknown)
+                if self.mle:
+                    self.handle_builtin_manifest_load_err(args)
+
+                cmd = self.builtins.get(args.command, self.builtins['help'])
+                cmd.run(args, unknown, self.topdir, manifest=self.manifest)
             else:
                 self.run_extension(args.command, argv)
         except KeyboardInterrupt:
@@ -281,36 +356,14 @@ class WestApp:
             # No need to dump_traceback() here. The command is responsible
             # for logging its own errors.
             sys.exit(ce.returncode)
-        except (MalformedManifest, MalformedConfig) as malformed:
-            log.die('\n  '.join(["can't load west manifest"] +
-                                list(malformed.args)))
-
-    def run_builtin(self, args, unknown):
-        if self.mve:
-            if args.command == 'help':
-                log.wrn(mve_msg(self.mve, suggest_ugprade=False) +
-                        '\n  Cannot get extension command help, ' +
-                        "and most commands won't run." +
-                        '\n  To silence this warning, upgrade west.')
-            elif args.command in ['config', 'topdir']:
-                # config and topdir are safe to run, but let's
-                # warn the user that most other commands won't be.
-                log.wrn(mve_msg(self.mve, suggest_ugprade=False) +
-                        "\n  This should work, but most commands won't." +
-                        '\n  To silence this warning, upgrade west.')
-            elif args.command != 'init':
-                log.die(mve_msg(self.mve))
-
-        cmd = self.builtins.get(args.command, self.builtins['help'])
-        cmd.run(args, unknown, self.topdir, manifest=self.manifest)
 
     def run_extension(self, name, argv):
         # Check a program invariant. We should never get here
         # unless we were able to parse the manifest. That's where
-        # information about extensions is gained.
-        assert self.mve is None, \
+        # information about extensions is loaded from.
+        assert self.manifest is not None and self.mle is None, \
             'internal error: running extension "{}" ' \
-            'but got ManifestVersionError'.format(name)
+            'but got {}'.format(name, self.mle)
 
         command = self.extensions[name].factory()
 
@@ -375,6 +428,10 @@ class Help(WestCommand):
         else:
             log.wrn('unknown command "{}"'.format(name))
             app.west_parser.print_help(top_level=True)
+            if app.mle:
+                log.wrn('your manifest could not be loaded, '
+                        'which may be causing this issue.\n'
+                        '  Try running "west update" or fixing the manifest.')
 
 class WestHelpAction(argparse.Action):
 
@@ -452,7 +509,7 @@ class WestArgumentParser(argparse.ArgumentParser):
                 append('')
 
             if self.west_app.extensions is None:
-                if not self.west_app.mve:
+                if not self.west_app.mle:
                     # This only happens when there is an error.
                     # If there are simply no extensions, it's an empty dict.
                     # If the user has already been warned about the error
@@ -574,17 +631,18 @@ class WestArgumentParser(argparse.ArgumentParser):
         super().add_argument(*args, **kwargs)
 
     def error(self, message):
-        if self.west_app and self.west_app.mve:
-            log.die(mve_msg(self.west_app.mve))
+        if self.west_app and self.west_app.mle and \
+           isinstance(self.west_app.mle, ManifestVersionError):
+            log.die(mve_msg(self.west_app.mle))
         super().error(message=message)
 
-def mve_msg(mve, suggest_ugprade=True):
+def mve_msg(mve, suggest_upgrade=True):
     return '\n  '.join(
         ['west v{} or later is required by the manifest'.
          format(mve.version),
          'West version: v{}'.format(__version__)] +
         (['Manifest file: {}'.format(mve.file)] if mve.file else []) +
-        (['Please upgrade west and retry.'] if suggest_ugprade else []))
+        (['Please upgrade west and retry.'] if suggest_upgrade else []))
 
 def set_zephyr_base(args, manifest, topdir):
     '''Ensure ZEPHYR_BASE is set
@@ -708,7 +766,8 @@ def main(argv=None):
     app.run(argv or sys.argv[1:])
 
 # If you add a command here, make sure to think about how it should be
-# handled in case of ManifestVersionError.
+# handled in case of ManifestVersionError or other reason the manifest
+# might fail to load (import error, configuration file error, etc.)
 BUILTIN_COMMAND_GROUPS = {
     'built-in commands for managing git repositories': [
         Init,
