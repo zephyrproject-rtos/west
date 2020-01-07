@@ -441,6 +441,33 @@ class Manifest:
             raise ValueError(unknown, uncloned)
         return ret
 
+    def _as_dict_helper(self, pdict=None):
+        # pdict: a function which is given a project, and returns its
+        #   dict representation. By default, it's Project.as_dict.
+        if pdict is None:
+            pdict = Project.as_dict
+
+        projects = list(self.projects)
+        del projects[MANIFEST_PROJECT_INDEX]
+        project_dicts = [pdict(p) for p in projects]
+
+        r = collections.OrderedDict()
+        r['manifest'] = collections.OrderedDict()
+        r['manifest']['projects'] = project_dicts
+        r['manifest']['self'] = self.projects[MANIFEST_PROJECT_INDEX].as_dict()
+
+        return r
+
+    def as_dict(self):
+        '''Returns an ``OrderedDict`` representing self, fully
+        resolved.
+
+        The value is "resolved" in that the result is as if all
+        projects had been defined in a single manifest without any
+        import attributes.
+        '''
+        return self._as_dict_helper()
+
     def as_frozen_dict(self):
         '''Returns an ``OrderedDict`` representing self, but frozen.
 
@@ -449,32 +476,21 @@ class Manifest:
 
         Raises ``RuntimeError`` if a project SHA can't be resolved.
         '''
-        # Build a 'frozen' representation of all projects, except the
-        # manifest project.
-        projects = list(self.projects)
-        del projects[MANIFEST_PROJECT_INDEX]
-        frozen_projects = []
-        for project in projects:
-            if not project.is_cloned():
-                raise RuntimeError('cannot freeze; project {} is uncloned'.
-                                   format(project.name))
+        def pdict(p):
+            if not p.is_cloned():
+                raise RuntimeError(f'cannot freeze; project {p.name} '
+                                   'is uncloned')
             try:
-                sha = project.sha(QUAL_MANIFEST_REV_BRANCH)
+                sha = p.sha(QUAL_MANIFEST_REV_BRANCH)
             except subprocess.CalledProcessError as e:
-                raise RuntimeError('cannot freeze; project {} ref {} '
-                                   'cannot be resolved to a SHA'.
-                                   format(project.name,
-                                          QUAL_MANIFEST_REV_BRANCH)) from e
-            d = project.as_dict()
+                raise RuntimeError(f'cannot freeze; project {p.name} '
+                                   f'ref {QUAL_MANIFEST_REV_BRANCH} '
+                                   'cannot be resolved to a SHA') from e
+            d = p.as_dict()
             d['revision'] = sha
-            frozen_projects.append(d)
+            return d
 
-        r = collections.OrderedDict()
-        r['manifest'] = collections.OrderedDict()
-        r['manifest']['projects'] = frozen_projects
-        r['manifest']['self'] = self.projects[MANIFEST_PROJECT_INDEX].as_dict()
-
-        return r
+        return self._as_dict_helper(pdict=pdict)
 
     def _malformed(self, complaint, parent=None):
         context = ('file: {} '.format(self.path) if self.path
