@@ -444,45 +444,67 @@ class ManifestCommand(_ProjectCommand):
             textwrap.dedent('''\
             Manages the west manifest.
 
-            The --freeze operation outputs the manifest with all
-            project-related values fully specified: defaults are
-            applied, and all revisions are converted to SHAs based on
-            the current manifest-rev branches. Note that all projects
-            must be cloned for this to work.
+            The following actions are available. You must give exactly one.
 
-            The --validate operation validates the current manifest,
-            printing an error if it cannot be successfully parsed.'''),
+            - --resolve: print the current manifest with all imports applied,
+              as an equivalent single manifest file. Any imported manifests
+              must be cloned locally (with "west update").
+
+            - --freeze: like --resolve, but with all project revisions
+              converted to their current SHAs, based on the latest manifest-rev
+              branches. All projects must be cloned (with "west update").
+
+            - --validate: print an error and exit the process unsuccessfully
+              if the current manifest cannot be successfully parsed.
+              If the manifest can be parsed, print nothing and exit
+              successfully.
+
+            If the manifest file does not use imports, and all project
+            revisions are SHAs, the --freeze and --resolve output will
+            be identical after a "west update".
+            '''),
             accepts_unknown_args=False)
 
     def do_add_parser(self, parser_adder):
         parser = self._parser(parser_adder)
 
         group = parser.add_mutually_exclusive_group(required=True)
+        group.add_argument('--resolve', action='store_true',
+                           help='print the manifest with all imports resolved')
         group.add_argument('--freeze', action='store_true',
-                           help='emit a manifest with SHAs for each revision')
+                           help='''print the resolved manifest with SHAs for
+                           all project revisions''')
         group.add_argument('--validate', action='store_true',
                            help='''validate the current manifest,
                            exiting with an error if there are issues''')
 
-        group = parser.add_argument_group('options for --freeze')
+        group = parser.add_argument_group('options for --resolve and --freeze')
         group.add_argument('-o', '--out',
                            help='output file, default is standard output')
 
         return parser
 
     def do_run(self, args, user_args):
-        if args.freeze:
-            self._freeze(args)
+        # All of these commands need the manifest. We are deliberately
+        # loading it again instead of using self.manifest to emit
+        # debug logs if enabled, which are turned off when the
+        # manifest is initially parsed in main.py.
+        #
+        # The code in main.py is responsible for handling any errors
+        # and printing useful messages.
+        manifest = Manifest.from_file()
+
+        if args.validate:
+            pass              # nothing more to do
+        elif args.resolve:
+            self._dump_dict(args, manifest.as_dict())
+        elif args.freeze:
+            self._dump_dict(args, manifest.as_frozen_dict())
         else:
-            # --validate. The exception block in main() handles errors.
-            Manifest.from_file()
+            # Can't happen.
+            raise RuntimeError(f'internal error: unhandled args {args}')
 
-    def _freeze(self, args):
-        try:
-            frozen = Manifest.from_file().as_frozen_dict()
-        except RuntimeError as re:
-            log.die(*(list(re.args) + ['(run "west update" and retry)']))
-
+    def _dump_dict(self, args, to_dump):
         # This is a destructive operation, so it's done here to avoid
         # impacting code which doesn't expect this representer to be
         # in place.
@@ -490,9 +512,10 @@ class ManifestCommand(_ProjectCommand):
 
         if args.out:
             with open(args.out, 'w') as f:
-                yaml.safe_dump(frozen, default_flow_style=False, stream=f)
+                yaml.safe_dump(to_dump, default_flow_style=False, stream=f)
         else:
-            yaml.safe_dump(frozen, default_flow_style=False, stream=sys.stdout)
+            yaml.safe_dump(to_dump, default_flow_style=False,
+                           stream=sys.stdout)
 
     def _rep(self, dumper, value):
         # See https://yaml.org/type/map.html for details on the tag.
