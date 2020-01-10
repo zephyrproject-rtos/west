@@ -375,6 +375,9 @@ class Manifest:
 
         self.has_imports = False
 
+        self.configs = None
+        '''Map with default configuration values.'''
+
         # Set up the public attributes documented above, as well as
         # any internal attributes needed to implement the public API.
         self._importer = importer or _default_importer
@@ -473,6 +476,7 @@ class Manifest:
         r['manifest'] = collections.OrderedDict()
         r['manifest']['projects'] = frozen_projects
         r['manifest']['self'] = self.projects[MANIFEST_PROJECT_INDEX].as_dict()
+        r['manifest']['configs'] = self.configs
 
         return r
 
@@ -532,6 +536,8 @@ class Manifest:
                     # can have a topdir but no path, and thus no abspath.
                     continue
                 self._projects_by_cpath[util.canon_path(p.abspath)] = p
+
+        self.configs = manifest.get('configs', dict())
 
     def _load_self(self, manifest, path_hint, projects):
         # Handle the "self:" section in the manifest data.

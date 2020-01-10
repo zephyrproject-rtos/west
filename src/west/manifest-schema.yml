@@ -127,3 +127,8 @@ mapping:
       import:
         required: false
         type: any
+
+  configs:
+    required: false
+    type: map
+    allowempty: true

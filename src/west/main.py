@@ -376,6 +376,8 @@ class WestApp:
         # Parse arguments again.
         args, unknown = west_parser.parse_known_args(argv)
 
+        load_manifest_configs(args)
+
         # HACK: try to set ZEPHYR_BASE.
         #
         # Currently required by zephyr extensions like "west build".
@@ -643,6 +645,27 @@ def mve_msg(mve, suggest_upgrade=True):
          'West version: v{}'.format(__version__)] +
         (['Manifest file: {}'.format(mve.file)] if mve.file else []) +
         (['Please upgrade west and retry.'] if suggest_upgrade else []))
+
+def load_manifest_configs(args):
+    try:
+        manifest = Manifest.from_file()
+
+        for section in manifest.configs:
+            if not config.config.has_section(section):
+                config.config.add_section(section)
+
+            for key in manifest.configs[section]:
+                value = manifest.configs[section][key]
+
+                if not config.config.has_option(section, key):
+                    config.config.set(section, key, str(value))
+    except MalformedConfig as e:
+        log.wrn("Can't load manifest configs:",
+                'parsing of manifest file failed during command',
+                args.command, ':', *e.args)
+    except WestNotFound:
+        log.wrn("Can't load manifest configs:",
+                'not currently in a west installation')
 
 def set_zephyr_base(args, manifest, topdir):
     '''Ensure ZEPHYR_BASE is set
