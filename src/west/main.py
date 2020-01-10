@@ -389,7 +389,8 @@ class WestApp:
         #   (controversial)
         # - make zephyr extensions that need ZEPHYR_BASE just set it
         #   themselves (easy if above is OK, unnecessary if it isn't)
-        set_zephyr_base(args, self.manifest, self.topdir)
+        if not config.config.getboolean("zephyr", "disabled", fallback=False):
+            set_zephyr_base(args, self.manifest, self.topdir)
 
         command.run(args, unknown, self.topdir, manifest=self.manifest)
 
