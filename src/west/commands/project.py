@@ -1000,11 +1000,17 @@ def _fetch(project, rev=None):
         _update_manifest_rev(project, '{revision}')
     else:
         # The revision is definitely not a SHA, so it's safe to fetch directly.
-        # This avoids fetching unnecessary ref space from the remote.
-        # We need {{commit}} instead of {commit} because everything gets run
-        # through Project.format.
-        fetch_cmd += '{revision}:' + QUAL_MANIFEST_REV
+        # This avoids fetching unnecessary refs from the remote.
+        #
+        # We update manifest-rev to FETCH_HEAD instead of using a
+        # refspec in case the revision is a tag, which we can't use
+        # from a refspec.
+        #
+        # We need {{commit}} instead of {commit} because everything
+        # gets run through Project.format().
+        fetch_cmd += '{revision}'
         project.git(fetch_cmd)
+        _update_manifest_rev(project, 'FETCH_HEAD^{{commit}}')
 
 def _head_ok(project):
     # Returns True if the reference 'HEAD' exists and is not a tag or remote
