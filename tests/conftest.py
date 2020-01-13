@@ -29,6 +29,8 @@ manifest:
     - name: Kconfiglib
       revision: zephyr
       path: subdir/Kconfiglib
+    - name: tagged_repo
+      revision: v1.0
     - name: net-tools
       clone-depth: 1
       west-commands: scripts/west-commands.yml
@@ -52,7 +54,7 @@ def _session_repos():
 
     # Create the repositories.
     rp = {}      # individual repository paths
-    for repo in 'net-tools', 'Kconfiglib', 'zephyr':
+    for repo in 'Kconfiglib', 'tagged_repo', 'net-tools', 'zephyr':
         path = os.path.join(session_repos, repo)
         rp[repo] = path
         create_repo(path)
@@ -69,6 +71,11 @@ def _session_repos():
                           cwd=rp['Kconfiglib'])
     add_commit(rp['Kconfiglib'], 'test kconfiglib commit',
                files={'kconfiglib.py': 'print("hello world kconfiglib")\n'})
+
+    # Initialize the tagged_repo repository.
+    add_commit(rp['tagged_repo'], 'tagged_repo commit',
+               files={'test.txt': 'hello world'})
+    add_tag(rp['tagged_repo'], 'v1.0')
 
     # Initialize the net-tools repository.
     add_commit(rp['net-tools'], 'test net-tools commit',
@@ -117,6 +124,8 @@ def repos_tmpdir(tmpdir, _session_repos):
     repos/
     ├── Kconfiglib (branch: zephyr)
     │   └── kconfiglib.py
+    ├── tagged_repo (branch: master, tag: v1.0)
+    │   └── test.txt
     ├── net-tools (branch: master)
     │   └── qemu-script.sh
     └── zephyr (branch: master)
@@ -140,6 +149,8 @@ def repos_tmpdir(tmpdir, _session_repos):
         - name: Kconfiglib
           revision: zephyr
           path: subdir/Kconfiglib
+        - name: tagged_repo
+          revision: v1.0
         - name: net-tools
           clone-depth: 1
           west-commands: scripts/west-commands.yml
@@ -147,11 +158,12 @@ def repos_tmpdir(tmpdir, _session_repos):
         path: zephyr
 
     '''
-    kconfiglib, net_tools, zephyr = [os.path.join(_session_repos, x) for x in
-                                     ['Kconfiglib', 'net-tools', 'zephyr']]
+    kconfiglib, tagged_repo, net_tools, zephyr = [
+        os.path.join(_session_repos, x) for x in
+        ['Kconfiglib', 'tagged_repo', 'net-tools', 'zephyr']]
     repos = tmpdir.mkdir('repos')
     repos.chdir()
-    for r in [kconfiglib, net_tools, zephyr]:
+    for r in [kconfiglib, tagged_repo, net_tools, zephyr]:
         subprocess.check_call([GIT, 'clone', r])
 
     manifest = MANIFEST_TEMPLATE.replace('THE_URL_BASE',
@@ -285,6 +297,14 @@ def add_commit(repo, msg, files=None, reconfigure=True):
         [GIT, 'commit', '-a', '--allow-empty', '-m', msg, '--no-verify',
          '--no-gpg-sign', '--no-post-rewrite'], cwd=repo)
 
+def add_tag(repo, tag, commit='HEAD', msg=None):
+    if msg is None:
+        msg = 'tag ' + tag
+
+    # Override tag.gpgSign with --no-sign, in case the test
+    # environment has that set to true.
+    subprocess.check_call([GIT, 'tag', '-m', msg, '--no-sign', tag, commit],
+                          cwd=repo)
 
 def rev_parse(repo, revision):
     out = subprocess.check_output([GIT, 'rev-parse', revision], cwd=repo)
