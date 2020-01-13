@@ -451,16 +451,18 @@ class Manifest:
         del projects[MANIFEST_PROJECT_INDEX]
         project_dicts = [pdict(p) for p in projects]
 
-        r = collections.OrderedDict()
-        r['manifest'] = collections.OrderedDict()
+        # This relies on insertion-ordered dictionaries for
+        # predictability, which is a CPython 3.6 implementation detail
+        # and Python 3.7+ guarantee.
+        r = {}
+        r['manifest'] = {}
         r['manifest']['projects'] = project_dicts
         r['manifest']['self'] = self.projects[MANIFEST_PROJECT_INDEX].as_dict()
 
         return r
 
     def as_dict(self):
-        '''Returns an ``OrderedDict`` representing self, fully
-        resolved.
+        '''Returns a dict representing self, fully resolved.
 
         The value is "resolved" in that the result is as if all
         projects had been defined in a single manifest without any
@@ -469,7 +471,7 @@ class Manifest:
         return self._as_dict_helper()
 
     def as_frozen_dict(self):
-        '''Returns an ``OrderedDict`` representing self, but frozen.
+        '''Returns a dict representing self, but frozen.
 
         The value is "frozen" in that all project revisions are the
         full SHAs pointed to by `QUAL_MANIFEST_REV_BRANCH` references.
@@ -491,6 +493,29 @@ class Manifest:
             return d
 
         return self._as_dict_helper(pdict=pdict)
+
+    def as_yaml(self, **kwargs):
+        '''Returns a YAML representation for self, fully resolved.
+
+        The value is "resolved" in that the result is as if all
+        projects had been defined in a single manifest without any
+        import attributes.
+
+        :param kwargs: passed to yaml.safe_dump()
+        '''
+        return yaml.safe_dump(self.as_dict(), **kwargs)
+
+    def as_frozen_yaml(self, **kwargs):
+        '''Returns a YAML representation for self, but frozen.
+
+        The value is "frozen" in that all project revisions are the
+        full SHAs pointed to by `QUAL_MANIFEST_REV_BRANCH` references.
+
+        Raises ``RuntimeError`` if a project SHA can't be resolved.
+
+        :param kwargs: passed to yaml.safe_dump()
+        '''
+        return yaml.safe_dump(self.as_frozen_dict(), **kwargs)
 
     def _malformed(self, complaint, parent=None):
         context = ('file: {} '.format(self.path) if self.path
@@ -1041,7 +1066,7 @@ class Project:
         '''Return a representation of this object as a dict, as it
         would be parsed from an equivalent YAML manifest.
         '''
-        ret = collections.OrderedDict()
+        ret = {}
         ret['name'] = self.name
         ret['url'] = self.url
         ret['revision'] = self.revision
@@ -1398,7 +1423,7 @@ class ManifestProject(Project):
     def as_dict(self):
         '''Return a representation of this object as a dict, as it would be
         parsed from an equivalent YAML manifest.'''
-        ret = collections.OrderedDict()
+        ret = {}
         if self.path:
             ret['path'] = self.path
         if self.west_commands:
