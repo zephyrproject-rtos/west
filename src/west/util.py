@@ -2,36 +2,6 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# Some code (the PyYAML representer for an OrderedDict) is adapted
-# from the PyYAML source code, which is MIT Licensed:
-#
-# SPDX-License-Identifier: MIT
-#
-# Full license text from the PyYAML repository is reproduced below:
-#
-# Copyright (c) 2017-2018 Ingy döt Net
-# Copyright (c) 2006-2016 Kirill Simonov
-#
-# Permission is hereby granted, free of charge, to any person
-# obtaining a copy of this software and associated documentation files
-# (the "Software"), to deal in the Software without restriction,
-# including without limitation the rights to use, copy, modify, merge,
-# publish, distribute, sublicense, and/or sell copies of the Software,
-# and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be
-# included in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
-# BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
-# ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
 '''Miscellaneous utilities.
 '''
 
@@ -39,8 +9,6 @@ import os
 import pathlib
 import shlex
 import textwrap
-
-import yaml
 
 def canon_path(path):
     '''Returns a canonical version of the path.
@@ -122,33 +90,3 @@ def west_topdir(start=None, fall_back=True):
                 raise WestNotFound('Could not find a West installation '
                                    'in this or any parent directory')
         cur_dir = parent_dir
-
-def _represent_ordered_dict(dumper, tag, mapping, flow_style=None):
-    # PyYAML representer for ordered dicts. Used internally.
-
-    value = []
-    node = yaml.MappingNode(tag, value, flow_style=flow_style)
-    if dumper.alias_key is not None:
-        dumper.represented_objects[dumper.alias_key] = node
-    best_style = True
-    if hasattr(mapping, 'items'):
-        mapping = list(mapping.items())
-        # The only real difference between
-        # BaseRepresenter.represent_mapping and this function is that
-        # we omit the sort here. Ugh!
-    for item_key, item_value in mapping:
-        node_key = dumper.represent_data(item_key)
-        node_value = dumper.represent_data(item_value)
-        if not (isinstance(node_key, yaml.ScalarNode) and
-                not node_key.style):
-            best_style = False
-        if not (isinstance(node_value, yaml.ScalarNode) and
-                not node_value.style):
-            best_style = False
-        value.append((node_key, node_value))
-    if flow_style is None:
-        if dumper.default_flow_style is not None:
-            node.flow_style = dumper.default_flow_style
-        else:
-            node.flow_style = best_style
-    return node
