@@ -1,3 +1,4 @@
+import collections
 import os
 import re
 import subprocess
@@ -6,7 +7,38 @@ import textwrap
 import pytest
 
 from west import configuration as config
-from conftest import create_repo, add_commit, check_output, cmd, GIT, rev_parse
+from west.manifest import Manifest
+from conftest import create_repo, add_commit, add_tag, \
+    check_output, cmd, GIT, rev_parse
+
+#
+# Helper types
+#
+
+# A container for the remote locations of the repositories involved in
+# a west update. These attributes may be None.
+UpdateRemotes = collections.namedtuple('UpdateRemotes',
+                                       'net_tools kconfiglib tagged_repo')
+
+# A container type which holds the remote and local repository paths
+# used in tests of 'west update'. This also contains manifest-rev
+# branches and HEAD commits before (attributes ending in _0) and after
+# (ending in _1) the 'west update' is done by update_helper().
+#
+# These may be None.
+#
+# See conftest.py for details on the manifest used in west update
+# testing, and update_helper() below as well.
+UpdateResults = collections.namedtuple('UpdateResults',
+                                       'nt_remote nt_local '
+                                       'kl_remote kl_local '
+                                       'tr_remote tr_local '
+                                       'nt_mr_0 nt_mr_1 '
+                                       'kl_mr_0 kl_mr_1 '
+                                       'tr_mr_0 tr_mr_1 '
+                                       'nt_head_0 nt_head_1 '
+                                       'kl_head_0 kl_head_1 '
+                                       'tr_head_0 tr_head_1')
 
 #
 # Test fixtures
@@ -17,7 +49,6 @@ def west_update_tmpdir(west_init_tmpdir):
     '''Like west_init_tmpdir, but also runs west update.'''
     cmd('update', cwd=str(west_init_tmpdir))
     return west_init_tmpdir
-
 
 #
 # Test cases
@@ -34,6 +65,9 @@ def test_installation(west_update_tmpdir):
     assert wct.join('subdir', 'Kconfiglib').check(dir=1)
     assert wct.join('subdir', 'Kconfiglib', '.git').check(dir=1)
     assert wct.join('subdir', 'Kconfiglib', 'kconfiglib.py').check(file=1)
+    assert wct.join('tagged_repo').check(dir=1)
+    assert wct.join('tagged_repo', '.git').check(dir=1)
+    assert wct.join('tagged_repo', 'test.txt').check()
     assert wct.join('net-tools').check(dir=1)
     assert wct.join('net-tools', '.git').check(dir=1)
     assert wct.join('net-tools', 'qemu-script.sh').check(file=1)
@@ -50,6 +84,7 @@ def test_list(west_update_tmpdir):
     actual = cmd('list -f "{name} {revision} {path} {cloned} {clone_depth}"')
     expected = ['manifest HEAD zephyr cloned None',
                 'Kconfiglib zephyr subdir/Kconfiglib cloned None',
+                'tagged_repo v1.0 tagged_repo cloned None',
                 'net-tools master net-tools cloned 1']
     assert actual.splitlines() == expected
 
@@ -98,6 +133,9 @@ def test_manifest_freeze(west_update_tmpdir):
                     '^    url: .*$',
                     '^    revision: [a-f0-9]{40}$',
                     '^    path: subdir/Kconfiglib$',
+                    '^  - name: tagged_repo$',
+                    '^    url: .*$',
+                    '^    revision: [a-f0-9]{40}$',
                     '^  - name: net-tools$',
                     '^    url: .*$',
                     '^    revision: [a-f0-9]{40}$',
@@ -162,22 +200,25 @@ def test_update_projects(west_init_tmpdir):
     # functions that are used for automatic updates and 'west init'
     # reinitialization.
 
-    # update all repositories
+    # create local repositories
     cmd('update')
 
-    # Add commits to the local repos. We need to reconfigure
-    # explicitly as these are clones, and west doesn't handle that for
-    # us.
-    (nt_mr_0, nt_mr_1,
-     nt_head_0, nt_head_1,
-     kl_mr_0, kl_mr_1,
-     kl_head_0, kl_head_1) = update_helper(west_init_tmpdir, 'update')
+    # Add commits to the local repos.
+    ur = update_helper(west_init_tmpdir)
 
-    assert nt_mr_0 != nt_mr_1, 'failed to update net-tools manifest-rev'
-    assert nt_head_0 != nt_head_1, 'failed to update net-tools HEAD'
-    assert kl_mr_0 != kl_mr_1, 'failed to update kconfiglib manifest-rev'
-    assert kl_head_0 != kl_head_1, 'failed to update kconfiglib HEAD'
+    # We updated all the repositories, so all paths and commits should
+    # be valid refs (i.e. there shouldn't be a None or empty string
+    # value in a ur attribute).
+    assert all(ur)
 
+    # Make sure we see different manifest-rev commits and HEAD revisions,
+    # except for the repository whose version was locked at a tag.
+    assert ur.nt_mr_0 != ur.nt_mr_1, 'failed updating net-tools manifest-rev'
+    assert ur.kl_mr_0 != ur.kl_mr_1, 'failed updating kconfiglib manifest-rev'
+    assert ur.tr_mr_0 == ur.tr_mr_1, 'tagged_repo manifest-rev changed'
+    assert ur.nt_head_0 != ur.nt_head_1, 'failed updating net-tools HEAD'
+    assert ur.kl_head_0 != ur.kl_head_1, 'failed updating kconfiglib HEAD'
+    assert ur.tr_head_0 == ur.tr_head_1, 'tagged_repo HEAD changed'
 
 def test_update_projects_local_branch_commits(west_init_tmpdir):
     # Test the 'west update' command when working on local branch with local
@@ -192,33 +233,94 @@ def test_update_projects_local_branch_commits(west_init_tmpdir):
     checkout_branch('net-tools', 'local_net_tools_test_branch', create=True)
     checkout_branch('subdir/Kconfiglib', 'local_kconfig_test_branch',
                     create=True)
+    checkout_branch('tagged_repo', 'local_tagged_repo_test_branch',
+                    create=True)
     add_commit('net-tools', 'test local branch commit', reconfigure=True)
     add_commit('subdir/Kconfiglib', 'test local branch commit',
                reconfigure=True)
+    add_commit('tagged_repo', 'test local branch commit',
+               reconfigure=True)
     net_tools_prev = head_subject('net-tools')
     kconfiglib_prev = head_subject('subdir/Kconfiglib')
+    tagged_repo_prev = head_subject('tagged_repo')
 
-    # Add commits to the upstream repos. We need to reconfigure
-    # explicitly as these are clones, and west doesn't handle that for
-    # us.
-    (nt_mr_0, nt_mr_1,
-     nt_head_0, nt_head_1,
-     kl_mr_0, kl_mr_1,
-     kl_head_0, kl_head_1) = update_helper(west_init_tmpdir, 'update')
+    # Update the upstream repositories, getting an UpdateResults tuple
+    # back.
+    ur = update_helper(west_init_tmpdir)
 
-    assert nt_mr_0 != nt_mr_1, 'failed to update net-tools manifest-rev'
-    assert nt_head_0 != nt_head_1, 'failed to update net-tools HEAD'
-    assert kl_mr_0 != kl_mr_1, 'failed to update kconfiglib manifest-rev'
-    assert kl_head_0 != kl_head_1, 'failed to update kconfiglib HEAD'
+    # We updated all the repositories, so all paths and commits should
+    # be valid refs (i.e. there shouldn't be a None or empty string
+    # value in a ur attribute).
+    assert all(ur)
+
+    # Verify each repository has moved to a new manifest-rev,
+    # except tagged_repo, which has a manifest-rev locked to a tag.
+    # Its HEAD should change, though.
+    assert ur.nt_mr_0 != ur.nt_mr_1, 'failed updating net-tools manifest-rev'
+    assert ur.kl_mr_0 != ur.kl_mr_1, 'failed updating kconfiglib manifest-rev'
+    assert ur.tr_mr_0 == ur.tr_mr_1, 'tagged_repo manifest-rev changed'
+    assert ur.nt_head_0 != ur.nt_head_1, 'failed updating net-tools HEAD'
+    assert ur.kl_head_0 != ur.kl_head_1, 'failed updating kconfiglib HEAD'
+    assert ur.tr_head_0 != ur.tr_head_1, 'failed updating tagged_repo HEAD'
 
     # Verify local branch is still present and untouched
     assert net_tools_prev != head_subject('net-tools')
     assert kconfiglib_prev != head_subject('subdir/Kconfiglib')
+    assert tagged_repo_prev != head_subject('tagged_repo')
     checkout_branch('net-tools', 'local_net_tools_test_branch')
     checkout_branch('subdir/Kconfiglib', 'local_kconfig_test_branch')
+    checkout_branch('tagged_repo', 'local_tagged_repo_test_branch')
     assert net_tools_prev == head_subject('net-tools')
     assert kconfiglib_prev == head_subject('subdir/Kconfiglib')
+    assert tagged_repo_prev == head_subject('tagged_repo')
 
+def test_update_tag_to_tag(west_init_tmpdir):
+    # Verify we can update the tagged_repo repo to a new tag.
+
+    # We only need to clone tagged_repo locally.
+    cmd('update tagged_repo')
+
+    def updater(remotes):
+        # Create a v2.0 tag on the remote tagged_repo repository.
+        add_commit(remotes.tagged_repo, 'another tagged_repo tagged commit')
+        add_tag(remotes.tagged_repo, 'v2.0')
+
+        # Update the manifest file to point the project's revision at
+        # the new tag.
+        manifest = Manifest.from_file(topdir=west_init_tmpdir)
+        for p in manifest.projects:
+            if p.name == 'tagged_repo':
+                p.revision = 'v2.0'
+                break
+        else:
+            assert False, 'no tagged_repo'
+        with open(west_init_tmpdir / 'zephyr' / 'west.yml', 'w') as f:
+            f.write(manifest.as_yaml())  # NOT as_frozen_yaml().
+
+        # Pull down the v2.0 tag into west_init_tmpdir.
+        cmd('update tagged_repo')
+    ur = update_helper(west_init_tmpdir, updater=updater)
+
+    # Make sure we have manifest-rev and HEADs before and after.
+    assert ur.tr_mr_0
+    assert ur.tr_mr_1
+    assert ur.tr_head_0
+    assert ur.tr_head_1
+
+    # Make sure we have v1.0 and v2.0 tags locally.
+    v1_0 = check_output([GIT, 'rev-parse', 'refs/tags/v1.0^{commit}'],
+                        cwd=ur.tr_local)
+    v2_0 = check_output([GIT, 'rev-parse', 'refs/tags/v2.0^{commit}'],
+                        cwd=ur.tr_local)
+    assert v1_0
+    assert v2_0
+
+    # Check that all the updates (including the first one in this
+    # function) behaved correctly.
+    assert ur.tr_mr_0 == v1_0
+    assert ur.tr_mr_1 == v2_0
+    assert ur.tr_head_0 == v1_0
+    assert ur.tr_head_1 == v2_0
 
 def test_init_again(west_init_tmpdir):
     # Test that 'west init' on an initialized tmpdir errors out
@@ -238,12 +340,12 @@ def test_init_local_manifest_project(repos_tmpdir):
 
     cmd('init -l "{}"'.format(str(zephyr_install_dir)))
 
-    # Verify Zephyr and .west/west has been installed during init -l
-    # but not projects
+    # Verify Zephyr has been installed during init -l, but not projects.
     zid = repos_tmpdir.join('west_installation')
     assert zid.check(dir=1)
     assert zid.join('subdir', 'Kconfiglib').check(dir=0)
     assert zid.join('net-tools').check(dir=0)
+    assert zid.join('tagged_repo').check(dir=0)
     assert zid.join('zephyr').check(dir=1)
     assert zid.join('zephyr', '.git').check(dir=1)
     assert zid.join('zephyr', 'CODEOWNERS').check(file=1)
@@ -255,12 +357,14 @@ def test_init_local_manifest_project(repos_tmpdir):
     assert zid.check(dir=1)
     assert zid.join('subdir', 'Kconfiglib').check(dir=1)
     assert zid.join('net-tools').check(dir=1)
+    assert zid.join('tagged_repo').check(dir=1)
     assert zid.join('subdir', 'Kconfiglib').check(dir=1)
     assert zid.join('subdir', 'Kconfiglib', '.git').check(dir=1)
     assert zid.join('subdir', 'Kconfiglib', 'kconfiglib.py').check(file=1)
     assert zid.join('net-tools').check(dir=1)
     assert zid.join('net-tools', '.git').check(dir=1)
     assert zid.join('net-tools', 'qemu-script.sh').check(file=1)
+    assert zid.join('tagged_repo', 'test.txt').check(file=1)
 
 
 def test_init_local_already_initialized_failure(west_init_tmpdir):
@@ -301,6 +405,7 @@ def test_extension_command_multiproject(repos_tmpdir):
     remote_west = str(rr.join('west'))
 
     # Update the manifest to specify extension commands in Kconfiglib.
+    # This removes tagged_repo, but we're not using it, so that's fine.
     add_commit(remote_zephyr, 'test added extension command',
                files={'west.yml': textwrap.dedent('''\
                       west:
@@ -380,6 +485,7 @@ def test_extension_command_duplicate(repos_tmpdir):
     remote_zephyr = str(rr.join('zephyr'))
     remote_west = str(rr.join('west'))
 
+    # This removes tagged_repo, but we're not using it, so that's fine.
     add_commit(remote_zephyr, 'test added extension command',
                files={'west.yml': textwrap.dedent('''\
                       west:
@@ -497,52 +603,65 @@ def head_subject(path):
     return subprocess.check_output([GIT, 'log', '-n1', '--format=%s'],
                                    cwd=path).decode().rstrip()
 
+def default_updater(remotes):
+    add_commit(remotes.net_tools, 'another net-tools commit')
+    add_commit(remotes.kconfiglib, 'another kconfiglib commit')
+    add_commit(remotes.tagged_repo, 'another tagged_repo commit')
+    cmd('update')
 
-def update_helper(west_tmpdir, command):
+def update_helper(west_tmpdir, updater=default_updater):
     # Helper command for causing a change in two remote repositories,
     # then running a project command on the west installation.
     #
     # Adds a commit to both of the kconfiglib and net-tools projects
-    # remotes, then run `command`.
+    # remotes, then call updater(update_remotes),
+    # which defaults to a function that adds commits in each
+    # repository's remote and runs 'west update'.
     #
-    # Captures the 'manifest-rev' and HEAD SHAs in both repositories
-    # before and after running the command, returning them in a tuple
-    # like this:
-    #
-    # (net-tools-manifest-rev-before,
-    #  net-tools-manifest-rev-after,
-    #  net-tools-HEAD-before,
-    #  net-tools-HEAD-after,
-    #  kconfiglib-manifest-rev-before,
-    #  kconfiglib-manifest-rev-after,
-    #  kconfiglib-HEAD-before,
-    #  kconfiglib-HEAD-after)
+    # Captures the remote and local repository paths, as well as
+    # manifest-rev and HEAD before and after, returning the results in
+    # an UpdateResults tuple.
 
     nt_remote = str(west_tmpdir.join('..', 'repos', 'net-tools'))
     nt_local = str(west_tmpdir.join('net-tools'))
     kl_remote = str(west_tmpdir.join('..', 'repos', 'Kconfiglib'))
     kl_local = str(west_tmpdir.join('subdir', 'Kconfiglib'))
+    tr_remote = str(west_tmpdir.join('..', 'repos', 'tagged_repo'))
+    tr_local = str(west_tmpdir.join('tagged_repo'))
 
-    nt_mr_0 = check_output([GIT, 'rev-parse', 'manifest-rev'], cwd=nt_local)
-    kl_mr_0 = check_output([GIT, 'rev-parse', 'manifest-rev'], cwd=kl_local)
-    nt_head_0 = check_output([GIT, 'rev-parse', 'HEAD'], cwd=nt_local)
-    kl_head_0 = check_output([GIT, 'rev-parse', 'HEAD'], cwd=kl_local)
+    def output_or_none(*args, **kwargs):
+        try:
+            ret = check_output(*args, **kwargs)
+        except (FileNotFoundError, NotADirectoryError,
+                subprocess.CalledProcessError):
+            ret = None
+        return ret
 
-    add_commit(nt_remote, 'another net-tools commit')
-    add_commit(kl_remote, 'another kconfiglib commit')
+    nt_mr_0 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=nt_local)
+    kl_mr_0 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=kl_local)
+    tr_mr_0 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=tr_local)
+    nt_head_0 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=nt_local)
+    kl_head_0 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=kl_local)
+    tr_head_0 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=tr_local)
 
-    cmd(command)
+    updater(UpdateRemotes(nt_remote, kl_remote, tr_remote))
 
-    nt_mr_1 = check_output([GIT, 'rev-parse', 'manifest-rev'], cwd=nt_local)
-    kl_mr_1 = check_output([GIT, 'rev-parse', 'manifest-rev'], cwd=kl_local)
-    nt_head_1 = check_output([GIT, 'rev-parse', 'HEAD'], cwd=nt_local)
-    kl_head_1 = check_output([GIT, 'rev-parse', 'HEAD'], cwd=kl_local)
+    nt_mr_1 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=nt_local)
+    kl_mr_1 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=kl_local)
+    tr_mr_1 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=tr_local)
+    nt_head_1 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=nt_local)
+    kl_head_1 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=kl_local)
+    tr_head_1 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=tr_local)
 
-    return (nt_mr_0, nt_mr_1,
-            nt_head_0, nt_head_1,
-            kl_mr_0, kl_mr_1,
-            kl_head_0, kl_head_1)
-
+    return UpdateResults(nt_remote, nt_local,
+                         kl_remote, kl_local,
+                         tr_remote, tr_local,
+                         nt_mr_0, nt_mr_1,
+                         kl_mr_0, kl_mr_1,
+                         tr_mr_0, tr_mr_1,
+                         nt_head_0, nt_head_1,
+                         kl_head_0, kl_head_1,
+                         tr_head_0, tr_head_1)
 
 def test_change_remote_conflict(west_update_tmpdir):
     # Test that `west update` will force fetch into local refs space when
