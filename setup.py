@@ -38,7 +38,7 @@ setuptools.setup(
     ],
     install_requires=[
         'colorama',
-        'PyYAML',
+        'PyYAML>=5.1',
         'pykwalify',
         'configobj',
         'setuptools>=v40.1.0',  # for find_namespace_packages

@@ -6,7 +6,6 @@
 '''West project commands'''
 
 import argparse
-import collections
 from functools import partial
 import os
 from os.path import join, relpath, basename, dirname, exists, isdir
@@ -14,7 +13,6 @@ import shutil
 import subprocess
 import sys
 import textwrap
-import yaml
 
 from west.configuration import config, update_config
 from west import log
@@ -494,34 +492,25 @@ class ManifestCommand(_ProjectCommand):
         # The code in main.py is responsible for handling any errors
         # and printing useful messages.
         manifest = Manifest.from_file()
+        dump_kwargs = {'default_flow_style': False,
+                       'sort_keys': False}
 
         if args.validate:
             pass              # nothing more to do
         elif args.resolve:
-            self._dump_dict(args, manifest.as_dict())
+            self._dump(args, manifest.as_yaml(**dump_kwargs))
         elif args.freeze:
-            self._dump_dict(args, manifest.as_frozen_dict())
+            self._dump(args, manifest.as_frozen_yaml(**dump_kwargs))
         else:
             # Can't happen.
             raise RuntimeError(f'internal error: unhandled args {args}')
 
-    def _dump_dict(self, args, to_dump):
-        # This is a destructive operation, so it's done here to avoid
-        # impacting code which doesn't expect this representer to be
-        # in place.
-        yaml.SafeDumper.add_representer(collections.OrderedDict, self._rep)
-
+    def _dump(self, args, to_dump):
         if args.out:
             with open(args.out, 'w') as f:
-                yaml.safe_dump(to_dump, default_flow_style=False, stream=f)
+                f.write(to_dump)
         else:
-            yaml.safe_dump(to_dump, default_flow_style=False,
-                           stream=sys.stdout)
-
-    def _rep(self, dumper, value):
-        # See https://yaml.org/type/map.html for details on the tag.
-        return util._represent_ordered_dict(dumper, 'tag:yaml.org,2002:map',
-                                            value)
+            sys.stdout.write(to_dump)
 
 class Diff(_ProjectCommand):
     def __init__(self):
