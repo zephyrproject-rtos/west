@@ -1062,6 +1062,10 @@ class Project:
             self._posixpath = PurePath(self.abspath).as_posix()
         return self._posixpath
 
+    @property
+    def name_and_path(self):
+        return f'{self.name} ({self.path})'
+
     def as_dict(self):
         '''Return a representation of this object as a dict, as it
         would be parsed from an equivalent YAML manifest.
