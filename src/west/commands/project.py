@@ -102,7 +102,7 @@ class _ProjectCommand(WestCommand):
             projects = ', '.join(f'{p.name}' for p in failed)
             log.err(f'{self.name} failed for project{s} {projects}')
         else:
-            log.err('{command} failed for multiple projects; see above')
+            log.err(f'{self.name} failed for multiple projects; see above')
         raise CommandError(1)
 
 class Init(_ProjectCommand):
