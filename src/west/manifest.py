@@ -831,9 +831,8 @@ class Manifest:
         elif imptype == dict:
             self._import_map_from_project(project, imp, projects)
         else:
-            self._malformed(project.format(
-                '{name_and_path}: invalid import {imp} type: {imptype}',
-                imp=imp, imptype=imptype))
+            self._malformed(f'{project.name_and_path}: invalid import {imp} '
+                            f'type: {imptype}')
 
     def _import_path_from_project(self, project, path, projects):
         # Import data from git at the given path at revision manifest-rev.
@@ -1217,19 +1216,16 @@ class Project:
         :param cwd: directory to run command in (default:
             ``self.abspath``)
         '''
-        returncode = self.git('merge-base --is-ancestor {} {}'.
-                              format(rev1, rev2),
-                              check=False, cwd=cwd).returncode
+        rc = self.git(f'merge-base --is-ancestor {rev1} {rev2}',
+                      check=False, cwd=cwd).returncode
 
-        if returncode == 0:
+        if rc == 0:
             return True
-        elif returncode == 1:
+        elif rc == 1:
             return False
         else:
-            log.wrn(self.format(
-                '{name_and_path}: git failed with exit code {rc}; '
-                'treating as if "{r1}" is not an ancestor of "{r2}"',
-                rc=returncode, r1=rev1, r2=rev2))
+            log.wrn(f'{self.name_and_path}: git failed with exit code {rc}; '
+                    f'treating as if "{rev1}" is not an ancestor of "{rev2}"')
             return False
 
     def is_up_to_date_with(self, rev, cwd=None):
@@ -1271,8 +1267,7 @@ class Project:
         # the top-level directory of a Git repository. Use --show-cdup
         # instead, which prints an empty string (i.e., just a newline,
         # which we strip) for the top-level directory.
-        log.dbg(self.format('{name}: checking if cloned'),
-                level=log.VERBOSE_EXTREME)
+        log.dbg(f'{self.name}: checking if cloned', level=log.VERBOSE_EXTREME)
         res = self.git('rev-parse --show-cdup', check=False,
                        capture_stderr=True, capture_stdout=True)
 
@@ -1491,8 +1486,7 @@ def _manifest_content_at(project, path, rev=QUAL_MANIFEST_REV_BRANCH):
     # Though this module and the "west update" implementation share
     # this code, it's an implementation detail, not API.
 
-    log.dbg(project.format('{name}: looking up path {path} type at {rev}',
-                           path=path, rev=rev),
+    log.dbg(f'{project.name}: looking up path {path} type at {rev}',
             level=log.VERBOSE_EXTREME)
 
     # Returns 'blob', 'tree', etc. for path at revision, if it exists.
