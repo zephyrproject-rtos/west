@@ -98,11 +98,9 @@ class _ProjectCommand(WestCommand):
         if not failed:
             return
         elif len(failed) < 20:
-            log.err('{command} failed for project{s} {projects}'.
-                    format(command=self.name,
-                           s='s:' if len(failed) > 1 else '',
-                           projects=', '.join(p.format('{name}')
-                                              for p in failed)))
+            s = 's:' if len(failed) > 1 else ''
+            projects = ', '.join(f'{p.name}' for p in failed)
+            log.err(f'{self.name} failed for project{s} {projects}')
         else:
             log.err('{command} failed for multiple projects; see above')
         raise CommandError(1)
@@ -527,11 +525,12 @@ class Diff(_ProjectCommand):
     def do_run(self, args, ignored):
         failed = []
         for project in self._cloned_projects(args):
-            log.banner(project.format('diff for {name_and_path}:'))
+            log.banner(f'diff for {project.name_and_path}:')
             # Use paths that are relative to the base directory to make it
             # easier to see where the changes are
             try:
-                project.git('diff --src-prefix={path}/ --dst-prefix={path}/')
+                project.git(['diff', f'--src-prefix={project.path}/',
+                             f'--dst-prefix={project.path}/'])
             except subprocess.CalledProcessError:
                 failed.append(project)
         self._handle_failed(args, failed)
@@ -551,7 +550,7 @@ class Status(_ProjectCommand):
     def do_run(self, args, user_args):
         failed = []
         for project in self._cloned_projects(args):
-            log.banner(project.format('status of {name_and_path}:'))
+            log.banner(f'status of {project.name_and_path}:')
             try:
                 project.git('status', extra_args=user_args)
             except subprocess.CalledProcessError:
@@ -719,7 +718,7 @@ class Update(_ProjectCommand):
                                            importer=self.update_importer)
 
     def update(self, project):
-        log.banner(project.format('updating {name_and_path}:'))
+        log.banner(f'updating {project.name_and_path}:')
         if not project.is_cloned():
             _clone(project)
 
@@ -727,7 +726,7 @@ class Update(_ProjectCommand):
             _fetch(project)
         else:
             log.dbg('skipping unnecessary fetch')
-            _update_manifest_rev(project, '{revision}^{{commit}}')
+            _update_manifest_rev(project, f'{project.revision}^{{commit}}')
 
         # Head of manifest-rev is now pointing to current manifest revision.
         # Thus it is safe to unconditionally clear out the refs/west space.
@@ -759,9 +758,8 @@ class Update(_ProjectCommand):
             sha = project.sha(QUAL_MANIFEST_REV)
         except subprocess.CalledProcessError:
             # This is a sign something's really wrong. Add more help.
-            log.err(project.format(
-                "no SHA for branch {mr} in {name_and_path}; "
-                'was the branch deleted?', mr=MANIFEST_REV))
+            log.err(f'no SHA for branch {MANIFEST_REV} '
+                    f'in {project.name_and_path}; was the branch deleted?')
             raise
 
         cp = project.git('rev-parse --abbrev-ref HEAD', capture_stdout=True)
@@ -778,20 +776,18 @@ class Update(_ProjectCommand):
         if self.args.keep_descendants and is_ancestor:
             # A descendant is currently checked out and keep_descendants was
             # given, so there's nothing more to do.
-            log.small_banner(project.format(
-                '{name}: left descendant branch "{b}" checked out',
-                b=current_branch))
+            log.small_banner(f'{project.name}: left descendant branch '
+                             f'"{current_branch}" checked out')
         elif try_rebase:
             # Attempt a rebase.
-            log.small_banner(project.format(
-                '{name}: rebasing to ' + MANIFEST_REV))
+            log.small_banner(f'{project.name}: rebasing to {MANIFEST_REV}')
             project.git('rebase ' + QUAL_MANIFEST_REV)
         else:
             # We can't keep a descendant or rebase, so just check
             # out the new detached HEAD, then print some helpful context.
             project.git('checkout --detach --quiet ' + sha)
-            log.small_banner(project.format(
-                "{name}: checked out {r} as detached HEAD", r=sha))
+            log.small_banner(
+                f'{project.name}: checked out {sha} as detached HEAD')
             _post_checkout_help(project, current_branch, sha, is_ancestor)
 
 class ForAll(_ProjectCommand):
@@ -825,8 +821,8 @@ class ForAll(_ProjectCommand):
     def do_run(self, args, user_args):
         failed = []
         for project in self._cloned_projects(args):
-            log.banner(project.format('running "{c}" in {name_and_path}:',
-                                      c=args.subcommand))
+            log.banner(
+                f'running "{args.subcommand}" in {project.name_and_path}:')
             rc = subprocess.Popen(args.subcommand, shell=True,
                                   cwd=project.abspath).wait()
             if rc:
@@ -898,8 +894,8 @@ def _maybe_sha(rev):
     return len(rev) <= 40
 
 def _clone(project):
-    log.small_banner(project.format('{name}: cloning and initializing'))
-    project.git('init {abspath}', cwd=util.west_topdir())
+    log.small_banner(f'{project.name}: cloning and initializing')
+    project.git(f'init {project.abspath}', cwd=util.west_topdir())
     # The "origin" remote is added to follow the practice that 'origin'
     # is the remote a Git repository was always cloned from.
     #
@@ -907,7 +903,7 @@ def _clone(project):
     # a fetch URL from the manifest file and fetches that directly.
     #
     # The URL of this remote can thus be changed by the user at will.
-    project.git('remote add -- origin {url}')
+    project.git(f'remote add -- origin {project.url}')
 
 def _rev_type(project, rev=None):
     # Returns a "refined" revision type of rev (default:
@@ -978,26 +974,18 @@ def _fetch(project, rev=None):
     # non-commit object" error when the revision is an annotated
     # tag. ^{commit} type peeling isn't supported for the <src> in a
     # <src>:<dst> refspec, so we have to do it separately.
-    msg = "{name}: fetching, need revision " + rev
+    msg = f'{project.name}: fetching, need revision {rev}'
     if project.clone_depth:
-        msg += " with --depth {clone_depth}"
-    # -f is needed to avoid errors in case multiple remotes are present,
-    # at least one of which contains refs that can't be fast-forwarded to our
-    # local ref space.
-    #
-    # --tags is required to get tags, since the remote is specified as a URL.
-    fetch_cmd = ('fetch -f --tags ' +
-                 ('--depth={clone_depth} ' if project.clone_depth else ' ') +
-                 '-- {url} ')
-
-    log.small_banner(project.format(msg))
+        msg += f' with --depth {project.clone_depth}'
+        depth = f'--depth={project.clone_depth}'
+    else:
+        depth = ''
     if _maybe_sha(rev):
         # We can't in general fetch a SHA from a remote, as many hosts
         # (GitHub included) forbid it for security reasons. Let's hope
         # it's reachable from some branch.
-        fetch_cmd += 'refs/heads/*:' + QUAL_REFS + '*'
-        project.git(fetch_cmd)
-        _update_manifest_rev(project, '{revision}')
+        refspec = f'refs/heads/*:{QUAL_REFS}*'
+        next_manifest_rev = project.revision
     else:
         # The revision is definitely not a SHA, so it's safe to fetch directly.
         # This avoids fetching unnecessary refs from the remote.
@@ -1005,12 +993,17 @@ def _fetch(project, rev=None):
         # We update manifest-rev to FETCH_HEAD instead of using a
         # refspec in case the revision is a tag, which we can't use
         # from a refspec.
-        #
-        # We need {{commit}} instead of {commit} because everything
-        # gets run through Project.format().
-        fetch_cmd += '{revision}'
-        project.git(fetch_cmd)
-        _update_manifest_rev(project, 'FETCH_HEAD^{{commit}}')
+        refspec = project.revision
+        next_manifest_rev = 'FETCH_HEAD^{commit}'
+
+    # -f is needed to avoid errors in case multiple remotes are present,
+    # at least one of which contains refs that can't be fast-forwarded to our
+    # local ref space.
+    #
+    # --tags is required to get tags, since the remote is specified as a URL.
+    log.small_banner(msg)
+    project.git(f'fetch -f --tags {depth} -- {project.url} {refspec}')
+    _update_manifest_rev(project, next_manifest_rev)
 
 def _head_ok(project):
     # Returns True if the reference 'HEAD' exists and is not a tag or remote
@@ -1043,19 +1036,17 @@ def _post_checkout_help(project, branch, sha, is_ancestor):
         # user is working on and the remote hasn't changed),
         # print a message that makes it easy to get back,
         # no matter where in the installation os.getcwd() is.
-        log.wrn(project.format(
-            'left behind {name} branch "{b}"; to switch '
-            'back to it (fast forward), use: git -C {rp} checkout {b}',
-            b=branch, rp=rel))
+        log.wrn(f'left behind {project.name} branch "{branch}"; '
+                f'to switch back to it (fast forward), use: '
+                f'git -C {rel} checkout {branch}')
         log.dbg('(To do this automatically in the future,',
                 'use "west update --keep-descendants".)')
     else:
         # Tell the user how they could rebase by hand, and
         # point them at west update --rebase.
-        log.wrn(project.format(
-            'left behind {name} branch "{b}"; '
-            'to rebase onto the new HEAD: git -C {rp} rebase {sh} {b}',
-            b=branch, rp=rel, sh=sha))
+        log.wrn(f'left behind {project.name} branch "{branch}"; '
+                f'to rebase onto the new HEAD: '
+                f'git -C {rel} rebase {sha} {branch}')
         log.dbg('(To do this automatically in the future,',
                 'use "west update --rebase".)')
 

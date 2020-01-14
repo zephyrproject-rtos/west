@@ -194,8 +194,8 @@ class WestApp:
                     ctxt += '        To fix, run:\n'
                     ctxt += '          west update'
 
-                log.die(p.format('failed manifest import in '
-                                 '{name_and_path}\n') + ctxt)
+                log.die(f'failed manifest import in {p.name_and_path}\n' +
+                        ctxt)
             else:
                 log.die('internal error:',
                         f'unhandled manifest load exception: {self.mle}')
@@ -537,9 +537,8 @@ class WestArgumentParser(argparse.ArgumentParser):
                         continue
 
                     project = specs[0].project  # they're all from this project
-                    append(project.format(
-                        'extension commands from project '
-                        '{name} (path: {path}):'))
+                    append('extension commands from project '
+                           f'{project.name} (path: {project.path}):')
 
                     for spec in specs:
                         self.format_extension_spec(append, spec, width)
