@@ -1082,39 +1082,6 @@ class Project:
 
         return ret
 
-    def format(self, s, *args, **kwargs):
-        '''Calls ``s.format()`` with instance-related arguments.
-
-        The formatted value is returned.
-
-        ``s.format()`` is called with any args and kwargs passed as
-        parameters to this method, and the following additional
-        kwargs:
-
-            - ``name``
-            - ``url``
-            - ``revision``
-            - ``path``
-            - ``abspath``
-            - ``posixpath``
-            - ``clone_depth``
-            - ``west_commands``
-            - ``topdir``
-            - ``name_and_path=f"{self.name} ({self.path})"`` (or its
-              non-f-string equivalent)
-
-        Any kwargs passed as parameters to this method override the
-        above additional kwargs.
-
-        :param s: string (or other object) to call ``format()`` on
-        '''
-        kw = {s: getattr(self, s) for s in
-              'name url revision path abspath posixpath '
-              'clone_depth west_commands topdir'.split()}
-        kw['name_and_path'] = '{} ({})'.format(self.name, self.path)
-        kw.update(kwargs)
-        return s.format(*args, **kw)
-
     #
     # Git helpers
     #
@@ -1126,8 +1093,7 @@ class Project:
         Returns a ``subprocess.CompletedProcess`` (an equivalent
         object is back-ported for Python 3.4).
 
-        :param cmd: git command as a string (or list of strings); all
-            strings are formatted using `format` before use.
+        :param cmd: git command as a string (or list of strings)
         :param extra_args: sequence of additional arguments to pass to
             the git command (useful mostly if *cmd* is a string).
         :param capture_stdout: if True, git's standard output is
@@ -1155,7 +1121,7 @@ class Project:
             else:
                 raise ValueError('no abspath; cwd must be given')
 
-        args = ['git'] + [self.format(arg) for arg in cmd_list] + extra_args
+        args = ['git'] + cmd_list + extra_args
         cmd_str = util.quote_sh_list(args)
 
         log.dbg("running '{}'".format(cmd_str), 'in', cwd,
