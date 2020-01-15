@@ -54,7 +54,7 @@ def west_update_tmpdir(west_init_tmpdir):
 # Test cases
 #
 
-def test_installation(west_update_tmpdir):
+def test_workspace(west_update_tmpdir):
     # Basic test that west_update_tmpdir bootstrapped correctly. This
     # is a basic test of west init and west update.
 
@@ -333,14 +333,14 @@ def test_init_again(west_init_tmpdir):
 
 def test_init_local_manifest_project(repos_tmpdir):
     # Do a local clone of manifest repo
-    zephyr_install_dir = repos_tmpdir.join('west_installation', 'zephyr')
+    zephyr_install_dir = repos_tmpdir.join('workspace', 'zephyr')
     clone(str(repos_tmpdir.join('repos', 'zephyr')),
           str(zephyr_install_dir))
 
     cmd(f'init -l "{zephyr_install_dir}"')
 
     # Verify Zephyr has been installed during init -l, but not projects.
-    zid = repos_tmpdir.join('west_installation')
+    zid = repos_tmpdir.join('workspace')
     assert zid.check(dir=1)
     assert zid.join('subdir', 'Kconfiglib').check(dir=0)
     assert zid.join('net-tools').check(dir=0)
@@ -376,7 +376,7 @@ def test_init_local_missing_west_yml_failure(repos_tmpdir):
     # Test that 'west init -l' on repo without a 'west.yml' fails
 
     # Do a local clone of manifest repo
-    zephyr_install_dir = repos_tmpdir.join('west_installation', 'zephyr')
+    zephyr_install_dir = repos_tmpdir.join('workspace', 'zephyr')
     clone(str(repos_tmpdir.join('repos', 'zephyr')),
           str(zephyr_install_dir))
     os.remove(str(zephyr_install_dir.join('west.yml')))
@@ -452,7 +452,7 @@ def test_extension_command_multiproject(repos_tmpdir):
                               print('Testing kconfig test')
                       '''),
                       })
-    west_tmpdir = repos_tmpdir / 'west_installation'
+    west_tmpdir = repos_tmpdir / 'workspace'
     zephyr = repos_tmpdir / 'repos' / 'zephyr'
     cmd(f'init -m "{zephyr}" "{west_tmpdir}"')
     west_tmpdir.chdir()
@@ -532,7 +532,7 @@ def test_extension_command_duplicate(repos_tmpdir):
                               print('Testing kconfig test command')
                       '''),
                       })
-    west_tmpdir = repos_tmpdir / 'west_installation'
+    west_tmpdir = repos_tmpdir / 'workspace'
     zephyr = repos_tmpdir / 'repos' / 'zephyr'
     cmd(f'init -m "{zephyr}" "{west_tmpdir}"')
     west_tmpdir.chdir()
@@ -548,14 +548,14 @@ def test_extension_command_duplicate(repos_tmpdir):
     assert actual == expected
 
 def test_topdir_none(tmpdir):
-    # Running west topdir outside of any installation ought to fail.
+    # Running west topdir outside of any workspace ought to fail.
 
     tmpdir.chdir()
     with pytest.raises(subprocess.CalledProcessError):
         cmd('topdir')
 
-def test_topdir_in_installation(west_init_tmpdir):
-    # Running west topdir anywhere inside of an installation ought to
+def test_topdir_in_workspace(west_init_tmpdir):
+    # Running west topdir anywhere inside of a workspace ought to
     # work, and return the same thing.
 
     expected = str(west_init_tmpdir)
@@ -610,7 +610,7 @@ def default_updater(remotes):
 
 def update_helper(west_tmpdir, updater=default_updater):
     # Helper command for causing a change in two remote repositories,
-    # then running a project command on the west installation.
+    # then running a project command on the west workspace.
     #
     # Adds a commit to both of the kconfiglib and net-tools projects
     # remotes, then call updater(update_remotes),

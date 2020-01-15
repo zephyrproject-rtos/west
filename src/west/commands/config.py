@@ -18,7 +18,7 @@ West configuration file handling.
 West follows Git-like conventions for configuration file locations.
 There are three types of configuration file: system-wide files apply
 to all users on the current machine, global files apply to the current
-user, and local files apply to the current west installation.
+user, and local files apply to the current west workspace.
 
 System files:
 
@@ -36,7 +36,7 @@ Global files:
 
 Local files:
 
-- Linux, macOS, Windows: <installation-root-directory>/.west/config
+- Linux, macOS, Windows: <workspace-root-directory>/.west/config
 
 You can override these files' locations with the WEST_CONFIG_SYSTEM,
 WEST_CONFIG_GLOBAL, and WEST_CONFIG_LOCAL environment variables.
@@ -98,7 +98,7 @@ class Config(WestCommand):
             'config',
             'get or set configuration settings in west config files',
             CONFIG_DESCRIPTION,
-            requires_installation=False)
+            requires_workspace=False)
 
     def do_add_parser(self, parser_adder):
         parser = parser_adder.add_parser(
@@ -122,7 +122,7 @@ class Config(WestCommand):
         group.add_argument('--global', dest='configfile', nargs=0, action=Once,
                            help='global (user-wide) file')
         group.add_argument('--local', dest='configfile', nargs=0, action=Once,
-                           help="this installation's file")
+                           help="this workspace's file")
 
         parser.add_argument('name', nargs='?',
                             help='''config option in section.key format;

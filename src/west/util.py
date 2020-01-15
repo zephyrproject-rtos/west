@@ -51,10 +51,10 @@ def wrap(text, indent):
                          subsequent_indent=indent)
 
 class WestNotFound(RuntimeError):
-    '''Neither the current directory nor any parent has a West installation.'''
+    '''Neither the current directory nor any parent has a west workspace.'''
 
 def west_dir(start=None):
-    '''Returns the absolute path of the installation's .west directory.
+    '''Returns the absolute path of the workspace's .west directory.
 
     Starts the search from the start directory, and goes to its
     parents. If the start directory is not specified, the current
@@ -85,6 +85,6 @@ def west_topdir(start=None, fall_back=True):
                 return west_topdir(os.environ['ZEPHYR_BASE'],
                                    fall_back=False)
             else:
-                raise WestNotFound('Could not find a West installation '
+                raise WestNotFound('Could not find a West workspace '
                                    'in this or any parent directory')
         cur_dir = parent_dir

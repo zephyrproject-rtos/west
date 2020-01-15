@@ -105,16 +105,16 @@ class Init(_ProjectCommand):
     def __init__(self):
         super().__init__(
             'init',
-            'create a west installation',
+            'create a west workspace',
             textwrap.dedent(f'''\
-            Creates a west installation as follows:
+            Creates a west workspace as follows:
 
               1. Creates a .west directory and clones a manifest repository
                  from a git URL to a temporary subdirectory of .west,
                  .west/<tmpdir>.
               2. Parses the manifest file, .west/<tmpdir>/west.yml.
                  This file's contents can specify manifest.path, the location
-                 of the manifest repository in the installation, like so:
+                 of the manifest repository in the workspace, like so:
 
                  manifest:
                     self:
@@ -138,7 +138,7 @@ class Init(_ProjectCommand):
 
             The default revision in this repository to check out is
             "{MANIFEST_REV_DEFAULT}"; override with --mr.'''),
-            requires_installation=False)
+            requires_workspace=False)
 
     def do_add_parser(self, parser_adder):
         parser = self._parser(parser_adder)
@@ -156,7 +156,7 @@ class Init(_ProjectCommand):
 
         parser.add_argument(
             'directory', nargs='?', default=None,
-            help='''Directory to create the installation in (default: current
+            help='''Directory to create the workspace in (default: current
                  directory). Missing intermediate directories will be created.
                  If -l is given, this is the path to the manifest repository to
                  use instead.''')
@@ -172,7 +172,7 @@ class Init(_ProjectCommand):
                     In your environment, ZEPHYR_BASE is set to:
                     {zb}
 
-                    This forces west to search for an installation there.
+                    This forces west to search for a workspace there.
                     Try unsetting ZEPHYR_BASE and re-running this command.''')
             else:
                 msg = ''
@@ -558,7 +558,7 @@ class Update(_ProjectCommand):
               3. Check out the new manifest-rev commit as a detached HEAD
                  (but see "checked out branches")
 
-            You must have already created a west installation with "west init".
+            You must have already created a west workspace with "west init".
 
             This command does not alter the manifest repository's contents.''')
         )
@@ -817,9 +817,9 @@ class Topdir(_ProjectCommand):
     def __init__(self):
         super().__init__(
             'topdir',
-            'print the top level directory of the installation',
+            'print the top level directory of the workspace',
             textwrap.dedent('''\
-            Prints the absolute path of the current west installation's
+            Prints the absolute path of the current west workspace's
             top directory.
 
             This is the directory containing .west. All project
@@ -1019,7 +1019,7 @@ def _post_checkout_help(project, branch, sha, is_ancestor):
         # the new HEAD (e.g. if this is a topic branch the
         # user is working on and the remote hasn't changed),
         # print a message that makes it easy to get back,
-        # no matter where in the installation os.getcwd() is.
+        # no matter where in the workspace os.getcwd() is.
         log.wrn(f'left behind {project.name} branch "{branch}"; '
                 f'to switch back to it (fast forward), use: '
                 f'git -C {rel} checkout {branch}')
@@ -1035,7 +1035,7 @@ def _post_checkout_help(project, branch, sha, is_ancestor):
                 'use "west update --rebase".)')
 
 #
-# Special files and directories in the west installation.
+# Special files and directories in the west workspace.
 #
 # These are given variable names for clarity, but they can't be
 # changed without propagating the changes into west itself.

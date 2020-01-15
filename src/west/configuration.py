@@ -7,7 +7,7 @@
 West follows Git-like conventions for configuration file locations.
 There are three types of configuration file: system-wide files apply
 to all users on the current machine, global files apply to the current
-user, and local files apply to the current west installation.
+user, and local files apply to the current west workspace.
 
 System files:
 
@@ -25,7 +25,7 @@ Global files:
 
 Local files:
 
-- Linux, macOS, Windows: ``<installation-root-directory>/.west/config``
+- Linux, macOS, Windows: ``<workspace-topdir>/.west/config``
 
 You can override these files' locations with the ``WEST_CONFIG_SYSTEM``,
 ``WEST_CONFIG_GLOBAL``, and ``WEST_CONFIG_LOCAL`` environment variables.
@@ -63,7 +63,7 @@ class ConfigFile(Enum):
 
     - SYSTEM: system level configuration shared by all users
     - GLOBAL: global or user-wide configuration
-    - LOCAL: per-installation configuration
+    - LOCAL: per-workspace configuration
     - ALL: all three of the above, where applicable
     '''
     ALL = 1
@@ -95,7 +95,7 @@ def read_config(configfile=None, config=config, topdir=None,
 
     :param configfile: a `west.configuration.ConfigFile`
     :param config: configuration object to read into
-    :param topdir: west installation root to read local options from
+    :param topdir: west workspace root to read local options from
     :param config_file: deprecated alternative for *configfile*
     '''
     if configfile is not None and config_file is not None:
@@ -114,7 +114,7 @@ def update_config(section, key, value, configfile=ConfigFile.LOCAL,
     :param key: key to set in the given section
     :param value: value to set the key to
     :param configfile: `west.configuration.ConfigFile`, must not be ALL
-    :param topdir: west installation root to write local config options to
+    :param topdir: west workspace root to write local config options to
 
     The destination file to write is given by *configfile*. The
     default value (``ConfigFile.LOCAL``) writes to the local
@@ -122,7 +122,7 @@ def update_config(section, key, value, configfile=ConfigFile.LOCAL,
 
     - topdir/.west/config, if topdir is given, or
     - the value of 'WEST_CONFIG_LOCAL' in the environment, if set, or
-    - the local configuration file in the west installation
+    - the local configuration file in the west workspace
       found by searching the file system (raising WestNotFound if
       one is not found).
     '''
@@ -150,7 +150,7 @@ def delete_config(section, key, configfile=None, topdir=None):
                        If a list of ConfigFile enumerators, delete
                        from those files.
                        Otherwise, delete from the given ConfigFile.
-    :param topdir: west installation root to delete local options from
+    :param topdir: west workspace root to delete local options from
 
     Deleting the only key in a section deletes the entire section.
 
@@ -161,7 +161,7 @@ def delete_config(section, key, configfile=None, topdir=None):
 
     - topdir/.west/config, if topdir is given, or
     - the value of 'WEST_CONFIG_LOCAL' in the environment, if set, or
-    - the local configuration file in the west installation
+    - the local configuration file in the west workspace
       found by searching the file system (raising WestNotFound if
       one is not found).
     '''

@@ -47,11 +47,11 @@ class ExtensionCommandError(CommandError):
 
 def _no_topdir_msg(cwd, name):
     return f'''\
-no west installation found from "{cwd}"; "west {name}" requires one.
+no west workspace found from "{cwd}"; "west {name}" requires one.
 Things to try:
-  - Change directory to a west installation and retry.
-  - Set ZEPHYR_BASE to a zephyr repository path in a west installation.
-  - Run "west init" to set up an installation here.
+  - Change directory to somewhere inside a west workspace and retry.
+  - Set ZEPHYR_BASE to a zephyr repository path in a west workspace.
+  - Run "west init" to set up a workspace here.
   - Run "west init -h" for additional information.
 '''
 
@@ -59,7 +59,7 @@ class WestCommand(ABC):
     '''Abstract superclass for a west command.'''
 
     def __init__(self, name, help, description, accepts_unknown_args=False,
-                 requires_installation=True):
+                 requires_workspace=True, requires_installation=None):
         '''Abstract superclass for a west command.
 
         Some fields, such as *name*, *help*, and *description*,
@@ -75,15 +75,21 @@ class WestCommand(ABC):
         :param accepts_unknown_args: if true, the command can handle
             arbitrary unknown command line arguments in `WestCommand.run`.
             Otherwise, it's a fatal to pass unknown arguments.
-        :param requires_installation: if true, the command requires a
-            west installation to run, and running it outside of one is
+        :param requires_workspace: if true, the command requires a
+            west workspace to run, and running it outside of one is
             a fatal error.
+        :param requires_installation: deprecated equivalent for
+            "requires_workspace"; this may go away eventually.
         '''
         self.name = name
         self.help = help
         self.description = description
         self.accepts_unknown_args = accepts_unknown_args
-        self.requires_installation = requires_installation
+        if requires_installation is not None:
+            self.requires_workspace = requires_installation
+        else:
+            self.requires_workspace = requires_workspace
+        self.requires_installation = self.requires_workspace
         self.topdir = None
         self.manifest = None
 
@@ -97,14 +103,14 @@ class WestCommand(ABC):
         :param args: known arguments parsed via `WestCommand.add_parser`
         :param unknown: unknown arguments present on the command line;
             must be empty unless ``accepts_unknown_args`` is true
-        :param topdir: west installation topdir, accessible as
+        :param topdir: west workspace topdir, accessible as
             ``self.topdir`` from `WestCommand.do_run`
         :param manifest: `west.manifest.Manifest` or ``None``,
             accessible as ``self.manifest`` from `WestCommand.do_run`
         '''
         if unknown and not self.accepts_unknown_args:
             self.parser.error(f'unexpected arguments: {unknown}')
-        if not topdir and self.requires_installation:
+        if not topdir and self.requires_workspace:
             log.die(_no_topdir_msg(os.getcwd(), self.name))
         self.topdir = topdir
         self.manifest = manifest

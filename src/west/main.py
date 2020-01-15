@@ -80,9 +80,9 @@ class WestApp:
     def run(self, argv):
         # Run the command-line application with argument list 'argv'.
 
-        # See if we're in an installation. It's fine if we're not.
+        # See if we're in a workspace. It's fine if we're not.
         # Note that this falls back on searching from ZEPHYR_BASE
-        # if the current directory isn't inside a west installation.
+        # if the current directory isn't inside a west workspace.
         try:
             self.topdir = west_topdir()
         except WestNotFound:
@@ -155,7 +155,7 @@ class WestApp:
                 return
             elif args.command == 'init':
                 # init is fine to run -- it will print its own error,
-                # with context about where the installation was found,
+                # with context about where the workspace was found,
                 # and what the user's choices are.
                 return
             else:
@@ -398,7 +398,7 @@ class Help(WestCommand):
                          textwrap.dedent('''\
                          With an argument, prints help for that command.
                          Without one, prints top-level help for west.'''),
-                         requires_installation=False)
+                         requires_workspace=False)
 
     def do_add_parser(self, parser_adder):
         parser = parser_adder.add_parser(
@@ -710,7 +710,7 @@ def set_zephyr_base(args, manifest, topdir):
                 #
                 # Therefore, issue a warning as the user might have
                 # run zephyr-env.sh/cmd in some other zephyr
-                # installation and forgotten about it.
+                # workspace and forgotten about it.
                 log.wrn(f'ZEPHYR_BASE={zb_env} '
                         f'in the calling environment will be used,\n'
                         f'but the zephyr.base config option in {topdir} '
@@ -731,7 +731,7 @@ def set_zephyr_base(args, manifest, topdir):
                     '  - west config contains no zephyr.base setting\n'
                     '  - no manifest project has name or path "zephyr"\n'
                     '\n'
-                    "  If this isn't a Zephyr installation, you can "
+                    "  If this isn't a Zephyr workspace, you can "
                     "  silence this warning with something like this:\n"
                     '    west config zephyr.base not-using-zephyr')
 
