@@ -808,8 +808,8 @@ class Manifest:
 
         imptype = type(imp)
         if imptype == bool:
-            if imp is False:
-                return
+            # We should not have been called unless the import was truthy.
+            assert imp
             self._import_path_from_project(project, _WEST_YML, projects)
         elif imptype == str:
             self._import_path_from_project(project, imp, projects)
@@ -1392,12 +1392,6 @@ _EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
 _EARLIEST_VER = parse_version(_EARLIEST_VER_STR)
 _DEFAULT_REV = 'master'
 
-def _quote_maybe(string):
-    if string:
-        return f'"{string}"'
-    else:
-        return None
-
 @lru_cache(maxsize=1)
 def _warn_once_if_no_git():
     # Using an LRU cache means this gets called once. Afterwards, the
@@ -1423,9 +1417,6 @@ def _mpath(cp=None, topdir=None):
         return cp.get('manifest', 'path')
     except (configparser.NoOptionError, configparser.NoSectionError) as e:
         raise MalformedConfig('no "manifest.path" config option is set') from e
-
-def _west_yml(topdir):
-    return os.path.join(topdir, _mpath(topdir=topdir), _WEST_YML)
 
 def _manifest_content_at(project, path, rev=QUAL_MANIFEST_REV_BRANCH):
     # Get a list of manifest data from project at path
