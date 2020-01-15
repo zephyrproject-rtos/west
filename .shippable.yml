@@ -14,8 +14,5 @@ build:
     - python3 --version
     - export PATH=$PATH:$HOME/.local/bin
     - pip3 install tox
-    # This setuptools upgrade is only needed for find_namespace_packages().
-    # We can eliminate it if we make west a non-namespace package again.
-    - pip3 install --upgrade setuptools
     - mkdir -p shippable/{testresults,codecoverage}
     - tox -- --junitxml=$PWD/shippable/testresults/nosetests.xml --cov=west --cov-report=xml:$PWD/shippable/codecoverage/coverage.xml tests
