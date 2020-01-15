@@ -218,16 +218,15 @@ class WestApp:
             filtered = []
             for spec in specs:
                 if spec.name in self.builtins:
-                    log.wrn('ignoring project {} extension command "{}";'.
-                            format(spec.project.name, spec.name),
+                    log.wrn(f'ignoring project {spec.project.name} '
+                            f'extension command "{spec.name}"; '
                             'this is a built in command')
                     continue
                 if spec.name in extension_names:
-                    log.wrn(
-                        'ignoring project {} extension command "{}";'.
-                        format(spec.project.name, spec.name),
-                        'command "{}" already defined as extension command'.
-                        format(spec.name))
+                    log.wrn(f'ignoring project {spec.project.name} '
+                            f'extension command "{spec.name}"; '
+                            f'command "{spec.name}" is '
+                            'already defined as extension command')
                     continue
 
                 filtered.append(spec)
@@ -288,7 +287,7 @@ class WestApp:
                             multiple times to increase verbosity.''')
 
         parser.add_argument('-V', '--version', action='version',
-                            version='West version: v{}'.format(__version__),
+                            version=f'West version: v{__version__}',
                             help='print the program version and exit')
 
         subparser_gen = parser.add_subparsers(metavar='<command>',
@@ -332,15 +331,14 @@ class WestApp:
         except BrokenPipeError:
             sys.exit(0)
         except CalledProcessError as cpe:
-            log.err('command exited with status {}: {}'.
-                    format(cpe.returncode, quote_sh_list(cpe.cmd)), fatal=True)
+            log.err(f'command exited with status {cpe.returncode}: '
+                    f'{quote_sh_list(cpe.cmd)}', fatal=True)
             if args.verbose >= log.VERBOSE_EXTREME:
                 log.banner('Traceback (enabled by -vvv):')
                 traceback.print_exc()
             sys.exit(cpe.returncode)
         except ExtensionCommandError as ece:
-            msg = "extension command \"{}\" couldn't be run".format(
-                args.command)
+            msg = f"extension command \"{args.command}\" couldn't be run"
             if ece.hint:
                 msg += '\n  Hint: ' + ece.hint
 
@@ -349,7 +347,8 @@ class WestApp:
                 log.banner('Traceback (enabled by -vvv):')
                 traceback.print_exc()
             else:
-                msg += '\n  See {} for a traceback.'.format(dump_traceback())
+                tb_file = dump_traceback()
+                msg += f'\n  See {tb_file} for a traceback.'
                 log.err(msg, fatal=True)
             sys.exit(ece.returncode)
         except CommandError as ce:
@@ -362,8 +361,8 @@ class WestApp:
         # unless we were able to parse the manifest. That's where
         # information about extensions is loaded from.
         assert self.manifest is not None and self.mle is None, \
-            'internal error: running extension "{}" ' \
-            'but got {}'.format(name, self.mle)
+            f'internal error: running extension "{name}" ' \
+            f'but got {self.mle}'
 
         command = self.extensions[name].factory()
 
@@ -426,7 +425,7 @@ class Help(WestCommand):
             # parent stack frame.
             app.run_extension(name, [name, '--help'])
         else:
-            log.wrn('unknown command "{}"'.format(name))
+            log.wrn(f'unknown command "{name}"')
             app.west_parser.print_help(top_level=True)
             if app.mle:
                 log.wrn('your manifest could not be loaded, '
@@ -557,8 +556,7 @@ class WestArgumentParser(argparse.ArgumentParser):
         # Join the various options together as a comma-separated list,
         # with the metavar if there is one. That's our "thing".
         if metavar is not None:
-            opt_str = '  ' + ', '.join('{} {}'.format(o, metavar)
-                                       for o in options)
+            opt_str = '  ' + ', '.join(f'{o} {metavar}' for o in options)
         else:
             opt_str = '  ' + ', '.join(options)
 
@@ -566,7 +564,7 @@ class WestArgumentParser(argparse.ArgumentParser):
         self.format_thing_and_help(append, opt_str, help, width)
 
     def format_command(self, append, command, width):
-        thing = '  {}:'.format(command.name)
+        thing = f'  {command.name}:'
         self.format_thing_and_help(append, thing, command.help, width)
 
     def format_extension_spec(self, append, spec, width):
@@ -637,10 +635,9 @@ class WestArgumentParser(argparse.ArgumentParser):
 
 def mve_msg(mve, suggest_upgrade=True):
     return '\n  '.join(
-        ['west v{} or later is required by the manifest'.
-         format(mve.version),
-         'West version: v{}'.format(__version__)] +
-        (['Manifest file: {}'.format(mve.file)] if mve.file else []) +
+        [f'west v{mve.version} or later is required by the manifest',
+         f'West version: v{__version__}'] +
+        ([f'Manifest file: {mve.file}'] if mve.file else []) +
         (['Please upgrade west and retry.'] if suggest_upgrade else []))
 
 def set_zephyr_base(args, manifest, topdir):
@@ -714,13 +711,13 @@ def set_zephyr_base(args, manifest, topdir):
                 # Therefore, issue a warning as the user might have
                 # run zephyr-env.sh/cmd in some other zephyr
                 # installation and forgotten about it.
-                log.wrn('ZEPHYR_BASE={}'.format(zb_env),
-                        'in the calling environment will be used,\n'
-                        'but the zephyr.base config option in {} is "{}"\n'
-                        'which implies a different ZEPHYR_BASE={}'
-                        '\n'.format(topdir, rel_zb_config, zb_config) +
-                        'To disable this warning in the future, execute '
-                        '\'west config --global zephyr.base-prefer env\'')
+                log.wrn(f'ZEPHYR_BASE={zb_env} '
+                        f'in the calling environment will be used,\n'
+                        f'but the zephyr.base config option in {topdir} '
+                        f'is "{rel_zb_config}"\n'
+                        f'which implies a different ZEPHYR_BASE={zb_config}\n'
+                        f'To disable this warning in the future, execute '
+                        f"'west config --global zephyr.base-prefer env'")
         elif zb_config:
             zb = str(zb_config)
             zb_origin = 'configfile'
@@ -740,7 +737,7 @@ def set_zephyr_base(args, manifest, topdir):
 
     if zb is not None:
         os.environ['ZEPHYR_BASE'] = zb
-        log.dbg('ZEPHYR_BASE={} (origin: {})'.format(zb, zb_origin))
+        log.dbg(f'ZEPHYR_BASE={zb} (origin: {zb_origin})')
 
 def dump_traceback():
     # Save the current exception to a file and return its path.

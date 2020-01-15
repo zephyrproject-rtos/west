@@ -40,10 +40,10 @@ def is_zephyr_build(path):
         cache = {}
 
     if 'ZEPHYR_TOOLCHAIN_VARIANT' in cache:
-        log.dbg('{} is a zephyr build directory'.format(path),
+        log.dbg(f'{path} is a zephyr build directory',
                 level=log.VERBOSE_EXTREME)
         return True
     else:
-        log.dbg('{} is NOT a valid zephyr build directory'.format(path),
+        log.dbg(f'{path} is NOT a valid zephyr build directory',
                 level=log.VERBOSE_EXTREME)
         return False

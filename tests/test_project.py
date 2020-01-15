@@ -93,17 +93,16 @@ def test_list(west_update_tmpdir):
     klib_rel = os.path.join('subdir', 'Kconfiglib')
     klib_abs = str(west_update_tmpdir.join('subdir', 'Kconfiglib'))
 
-    rel_outside = cmd('list -f "{{name}}" {}'.format(klib_rel)).strip()
+    rel_outside = cmd(f'list -f "{{name}}" {klib_rel}').strip()
     assert rel_outside == 'Kconfiglib'
 
-    abs_outside = cmd('list -f "{{name}}" {}'.format(klib_abs)).strip()
+    abs_outside = cmd(f'list -f "{{name}}" {klib_abs}').strip()
     assert abs_outside == 'Kconfiglib'
 
     rel_inside = cmd('list -f "{name}" .', cwd=klib_abs).strip()
     assert rel_inside == 'Kconfiglib'
 
-    abs_inside = cmd('list -f "{{name}}" {}'.format(klib_abs),
-                     cwd=klib_abs).strip()
+    abs_inside = cmd(f'list -f "{{name}}" {klib_abs}', cwd=klib_abs).strip()
     assert abs_inside == 'Kconfiglib'
 
     with pytest.raises(subprocess.CalledProcessError):
@@ -338,7 +337,7 @@ def test_init_local_manifest_project(repos_tmpdir):
     clone(str(repos_tmpdir.join('repos', 'zephyr')),
           str(zephyr_install_dir))
 
-    cmd('init -l "{}"'.format(str(zephyr_install_dir)))
+    cmd(f'init -l "{zephyr_install_dir}"')
 
     # Verify Zephyr has been installed during init -l, but not projects.
     zid = repos_tmpdir.join('west_installation')
@@ -370,7 +369,7 @@ def test_init_local_manifest_project(repos_tmpdir):
 def test_init_local_already_initialized_failure(west_init_tmpdir):
     # Test that 'west init -l' on an initialized tmpdir errors out
     with pytest.raises(subprocess.CalledProcessError):
-        cmd('init -l "{}"'.format(str(west_init_tmpdir)))
+        cmd(f'init -l "{west_init_tmpdir}"')
 
 
 def test_init_local_missing_west_yml_failure(repos_tmpdir):
@@ -383,7 +382,7 @@ def test_init_local_missing_west_yml_failure(repos_tmpdir):
     os.remove(str(zephyr_install_dir.join('west.yml')))
 
     with pytest.raises(subprocess.CalledProcessError):
-        cmd('init -l "{}"'.format(str(zephyr_install_dir)))
+        cmd(f'init -l "{zephyr_install_dir}"')
 
 
 def test_extension_command_execution(west_init_tmpdir):
@@ -407,9 +406,9 @@ def test_extension_command_multiproject(repos_tmpdir):
     # Update the manifest to specify extension commands in Kconfiglib.
     # This removes tagged_repo, but we're not using it, so that's fine.
     add_commit(remote_zephyr, 'test added extension command',
-               files={'west.yml': textwrap.dedent('''\
+               files={'west.yml': textwrap.dedent(f'''\
                       west:
-                        url: file://{west}
+                        url: file://{remote_west}
                       manifest:
                         defaults:
                           remote: test-local
@@ -427,7 +426,7 @@ def test_extension_command_multiproject(repos_tmpdir):
                             west-commands: scripts/west-commands.yml
                         self:
                           path: zephyr
-                      '''.format(west=remote_west, rr=str(rr)))})
+                      ''')})
 
     # Add an extension command to the Kconfiglib remote.
     add_commit(remote_kconfiglib, 'add west commands',
@@ -453,9 +452,9 @@ def test_extension_command_multiproject(repos_tmpdir):
                               print('Testing kconfig test')
                       '''),
                       })
-    west_tmpdir = repos_tmpdir.join('west_installation')
-    cmd('init -m "{}" "{}"'.format(str(repos_tmpdir.join('repos', 'zephyr')),
-                                   str(west_tmpdir)))
+    west_tmpdir = repos_tmpdir / 'west_installation'
+    zephyr = repos_tmpdir / 'repos' / 'zephyr'
+    cmd(f'init -m "{zephyr}" "{west_tmpdir}"')
     west_tmpdir.chdir()
     config.read_config()
     cmd('update')
@@ -487,9 +486,9 @@ def test_extension_command_duplicate(repos_tmpdir):
 
     # This removes tagged_repo, but we're not using it, so that's fine.
     add_commit(remote_zephyr, 'test added extension command',
-               files={'west.yml': textwrap.dedent('''\
+               files={'west.yml': textwrap.dedent(f'''\
                       west:
-                        url: file://{west}
+                        url: file://{remote_west}
                       manifest:
                         defaults:
                           remote: test-local
@@ -507,7 +506,7 @@ def test_extension_command_duplicate(repos_tmpdir):
                             west-commands: scripts/west-commands.yml
                         self:
                           path: zephyr
-                      '''.format(west=remote_west, rr=str(rr)))})
+                      ''')})
 
     # Initialize the net-tools repository.
     add_commit(remote_kconfiglib, 'add west commands',
@@ -533,16 +532,16 @@ def test_extension_command_duplicate(repos_tmpdir):
                               print('Testing kconfig test command')
                       '''),
                       })
-    west_tmpdir = repos_tmpdir.join('west_installation')
-    cmd('init -m "{}" "{}"'.format(str(repos_tmpdir.join('repos', 'zephyr')),
-                                   str(west_tmpdir)))
+    west_tmpdir = repos_tmpdir / 'west_installation'
+    zephyr = repos_tmpdir / 'repos' / 'zephyr'
+    cmd(f'init -m "{zephyr}" "{west_tmpdir}"')
     west_tmpdir.chdir()
     config.read_config()
     cmd('update')
 
     actual = cmd('test-extension', stderr=subprocess.STDOUT).splitlines()
     expected = [
-        'WARNING: ignoring project net-tools extension command "test-extension"; command "test-extension" already defined as extension command',  # noqa: E501
+        'WARNING: ignoring project net-tools extension command "test-extension"; command "test-extension" is already defined as extension command',  # noqa: E501
         'Testing kconfig test command',
     ]
 
@@ -680,23 +679,23 @@ def test_change_remote_conflict(west_update_tmpdir):
 
     revision = rev_parse(net_tools, 'HEAD')
 
-    west_yml_content = textwrap.dedent('''\
+    west_yml_content = textwrap.dedent(f'''\
                       west:
-                        url: file://{west}
+                        url: file://{rwest}
                       manifest:
                         defaults:
                           remote: test-local
 
                         remotes:
                           - name: test-local
-                            url-base: file://{rr}
+                            url-base: file://{rrepo}
 
                         projects:
                           - name: net-tools
-                            revision: {rev}
+                            revision: {revision}
                         self:
                           path: zephyr
-                      '''.format(west=rwest, rr=rrepo, rev=revision))
+                      ''')
     add_commit(str(wct.join('zephyr')), 'test update manifest',
                files={'west.yml': west_yml_content})
 
@@ -704,27 +703,26 @@ def test_change_remote_conflict(west_update_tmpdir):
 
     revision = rev_parse(alt_net_tools, 'HEAD')
 
-    west_yml_content = textwrap.dedent('''\
+    west_yml_content = textwrap.dedent(f'''\
                       west:
-                        url: file://{west}
+                        url: file://{rwest}
                       manifest:
                         defaults:
                           remote: test-local
 
                         remotes:
                           - name: test-local
-                            url-base: file://{rr}
+                            url-base: file://{rrepo}
                           - name: test-alternate
-                            url-base: file://{ar}
+                            url-base: file://{alt_repo}
 
                         projects:
                           - name: net-tools
                             remote: test-alternate
-                            revision: {rev}
+                            revision: {revision}
                         self:
                           path: zephyr
-                      '''.format(west=rwest, ar=alt_repo, rr=rrepo,
-                                 rev=revision))
+                      ''')
 
     add_commit(str(wct.join('zephyr')), 'test update manifest conflict',
                files={'west.yml': west_yml_content})

@@ -175,7 +175,7 @@ def _use_colors():
     except ValueError as e:
         global _COLOR_UI_WARNED
         if not _COLOR_UI_WARNED:
-            print("WARNING: invalid color.ui value: {}.".format(e),
+            print(f"WARNING: invalid color.ui value: {e}.",
                   file=sys.stderr)
             print('         To fix, run: "west config color.ui <true|false>"',
                   file=sys.stderr)

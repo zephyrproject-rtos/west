@@ -16,8 +16,8 @@ def test_builtin_help_and_dash_h(west_init_tmpdir):
 
     for cls in itertools.chain(*BUILTIN_COMMAND_GROUPS.values()):
         c = cls()
-        h1out = cmd('help {}'.format(c.name))
-        h2out = cmd('{} -h'.format(c.name))
+        h1out = cmd(f'help {c.name}')
+        h2out = cmd(f'{c.name} -h')
         assert h1out == h2out
 
 def test_extension_help_and_dash_h(west_init_tmpdir):

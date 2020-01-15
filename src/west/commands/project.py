@@ -10,6 +10,7 @@ from functools import partial
 import os
 from os.path import join, relpath, basename, dirname, exists, isdir
 import shutil
+import shlex
 import subprocess
 import sys
 import textwrap
@@ -70,21 +71,15 @@ class _ProjectCommand(WestCommand):
             # Die with an error message on unknown or uncloned projects.
             unknown, uncloned = ve.args
             if unknown:
-                log.die('Unknown project name{s}/path{s}: {unknown} '
-                        '(use "west list" to list all projects)'
-                        .format(s='s' if len(unknown) > 1 else '',
-                                unknown=', '.join(unknown)))
+                s = 's' if len(unknown) > 1 else ''
+                names = ' '.join(unknown)
+                log.die(f'unknown project name{s}/path{s}: {names}\n'
+                        '  Hint: use "west list" to list all projects.')
             elif only_cloned and uncloned:
-                plural = len(uncloned) > 1
-                names = [p.name for p in uncloned]
-                log.die(textwrap.dedent('''\
-                The following project{} not cloned: {}.
-                Please clone {} first, with:
-                    west update {}
-                then retry.'''.format('s are' if plural else ' is',
-                                      ", ".join(names),
-                                      'them' if plural else 'it',
-                                      " ".join(names))))
+                s = 's' if len(uncloned) > 1 else ''
+                names = ' '.join(p.name for p in uncloned)
+                log.die(f'uncloned project{s}: {names}.\n'
+                        '  Hint: run "west update" and retry.')
             else:
                 # Should never happen, but re-raise to fail fast and
                 # preserve a stack trace, to encourage a bug report.
@@ -111,7 +106,7 @@ class Init(_ProjectCommand):
         super().__init__(
             'init',
             'create a west installation',
-            textwrap.dedent('''\
+            textwrap.dedent(f'''\
             Creates a west installation as follows:
 
               1. Creates a .west directory and clones a manifest repository
@@ -137,13 +132,12 @@ class Init(_ProjectCommand):
 
             The default manifest repository URL is:
 
-            {}
+            {MANIFEST_URL_DEFAULT}
 
             This can be overridden using -m.
 
-            The default revision in this repository to check out is "{}";
-            override with --mr.'''.format(MANIFEST_URL_DEFAULT,
-                                          MANIFEST_REV_DEFAULT)),
+            The default revision in this repository to check out is
+            "{MANIFEST_REV_DEFAULT}"; override with --mr.'''),
             requires_installation=False)
 
     def do_add_parser(self, parser_adder):
@@ -173,18 +167,16 @@ class Init(_ProjectCommand):
         if self.topdir:
             zb = os.environ.get('ZEPHYR_BASE')
             if zb:
-                msg = textwrap.dedent('''
+                msg = textwrap.dedent(f'''
                 Note:
                     In your environment, ZEPHYR_BASE is set to:
-                    {}
+                    {zb}
 
                     This forces west to search for an installation there.
-                    Try unsetting ZEPHYR_BASE and re-running this command.'''.
-                                      format(zb))
+                    Try unsetting ZEPHYR_BASE and re-running this command.''')
             else:
                 msg = ''
-            log.die('already initialized in {}, aborting.{}'.
-                    format(self.topdir, msg))
+            log.die(f'already initialized in {self.topdir}, aborting.{msg}')
 
         if args.local and (args.manifest_url or args.manifest_rev):
             log.die('-l cannot be combined with -m or --mr')
@@ -197,8 +189,7 @@ class Init(_ProjectCommand):
         else:
             topdir = self.bootstrap(args)
 
-        log.banner('Initialized. Now run "west update" inside {}.'.
-                   format(topdir))
+        log.banner(f'Initialized. Now run "west update" inside {topdir}.')
 
     def local(self, args):
         if args.manifest_rev is not None:
@@ -211,13 +202,11 @@ class Init(_ProjectCommand):
         west_dir = os.path.join(topdir, WEST_DIR)
 
         if not exists(manifest_file):
-            log.die('can\'t init: no "west.yml" found in {}'.
-                    format(manifest_dir))
+            log.die(f'can\'t init: no "west.yml" found in {manifest_dir}')
 
         log.banner('Initializing from existing manifest repository',
                    rel_manifest)
-        log.small_banner('Creating {} and local configuration file'.
-                         format(west_dir))
+        log.small_banner(f'Creating {west_dir} and local configuration file')
         self.create(west_dir)
         os.chdir(topdir)
         update_config('manifest', 'path', rel_manifest)
@@ -248,10 +237,10 @@ class Init(_ProjectCommand):
         # Verify the manifest file exists.
         temp_manifest = join(tempdir, 'west.yml')
         if not exists(temp_manifest):
-            log.die('can\'t init: no "west.yml" found in {}\n'
-                    '  Hint: check --manifest-url={} and --manifest-rev={}\n'
-                    '  You may need to remove {} before retrying.'.
-                    format(tempdir, manifest_url, manifest_rev, west_dir))
+            log.die(f'can\'t init: no "west.yml" found in {tempdir}\n'
+                    f'  Hint: check --manifest-url={manifest_url} and '
+                    '--manifest-rev={manifest_rev}\n'
+                    f'  You may need to remove {west_dir} before retrying.')
 
         # Parse the manifest to get the manifest path, if it declares one.
         # Otherwise, use the URL. Ignore imports -- all we really
@@ -278,25 +267,22 @@ class Init(_ProjectCommand):
         try:
             os.makedirs(directory, exist_ok=exist_ok)
         except PermissionError:
-            log.die('Cannot initialize in {}: permission denied'.
-                    format(directory))
+            log.die(f'Cannot initialize in {directory}: permission denied')
         except FileExistsError:
-            log.die('Something else created {} concurrently; quitting'.
-                    format(directory))
+            log.die(f'Something else created {directory} concurrently')
         except Exception as e:
-            log.die("Can't create directory {}: {}".format(directory, e.args))
+            log.die(f"Can't create {directory}: {e}")
 
     def check_call(self, args, cwd=None):
         cmd_str = util.quote_sh_list(args)
-        log.dbg("running '{}'".format(cmd_str), 'in', cwd or os.getcwd(),
+        log.dbg(f"running '{cmd_str}' in {cwd or os.getcwd()}",
                 level=log.VERBOSE_VERY)
         subprocess.check_call(args, cwd=cwd)
 
     def clone_manifest(self, url, rev, dest, exist_ok=False):
-        log.small_banner('Cloning manifest repository from {}, rev. {}'.
-                         format(url, rev))
+        log.small_banner(f'Cloning manifest repository from {url}, rev. {rev}')
         if not exist_ok and exists(dest):
-            log.die('refusing to clone into existing location ' + dest)
+            log.die(f'refusing to clone into existing location {dest}')
 
         self.check_call(('git', 'init', dest))
         self.check_call(('git', 'remote', 'add', 'origin', '--', url),
@@ -342,7 +328,7 @@ class List(_ProjectCommand):
         default_fmt = '{name:12} {path:28} {revision:40} {url}'
         parser = self._parser(
             parser_adder,
-            epilog=textwrap.dedent('''\
+            epilog=textwrap.dedent(f'''\
             FORMAT STRINGS
             --------------
 
@@ -351,7 +337,7 @@ class List(_ProjectCommand):
 
             The default format string is:
 
-            "{}"
+            "{default_fmt}"
 
             The following arguments are available:
 
@@ -368,7 +354,7 @@ class List(_ProjectCommand):
             - cloned: "cloned" if the project has been cloned, "not-cloned"
               otherwise
             - clone_depth: project clone depth if specified, "None" otherwise
-            '''.format(default_fmt)))
+            '''))
         parser.add_argument('-a', '--all', action='store_true',
                             help='ignored for backwards compatibility'),
         parser.add_argument('-f', '--format', default=default_fmt,
@@ -382,13 +368,12 @@ class List(_ProjectCommand):
     def do_run(self, args, user_args):
         def sha_thunk(project):
             if not project.is_cloned():
-                log.die('cannot get sha for uncloned project {0}; '
-                        'run "west update {0}" and retry'.
-                        format(project.name))
+                log.die(f'cannot get sha for uncloned project {project.name}; '
+                        f'run "west update {project.name}" and retry')
             elif project.revision:
                 return project.sha(MANIFEST_REV)
             else:
-                return '{:40}'.format('N/A')
+                return f'{"N/A":40}'
 
         def cloned_thunk(project):
             return "cloned" if project.is_cloned() else "not-cloned"
@@ -419,14 +404,13 @@ class List(_ProjectCommand):
                 # The raised KeyError seems to just put the first
                 # invalid argument in the args tuple, regardless of
                 # how many unrecognizable keys there were.
-                log.die('unknown key "{}" in format string "{}"'.
-                        format(e.args[0], args.format))
+                log.die(f'unknown key "{e.args[0]}" in format string '
+                        f'{shlex.quote(args.format)}')
             except IndexError:
                 self.parser.print_usage()
-                log.die('invalid format string', args.format)
+                log.die(f'invalid format string {shlex.quote(args.format)}')
             except subprocess.CalledProcessError:
-                log.die('subprocess error while listing project',
-                        project.name)
+                log.die(f'subprocess failed while listing {project.name}')
 
             log.inf(result, colorize=False)
 
@@ -702,8 +686,8 @@ class Update(_ProjectCommand):
     def fetch_strategy(self, args):
         cfg = config.get('update', 'fetch', fallback=None)
         if cfg is not None and cfg not in ('always', 'smart'):
-            log.wrn('ignoring invalid config update.fetch={}; '
-                    'choices: always, smart'.format(cfg))
+            log.wrn(f'ignoring invalid config update.fetch={cfg}; '
+                    'choices: always, smart')
             cfg = None
         if args.fetch_strategy:
             return args.fetch_strategy
