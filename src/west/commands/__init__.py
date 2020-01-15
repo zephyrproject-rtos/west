@@ -322,21 +322,9 @@ def _commands_module_from_file(file):
         return _EXT_MODULES_CACHE[file]
 
     mod_name = next(_EXT_MODULES_NAME_IT)
-    # The Python 3.4 way to import a module given its file got deprecated
-    # later on, but we still need to support 3.4. If that requirement ever
-    # gets dropped, this code can be simplified.
-    if (3, 4) <= sys.version_info < (3, 5):
-        def _import_mod_from(mod_name, file):
-            from importlib.machinery import SourceFileLoader
-            return SourceFileLoader(mod_name, file).load_module()
-    else:
-        def _import_mod_from(mod_name, file):
-            spec = importlib.util.spec_from_file_location(mod_name, file)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            return mod
-
-    mod = _import_mod_from(mod_name, file)
+    spec = importlib.util.spec_from_file_location(mod_name, file)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
     _EXT_MODULES_CACHE[file] = mod
 
     return mod
