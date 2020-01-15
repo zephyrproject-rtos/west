@@ -176,7 +176,7 @@ class Init(_ProjectCommand):
                     Try unsetting ZEPHYR_BASE and re-running this command.''')
             else:
                 msg = ''
-            log.die(f'already initialized in {self.topdir}, aborting.{msg}')
+            self.die_already(self.topdir, msg)
 
         if args.local and (args.manifest_url or args.manifest_rev):
             log.die('-l cannot be combined with -m or --mr')
@@ -190,6 +190,9 @@ class Init(_ProjectCommand):
             topdir = self.bootstrap(args)
 
         log.banner(f'Initialized. Now run "west update" inside {topdir}.')
+
+    def die_already(self, where, also=None):
+        log.die(f'already initialized in {where}, aborting.{also or ""}')
 
     def local(self, args):
         if args.manifest_rev is not None:
@@ -218,6 +221,12 @@ class Init(_ProjectCommand):
         manifest_rev = args.manifest_rev or MANIFEST_REV_DEFAULT
         topdir = util.canon_path(args.directory or os.getcwd())
         west_dir = join(topdir, WEST_DIR)
+
+        try:
+            already = util.west_topdir(topdir, fall_back=False)
+            self.die_already(already)
+        except util.WestNotFound:
+            pass
 
         log.banner('Initializing in', topdir)
         if not isdir(topdir):
@@ -257,7 +266,10 @@ class Init(_ProjectCommand):
 
         log.dbg('moving', tempdir, 'to', manifest_abspath,
                 level=log.VERBOSE_EXTREME)
-        shutil.move(tempdir, manifest_abspath)
+        try:
+            shutil.move(tempdir, manifest_abspath)
+        except shutil.Error as e:
+            log.die(e)
         log.small_banner('setting manifest.path to', manifest_path)
         update_config('manifest', 'path', manifest_path, topdir=topdir)
 
