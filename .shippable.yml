@@ -15,4 +15,4 @@ build:
     - export PATH=$PATH:$HOME/.local/bin
     - pip3 install tox
     - mkdir -p shippable/{testresults,codecoverage}
-    - tox -- --junitxml=$PWD/shippable/testresults/nosetests.xml --cov=west --cov-report=xml:$PWD/shippable/codecoverage/coverage.xml tests
+    - tox -- --junitxml=$PWD/shippable/testresults/nosetests.xml --cov-report=xml:$PWD/shippable/codecoverage/coverage.xml tests
