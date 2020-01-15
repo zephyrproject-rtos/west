@@ -1,3 +1,5 @@
+# Copyright (c) 2019, Nordic Semiconductor ASA
+#
 # Don't put anything else in here!
 #
 # This is the Python 3 version of option 3 in:
