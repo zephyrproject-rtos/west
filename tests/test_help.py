@@ -1,3 +1,5 @@
+# Copyright (c) 2020, Nordic Semiconductor ASA
+
 import itertools
 
 import os
