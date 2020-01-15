@@ -3,6 +3,7 @@
 import collections
 import os
 import re
+import shlex
 import subprocess
 import textwrap
 
@@ -325,13 +326,33 @@ def test_update_tag_to_tag(west_init_tmpdir):
 
 def test_init_again(west_init_tmpdir):
     # Test that 'west init' on an initialized tmpdir errors out
+    # with a message that indicates it's already initialized.
 
-    with pytest.raises(subprocess.CalledProcessError):
-        cmd('init')
+    popen = subprocess.Popen('west init'.split(),
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.PIPE,
+                             cwd=west_init_tmpdir)
+    _, stderr = popen.communicate()
+    assert popen.returncode
+    assert b'already initialized' in stderr
 
-    with pytest.raises(subprocess.CalledProcessError):
-        cmd('init -m foo')
+    popen = subprocess.Popen('west init -m http://example.com'.split(),
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.PIPE,
+                             cwd=west_init_tmpdir)
+    _, stderr = popen.communicate()
+    assert popen.returncode
+    assert b'already initialized' in stderr
 
+    manifest = west_init_tmpdir / '..' / 'repos' / 'zephyr'
+    popen = subprocess.Popen(
+        shlex.split(f'west -vvv init -m {manifest} workspace'),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        cwd=west_init_tmpdir.dirname)
+    _, stderr = popen.communicate()
+    assert popen.returncode
+    assert b'already initialized' in stderr
 
 def test_init_local_manifest_project(repos_tmpdir):
     # Do a local clone of manifest repo
