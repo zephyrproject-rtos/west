@@ -687,20 +687,15 @@ class Manifest:
 
         for i, project in enumerate(submp.projects):
             if i == MANIFEST_PROJECT_INDEX:
-                # If the submanifest has west commands, add them
-                # to mp's.
-                subcmds = project.west_commands
-                if not subcmds:
-                    continue
-
-                if isinstance(subcmds, str):
-                    subcmds = [subcmds]
-
-                if isinstance(mp.west_commands, str):
-                    mp.west_commands = [mp.west_commands]
-                elif not mp.west_commands:
-                    mp.west_commands = []
-                mp.west_commands.extend(project.west_commands)
+                # If the submanifest has west commands, add them to
+                # mp's.
+                #
+                # project.west_commands comes first because we
+                # logically treat imports from self as if they are
+                # defined before the contents in the higher level
+                # manifest.
+                mp.west_commands = self._merge_wcs(
+                    project.west_commands, mp.west_commands)
             else:
                 self._add_project(project, projects)
 
@@ -837,8 +832,6 @@ class Manifest:
             # It means there's nothing to do.
             return
 
-        has_wc = bool(project.west_commands)
-        inherited_wc = []
         for data in imported:
             if isinstance(data, str):
                 data = yaml.safe_load(data)
@@ -857,17 +850,12 @@ class Manifest:
 
             for i, subp in enumerate(submp.projects):
                 if i == MANIFEST_PROJECT_INDEX:
-                    # If the project has no west commands, inherit them
-                    # from imported manifest data inside the project.
-                    if not has_wc and subp.west_commands:
-                        if isinstance(subp.west_commands, str):
-                            inherited_wc.append(subp.west_commands)
-                        else:
-                            inherited_wc.extend(subp.west_commands)
+                    # If the submanifest has west commands, merge them
+                    # into project's.
+                    project.west_commands = self._merge_wcs(
+                        project.west_commands, subp.west_commands)
                 else:
                     self._add_project(subp, projects)
-        if not has_wc and inherited_wc:
-            project.west_commands = inherited_wc
 
     def _import_content_from_project(self, project, path):
         log.dbg(f'manifest file {self.path}: resolving import {path} '
@@ -927,6 +915,21 @@ class Manifest:
                 self._malformed(f'project {name} path "{project.path}" '
                                 f'is taken by project {other.name}')
             ppaths[pp] = project
+
+    @staticmethod
+    def _merge_wcs(wc1, wc2):
+        # Merge two west_commands attributes. Try to keep the result a
+        # str if possible, but upgrade it to a list if both wc1 and
+        # wc2 are truthy.
+
+        if wc1 and wc2:
+            if isinstance(wc1, str):
+                wc1 = [wc1]
+            if isinstance(wc2, str):
+                wc2 = [wc2]
+            return wc1 + wc2
+        else:
+            return wc1 or wc2
 
 
 class MalformedManifest(Exception):
