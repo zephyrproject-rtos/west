@@ -26,7 +26,7 @@ from west import util, log
 import west.configuration as cfg
 
 #: Index in a Manifest.projects attribute where the `ManifestProject`
-#: instance for the installation is stored.
+#: instance for the workspace is stored.
 MANIFEST_PROJECT_INDEX = 0
 
 #: A git revision which points to the most recent `Project` update.
@@ -47,12 +47,12 @@ SCHEMA_VERSION = '0.6.99'
 # there were changes since 0.6 and we're in a development tree.
 
 def manifest_path():
-    '''Absolute path of the manifest file in the current installation.
+    '''Absolute path of the manifest file in the current workspace.
 
     Exceptions raised:
 
         - `west.util.WestNotFound` if called from outside of a west
-          installation
+          workspace
 
         - `MalformedConfig` if the configuration file has no
           ``manifest.path`` key
@@ -137,7 +137,7 @@ class Manifest:
     def from_file(source_file=None, **kwargs):
         '''Manifest object factory given a source YAML file.
 
-        The default behavior is to find the current west installation's
+        The default behavior is to find the current west workspace's
         manifest file and resolve it.
 
         Results depend on the keyword arguments given in *kwargs*:
@@ -150,7 +150,7 @@ class Manifest:
               at another location in the system.
 
             - If neither *source_file* nor *topdir* is given, the file
-              system is searched for *topdir*. That installation's
+              system is searched for *topdir*. That workspace's
               ``manifest.path`` configuration option is used to find
               *source_file*, ``topdir/<manifest.path>/west.yml``.
 
@@ -158,7 +158,7 @@ class Manifest:
               starting there. The directory containing *source_file*
               doesn't have to be ``manifest.path`` in this case.
 
-            - If only *topdir* is given, that installation's
+            - If only *topdir* is given, that workspace's
               ``manifest.path`` is used to find *source_file*.
 
         Exceptions raised:
@@ -175,7 +175,7 @@ class Manifest:
               can't be read
 
             - ``ValueError`` if *topdir* is given but is not a west
-              installation root
+              workspace root
 
         :param source_file: source file to load
         :param kwargs: Manifest.__init__ keyword arguments
@@ -185,7 +185,7 @@ class Manifest:
         if topdir is None:
             if source_file is None:
                 # neither source_file nor topdir: search the filesystem
-                # for the installation and use its manifest.path.
+                # for the workspace and use its manifest.path.
                 topdir = util.west_topdir()
                 kwargs.update({
                     'topdir': topdir,
@@ -203,8 +203,8 @@ class Manifest:
         elif source_file is None:
             # Just topdir.
 
-            # Verify topdir is a real west installation root.
-            msg = f'topdir {topdir} is not a west installation root'
+            # Verify topdir is a real west workspace root.
+            msg = f'topdir {topdir} is not a west workspace root'
             try:
                 real_topdir = util.west_topdir(start=topdir, fall_back=False)
             except util.WestNotFound:
@@ -265,7 +265,7 @@ class Manifest:
 
             - ``projects``: sequence of `Project`
 
-            - ``topdir``: west installation top level directory, or
+            - ``topdir``: west workspace top level directory, or
               None
 
             - ``path``: path to the manifest file itself, or None
@@ -324,7 +324,7 @@ class Manifest:
             string containing unparsed YAML data
         :param manifest_path: fallback `ManifestProject` ``path``
             attribute
-        :param topdir: used as the west installation top level
+        :param topdir: used as the west workspace top level
             directory
         :param importer: callback to resolve missing manifest import
             data
@@ -370,7 +370,7 @@ class Manifest:
         '''
 
         self.topdir = topdir
-        '''The west installation's top level directory, or None.'''
+        '''The west workspace's top level directory, or None.'''
 
         self.has_imports = False
 
@@ -972,7 +972,7 @@ class Project:
     - ``url``: project fetch URL
     - ``revision``: revision to fetch from ``url`` when the
       project is updated
-    - ``path``: relative path to the project within the installation
+    - ``path``: relative path to the project within the workspace
       (i.e. from ``topdir`` if that is set)
     - ``abspath``: absolute path to the project in the native path name
       format (or ``None`` if ``topdir`` is)
@@ -983,7 +983,7 @@ class Project:
       if this is used)
     - ``west_commands``: list of places to find extension commands in
       the project
-    - ``topdir``: the top level directory of the west installation
+    - ``topdir``: the top level directory of the west workspace
       the project is part of, or ``None``
     '''
 
@@ -1015,7 +1015,7 @@ class Project:
         :param west_commands: path to west commands directory in the
             project, relative to its own base directory, topdir / path,
             or list of these
-        :param topdir: the west installation's top level directory
+        :param topdir: the west workspace's top level directory
         '''
 
         self.name = name
@@ -1274,10 +1274,10 @@ class ManifestProject(Project):
     Meaningful attributes:
 
     - ``name``: the string ``"manifest"``
-    - ``topdir``: the top level directory of the west installation
+    - ``topdir``: the top level directory of the west workspace
       the manifest project controls, or ``None``
     - ``path``: relative path to the manifest repository within the
-      installation, or ``None`` (i.e. from ``topdir`` if that is set)
+      workspace, or ``None`` (i.e. from ``topdir`` if that is set)
     - ``abspath``: absolute path to the manifest repository in the
       native path name format (or ``None`` if ``topdir`` is)
     - ``posixpath``: like ``abspath``, but with slashes (``/``) as
@@ -1302,10 +1302,10 @@ class ManifestProject(Project):
     def __init__(self, path=None, west_commands=None, topdir=None):
         '''
         :param path: Relative path to the manifest repository in the
-            west installation, if known.
+            west workspace, if known.
         :param west_commands: path to the YAML file in the manifest
             repository configuring its extension commands, if any.
-        :param topdir: Root of the west installation the manifest
+        :param topdir: Root of the west workspace the manifest
             project is inside. If not given, all absolute path
             attributes (abspath and posixpath) will be None.
         '''
@@ -1407,7 +1407,7 @@ def _mpath(cp=None, topdir=None):
     # Return the value of the manifest.path configuration option
     # in *cp*, a ConfigParser. If not given, create a new one and
     # load configuration options with the given *topdir* as west
-    # installation root.
+    # workspace root.
     #
     # TODO: write a cfg.get(section, key)
     # wrapper, with friends for update and delete, to avoid

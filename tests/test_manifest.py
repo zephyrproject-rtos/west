@@ -27,7 +27,7 @@ THIS_DIRECTORY = os.path.dirname(__file__)
 
 @pytest.fixture
 def fs_topdir(tmpdir):
-    # This fixture creates a skeletal west installation in a temporary
+    # This fixture creates a skeletal west workspace in a temporary
     # directory on the file system, and changes directory there.
     #
     # If you use this fixture, you can create
@@ -44,7 +44,7 @@ def fs_topdir(tmpdir):
     topdir.join('.west', 'config').write('[manifest]\n'
                                          'path = mp\n')
 
-    # Switch to the top-level West installation directory,
+    # Switch to the top-level west workspace directory,
     # and give it to the test case.
     topdir.chdir()
     return topdir
@@ -903,7 +903,7 @@ def make_importer(import_map):
     # This, makes it easier to set up tests cases where import
     # resolution can be done entirely with data in this file. That's
     # faster (both when writing tests and running them) than setting
-    # up a west installation on the file system.
+    # up a west workspace on the file system.
 
     def importer(project, file):
         return import_map[(project.name, file)]
@@ -1087,7 +1087,7 @@ def test_import_with_fork_and_proj():
 #
 # This tests "Downstream with directory of manifest files" in the
 # documentation. We do the testing in a tmpdir with just enough
-# files to fake out an installation.
+# files to fake out a workspace.
 _IMPORT_SELF_MANIFESTS = [
     # as a directory:
     '''\

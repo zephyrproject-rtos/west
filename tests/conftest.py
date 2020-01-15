@@ -112,7 +112,7 @@ def _session_repos():
 def repos_tmpdir(tmpdir, _session_repos):
     '''Fixture for tmpdir with "remote" repositories.
 
-    These can then be used to bootstrap an installation and run
+    These can then be used to bootstrap a workspace and run
     project-related commands on it with predictable results.
 
     Switches directory to, and returns, the top level tmpdir -- NOT
@@ -177,15 +177,15 @@ def west_init_tmpdir(repos_tmpdir):
     '''Fixture for a tmpdir with 'remote' repositories and 'west init' run.
 
     Uses the remote repositories from the repos_tmpdir fixture to
-    create a west installation using the system bootstrapper's init
+    create a west workspace using the system bootstrapper's init
     command.
 
-    The contents of the west installation aren't checked at all.
+    The contents of the west workspace aren't checked at all.
     This is left up to the test cases.
 
     The directory that 'west init' created is returned as a
     py.path.local, with the current working directory set there.'''
-    west_tmpdir = repos_tmpdir / 'west_installation'
+    west_tmpdir = repos_tmpdir / 'workspace'
     manifest = repos_tmpdir / 'repos' / 'zephyr'
     cmd(f'init -m "{manifest}" "{west_tmpdir}"')
     west_tmpdir.chdir()
