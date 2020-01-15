@@ -272,21 +272,12 @@ def _gather_configs(cfg, topdir):
 def _ensure_config(configfile, topdir):
     # Ensure the given configfile exists, returning its path. May
     # raise permissions errors, WestNotFound, etc.
-    #
-    # Uses pathlib as this is hard to implement correctly without it.
     loc = _location(configfile, topdir=topdir)
     path = pathlib.Path(loc)
 
     if path.is_file():
         return loc
 
-    # Create the directory. We can't use
-    #     path.parent.mkdir(..., exist_ok=True)
-    # in Python 3.4, so roughly emulate its behavior.
-    try:
-        path.parent.mkdir(parents=True)
-    except FileExistsError:
-        pass
-
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.touch(exist_ok=True)
     return canon_path(str(path))

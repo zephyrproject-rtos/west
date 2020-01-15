@@ -23,7 +23,6 @@ import pykwalify.core
 import yaml
 
 from west import util, log
-from west.backports import CompletedProcess
 import west.configuration as cfg
 
 #: Index in a Manifest.projects attribute where the `ManifestProject`
@@ -1082,8 +1081,7 @@ class Project:
             capture_stderr=False, check=True, cwd=None):
         '''Run a git command in the project repository.
 
-        Returns a ``subprocess.CompletedProcess`` (an equivalent
-        object is back-ported for Python 3.4).
+        Returns a ``subprocess.CompletedProcess``.
 
         :param cmd: git command as a string (or list of strings)
         :param extra_args: sequence of additional arguments to pass to
@@ -1136,8 +1134,8 @@ class Project:
             raise subprocess.CalledProcessError(popen.returncode, cmd_list,
                                                 output=stdout, stderr=stderr)
         else:
-            return CompletedProcess(popen.args, popen.returncode,
-                                    stdout, stderr)
+            return subprocess.CompletedProcess(popen.args, popen.returncode,
+                                               stdout, stderr)
 
     def sha(self, rev, cwd=None):
         '''Get the SHA for a project revision.
@@ -1149,10 +1147,6 @@ class Project:
         # Though we capture stderr, it will be available as the stderr
         # attribute in the CalledProcessError raised by git() in
         # Python 3.5 and above if this call fails.
-        #
-        # That's missing for Python 3.4, which at time of writing is
-        # still supported by west, but since 3.4 has hit EOL as a
-        # mainline Python version, that's an acceptable tradeoff.
         cp = self.git(f'rev-parse {rev}', capture_stdout=True, cwd=cwd,
                       capture_stderr=True)
         # Assumption: SHAs are hex values and thus safe to decode in ASCII.
