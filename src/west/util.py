@@ -43,9 +43,7 @@ def escapes_directory(path, directory):
 
 def quote_sh_list(cmd):
     '''Transform a command from list into shell string form.'''
-    fmt = ' '.join('{}' for _ in cmd)
-    args = [shlex.quote(s) for s in cmd]
-    return fmt.format(*args)
+    return ' '.join(shlex.quote(s) for s in cmd)
 
 def wrap(text, indent):
     '''Convenience routine for wrapping text to a consistent indent.'''

@@ -185,9 +185,9 @@ def west_init_tmpdir(repos_tmpdir):
 
     The directory that 'west init' created is returned as a
     py.path.local, with the current working directory set there.'''
-    west_tmpdir = repos_tmpdir.join('west_installation')
-    cmd('init -m "{}" "{}"'.format(str(repos_tmpdir.join('repos', 'zephyr')),
-                                   str(west_tmpdir)))
+    west_tmpdir = repos_tmpdir / 'west_installation'
+    manifest = repos_tmpdir / 'repos' / 'zephyr'
+    cmd(f'init -m "{manifest}" "{west_tmpdir}"')
     west_tmpdir.chdir()
     config.read_config()
     return west_tmpdir
@@ -231,10 +231,10 @@ def cmd(cmd, cwd=None, stderr=None, env=None):
         print('with non-default environment:')
         for k in env:
             if k not in os.environ or env[k] != os.environ[k]:
-                print('\t{}={}'.format(k, env[k]))
+                print(f'\t{k}={env[k]}')
         for k in os.environ:
             if k not in env:
-                print('\t{}: deleted, was: {}'.format(k, os.environ[k]))
+                print(f'\t{k}: deleted, was: {os.environ[k]}')
     try:
         return check_output(cmd, cwd=cwd, stderr=stderr, env=env)
     except subprocess.CalledProcessError:

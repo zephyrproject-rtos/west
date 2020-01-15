@@ -126,7 +126,7 @@ class CMakeCacheEntry:
                 v = int(val)
                 return v != 0
             except ValueError as exc:
-                raise ValueError('invalid bool {}'.format(val)) from exc
+                raise ValueError(f'invalid bool {val}') from exc
 
     @classmethod
     def from_line(cls, line, line_no):
@@ -148,7 +148,7 @@ class CMakeCacheEntry:
             try:
                 value = cls._to_bool(value)
             except ValueError as exc:
-                args = exc.args + ('on line {}: {}'.format(line_no, line),)
+                args = exc.args + (f'on line {line_no}: {line}',)
                 raise ValueError(args) from exc
         elif type_ == 'STRING' or type_ == 'INTERNAL':
             # If the value is a CMake list (i.e. is a string which
@@ -163,8 +163,7 @@ class CMakeCacheEntry:
         self.value = value
 
     def __str__(self):
-        fmt = 'CMakeCacheEntry(name={}, value={})'
-        return fmt.format(self.name, self.value)
+        return f'CMakeCacheEntry(name={self.name}, value={self.value})'
 
 class CMakeCache:
     '''Parses and represents a CMake cache file.'''
@@ -204,8 +203,7 @@ class CMakeCache:
             elif isinstance(value, str):
                 return [value] if value else []
             else:
-                msg = 'invalid value {} type {}'
-                raise RuntimeError(msg.format(value, type(value)))
+                raise RuntimeError(f'invalid value {value} type {type(value)}')
         else:
             return default
 
@@ -217,8 +215,8 @@ class CMakeCache:
 
     def __setitem__(self, name, entry):
         if not isinstance(entry, CMakeCacheEntry):
-            msg = 'improper type {} for value {}, expecting CMakeCacheEntry'
-            raise TypeError(msg.format(type(entry), entry))
+            raise TypeError(f'improper type {type(entry)} for value {entry}, '
+                            'expecting CMakeCacheEntry')
         self._entries[name] = entry
 
     def __delitem__(self, name):

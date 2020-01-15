@@ -87,8 +87,8 @@ class Once(argparse.Action):
 
         if getattr(namespace, self.dest):
             previous = rev[getattr(namespace, self.dest)]
-            parser.error("argument {}: not allowed with argument {}".
-                         format(option_string, previous))
+            parser.error(f"argument {option_string}: "
+                         f"not allowed with argument {previous}")
 
         setattr(namespace, self.dest, values[option_string])
 
@@ -159,7 +159,7 @@ class Config(WestCommand):
         read_config(configfile=what, config=cfg)
         for s in cfg.sections():
             for k, v in cfg[s].items():
-                log.inf('{}.{}={}'.format(s, k, v))
+                log.inf(f'{s}.{k}={v}')
 
     def delete(self, args):
         section, key = self._sk(args)
@@ -173,8 +173,7 @@ class Config(WestCommand):
         try:
             delete_config(section, key, configfile=what)
         except KeyError:
-            log.dbg('{} was not set in requested location(s)'.
-                    format(args.name))
+            log.dbg(f'{args.name} was not set in requested location(s)')
             raise CommandError(returncode=1)
         except PermissionError as pe:
             self._perm_error(pe, what, section, key)
@@ -187,7 +186,7 @@ class Config(WestCommand):
         if value is not None:
             log.inf(value)
         else:
-            log.dbg('{} is unset'.format(args.name))
+            log.dbg(f'{args.name} is unset')
             raise CommandError(returncode=1)
 
     def write(self, args):
@@ -201,12 +200,12 @@ class Config(WestCommand):
     def _sk(self, args):
         name_list = args.name.split(".", 1)
         if len(name_list) != 2:
-            self.parser.error("name '{}' should be in the form "
-                              "<section>.<key>".format(args.name))
+            self.parser.error(f"name '{args.name}' should be in the form "
+                              "<section>.<key>")
         return name_list[0], name_list[1]
 
     def _perm_error(self, pe, what, section, key):
         rootp = ('; are you root/administrator?' if what in [SYSTEM, ALL]
                  else '')
-        log.die("can't update {}.{}: permission denied when writing {}{}".
-                format(section, key, pe.filename, rootp))
+        log.die(f"can't update {section}.{key}: "
+                f"permission denied when writing {pe.filename}{rootp}")

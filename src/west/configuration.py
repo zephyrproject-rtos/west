@@ -128,7 +128,7 @@ def update_config(section, key, value, configfile=ConfigFile.LOCAL,
     '''
     if configfile == ConfigFile.ALL:
         # Not possible to update ConfigFile.ALL, needs specific conf file here.
-        raise ValueError('invalid configfile: {}'.format(configfile))
+        raise ValueError(f'invalid configfile: {configfile}')
 
     filename = _ensure_config(configfile, topdir)
     updater = configobj.ConfigObj(filename)
@@ -193,7 +193,7 @@ def delete_config(section, key, configfile=None, topdir=None):
             break
 
     if not found:
-        raise KeyError('{}.{}'.format(section, key))
+        raise KeyError(f'{section}.{key}')
 
 def _location(cfg, topdir=None):
     # Making this a function that gets called each time you ask for a
@@ -250,7 +250,7 @@ def _location(cfg, topdir=None):
             # Might raise WestNotFound!
             return os.path.join(west_dir(), 'config')
     else:
-        raise ValueError('invalid configuration file {}'.format(cfg))
+        raise ValueError(f'invalid configuration file {cfg}')
 
 def _gather_configs(cfg, topdir):
     # Find the paths to the given configuration files, in increasing

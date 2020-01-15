@@ -45,8 +45,9 @@ class ExtensionCommandError(CommandError):
         self.hint = kwargs.pop('hint', None)
         super(ExtensionCommandError, self).__init__(**kwargs)
 
-_NO_TOPDIR_MSG_FMT = '''\
-no west installation found from "{}"; "west {}" requires one.
+def _no_topdir_msg(cwd, name):
+    return f'''\
+no west installation found from "{cwd}"; "west {name}" requires one.
 Things to try:
   - Change directory to a west installation and retry.
   - Set ZEPHYR_BASE to a zephyr repository path in a west installation.
@@ -102,9 +103,9 @@ class WestCommand(ABC):
             accessible as ``self.manifest`` from `WestCommand.do_run`
         '''
         if unknown and not self.accepts_unknown_args:
-            self.parser.error('unexpected arguments: {}'.format(unknown))
+            self.parser.error(f'unexpected arguments: {unknown}')
         if not topdir and self.requires_installation:
-            log.die(_NO_TOPDIR_MSG_FMT.format(os.getcwd(), self.name))
+            log.die(_no_topdir_msg(os.getcwd(), self.name))
         self.topdir = topdir
         self.manifest = manifest
         self.do_run(args, unknown)
@@ -168,7 +169,7 @@ class WestCommand(ABC):
         Otherwise, a fatal error occurs.
         '''
         if self._manifest is None:
-            log.die("can't run west {};".format(self.name),
+            log.die(f"can't run west {self.name};",
                     "it requires the manifest, which was not available.",
                     'Try "west manifest --validate" to debug.')
         return self._manifest
@@ -254,8 +255,8 @@ def _ext_specs(project):
         # outside of the project.
         if escapes_directory(spec_file, project.abspath):
             raise ExtensionCommandError(
-                'west-commands file {} escapes project path {}'.
-                format(project.west_commands, project.path))
+                f'west-commands file {project.west_commands} '
+                f'escapes project path {project.path}')
 
         # The project may not be cloned yet, or this might be coming
         # from a manifest that was copy/pasted into a self import
@@ -286,18 +287,16 @@ def _ext_specs_from_desc(project, commands_desc):
     # Verify the YAML's python file doesn't escape the project directory.
     if escapes_directory(py_file, project.abspath):
         raise ExtensionCommandError(
-            'extension command python file "{}" escapes project path {}'.
-            format(commands_desc['file'], project.path))
+            f'extension command python file "{commands_desc["file"]}" '
+            f'escapes project path {project.path}')
 
     # Create the command thunks.
     thunks = []
     for command_desc in commands_desc['commands']:
         name = command_desc['name']
         attr = command_desc.get('class', name)
-        help = command_desc.get(
-            'help',
-            '(no help provided; try "west {} -h")'.
-            format(name))
+        help = command_desc.get('help',
+                                f'(no help provided; try "west {name} -h")')
         factory = _ExtFactory(py_file, name, attr)
         thunks.append(WestExtCommandSpec(name, project, help, factory))
 
@@ -345,11 +344,11 @@ def _commands_module_from_file(file):
 _EXT_SCHEMA_PATH = os.path.join(os.path.dirname(__file__),
                                 'west-commands-schema.yml')
 
-# Cache which maps files implementing extension commands their
+# Cache which maps files implementing extension commands to their
 # imported modules.
 _EXT_MODULES_CACHE = {}
 # Infinite iterator of "fresh" extension command module names.
-_EXT_MODULES_NAME_IT = ('west.commands.ext.cmd_{}'.format(i)
+_EXT_MODULES_NAME_IT = (f'west.commands.ext.cmd_{i}'
                         for i in itertools.count(1))
 
 class _ExtFactory:
@@ -371,15 +370,14 @@ class _ExtFactory:
             mod = _commands_module_from_file(self.py_file)
         except ImportError as ie:
             raise ExtensionCommandError(
-                hint='could not import {}'.format(self.py_file)) from ie
+                hint=f'could not import {self.py_file}') from ie
 
         # Get the attribute which provides the WestCommand subclass.
         try:
             cls = getattr(mod, self.attr)
         except AttributeError as ae:
-            hint = 'no attribute {} in {}'.format(self.attr,
-                                                  self.py_file)
-            raise ExtensionCommandError(hint=hint) from ae
+            raise ExtensionCommandError(
+                hint=f'no attribute {self.attr} in {self.py_file}') from ae
 
         # Create the command instance and return it.
         try:

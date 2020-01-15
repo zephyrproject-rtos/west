@@ -105,8 +105,8 @@ def validate(data):
             raise ManifestVersionError(min_version)
         elif min_version < _EARLIEST_VER:
             raise MalformedManifest(
-                'invalid version {}; lowest schema version is {}'.
-                format(min_version, _EARLIEST_VER_STR))
+                f'invalid version {min_version}; '
+                f'lowest schema version is {_EARLIEST_VER_STR}')
 
     try:
         pykwalify.core.Core(source_data=data,
@@ -205,13 +205,13 @@ class Manifest:
             # Just topdir.
 
             # Verify topdir is a real west installation root.
-            msg = 'topdir {} is not a west installation root'.format(topdir)
+            msg = f'topdir {topdir} is not a west installation root'
             try:
                 real_topdir = util.west_topdir(start=topdir, fall_back=False)
             except util.WestNotFound:
                 raise ValueError(msg)
             if PurePath(topdir) != PurePath(real_topdir):
-                raise ValueError(msg + '; but {} is'.format(real_topdir))
+                raise ValueError(f'{msg}; but {real_topdir} is')
 
             # Read manifest.path from topdir/.west/config, and use it
             # to locate source_file.
@@ -518,10 +518,9 @@ class Manifest:
         return yaml.safe_dump(self.as_frozen_dict(), **kwargs)
 
     def _malformed(self, complaint, parent=None):
-        context = ('file: {} '.format(self.path) if self.path
-                   else 'data')
-        args = ['Malformed manifest {}'.format(context),
-                'Schema file: {}'.format(_SCHEMA_PATH)]
+        context = (f'file: {self.path} ' if self.path else 'data')
+        args = [f'Malformed manifest {context}',
+                f'Schema file: {_SCHEMA_PATH}']
         if complaint:
             args.append('Hint: ' + complaint)
         exc = MalformedManifest(*args)
@@ -585,8 +584,7 @@ class Manifest:
         imp = slf.get('import')
         if imp is not None:
             if self._import_flags & ImportFlag.IGNORE:
-                log.dbg('manifest {} self import {}: ignored'.
-                        format(mp, imp),
+                log.dbg(f'manifest {mp} self import {imp}: ignored',
                         level=log.VERBOSE_EXTREME)
             else:
                 log.dbg('resolving self imports for:', self.path,
@@ -627,7 +625,7 @@ class Manifest:
 
         imptype = type(imp)
         if imptype == bool:
-            self._malformed('got "self: import: {}" of boolean'.format(imp))
+            self._malformed(f'got "self: import: {imp}" of boolean')
         elif imptype == str:
             self._import_path_from_self(mp, imp, projects)
         elif imptype == list:
@@ -636,8 +634,8 @@ class Manifest:
         elif imptype == dict:
             self._import_map_from_self(mp, imp, projects)
         else:
-            self._malformed('{}: "self: import: {}" has invalid type {}'.
-                            format(mp.abspath, imp, imptype))
+            self._malformed(f'{mp.abspath}: "self: import: {imp}" '
+                            f'has invalid type {imptype}')
 
     def _import_path_from_self(self, mp, imp, projects):
         if mp.abspath:
@@ -661,11 +659,10 @@ class Manifest:
         p = Path(repo_root) / imp
 
         if p.is_file():
-            log.dbg('found submanifest: {}'.format(p),
-                    level=log.VERBOSE_EXTREME)
+            log.dbg(f'found submanifest: {p}', level=log.VERBOSE_EXTREME)
             self._import_pathobj_from_self(mp, p, projects)
         elif p.is_dir():
-            log.dbg('found directory of submanifests: {}'.format(p),
+            log.dbg(f'found directory of submanifests: {p}',
                     level=log.VERBOSE_EXTREME)
             for yml in filter(_is_yml, sorted(p.iterdir())):
                 self._import_pathobj_from_self(mp, p / yml, projects)
@@ -673,8 +670,8 @@ class Manifest:
             # This also happens for special files like character
             # devices, but it doesn't seem worth handling that error
             # separately. Who would call mknod in their manifest repo?
-            self._malformed('{}: "self: import: {}": file {} not found'.
-                            format(mp.abspath, imp, p))
+            self._malformed(f'{mp.abspath}: "self: import: {imp}": '
+                            f'file {p} not found')
 
     def _import_map_from_self(self, mproject, map, projects):     # TODO
         raise NotImplementedError('import: <map> is not yet implemented')
@@ -716,8 +713,7 @@ class Manifest:
             # The default remote name, if provided, must refer to a
             # well-defined remote.
             if mdrem not in url_bases:
-                self._malformed('default remote {} is not defined'.
-                                format(mdrem))
+                self._malformed(f'default remote {mdrem} is not defined')
         return _defaults(mdrem, md.get('revision', _DEFAULT_REV))
 
     def _load_projects(self, manifest, url_bases, defaults, projects,
@@ -737,22 +733,20 @@ class Manifest:
 
             if name in names:
                 # Project names must be unique within a manifest.
-                self._malformed('project name {} used twice in {}'.
-                                format(name, path_hint or 'the same manifest'))
+                self._malformed(f'project name {name} used twice in ' +
+                                (path_hint or 'the same manifest'))
             names.add(name)
 
             # Add the project to the map if it's new.
             added = self._add_project(project, projects)
             if added:
-                log.dbg('manifest file {}: added {}'.
-                        format(self.path, project),
+                log.dbg(f'manifest file {self.path}: added {project}',
                         level=log.VERBOSE_EXTREME)
                 # Track project imports unless we are ignoring those.
                 imp = pd.get('import')
                 if imp:
                     if self._import_flags & ImportFlag.IGNORE:
-                        log.dbg('project {} import {} ignored'.
-                                format(project, imp),
+                        log.dbg(f'project {project} import {imp} ignored',
                                 level=log.VERBOSE_EXTREME)
                     else:
                         have_imports.append((project, imp))
@@ -783,24 +777,24 @@ class Manifest:
         remote = pd.get('remote')
         repo_path = pd.get('repo-path')
         if remote and url:
-            self._malformed('project {} has both "remote: {}" and "url: {}"'.
-                            format(name, remote, url))
+            self._malformed(f'project {name} has both "remote: {remote}" '
+                            f'and "url: {url}"')
         if defaults.remote and not (remote or url):
             remote = defaults.remote
 
         if url:
             if repo_path:
-                self._malformed('project {} has "repo_path: {}" and "url: {}"'.
-                                format(name, repo_path, url))
+                self._malformed(f'project {name} has "repo_path: {repo_path}" '
+                                f'and "url: {url}"')
         elif remote:
             if remote not in url_bases:
-                self._malformed('project {} remote {} is not defined'.
-                                format(name, remote))
+                self._malformed(f'project {name} remote {remote} '
+                                'is not defined')
             url = url_bases[remote] + '/' + (repo_path or name)
         else:
             self._malformed(
-                'project {} has no remote or url and no default remote is set'.
-                format(name))
+                f'project {name} '
+                'has no remote or url and no default remote is set')
 
         return Project(name, url, pd.get('revision', defaults.revision),
                        pd.get('path', name), clone_depth=pd.get('clone-depth'),
@@ -927,13 +921,12 @@ class Manifest:
         for name, project in projects.items():
             pp = PurePath(project.path)
             if pp == mppath:
-                self._malformed('project {} path "{}" '
-                                'is taken by the manifest repository'.
-                                format(name, project.path))
+                self._malformed(f'project {name} path "{project.path}" '
+                                'is taken by the manifest repository')
             other = ppaths.get(pp)
             if other:
-                self._malformed('project {} path "{}" is taken by project {}'.
-                                format(name, project.path, other.name))
+                self._malformed(f'project {name} path "{project.path}" '
+                                f'is taken by project {other.name}')
             ppaths[pp] = project
 
 
@@ -999,15 +992,14 @@ class Project:
         return NotImplemented
 
     def __repr__(self):
-        return ('Project("{}", "{}", revision="{}", path="{}", '
-                'clone_depth={}, west_commands={}, topdir={})').format(
-                    self.name, self.url, self.revision, self.path,
-                    self.clone_depth, _quote_maybe(self.west_commands),
-                    _quote_maybe(self.topdir))
+        return (f'Project("{self.name}", "{self.url}", '
+                f'revision="{self.revision}", path="{self.path}", '
+                f'clone_depth={self.clone_depth}, '
+                f'west_commands={self.west_commands}, topdir={self.topdir})')
 
     def __str__(self):
-        return '<Project {} ({}) at {}>'.format(
-            self.name, repr(self.abspath or self.path), self.revision)
+        path_repr = repr(self.abspath or self.path)
+        return f'<Project {self.name} ({path_repr}) at {self.revision}>'
 
     def __init__(self, name, url, revision=None, path=None,
                  clone_depth=None, west_commands=None, topdir=None):
@@ -1124,8 +1116,7 @@ class Project:
         args = ['git'] + cmd_list + extra_args
         cmd_str = util.quote_sh_list(args)
 
-        log.dbg("running '{}'".format(cmd_str), 'in', cwd,
-                level=log.VERBOSE_VERY)
+        log.dbg(f"running '{cmd_str}' in {cwd}", level=log.VERBOSE_VERY)
         popen = subprocess.Popen(
             args, cwd=cwd,
             stdout=subprocess.PIPE if capture_stdout else None,
@@ -1133,13 +1124,13 @@ class Project:
 
         stdout, stderr = popen.communicate()
 
-        dbg_msg = "'{}' in {} finished with exit status {}".format(
-            cmd_str, cwd, popen.returncode)
-        if capture_stdout:
-            dbg_msg += " and wrote {} to stdout".format(stdout)
-        if capture_stderr:
-            dbg_msg += " and wrote {} to stderr".format(stderr)
-        log.dbg(dbg_msg, level=log.VERBOSE_VERY)
+        if log.VERBOSE >= log.VERBOSE_VERY:
+            dbg_msg = f"{cmd_str} exit code: {popen.returncode}"
+            if capture_stdout:
+                dbg_msg += f'\ncaptured stdout:\n{stdout}'
+            if capture_stderr:
+                dbg_msg += f'\ncaptured stderr:\n{stderr}'
+            log.dbg(dbg_msg, level=log.VERBOSE_VERY)
 
         if check and popen.returncode:
             raise subprocess.CalledProcessError(popen.returncode, cmd_list,
@@ -1162,7 +1153,7 @@ class Project:
         # That's missing for Python 3.4, which at time of writing is
         # still supported by west, but since 3.4 has hit EOL as a
         # mainline Python version, that's an acceptable tradeoff.
-        cp = self.git('rev-parse ' + rev, capture_stdout=True, cwd=cwd,
+        cp = self.git(f'rev-parse {rev}', capture_stdout=True, cwd=cwd,
                       capture_stderr=True)
         # Assumption: SHAs are hex values and thus safe to decode in ASCII.
         # It'll be fun when we find out that was wrong and how...
@@ -1251,7 +1242,7 @@ class Project:
         '''
         if rev is None:
             rev = self.revision
-        cp = self.git(['show', rev + ':' + path], capture_stdout=True,
+        cp = self.git(f'show {rev}:{path}', capture_stdout=True,
                       capture_stderr=True, cwd=cwd)
         return cp.stdout
 
@@ -1274,7 +1265,7 @@ class Project:
         # git-ls-tree -z means we get NUL-separated output with no quoting
         # of the file names. Using 'git-show' or 'git-cat-file -p'
         # wouldn't work for files with special characters in their names.
-        out = self.git(['ls-tree', '-z', "{}:{}".format(rev, path)],
+        out = self.git(['ls-tree', '-z', f'{rev}:{path}'],
                        capture_stdout=True, capture_stderr=True).stdout
 
         # A tab character separates the SHA from the file name in each
@@ -1311,8 +1302,8 @@ class ManifestProject(Project):
     '''
 
     def __repr__(self):
-        return 'ManifestProject({}, path={}, west_commands={}, topdir={})'. \
-            format(self.name, self.path, self.west_commands, self.topdir)
+        return (f'ManifestProject({self.name}, path={self.path}, '
+                f'west_commands={self.west_commands}, topdir={self.topdir})')
 
     def __init__(self, path=None, west_commands=None, topdir=None):
         '''
@@ -1480,9 +1471,9 @@ def _manifest_content_at(project, path, rev=QUAL_MANIFEST_REV_BRANCH):
                                        rev=rev).decode('utf-8'))
         return ret
     else:
-        raise MalformedManifest(
-            "can't decipher project {} path {} revision {} (git type: {})".
-            format(project.name, path, rev, ptype))
+        raise MalformedManifest(f"can't decipher project {project.name} "
+                                f'path {path} revision {rev} '
+                                f'(git type: {ptype})')
 
 def _is_yml(path):
     return os.path.splitext(str(path))[1][1:] in _YML_EXTS
