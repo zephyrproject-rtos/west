@@ -67,8 +67,7 @@ def _session_repos():
                       'subsys/bluetooth/code.c': 'void foo(void) {}\n'})
 
     # Initialize the Kconfiglib repository.
-    subprocess.check_call([GIT, 'checkout', '-b', 'zephyr'],
-                          cwd=rp['Kconfiglib'])
+    create_branch(rp['Kconfiglib'], 'zephyr', checkout=True)
     add_commit(rp['Kconfiglib'], 'test kconfiglib commit',
                files={'kconfiglib.py': 'print("hello world kconfiglib")\n'})
 
@@ -258,6 +257,15 @@ def config_repo(path):
                            'west-test@example.com'],
                           cwd=path)
 
+def create_branch(path, branch, checkout=False):
+    subprocess.check_call([GIT, 'branch', branch], cwd=path)
+    if checkout:
+        checkout_branch(path, branch)
+
+def checkout_branch(path, branch, detach=False):
+    detach = ['--detach'] if detach else []
+    subprocess.check_call([GIT, 'checkout', branch] + detach,
+                          cwd=path)
 
 def add_commit(repo, msg, files=None, reconfigure=True):
     # Adds a commit with message 'msg' to the repo in 'repo'
