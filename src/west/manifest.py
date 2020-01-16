@@ -840,6 +840,7 @@ class Manifest:
         for data in imported:
             if isinstance(data, str):
                 data = yaml.safe_load(data)
+                validate(data)
             try:
                 # Force a fallback onto manifest_path=project.path.
                 # The subpath to the manifest file itself will not be
