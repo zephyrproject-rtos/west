@@ -1267,7 +1267,7 @@ class Project:
 
         # A tab character separates the SHA from the file name in each
         # NUL-separated entry.
-        return [f.decode(encoding).split('\t', 1)[1:]
+        return [f.decode(encoding).split('\t', 1)[1]
                 for f in out.split(b'\x00') if f]
 
 # FIXME: this whole class should just go away. See #327.
