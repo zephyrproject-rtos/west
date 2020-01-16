@@ -80,7 +80,7 @@ def validate(data):
     '''
     if isinstance(data, str):
         as_str = data
-        data = yaml.safe_load(data)
+        data = _load(data)
         if not isinstance(data, dict):
             raise MalformedManifest(f'{as_str} is not a YAML dictionary')
     elif not isinstance(data, dict):
@@ -352,7 +352,7 @@ class Manifest:
             self._malformed('manifest contains no data')
 
         if isinstance(source_data, str):
-            source_data = yaml.safe_load(source_data)
+            source_data = _load(source_data)
 
         # Validate the manifest. Wrap a couple of the exceptions with
         # extra context about the problematic file in case of errors,
@@ -839,7 +839,7 @@ class Manifest:
 
         for data in imported:
             if isinstance(data, str):
-                data = yaml.safe_load(data)
+                data = _load(data)
                 validate(data)
             try:
                 # Force a fallback onto manifest_path=project.path.
@@ -1474,3 +1474,9 @@ def _is_yml(path):
 
 def _default_importer(project, file):
     raise ManifestImportFailed(project, file)
+
+def _load(data):
+    try:
+        return yaml.safe_load(data)
+    except yaml.scanner.ScannerError as e:
+        raise MalformedManifest(data) from e
