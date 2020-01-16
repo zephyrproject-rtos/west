@@ -1199,7 +1199,7 @@ class Project:
     def is_up_to_date(self, cwd=None):
         '''Check if the project HEAD is up to date with the manifest.
 
-        This is equivalent to ``is_up_to_date_with(self,revision,
+        This is equivalent to ``is_up_to_date_with(self.revision,
         cwd=cwd)``.
 
         :param cwd: directory to run command in (default:
