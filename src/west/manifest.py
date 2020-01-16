@@ -79,7 +79,12 @@ def validate(data):
     :param data: YAML manifest data as a string or object
     '''
     if isinstance(data, str):
+        as_str = data
         data = yaml.safe_load(data)
+        if not isinstance(data, dict):
+            raise MalformedManifest(f'{as_str} is not a YAML dictionary')
+    elif not isinstance(data, dict):
+        raise TypeError(f'data type {type(data)} must be str or dict')
 
     if 'manifest' not in data:
         raise MalformedManifest('manifest data contains no "manifest" key')
