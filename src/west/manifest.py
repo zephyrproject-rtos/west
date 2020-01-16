@@ -1454,7 +1454,7 @@ def _manifest_content_at(project, path, rev=QUAL_MANIFEST_REV_BRANCH):
         # Importing a tree: return the content of the YAML files inside it.
         ret = []
         pathobj = PurePath(path)
-        for f in filter(_is_yml, project.listdir_at(path)):
+        for f in filter(_is_yml, project.listdir_at(path, rev=rev)):
             ret.append(project.read_at(str(pathobj / f),
                                        rev=rev).decode('utf-8'))
         return ret
