@@ -1,3 +1,6 @@
+runtime:
+  nodePool: large_nodes
+
 language: python
 # TODO: 3.7 and 3.8 need testing here.
 python:
