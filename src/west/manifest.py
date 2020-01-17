@@ -636,7 +636,7 @@ class Manifest:
             for subimp in imp:
                 self._import_from_self(mp, subimp, projects)
         elif imptype == dict:
-            self._import_map_from_self(mp, imp, projects)
+            self._import_map(mp, imp, self.import_path_from_self, projects)
         else:
             self._malformed(f'{mp.abspath}: "self: import: {imp}" '
                             f'has invalid type {imptype}')
@@ -676,9 +676,6 @@ class Manifest:
             # separately. Who would call mknod in their manifest repo?
             self._malformed(f'{mp.abspath}: "self: import: {imp}": '
                             f'file {p} not found')
-
-    def _import_map_from_self(self, mproject, map, projects):     # TODO
-        raise NotImplementedError('import: <map> is not yet implemented')
 
     def _import_pathobj_from_self(self, mp, pathobj, projects):
         # Import a Path object, which is a manifest file in the
@@ -822,7 +819,8 @@ class Manifest:
             for subimp in imp:
                 self._import_from_project(project, subimp, projects)
         elif imptype == dict:
-            self._import_map_from_project(project, imp, projects)
+            self._import_map(project, imp, self._import_path_from_project,
+                             projects)
         else:
             self._malformed(f'{project.name_and_path}: invalid import {imp} '
                             f'type: {imptype}')
@@ -892,8 +890,67 @@ class Manifest:
 
         return content
 
-    def _import_map_from_project(self, project, map, projects):  # TODO
-        raise NotImplementedError('import: <map> from project unimplemented')
+    def _import_map(self, p, imp, base_importer, projects):
+        # Helper routine used to handle imports from self and projects.
+        # We import everything, then filter out what's not desired.
+
+        imap = self._load_imap(p, imp)
+
+        all_imported = {}
+        base_importer(p, imap.file, all_imported)
+
+        for name, project in all_imported.items():
+            if _is_imap_ok(project, imap):
+                if name in imap.rename:
+                    project.name = imap.rename[name]
+                self._add_project(project, projects)
+
+    def _load_imap(self, project, imp):
+        # Convert a parsed self or project import value from YAML into
+        # an _import_map namedtuple.
+
+        # Work on a copy in case the caller needs the full value.
+        copy = dict(imp)
+        ret = _import_map(copy.pop('file', _WEST_YML),
+                          copy.pop('name-whitelist', []),
+                          copy.pop('path-whitelist', []),
+                          copy.pop('name-blacklist', []),
+                          copy.pop('path-blacklist', []),
+                          copy.pop('rename', {}))
+
+        # Find a useful name for the project on error.
+        if isinstance(project, ManifestProject):
+            what = f'manifest file {project.abspath}'
+        else:
+            what = f'project {project.name}'
+
+        # Check that the value is OK.
+        if copy:
+            # We popped out all of the valid keys already.
+            self._malformed(f'{what}: invalid import contents: {copy}')
+        elif not _is_imap_list(ret.name_whitelist):
+            self._malformed(f'{what}: bad import name-whitelist '
+                            f'{ret.name_whitelist}')
+        elif not _is_imap_list(ret.path_whitelist):
+            self._malformed(f'{what}: bad import path-whitelist '
+                            f'{ret.path_whitelist}')
+        elif not _is_imap_list(ret.name_blacklist):
+            self._malformed(f'{what}: bad import name-blacklist '
+                            f'{ret.name_blacklist}')
+        elif not _is_imap_list(ret.path_blacklist):
+            self._malformed(f'{what}: bad import path-blacklist '
+                            f'{ret.path_blacklist}')
+        elif not isinstance(ret.rename, dict):
+            self._malformed(f'{what}: rename: {ret.rename} '
+                            f'expected a map, {type(ret.rename)}')
+        else:
+            err = f"{what}: import map's rename includes "
+            for f, t in ret.rename.items():
+                if 'manifest' in [f, t]:
+                    self._malformed(err + f'{f}: {t}; '
+                                    '"manifest" is a reserved name')
+
+        return ret
 
     def _add_project(self, project, projects):
         # Add the project to our map if we don't already know about it.
@@ -927,13 +984,8 @@ class Manifest:
         # Merge two west_commands attributes. Try to keep the result a
         # str if possible, but upgrade it to a list if both wc1 and
         # wc2 are truthy.
-
         if wc1 and wc2:
-            if isinstance(wc1, str):
-                wc1 = [wc1]
-            if isinstance(wc2, str):
-                wc2 = [wc2]
-            return wc1 + wc2
+            return _ensure_list(wc1) + _ensure_list(wc2)
         else:
             return wc1 or wc2
 
@@ -1390,6 +1442,11 @@ class ManifestProject(Project):
         return ret
 
 _defaults = collections.namedtuple('_defaults', 'remote revision')
+_import_map = collections.namedtuple('_import_map',
+                                     'file '
+                                     'name_whitelist path_whitelist '
+                                     'name_blacklist path_blacklist '
+                                     'rename')
 _YML_EXTS = ['yml', 'yaml']
 _WEST_YML = 'west.yml'
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
@@ -1480,3 +1537,37 @@ def _load(data):
         return yaml.safe_load(data)
     except yaml.scanner.ScannerError as e:
         raise MalformedManifest(data) from e
+
+def _is_imap_list(value):
+    # Return True if the value is a valid import map 'blacklist' or
+    # 'whitelist'. Empty strings and lists are OK, and list nothing.
+
+    return (isinstance(value, str) or
+            (isinstance(value, list) and
+             all(isinstance(item, str) for item in value)))
+
+def _is_imap_ok(project, imap):
+    # Return True if a project passes an import map's filters,
+    # and False otherwise.
+
+    nwl, pwl, nbl, pbl = [_ensure_list(l) for l in
+                          (imap.name_whitelist, imap.path_whitelist,
+                           imap.name_blacklist, imap.path_blacklist)]
+    name = project.name
+    path = PurePath(project.path)
+    blacklisted = (name in nbl) or any(path.match(p) for p in pbl)
+    whitelisted = (name in nwl) or any(path.match(p) for p in pwl)
+    no_whitelists = not (nwl or pwl)
+
+    if blacklisted:
+        return whitelisted
+    else:
+        return whitelisted or no_whitelists
+
+def _ensure_list(item):
+    # Converts item to a list containing it if item is a string, or
+    # returns item.
+
+    if isinstance(item, str):
+        return [item]
+    return item

@@ -1920,6 +1920,75 @@ def test_import_flags_ignore(tmpdir):
     ''', import_flags=ImportFlag.IGNORE)
     assert m.get_projects(['foo'])
 
+def test_import_name_whitelist(fs_topdir):
+    # This tests an example from the documentation which uses
+    # name-whitelist.
+
+    manifest_repo = fs_topdir / 'mp'
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''
+        manifest:
+          projects:
+            - name: mainline
+              url: https://git.example.com/mainline/manifest
+              import:
+                name-whitelist:
+                  - app
+                  - lib2
+                rename:
+                  app: mainline-app
+            - name: app
+              url: https://git.example.com/downstream/app
+            - name: lib3
+              path: libraries/lib3
+              url: https://git.example.com/downstream/lib3
+          self:
+            path: mp
+        ''')
+
+    mainline = fs_topdir / 'mainline'
+    create_repo(mainline)
+    create_branch(mainline, 'manifest-rev', checkout=True)
+    add_commit(mainline, 'mainline/west.yml',
+               files={'west.yml':
+                      '''
+                      manifest:
+                        projects:
+                          - name: app
+                            path: examples/app
+                            url: https://git.example.com/mainline/app
+                          - name: lib
+                            path: libraries/lib
+                            url: https://git.example.com/mainline/lib
+                          - name: lib2
+                            path: libraries/lib2
+                            url: https://git.example.com/mainline/lib2
+                      '''})
+    checkout_branch(mainline, 'master')
+
+    actual = MF().projects
+
+    expected = M('''\
+    projects:
+       - name: mainline
+         url: https://git.example.com/mainline/manifest
+       - name: app
+         url: https://git.example.com/downstream/app
+       - name: lib3
+         path: libraries/lib3
+         url: https://git.example.com/downstream/lib3
+       - name: mainline-app
+         path: examples/app
+         url: https://git.example.com/mainline/app
+       - name: lib2
+         path: libraries/lib2
+         url: https://git.example.com/mainline/lib2
+    ''',
+                 manifest_path='mp',
+                 topdir=fs_topdir).projects
+
+    for a, e in zip(actual, expected):
+        check_proj_consistency(a, e)
 
 #########################################
 # Various invalid manifests
