@@ -29,9 +29,9 @@ from west import log
 from west import configuration as config
 from west.commands import WestCommand, extension_commands, \
     CommandError, ExtensionCommandError
-from west.commands.project import List, ManifestCommand, Diff, Status, \
+from west.app.project import List, ManifestCommand, Diff, Status, \
     SelfUpdate, ForAll, Init, Update, Topdir
-from west.commands.config import Config
+from west.app.config import Config
 from west.manifest import Manifest, MalformedConfig, MalformedManifest, \
     ManifestVersionError, ManifestImportFailed, \
     ManifestProject, MANIFEST_REV_BRANCH
