@@ -5,7 +5,7 @@ import itertools
 import os
 import sys
 
-from west.main import BUILTIN_COMMAND_GROUPS
+from west.app.main import BUILTIN_COMMAND_GROUPS
 from conftest import cmd
 
 def test_builtin_help_and_dash_h(west_init_tmpdir):

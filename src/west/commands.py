@@ -22,7 +22,6 @@ from west.util import escapes_directory
 This package provides WestCommand, which is the common abstraction all
 west commands subclass.
 
-All built-in west commands are implemented as modules in this package.
 This package also provides support for extension commands.'''
 
 __all__ = ['CommandContextError', 'CommandError', 'WestCommand']
@@ -130,6 +129,8 @@ class WestCommand(ABC):
             raise ValueError('do_add_parser did not return a value')
 
         return self.parser
+
+
 
     #
     # Mandatory subclass hooks

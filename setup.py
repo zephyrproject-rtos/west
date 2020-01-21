@@ -46,5 +46,5 @@ setuptools.setup(
         'packaging',
     ],
     python_requires='>=3.6',
-    entry_points={'console_scripts': ('west = west.main:main',)},
+    entry_points={'console_scripts': ('west = west.app.main:main',)},
 )
