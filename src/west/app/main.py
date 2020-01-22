@@ -38,6 +38,33 @@ from west.manifest import Manifest, MalformedConfig, MalformedManifest, \
 from west.util import quote_sh_list, west_topdir, WestNotFound
 from west.version import __version__
 
+class LogFormatter(logging.Formatter):
+
+    def __init__(self):
+        super().__init__(fmt='%(name)s: %(message)s')
+
+class LogHandler(logging.Handler):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFormatter(LogFormatter())
+
+    def emit(self, record):
+        fmt = self.format(record)
+        lvl = record.levelno
+        if lvl > logging.CRITICAL:
+            log.die(fmt)
+        elif lvl >= logging.ERROR:
+            log.err(fmt)
+        elif lvl >= logging.WARNING:
+            log.wrn(fmt)
+        elif lvl >= logging.INFO:
+            log.inf(fmt)
+        elif lvl >= logging.DEBUG:
+            log.dbg(fmt)
+        else:
+            log.dbg(fmt, level=log.VERBOSE_EXTREME)
+
 class WestApp:
     # The west 'application' object.
     #
@@ -305,6 +332,7 @@ class WestApp:
         # Set up logging verbosity before running the command, so e.g.
         # verbose messages related to argument handling errors work
         # properly.
+        self.setup_logging(args)
         log.set_verbosity(args.verbose)
         log.dbg('args namespace:', args, level=log.VERBOSE_EXTREME)
 
@@ -355,6 +383,18 @@ class WestApp:
             # No need to dump_traceback() here. The command is responsible
             # for logging its own errors.
             sys.exit(ce.returncode)
+
+    def setup_logging(self, args):
+        logger = logging.getLogger('west.manifest')
+
+        verbose = min(args.verbose, log.VERBOSE_EXTREME)
+        if verbose >= log.VERBOSE_NORMAL:
+            level = logging.DEBUG
+        else:
+            level = logging.INFO
+
+        logger.setLevel(level)
+        logger.addHandler(LogHandler())
 
     def run_extension(self, name, argv):
         # Check a program invariant. We should never get here

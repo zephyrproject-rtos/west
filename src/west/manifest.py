@@ -11,6 +11,7 @@ import collections
 import configparser
 import enum
 import errno
+import logging
 import os
 from pathlib import PurePath, Path
 import shlex
@@ -20,7 +21,7 @@ from packaging.version import parse as parse_version
 import pykwalify.core
 import yaml
 
-from west import util, log
+from west import util
 import west.configuration as cfg
 
 #: Index in a Manifest.projects attribute where the `ManifestProject`
@@ -43,6 +44,8 @@ QUAL_REFS_WEST = 'refs/west/'
 SCHEMA_VERSION = '0.6.99'
 # ^^ will be bumped to 0.7 for that release; this just marks that
 # there were changes since 0.6 and we're in a development tree.
+
+_logger = logging.getLogger(__name__)
 
 def manifest_path():
     '''Absolute path of the manifest file in the current workspace.
@@ -538,8 +541,11 @@ class Manifest:
         # manifest data, which must be validated according to the schema.
 
         if self.path:
-            log.dbg('loading manifest file:',
-                    self.path, level=log.VERBOSE_EXTREME)
+            loading_what = self.path
+        else:
+            loading_what = 'data (no file)'
+
+        _logger.debug(f'loading {loading_what}')
 
         # We want to make an ordered map from project names to
         # corresponding Project instances. Insertion order into this
@@ -577,6 +583,8 @@ class Manifest:
                     continue
                 self._projects_by_cpath[util.canon_path(p.abspath)] = p
 
+        _logger.debug(f'loaded {loading_what}')
+
     def _load_self(self, manifest, path_hint, projects):
         # Handle the "self:" section in the manifest data.
 
@@ -588,14 +596,11 @@ class Manifest:
         imp = slf.get('import')
         if imp is not None:
             if self._import_flags & ImportFlag.IGNORE:
-                log.dbg(f'manifest {mp} self import {imp}: ignored',
-                        level=log.VERBOSE_EXTREME)
+                _logger.debug('ignored self import')
             else:
-                log.dbg('resolving self imports for:', self.path,
-                        level=log.VERBOSE_EXTREME)
+                _logger.debug(f'resolving self import {imp}')
                 self._import_from_self(mp, imp, projects)
-                log.dbg('done resolving self imports for:', self.path,
-                        level=log.VERBOSE_EXTREME)
+                _logger.debug('resolved self import')
 
         return mp
 
@@ -645,16 +650,15 @@ class Manifest:
         if mp.abspath:
             # Fast path, when we're working inside a fully initialized
             # topdir.
-            log.dbg('manifest repository root:', mp.abspath,
-                    level=log.VERBOSE_EXTREME)
             repo_root = Path(mp.abspath)
         else:
             # Fallback path, which is needed by at least west init. If
             # this happens too often, something may be wrong with how
             # we've implemented this. We'd like to avoid too many git
             # commands, as subprocesses are slow on windows.
-            log.dbg('searching for the manifest repository root',
-                    level=log.VERBOSE_EXTREME)
+            start = Path(self.path).parent
+            _logger.debug(
+                f'searching for manifest repository root from {start}')
             repo_root = Path(mp.git('rev-parse --show-toplevel',
                                     capture_stdout=True,
                                     cwd=str(Path(self.path).parent)).
@@ -663,11 +667,10 @@ class Manifest:
         p = repo_root / imp
 
         if p.is_file():
-            log.dbg(f'found submanifest: {p}', level=log.VERBOSE_EXTREME)
+            _logger.debug(f'found submanifest file: {p}')
             self._import_pathobj_from_self(mp, p, projects)
         elif p.is_dir():
-            log.dbg(f'found directory of submanifests: {p}',
-                    level=log.VERBOSE_EXTREME)
+            _logger.debug(f'found submanifest directory: {p}')
             for yml in filter(_is_yml, sorted(p.iterdir())):
                 self._import_pathobj_from_self(mp, p / yml, projects)
         else:
@@ -736,14 +739,13 @@ class Manifest:
             # Add the project to the map if it's new.
             added = self._add_project(project, projects)
             if added:
-                log.dbg(f'manifest file {self.path}: added {project}',
-                        level=log.VERBOSE_EXTREME)
+                _logger.debug(f'added {project} from file {self.path}')
                 # Track project imports unless we are ignoring those.
                 imp = pd.get('import')
                 if imp:
                     if self._import_flags & ImportFlag.IGNORE:
-                        log.dbg(f'project {project} import {imp} ignored',
-                                level=log.VERBOSE_EXTREME)
+                        _logger.debug(
+                            f'project {project}: ignored import ({imp})')
                     else:
                         have_imports.append((project, imp))
 
@@ -862,9 +864,7 @@ class Manifest:
                     self._add_project(subp, projects)
 
     def _import_content_from_project(self, project, path):
-        log.dbg(f'manifest file {self.path}: resolving import {path} '
-                f'for {project}',
-                level=log.VERBOSE_EXTREME)
+        _logger.debug(f'resolving import {path} for {project}')
         if not (self._import_flags & ImportFlag.FORCE_PROJECTS) and \
            project.is_cloned():
             try:
@@ -1161,7 +1161,7 @@ class Project:
         args = ['git'] + cmd_list + extra_args
         cmd_str = util.quote_sh_list(args)
 
-        log.dbg(f"running '{cmd_str}' in {cwd}", level=log.VERBOSE_VERY)
+        _logger.debug(f"running '{cmd_str}' in {cwd}")
         popen = subprocess.Popen(
             args, cwd=cwd,
             stdout=subprocess.PIPE if capture_stdout else None,
@@ -1169,13 +1169,12 @@ class Project:
 
         stdout, stderr = popen.communicate()
 
-        if log.VERBOSE >= log.VERBOSE_VERY:
-            dbg_msg = f"{cmd_str} exit code: {popen.returncode}"
-            if capture_stdout:
-                dbg_msg += f'\ncaptured stdout:\n{stdout}'
-            if capture_stderr:
-                dbg_msg += f'\ncaptured stderr:\n{stderr}'
-            log.dbg(dbg_msg, level=log.VERBOSE_VERY)
+        # We use logger style % formatting here to avoid the
+        # potentially expensive overhead of formatting long
+        # stdout/stderr strings if the current log level isn't DEBUG,
+        # which is the usual case.
+        _logger.debug('"%s" exit code: %d stdout: %r stderr: %r',
+                      cmd_str, popen.returncode, stdout, stderr)
 
         if check and popen.returncode:
             raise subprocess.CalledProcessError(popen.returncode, cmd_list,
@@ -1263,7 +1262,7 @@ class Project:
         # the top-level directory of a Git repository. Use --show-cdup
         # instead, which prints an empty string (i.e., just a newline,
         # which we strip) for the top-level directory.
-        log.dbg(f'{self.name}: checking if cloned', level=log.VERBOSE_EXTREME)
+        _logger.debug(f'{self.name}: checking if cloned')
         res = self.git('rev-parse --show-cdup', check=False,
                        capture_stderr=True, capture_stdout=True)
 
@@ -1469,8 +1468,7 @@ def _manifest_content_at(project, path, rev=QUAL_MANIFEST_REV_BRANCH):
     # Though this module and the "west update" implementation share
     # this code, it's an implementation detail, not API.
 
-    log.dbg(f'{project.name}: looking up path {path} type at {rev}',
-            level=log.VERBOSE_EXTREME)
+    _logger.debug(f'{project.name}: looking up path {path} type at {rev}')
 
     # Returns 'blob', 'tree', etc. for path at revision, if it exists.
     out = project.git(['ls-tree', rev, path], capture_stdout=True,
