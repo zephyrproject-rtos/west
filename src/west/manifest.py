@@ -262,7 +262,7 @@ class Manifest:
 
     def __init__(self, source_file=None, source_data=None,
                  manifest_path=None, topdir=None, importer=None,
-                 import_flags=0):
+                 import_flags=0, **kwargs):
         '''
         Using `from_file` or `from_data` is usually easier than direct
         instantiation.
@@ -386,7 +386,8 @@ class Manifest:
         # any internal attributes needed to implement the public API.
         self._importer = importer or _default_importer
         self._import_flags = import_flags
-        self._load(source_data['manifest'], manifest_path)
+        self._load(source_data['manifest'], manifest_path,
+                   kwargs.get('projects', {}))
 
     def get_projects(self, project_ids, allow_paths=True, only_cloned=False):
         '''Get a list of `Project` objects in the manifest from
@@ -536,9 +537,14 @@ class Manifest:
         else:
             raise exc
 
-    def _load(self, manifest, path_hint):
-        # Initialize this instance's fields from values given in the
-        # manifest data, which must be validated according to the schema.
+    def _load(self, manifest, path_hint, projects):
+        # Initialize this instance.
+        #
+        # - manifest: manifest data, parsed and validated
+        # - path_hint: optional hint about where the manifest repo lives
+        # - projects: map from name to Project for known projects
+
+        top_level = not bool(projects)
 
         if self.path:
             loading_what = self.path
@@ -555,7 +561,6 @@ class Manifest:
         # 1. Imported projects from "manifest: self: import:"
         # 2. "manifest: projects:"
         # 3. Imported projects from "manifest: projects: ... import:"
-        projects = collections.OrderedDict()
 
         # Create the ManifestProject, and import projects from "self:".
         mp = self._load_self(manifest, path_hint, projects)
@@ -567,7 +572,7 @@ class Manifest:
         self._load_projects(manifest, url_bases, defaults, projects)
 
         # The manifest is resolved. Make sure paths are unique.
-        self._check_paths_are_unique(mp, projects)
+        self._check_paths_are_unique(mp, projects, top_level)
 
         # Save the results.
         self.projects = list(projects.values())
@@ -684,13 +689,14 @@ class Manifest:
         # Import a Path object, which is a manifest file in the
         # manifest repository whose ManifestProject is mp.
 
-        submp = Manifest(source_file=str(pathobj),
-                         manifest_path=mp.path,
-                         topdir=self.topdir,
-                         importer=self._importer,
-                         import_flags=self._import_flags)
+        sub = Manifest(source_file=str(pathobj),
+                       manifest_path=mp.path,
+                       topdir=self.topdir,
+                       importer=self._importer,
+                       import_flags=self._import_flags,
+                       projects=projects)
 
-        for i, project in enumerate(submp.projects):
+        for i, project in enumerate(sub.projects):
             if i == MANIFEST_PROJECT_INDEX:
                 # If the submanifest has west commands, add them to
                 # mp's.
@@ -739,7 +745,6 @@ class Manifest:
             # Add the project to the map if it's new.
             added = self._add_project(project, projects)
             if added:
-                _logger.debug(f'added {project} from file {self.path}')
                 # Track project imports unless we are ignoring those.
                 imp = pd.get('import')
                 if imp:
@@ -848,13 +853,14 @@ class Manifest:
                 del data['manifest']['self']['path']
             except KeyError:
                 pass
-            submp = Manifest(source_data=data,
-                             manifest_path=project.path,
-                             topdir=self.topdir,
-                             importer=self._importer,
-                             import_flags=self._import_flags)
+            sub = Manifest(source_data=data,
+                           manifest_path=project.path,
+                           topdir=self.topdir,
+                           importer=self._importer,
+                           import_flags=self._import_flags,
+                           projects=projects)
 
-            for i, subp in enumerate(submp.projects):
+            for i, subp in enumerate(sub.projects):
                 if i == MANIFEST_PROJECT_INDEX:
                     # If the submanifest has west commands, merge them
                     # into project's.
@@ -946,11 +952,15 @@ class Manifest:
 
         if project.name not in projects:
             projects[project.name] = project
+            _logger.debug(f'added project {project.name}' +
+                          (f' from {self.path}' if self.path else ''))
             return True
         else:
             return False
 
-    def _check_paths_are_unique(self, mp, projects):
+    def _check_paths_are_unique(self, mp, projects, top_level):
+        # TODO: top_level can probably go away when #327 is done.
+
         ppaths = {}
         if mp.path:
             mppath = PurePath(mp.path)
@@ -958,7 +968,7 @@ class Manifest:
             mppath = None
         for name, project in projects.items():
             pp = PurePath(project.path)
-            if pp == mppath:
+            if top_level and pp == mppath:
                 self._malformed(f'project {name} path "{project.path}" '
                                 'is taken by the manifest repository')
             other = ppaths.get(pp)
