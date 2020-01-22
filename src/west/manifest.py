@@ -1235,9 +1235,7 @@ class Project:
         elif rc == 1:
             return False
         else:
-            log.wrn(f'{self.name_and_path}: git failed with exit code {rc}; '
-                    f'treating as if "{rev1}" is not an ancestor of "{rev2}"')
-            return False
+            raise RuntimeError(f'unexpected git merge-base result {rc}')
 
     def is_up_to_date_with(self, rev, cwd=None):
         '''Check if the project is up to date with *rev*, returning
