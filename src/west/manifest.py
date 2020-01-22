@@ -11,10 +11,8 @@ import collections
 import configparser
 import enum
 import errno
-from functools import lru_cache
 import os
 from pathlib import PurePath, Path
-import shutil
 import shlex
 import subprocess
 
@@ -1156,8 +1154,6 @@ class Project:
             raised if git finishes with a non-zero return code
         :param cwd: directory to run git in (default: ``self.abspath``)
         '''
-        _warn_once_if_no_git()
-
         if isinstance(cmd, str):
             cmd_list = shlex.split(cmd)
         else:
@@ -1451,14 +1447,6 @@ _SCHEMA_VER = parse_version(SCHEMA_VERSION)
 _EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
 _EARLIEST_VER = parse_version(_EARLIEST_VER_STR)
 _DEFAULT_REV = 'master'
-
-@lru_cache(maxsize=1)
-def _warn_once_if_no_git():
-    # Using an LRU cache means this gets called once. Afterwards, the
-    # (nonexistent) memoized result is simply returned from the cache,
-    # so the warning is emitted only once per process invocation.
-    if shutil.which('git') is None:
-        log.wrn('Git is not installed or cannot be found')
 
 def _mpath(cp=None, topdir=None):
     # Return the value of the manifest.path configuration option
