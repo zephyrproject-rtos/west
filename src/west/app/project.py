@@ -6,7 +6,7 @@
 '''West project commands'''
 
 import argparse
-from functools import partial
+from functools import partial, lru_cache
 import os
 from os.path import join, relpath, basename, dirname, exists, isdir
 import shutil
@@ -181,8 +181,7 @@ class Init(_ProjectCommand):
         if args.local and (args.manifest_url or args.manifest_rev):
             log.die('-l cannot be combined with -m or --mr')
 
-        if shutil.which('git') is None:
-            log.die("can't find git; install it or ensure it's on your PATH")
+        die_if_no_git()
 
         if args.local:
             topdir = self.local(args)
@@ -379,6 +378,8 @@ class List(_ProjectCommand):
 
     def do_run(self, args, user_args):
         def sha_thunk(project):
+            die_if_no_git()
+
             if not project.is_cloned():
                 log.die(f'cannot get sha for uncloned project {project.name}; '
                         f'run "west update {project.name}" and retry')
@@ -388,6 +389,8 @@ class List(_ProjectCommand):
                 return f'{"N/A":40}'
 
         def cloned_thunk(project):
+            die_if_no_git()
+
             return "cloned" if project.is_cloned() else "not-cloned"
 
         def delay(func, project):
@@ -519,6 +522,8 @@ class Diff(_ProjectCommand):
         return parser
 
     def do_run(self, args, ignored):
+        die_if_no_git()
+
         failed = []
         for project in self._cloned_projects(args):
             log.banner(f'diff for {project.name_and_path}:')
@@ -544,6 +549,8 @@ class Status(_ProjectCommand):
         return parser
 
     def do_run(self, args, user_args):
+        die_if_no_git()
+
         failed = []
         for project in self._cloned_projects(args):
             log.banner(f'status of {project.name_and_path}:')
@@ -612,6 +619,8 @@ class Update(_ProjectCommand):
         return parser
 
     def do_run(self, args, user_args):
+        die_if_no_git()
+
         self.args = args
         if args.exclude_west:
             log.wrn('ignoring --exclude-west')
@@ -1045,6 +1054,22 @@ def _post_checkout_help(project, branch, sha, is_ancestor):
                 f'git -C {rel} rebase {sha} {branch}')
         log.dbg('(To do this automatically in the future,',
                 'use "west update --rebase".)')
+
+@lru_cache(maxsize=1)
+def warn_once_if_no_git():
+    # Using an LRU cache means this gets called once. Afterwards, the
+    # memoized return value (None) is simply returned from the cache,
+    # so the warning is emitted only once per process invocation.
+    if shutil.which('git') is None:
+        log.wrn('git is not installed or cannot be found; this may fail')
+
+@lru_cache(maxsize=1)
+def die_if_no_git():
+    # Using an LRU cache means this only calls shutil.which() once.
+    # This is useful when the function is called multiple times, e.g.
+    # from the west list thunk for computing a SHA.
+    if shutil.which('git') is None:
+        log.die("can't find git; install it or ensure it's on your PATH")
 
 #
 # Special files and directories in the west workspace.
