@@ -118,7 +118,6 @@ def validate(data):
     except pykwalify.errors.SchemaError as se:
         raise MalformedManifest(se._msg) from se
 
-# TODO rewrite without enum.IntFlag if we can't move to python 3.6+
 class ImportFlag(enum.IntFlag):
     '''Bit flags for handling imports when resolving a manifest.
 
