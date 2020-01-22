@@ -635,7 +635,7 @@ class Manifest:
             for subimp in imp:
                 self._import_from_self(mp, subimp, projects)
         elif imptype == dict:
-            self._import_map(mp, imp, self.import_path_from_self, projects)
+            self._import_map(mp, imp, self._import_path_from_self, projects)
         else:
             self._malformed(f'{mp.abspath}: "self: import: {imp}" '
                             f'has invalid type {imptype}')
