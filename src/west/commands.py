@@ -130,8 +130,6 @@ class WestCommand(ABC):
 
         return self.parser
 
-
-
     #
     # Mandatory subclass hooks
     #
