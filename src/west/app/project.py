@@ -485,7 +485,7 @@ class ManifestCommand(_ProjectCommand):
         #
         # The code in main.py is responsible for handling any errors
         # and printing useful messages.
-        manifest = Manifest.from_file()
+        manifest = Manifest.from_file(topdir=self.topdir)
         dump_kwargs = {'default_flow_style': False,
                        'sort_keys': False}
 
