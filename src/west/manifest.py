@@ -657,7 +657,7 @@ class Manifest:
                                     cwd=str(Path(self.path).parent)).
                              stdout[:-1].      # chop off newline
                              decode('utf-8'))  # hopefully this is safe
-        p = Path(repo_root) / imp
+        p = repo_root / imp
 
         if p.is_file():
             log.dbg(f'found submanifest: {p}', level=log.VERBOSE_EXTREME)
