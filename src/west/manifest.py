@@ -901,8 +901,6 @@ class Manifest:
 
         for name, project in all_imported.items():
             if _is_imap_ok(project, imap):
-                if name in imap.rename:
-                    project.name = imap.rename[name]
                 self._add_project(project, projects)
 
     def _load_imap(self, project, imp):
@@ -915,8 +913,7 @@ class Manifest:
                           copy.pop('name-whitelist', []),
                           copy.pop('path-whitelist', []),
                           copy.pop('name-blacklist', []),
-                          copy.pop('path-blacklist', []),
-                          copy.pop('rename', {}))
+                          copy.pop('path-blacklist', []))
 
         # Find a useful name for the project on error.
         if isinstance(project, ManifestProject):
@@ -940,15 +937,6 @@ class Manifest:
         elif not _is_imap_list(ret.path_blacklist):
             self._malformed(f'{what}: bad import path-blacklist '
                             f'{ret.path_blacklist}')
-        elif not isinstance(ret.rename, dict):
-            self._malformed(f'{what}: rename: {ret.rename} '
-                            f'expected a map, {type(ret.rename)}')
-        else:
-            err = f"{what}: import map's rename includes "
-            for f, t in ret.rename.items():
-                if 'manifest' in [f, t]:
-                    self._malformed(err + f'{f}: {t}; '
-                                    '"manifest" is a reserved name')
 
         return ret
 
@@ -1441,8 +1429,7 @@ _defaults = collections.namedtuple('_defaults', 'remote revision')
 _import_map = collections.namedtuple('_import_map',
                                      'file '
                                      'name_whitelist path_whitelist '
-                                     'name_blacklist path_blacklist '
-                                     'rename')
+                                     'name_blacklist path_blacklist')
 _YML_EXTS = ['yml', 'yaml']
 _WEST_YML = 'west.yml'
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")

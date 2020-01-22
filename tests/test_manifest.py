@@ -1935,7 +1935,7 @@ def test_import_flags_ignore(tmpdir):
     ''', import_flags=ImportFlag.IGNORE)
     assert m.get_projects(['foo'])
 
-def test_import_name_whitelist(fs_topdir):
+def test_import_map_name_whitelist(fs_topdir):
     # This tests an example from the documentation which uses
     # name-whitelist.
 
@@ -1948,11 +1948,9 @@ def test_import_name_whitelist(fs_topdir):
               url: https://git.example.com/mainline/manifest
               import:
                 name-whitelist:
-                  - app
+                  - mainline-app
                   - lib2
-                rename:
-                  app: mainline-app
-            - name: app
+            - name: downstream-app
               url: https://git.example.com/downstream/app
             - name: lib3
               path: libraries/lib3
@@ -1969,7 +1967,7 @@ def test_import_name_whitelist(fs_topdir):
                       '''
                       manifest:
                         projects:
-                          - name: app
+                          - name: mainline-app
                             path: examples/app
                             url: https://git.example.com/mainline/app
                           - name: lib
@@ -1985,19 +1983,19 @@ def test_import_name_whitelist(fs_topdir):
 
     expected = M('''\
     projects:
-       - name: mainline
-         url: https://git.example.com/mainline/manifest
-       - name: app
-         url: https://git.example.com/downstream/app
-       - name: lib3
-         path: libraries/lib3
-         url: https://git.example.com/downstream/lib3
-       - name: mainline-app
-         path: examples/app
-         url: https://git.example.com/mainline/app
-       - name: lib2
-         path: libraries/lib2
-         url: https://git.example.com/mainline/lib2
+      - name: mainline
+        url: https://git.example.com/mainline/manifest
+      - name: downstream-app
+        url: https://git.example.com/downstream/app
+      - name: lib3
+        path: libraries/lib3
+        url: https://git.example.com/downstream/lib3
+      - name: mainline-app
+        path: examples/app
+        url: https://git.example.com/mainline/app
+      - name: lib2
+        path: libraries/lib2
+        url: https://git.example.com/mainline/lib2
     ''',
                  manifest_path='mp',
                  topdir=fs_topdir).projects
