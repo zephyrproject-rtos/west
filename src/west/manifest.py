@@ -11,6 +11,7 @@ import collections
 import configparser
 import enum
 import errno
+import logging
 import os
 from pathlib import PurePath, Path
 import shlex
@@ -20,7 +21,7 @@ from packaging.version import parse as parse_version
 import pykwalify.core
 import yaml
 
-from west import util, log
+from west import util
 import west.configuration as cfg
 
 #: Index in a Manifest.projects attribute where the `ManifestProject`
@@ -43,6 +44,8 @@ QUAL_REFS_WEST = 'refs/west/'
 SCHEMA_VERSION = '0.6.99'
 # ^^ will be bumped to 0.7 for that release; this just marks that
 # there were changes since 0.6 and we're in a development tree.
+
+_logger = logging.getLogger(__name__)
 
 def manifest_path():
     '''Absolute path of the manifest file in the current workspace.
@@ -535,8 +538,9 @@ class Manifest:
         # manifest data, which must be validated according to the schema.
 
         if self.path:
-            log.dbg('loading manifest file:',
-                    self.path, level=log.VERBOSE_EXTREME)
+            _logger.debug(f'loading file {self.path}')
+        else:
+            _logger.debug('loading data (no file was given)')
 
         # We want to make an ordered map from project names to
         # corresponding Project instances. Insertion order into this
@@ -585,14 +589,11 @@ class Manifest:
         imp = slf.get('import')
         if imp is not None:
             if self._import_flags & ImportFlag.IGNORE:
-                log.dbg(f'manifest {mp} self import {imp}: ignored',
-                        level=log.VERBOSE_EXTREME)
+                _logger.debug('ignored self import')
             else:
-                log.dbg('resolving self imports for:', self.path,
-                        level=log.VERBOSE_EXTREME)
+                _logger.debug(f'resolving self import {imp}')
                 self._import_from_self(mp, imp, projects)
-                log.dbg('done resolving self imports for:', self.path,
-                        level=log.VERBOSE_EXTREME)
+                _logger.debug('resolved self import')
 
         return mp
 
@@ -657,7 +658,7 @@ class Manifest:
                                     cwd=str(Path(self.path).parent)).
                              stdout[:-1].      # chop off newline
                              decode('utf-8'))  # hopefully this is safe
-        p = Path(repo_root) / imp
+        p = repo_root / imp
 
         if p.is_file():
             log.dbg(f'found submanifest: {p}', level=log.VERBOSE_EXTREME)
