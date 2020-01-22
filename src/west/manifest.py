@@ -85,7 +85,8 @@ def validate(data):
         if not isinstance(data, dict):
             raise MalformedManifest(f'{as_str} is not a YAML dictionary')
     elif not isinstance(data, dict):
-        raise TypeError(f'data type {type(data)} must be str or dict')
+        raise TypeError(f'{data} has type {type(data)}, '
+                        'expected valid manifest data')
 
     if 'manifest' not in data:
         raise MalformedManifest('manifest data contains no "manifest" key')
@@ -363,6 +364,8 @@ class Manifest:
             raise ManifestVersionError(mv.version, file=source_file) from mv
         except MalformedManifest as mm:
             self._malformed(mm.args[0], parent=mm)
+        except TypeError as te:
+            self._malformed(te.args[0], parent=te)
 
         self.projects = None
         '''Sequence of `Project` objects representing manifest
