@@ -1676,6 +1676,21 @@ _IMPORT_SELF_MANIFESTS = [
           - west.d/02-vendor-hals.yml
           - west.d/03-applications.yml
     '''
+    # as an equivalent map:
+    '''\
+    manifest:
+      remotes:
+        - name: upstream
+          url-base: upstream.com
+      projects:
+        - name: upstream
+          remote: upstream
+          revision: refs/tags/v1.0
+          import: true
+      self:
+        import:
+          file: west.d
+    '''
 ]
 
 _IMPORT_SELF_SUBMANIFESTS = {
