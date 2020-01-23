@@ -2003,6 +2003,62 @@ def test_import_map_name_whitelist(fs_topdir):
     for a, e in zip(actual, expected):
         check_proj_consistency(a, e)
 
+def test_import_map_filter_propagation(fs_topdir):
+    # Blacklists and whitelists need to propagate down imports.
+
+    manifest_repo = fs_topdir / 'mp'
+    create_repo(manifest_repo)
+
+    # For this test, we'll write a west.yml which imports level2.yml
+    # with various whitelist and blacklist settings. The file
+    # level2.yml exists only to import level3.yml, adding a layer of
+    # imports in between west.yml (which defines the filters)
+    # and level3.yml (which defines the projects being filtered).
+    #
+    # We then make sure the filters are applied on level3.yml's
+    # projects in the final resolved manifest.
+
+    with open(manifest_repo / 'level2.yml', 'w') as f:
+        f.write('''
+        manifest:
+          projects: []
+          self:
+            import: level3.yml
+        ''')
+
+    with open(manifest_repo / 'level3.yml', 'w') as f:
+        f.write('''
+        manifest:
+          defaults: {remote: r}
+          remotes: [{name: r, url-base: u}]
+          projects:
+          - name: n1
+            path: p1
+          - name: n2
+            path: p2
+        ''')
+
+    # Since we need a few different test cases with the above setup,
+    # introduce some helpers. It might be nicer to make this a
+    # parametrized test at some point, but this will do.
+
+    import_map = {}
+    west_yml = {'manifest':
+                {'projects': [],
+                 'self': {'import': import_map}}}
+
+    def load_manifest(import_map_vals):
+        import_map.clear()
+        import_map['file'] = 'level2.yml'
+        import_map.update(import_map_vals)
+        with open(manifest_repo / 'west.yml', 'w') as f:
+            f.write(yaml.dump(west_yml))
+        return MF()
+
+    projects = load_manifest({'name-whitelist': 'n2'}).projects
+    assert len(projects) == 2
+    assert projects[1].name == 'n2'
+
 #########################################
 # Various invalid manifests
 
