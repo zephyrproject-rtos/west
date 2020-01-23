@@ -661,7 +661,7 @@ class Manifest:
                 f'searching for manifest repository root from {start}')
             repo_root = Path(mp.git('rev-parse --show-toplevel',
                                     capture_stdout=True,
-                                    cwd=str(Path(self.path).parent)).
+                                    cwd=start).
                              stdout[:-1].      # chop off newline
                              decode('utf-8'))  # hopefully this is safe
         p = repo_root / imp
