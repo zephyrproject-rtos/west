@@ -10,12 +10,13 @@ import textwrap
 import pytest
 
 from west import configuration as config
-from west.manifest import Manifest
-from conftest import create_repo, add_commit, add_tag, \
-    check_output, cmd, GIT, rev_parse
+from west.manifest import Manifest, ManifestProject, Project, \
+    ManifestImportFailed
+from conftest import create_workspace, create_repo, add_commit, add_tag, \
+    check_output, cmd, GIT, rev_parse, check_proj_consistency
 
 #
-# Helper types
+# Helpers
 #
 
 # A container for the remote locations of the repositories involved in
@@ -751,3 +752,255 @@ def test_change_remote_conflict(west_update_tmpdir):
                files={'west.yml': west_yml_content})
 
     cmd('update')
+
+def test_import_project_release(repos_tmpdir):
+    # Tests for a workspace that's based off of importing from a
+    # project at a fixed release, with no downstream project forks.
+
+    remotes = repos_tmpdir / 'repos'
+    zephyr = remotes / 'zephyr'
+    add_tag(zephyr, 'test-tag')
+
+    # For this test, we create a remote manifest repository. This
+    # makes sure we can clone a manifest repository which contains
+    # imports without issue (and we don't need to clone the imported
+    # projects.)
+    #
+    # On subsequent tests, we won't bother with this step. We will
+    # just put the manifest repository directly into the workspace and
+    # use west init -l. This also provides coverage for the -l option
+    # in the presence of imports.
+    manifest_remote = remotes / 'mp'
+    create_repo(manifest_remote)
+    add_commit(manifest_remote, 'manifest repo commit',
+               files={'west.yml':
+                      f'''
+                      manifest:
+                        projects:
+                        - name: zephyr
+                          url: {zephyr}
+                          revision: test-tag
+                          import: true
+                      '''})
+
+    # Create the workspace and verify we can't load the manifest yet
+    # (because some imported data is missing).
+    ws = repos_tmpdir / 'ws'
+    cmd(f'init -m {manifest_remote} {ws}')
+    with pytest.raises(ManifestImportFailed):
+        # We can't load this yet, because we haven't cloned zephyr.
+        Manifest.from_file(topdir=ws)
+
+    # Run west update and make sure we can load the manifest now.
+    cmd('update', cwd=ws)
+
+    actual = Manifest.from_file(topdir=ws).projects
+    expected = [ManifestProject(path='mp', topdir=ws),
+                Project('zephyr', zephyr,
+                        revision='test-tag', topdir=ws),
+                Project('Kconfiglib', remotes / 'Kconfiglib',
+                        revision='zephyr', path='subdir/Kconfiglib',
+                        topdir=ws),
+                Project('tagged_repo', remotes / 'tagged_repo',
+                        revision='v1.0', topdir=ws),
+                Project('net-tools', remotes / 'net-tools',
+                        clone_depth=1, topdir=ws,
+                        west_commands='scripts/west-commands.yml')]
+    for a, e in zip(actual, expected):
+        check_proj_consistency(a, e)
+
+    # Add a commit in the remote zephyr repository and make sure it
+    # doesn't affect our local workspace, since we've locked it to a
+    # tag.
+    zephyr_ws = ws / 'zephyr'
+    head_before = rev_parse(zephyr_ws, 'HEAD')
+    add_commit(zephyr, 'this better not show up',
+               files={'should-not-clone': ''})
+
+    cmd('update', cwd=ws)
+
+    assert head_before == rev_parse(zephyr_ws, 'HEAD')
+    actual = Manifest.from_file(topdir=ws).projects
+    for a, e in zip(actual, expected):
+        check_proj_consistency(a, e)
+    assert (zephyr_ws / 'should-not-clone').check(file=0)
+
+def test_import_project_release_fork(repos_tmpdir):
+    # Like test_import_project_release(), but with a project fork,
+    # and using west init -l.
+
+    remotes = repos_tmpdir / 'repos'
+
+    zephyr = remotes / 'zephyr'
+    add_tag(zephyr, 'zephyr-tag')
+
+    fork = remotes / 'my-kconfiglib-fork'
+    create_repo(fork)
+    add_commit(fork, 'fork kconfiglib')
+    add_tag(fork, 'fork-tag')
+
+    ws = repos_tmpdir / 'ws'
+    create_workspace(ws, and_git=True)
+    manifest_repo = ws / 'mp'
+    create_repo(manifest_repo)
+    add_commit(manifest_repo, 'manifest repo commit',
+               files={'west.yml':
+                      f'''
+                      manifest:
+                        projects:
+                        - name: zephyr
+                          url: {zephyr}
+                          revision: zephyr-tag
+                          import: true
+                        - name: Kconfiglib
+                          url: {fork}
+                          revision: fork-tag
+                      '''})
+
+    cmd(f'init -l {manifest_repo}')
+    with pytest.raises(ManifestImportFailed):
+        Manifest.from_file(topdir=ws)
+
+    cmd('update', cwd=ws)
+
+    actual = Manifest.from_file(topdir=ws).projects
+    expected = [ManifestProject(path='mp', topdir=ws),
+                Project('zephyr', zephyr,
+                        revision='zephyr-tag', topdir=ws),
+                Project('Kconfiglib', fork,
+                        revision='fork-tag', path='Kconfiglib',
+                        topdir=ws),
+                Project('tagged_repo', remotes / 'tagged_repo',
+                        revision='v1.0', topdir=ws),
+                Project('net-tools', remotes / 'net-tools',
+                        clone_depth=1, topdir=ws,
+                        west_commands='scripts/west-commands.yml')]
+    for a, e in zip(actual, expected):
+        check_proj_consistency(a, e)
+
+    zephyr_ws = ws / 'zephyr'
+    head_before = rev_parse(zephyr_ws, 'HEAD')
+    add_commit(zephyr, 'this better not show up',
+               files={'should-not-clone': ''})
+
+    cmd('update', cwd=ws)
+
+    assert head_before == rev_parse(zephyr_ws, 'HEAD')
+    actual = Manifest.from_file(topdir=ws).projects
+    for a, e in zip(actual, expected):
+        check_proj_consistency(a, e)
+    assert (zephyr_ws / 'should-not-clone').check(file=0)
+
+def test_import_project_release_dir(tmpdir):
+    # Tests for a workspace that imports a directory from a project
+    # at a fixed release.
+
+    remotes = tmpdir / 'remotes'
+    empty_project = remotes / 'empty_project'
+    create_repo(empty_project)
+    add_commit(empty_project, 'empty-project empty commit')
+    imported = remotes / 'imported'
+    create_repo(imported)
+    add_commit(imported, 'add directory of imports',
+               files={'test.d/1.yml':
+                      f'''\
+                      manifest:
+                        projects:
+                        - name: west.d/1.yml-p1
+                          url: {empty_project}
+                        - name: west.d/1.yml-p2
+                          url: {empty_project}
+                      ''',
+                      'test.d/2.yml':
+                      f'''\
+                      manifest:
+                        projects:
+                        - name: west.d/2.yml-p1
+                          url: {empty_project}
+                      '''})
+    add_tag(imported, 'import-tag')
+
+    ws = tmpdir / 'ws'
+    create_workspace(ws, and_git=True)
+    manifest_repo = ws / 'mp'
+    add_commit(manifest_repo, 'manifest repo commit',
+               files={'west.yml':
+                      f'''
+                      manifest:
+                        projects:
+                        - name: imported
+                          url: {imported}
+                          revision: import-tag
+                          import: test.d
+                      '''})
+
+    cmd(f'init -l {manifest_repo}')
+    with pytest.raises(ManifestImportFailed):
+        Manifest.from_file(topdir=ws)
+
+    cmd('update', cwd=ws)
+    actual = Manifest.from_file(topdir=ws).projects
+    expected = [ManifestProject(path='mp', topdir=ws),
+                Project('imported', imported,
+                        revision='import-tag', topdir=ws),
+                Project('west.d/1.yml-p1', empty_project, topdir=ws),
+                Project('west.d/1.yml-p2', empty_project, topdir=ws),
+                Project('west.d/2.yml-p1', empty_project, topdir=ws)]
+    for a, e in zip(actual, expected):
+        check_proj_consistency(a, e)
+
+def test_import_project_rolling(repos_tmpdir):
+    # Like test_import_project_release, but with a rolling downstream
+    # that pulls master. We also use west init -l.
+
+    remotes = repos_tmpdir / 'repos'
+    zephyr = remotes / 'zephyr'
+
+    ws = repos_tmpdir / 'ws'
+    create_workspace(ws, and_git=True)
+    manifest_repo = ws / 'mp'
+    create_repo(manifest_repo)
+    add_commit(manifest_repo, 'manifest repo commit',
+               # zephyr revision is implicitly master:
+               files={'west.yml':
+                      f'''
+                      manifest:
+                        projects:
+                        - name: zephyr
+                          url: {zephyr}
+                          import: true
+                      '''})
+
+    cmd(f'init -l {manifest_repo}')
+    with pytest.raises(ManifestImportFailed):
+        Manifest.from_file(topdir=ws)
+
+    cmd('update', cwd=ws)
+
+    actual = Manifest.from_file(topdir=ws).projects
+    expected = [ManifestProject(path='mp', topdir=ws),
+                Project('zephyr', zephyr,
+                        revision='master', topdir=ws),
+                Project('Kconfiglib', remotes / 'Kconfiglib',
+                        revision='zephyr', path='subdir/Kconfiglib',
+                        topdir=ws),
+                Project('tagged_repo', remotes / 'tagged_repo',
+                        revision='v1.0', topdir=ws),
+                Project('net-tools', remotes / 'net-tools',
+                        clone_depth=1, topdir=ws,
+                        west_commands='scripts/west-commands.yml')]
+    for a, e in zip(actual, expected):
+        check_proj_consistency(a, e)
+
+    # Add a commit in the remote zephyr repository and make sure it
+    # *does* affect our local workspace, since we're rolling with its
+    # master branch.
+    zephyr_ws = ws / 'zephyr'
+    head_before = rev_parse(zephyr_ws, 'HEAD')
+    add_commit(zephyr, 'this better show up',
+               files={'should-clone': ''})
+
+    cmd('update', cwd=ws)
+
+    assert head_before != rev_parse(zephyr_ws, 'HEAD')
+    assert (zephyr_ws / 'should-clone').check(file=1)
