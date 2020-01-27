@@ -24,8 +24,8 @@ from west.manifest import Manifest, Project, ManifestProject, \
     MalformedManifest, ManifestVersionError, ManifestImportFailed, \
     manifest_path, ImportFlag, validate, MANIFEST_PROJECT_INDEX
 
-from conftest import create_repo, checkout_branch, \
-    create_branch, add_commit, GIT
+from conftest import create_workspace, create_repo, checkout_branch, \
+    create_branch, add_commit, GIT, check_proj_consistency
 
 FPI = ImportFlag.FORCE_PROJECTS  # to force project imports to use the callback
 
@@ -47,15 +47,9 @@ def tmp_workspace(tmpdir):
     # './mp/west.yml', then run tests using its contents using
     # Manifest.from_file(), etc. Or just use manifest_repo().
 
-    # Create the topdir
-    topdir = tmpdir.join('topdir')
-    topdir.mkdir()
-
     # Create the manifest repository directory and skeleton config.
-    topdir.join('mp').mkdir()
-    topdir.join('.west').mkdir()
-    topdir.join('.west', 'config').write('[manifest]\n'
-                                         'path = mp\n')
+    topdir = tmpdir / 'topdir'
+    create_workspace(topdir)
 
     # Switch to the top-level west workspace directory,
     # and give it to the test case.
@@ -71,38 +65,6 @@ def manifest_repo(tmp_workspace):
     create_repo(manifest_repo)
     manifest_repo.topdir = tmp_workspace
     return manifest_repo
-
-def check_proj_consistency(actual, expected):
-    # Check equality of all project fields (projects themselves are
-    # not comparable), with extra semantic consistency checking
-    # for paths.
-    assert actual.name == expected.name
-
-    assert actual.path == expected.path
-    if actual.topdir is None or expected.topdir is None:
-        assert actual.topdir is None and expected.topdir is None
-        assert actual.abspath is None and expected.abspath is None
-        assert actual.posixpath is None and expected.posixpath is None
-    else:
-        assert actual.topdir and actual.abspath and actual.posixpath
-        assert expected.topdir and expected.abspath and expected.posixpath
-        a_top, e_top = PurePath(actual.topdir), PurePath(expected.topdir)
-        a_abs, e_abs = PurePath(actual.abspath), PurePath(expected.abspath)
-        a_psx, e_psx = PurePath(actual.posixpath), PurePath(expected.posixpath)
-        assert a_top.is_absolute()
-        assert e_top.is_absolute()
-        assert a_abs.is_absolute()
-        assert e_abs.is_absolute()
-        assert a_psx.is_absolute()
-        assert e_psx.is_absolute()
-        assert a_top == e_top
-        assert a_abs == e_abs
-        assert a_psx == e_psx
-
-    assert actual.url == expected.url
-    assert actual.clone_depth == expected.clone_depth
-    assert actual.revision == expected.revision
-    assert actual.west_commands == expected.west_commands
 
 def nodrive(path):
     return os.path.splitdrive(path)[1]
