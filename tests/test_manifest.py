@@ -2059,6 +2059,22 @@ def test_import_map_filter_propagation(fs_topdir):
     assert len(projects) == 2
     assert projects[1].name == 'n2'
 
+    projects = load_manifest({'name-blacklist': 'n2'}).projects
+    assert len(projects) == 2
+    assert projects[1].name == 'n1'
+
+    projects = load_manifest({'name-blacklist': 'n2',
+                              'name-whitelist': 'n2'}).projects
+    assert len(projects) == 2
+    assert projects[1].name == 'n2'
+
+    projects = load_manifest({'path-blacklist': 'p*'}).projects
+    assert len(projects) == 1
+
+    projects = load_manifest({'path-blacklist': 'p1'}).projects
+    assert len(projects) == 2
+    assert projects[1].name == 'n2'
+
 #########################################
 # Various invalid manifests
 
