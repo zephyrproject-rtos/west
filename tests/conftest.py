@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+from pathlib import PurePath
 import platform
 import shlex
 import shutil
@@ -240,6 +241,23 @@ def cmd(cmd, cwd=None, stderr=None, env=None):
         print('cmd: west:', shutil.which('west'), file=sys.stderr)
         raise
 
+def create_workspace(workspace_dir, and_git=False):
+    # Manually create a bare-bones west workspace inside
+    # workspace_dir. The manifest.path config option is 'mp'. The
+    # manifest repository *directory* is created, but the git
+    # repository is not initialized unless and_git is True.
+    if not os.path.isdir(workspace_dir):
+        workspace_dir.mkdir()
+    dot_west = workspace_dir / '.west'
+    dot_west.mkdir()
+    with open(dot_west / 'config', 'w') as f:
+        f.write('[manifest]\n'
+                'path = mp')
+    mp = workspace_dir / 'mp'
+    mp.mkdir()
+    if and_git:
+        create_repo(mp)
+
 def create_repo(path):
     # Initializes a Git repository in 'path', and adds an initial commit to it
 
@@ -317,3 +335,35 @@ def add_tag(repo, tag, commit='HEAD', msg=None):
 def rev_parse(repo, revision):
     out = subprocess.check_output([GIT, 'rev-parse', revision], cwd=repo)
     return out.decode(sys.getdefaultencoding())
+
+def check_proj_consistency(actual, expected):
+    # Check equality of all project fields (projects themselves are
+    # not comparable), with extra semantic consistency checking
+    # for paths.
+    assert actual.name == expected.name
+
+    assert actual.path == expected.path
+    if actual.topdir is None or expected.topdir is None:
+        assert actual.topdir is None and expected.topdir is None
+        assert actual.abspath is None and expected.abspath is None
+        assert actual.posixpath is None and expected.posixpath is None
+    else:
+        assert actual.topdir and actual.abspath and actual.posixpath
+        assert expected.topdir and expected.abspath and expected.posixpath
+        a_top, e_top = PurePath(actual.topdir), PurePath(expected.topdir)
+        a_abs, e_abs = PurePath(actual.abspath), PurePath(expected.abspath)
+        a_psx, e_psx = PurePath(actual.posixpath), PurePath(expected.posixpath)
+        assert a_top.is_absolute()
+        assert e_top.is_absolute()
+        assert a_abs.is_absolute()
+        assert e_abs.is_absolute()
+        assert a_psx.is_absolute()
+        assert e_psx.is_absolute()
+        assert a_top == e_top
+        assert a_abs == e_abs
+        assert a_psx == e_psx
+
+    assert actual.url == expected.url
+    assert actual.clone_depth == expected.clone_depth
+    assert actual.revision == expected.revision
+    assert actual.west_commands == expected.west_commands
