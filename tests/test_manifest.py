@@ -36,42 +36,16 @@ else:
     TOPDIR = '/topdir'
     TOPDIR_POSIX = TOPDIR
 
-# Keep these two in sync.
-FS_TOPDIR_CONTENT_STR = '''\
-manifest:
-  projects:
-  - name: p1
-    url: https://example.com/p1
-  - name: p2
-    url: https://example.com/p2
-    revision: deadbeef
-    path: project-two
-    clone-depth: 1
-    west-commands: commands.yml
-'''
-FS_TOPDIR_CONTENT_DICT = {'manifest':
-                          {'projects':
-                           [{'name': 'p1',
-                             'url': 'https://example.com/p1',
-                             'revision': 'master'},
-                            {'name': 'p2',
-                             'url': 'https://example.com/p2',
-                             'revision': 'deadbeef',
-                             'path': 'project-two',
-                             'clone-depth': 1,
-                             'west-commands': 'commands.yml'}],
-                           'self': {}}}
-
 THIS_DIRECTORY = os.path.dirname(__file__)
 
 @pytest.fixture
-def fs_topdir(tmpdir):
+def tmp_workspace(tmpdir):
     # This fixture creates a skeletal west workspace in a temporary
     # directory on the file system, and changes directory there.
     #
     # If you use this fixture, you can create
     # './mp/west.yml', then run tests using its contents using
-    # Manifest.from_file(), etc.
+    # Manifest.from_file(), etc. Or just use manifest_repo().
 
     # Create the topdir
     topdir = tmpdir.join('topdir')
@@ -89,9 +63,14 @@ def fs_topdir(tmpdir):
     return topdir
 
 @pytest.fixture
-def fs_topdir_content(fs_topdir):
-    with open(fs_topdir / 'mp' / 'west.yml', 'w') as f:
-        f.write(FS_TOPDIR_CONTENT_STR)
+def manifest_repo(tmp_workspace):
+    # This creates a temporary manifest repository, changes directory
+    # to its topdir, and returns a pathlike to the manifest repository.
+
+    manifest_repo = tmp_workspace / 'mp'
+    create_repo(manifest_repo)
+    manifest_repo.topdir = tmp_workspace
+    return manifest_repo
 
 def check_proj_consistency(actual, expected):
     # Check equality of all project fields (projects themselves are
@@ -766,14 +745,14 @@ def test_from_data_with_topdir(tmpdir):
     assert p1.path == 'project-path'
     assert PurePath(p1.abspath) == PurePath(str(tmpdir / 'project-path'))
 
-def test_manifest_path_not_found(fs_topdir):
+def test_manifest_path_not_found(tmp_workspace):
     # Make sure manifest_path() raises FileNotFoundError if the
     # manifest file specified in .west/config doesn't exist.
-    # Here, we rely on fs_topdir not actually creating the file.
+    # Here, we rely on tmp_workspace not actually creating the file.
 
     with pytest.raises(FileNotFoundError) as e:
         manifest_path()
-    assert e.value.filename == fs_topdir / 'mp' / 'west.yml'
+    assert e.value.filename == tmp_workspace / 'mp' / 'west.yml'
 
 def test_manifest_path_conflicts():
     # Project path conflicts with the manifest path are errors.
@@ -800,83 +779,81 @@ def test_manifest_path_conflicts():
         ''')
     assert 'n path "p" is taken by the manifest' in str(e.value)
 
-def test_fs_topdir(fs_topdir):
+def test_manifest_repo_discovery(manifest_repo):
     # The API should be able to find a manifest file based on the file
     # system and west configuration. The resulting topdir and abspath
     # attributes should work as specified.
 
-    content = '''\
-    manifest:
-      projects:
-      - name: project-from-manifest-dir
-        url: from-manifest-dir
-    '''
-    west_yml = str(fs_topdir / 'mp' / 'west.yml')
-    with open(west_yml, 'w') as f:
-        f.write(content)
+    topdir = manifest_repo.topdir
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: project-from-manifest-dir
+            url: from-manifest-dir
+        ''')
 
     # manifest_path() should discover west_yml.
-    assert manifest_path() == west_yml
+    assert manifest_path() == manifest_repo / 'west.yml'
 
     # Manifest.from_file() should as well.
     # The project hierarchy should be rooted in the topdir.
     manifest = Manifest.from_file()
     assert manifest.topdir is not None
-    assert manifest.topdir == str(fs_topdir)
+    assert manifest.topdir == topdir
     assert len(manifest.projects) == 2
     p = manifest.projects[1]
     assert p.name == 'project-from-manifest-dir'
     assert p.url == 'from-manifest-dir'
     assert p.topdir is not None
-    assert PurePath(p.topdir) == PurePath(str(fs_topdir))
+    assert PurePath(p.topdir) == topdir
 
-    manifest = MF(topdir=fs_topdir)
+    manifest = MF(topdir=topdir)
     assert len(manifest.get_projects(['project-from-manifest-dir'],
                                      allow_paths=False)) == 1
 
-def test_fs_topdir_different_source(fs_topdir):
+def test_parse_multiple_manifest_files(manifest_repo):
     # The API should be able to parse multiple manifest files inside a
     # single topdir. The project hierarchies should always be rooted
     # in that same topdir. The results of parsing the two separate
     # files are independent of one another.
 
-    topdir = str(fs_topdir)
-    west_yml_content = '''\
-    manifest:
-      projects:
-      - name: project-1
-        url: url-1
-      - name: project-2
-        url: url-2
-    '''
-    west_yml = str(fs_topdir / 'mp' / 'west.yml')
+    topdir = manifest_repo.topdir
+    west_yml = manifest_repo / 'west.yml'
+
     with open(west_yml, 'w') as f:
-        f.write(west_yml_content)
+        f.write('''\
+        manifest:
+          projects:
+          - name: project-1
+            url: url-1
+          - name: project-2
+            url: url-2
+        ''')
 
-    another_yml_content = '''\
-    manifest:
-      projects:
-      - name: another-1
-        url: another-url-1
-      - name: another-2
-        url: another-url-2
-        path:  another/path
-    '''
-    another_yml = str(fs_topdir / 'another.yml')
+    another_yml = topdir / 'another.yml'
     with open(another_yml, 'w') as f:
-        f.write(another_yml_content)
+        f.write('''\
+        manifest:
+          projects:
+          - name: another-1
+            url: another-url-1
+          - name: another-2
+            url: another-url-2
+            path:  another/path
+        ''')
 
-    another_yml_with_path_content = '''\
-    manifest:
-      projects:
-      - name: foo
-        url: bar
-      self:
-        path: with-path
-    '''
-    another_yml_with_path = str(fs_topdir / 'another-with-path.yml')
+    another_yml_with_path = topdir / 'another-with-path.yml'
     with open(another_yml_with_path, 'w') as f:
-        f.write(another_yml_with_path_content)
+        f.write('''\
+        manifest:
+          projects:
+          - name: foo
+            url: bar
+          self:
+            path: with-path
+        ''')
 
     # manifest_path() should discover west_yml.
     assert manifest_path() == west_yml
@@ -884,7 +861,7 @@ def test_fs_topdir_different_source(fs_topdir):
     # Manifest.from_file() should discover west.yml, and
     # the project hierarchy should be rooted at topdir.
     manifest = Manifest.from_file()
-    assert PurePath(manifest.topdir) == PurePath(topdir)
+    assert PurePath(manifest.topdir) == topdir
     assert len(manifest.projects) == 3
     assert manifest.projects[1].name == 'project-1'
     assert manifest.projects[2].name == 'project-2'
@@ -908,23 +885,22 @@ def test_fs_topdir_different_source(fs_topdir):
     assert p1.name == 'another-1'
     assert p1.url == 'another-url-1'
     assert p1.topdir == topdir
-    assert PurePath(p1.abspath) == PurePath(str(fs_topdir / 'another-1'))
+    assert PurePath(p1.abspath) == topdir / 'another-1'
     p2 = manifest.projects[2]
     assert p2.name == 'another-2'
     assert p2.url == 'another-url-2'
     assert p2.topdir == topdir
-    assert PurePath(p2.abspath) == PurePath(str(fs_topdir / 'another' /
-                                                'path'))
+    assert PurePath(p2.abspath) == topdir / 'another' / 'path'
 
     # On the other hand, if the manifest yaml file does specify its
     # path, the ManifestProject must also be rooted at topdir.
     manifest = Manifest.from_file(source_file=another_yml_with_path)
     mproj = manifest.projects[0]
     assert mproj.path == 'with-path'
-    assert PurePath(mproj.topdir) == PurePath(topdir)
-    assert PurePath(mproj.abspath) == PurePath(str(fs_topdir / 'with-path'))
+    assert PurePath(mproj.topdir) == topdir
+    assert PurePath(mproj.abspath) == topdir / 'with-path'
 
-def test_fs_topdir_freestanding_manifest(tmpdir, fs_topdir):
+def test_parse_freestanding_manifest(tmpdir, tmp_workspace):
     # The API should be able to parse a random manifest file
     # in a location that has nothing to do with the current topdir.
     #
@@ -932,51 +908,50 @@ def test_fs_topdir_freestanding_manifest(tmpdir, fs_topdir):
     #
     # If it has a self path, that's its path, and the ManifestProject
     # is rooted at topdir. Otherwise, its path and abspath are None.
-    topdir = str(fs_topdir)
+
+    random_yml = tmpdir / 'random.yml'
 
     # Case 1: self path is present. ManifestProject is rooted
     # within the same topdir as the projects.
-    content = '''\
-    manifest:
-      projects:
-      - name: name
-        url: url
-      self:
-        path: my-path
-    '''
-    yml = str(tmpdir / 'random.yml')
-    with open(yml, 'w') as f:
-        f.write(content)
-    manifest = Manifest.from_file(source_file=yml, topdir=topdir)
-    assert PurePath(manifest.topdir) == PurePath(topdir)
+    with open(random_yml, 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: name
+            url: url
+          self:
+            path: my-path
+        ''')
+    manifest = Manifest.from_file(source_file=random_yml,
+                                  topdir=tmp_workspace)
+    assert PurePath(manifest.topdir) == tmp_workspace
     mproj = manifest.projects[0]
     assert mproj.path == 'my-path'
-    assert PurePath(mproj.abspath) == PurePath(str(fs_topdir / 'my-path'))
+    assert PurePath(mproj.abspath) == tmp_workspace / 'my-path'
 
     # Case 1: self path is missing
-    content = '''\
-    manifest:
-      projects:
-      - name: name
-        url: url
-    '''
-    yml = str(tmpdir / 'random.yml')
-    with open(yml, 'w') as f:
-        f.write(content)
-    manifest = Manifest.from_file(source_file=yml, topdir=topdir)
-    assert PurePath(manifest.topdir) == PurePath(topdir)
+    with open(tmpdir / 'random.yml', 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: name
+            url: url
+        ''')
+    manifest = Manifest.from_file(source_file=random_yml,
+                                  topdir=tmp_workspace)
+    assert PurePath(manifest.topdir) == tmp_workspace
     mproj = manifest.projects[0]
     assert mproj.path is None
     assert mproj.abspath is None
 
-def test_fs_topdir_no_manifest(fs_topdir):
+def test_bad_topdir_fails(tmp_workspace):
     # Make sure we get expected failure using Manifest.from_file()
     # with the topdir kwarg when no west.yml exists.
 
     with pytest.raises(ValueError) as e:
-        MF(topdir=fs_topdir / 'mp')
+        MF(topdir=tmp_workspace / 'mp')
     assert 'is not a west workspace root' in str(e.value)
-    assert f'but {fs_topdir} is' in str(e.value)
+    assert f'but {tmp_workspace} is' in str(e.value)
 
 def test_from_bad_topdir(tmpdir):
     # If we give a bad temporary directory that isn't a workspace
@@ -994,7 +969,8 @@ def test_ignore_west_section():
     # once have been schema errors shouldn't be anymore. Projects
     # should still work as expected regardless of what's in there.
 
-    content_wrong_west = '''\
+    # Parsing manifest only, no exception raised
+    manifest = Manifest.from_data(yaml.safe_load('''\
     west:
       url: https://example.com
       revision: abranch
@@ -1007,15 +983,13 @@ def test_ignore_west_section():
       - name: testproject
         remote: testremote
         path: sub/directory
-    '''
-    # Parsing manifest only, no exception raised
-    manifest = Manifest.from_data(yaml.safe_load(content_wrong_west),
+    '''),
                                   topdir='/west_top')
     p1 = manifest.projects[1]
     assert PurePath(p1.path) == PurePath('sub', 'directory')
     assert PurePath(nodrive(p1.abspath)) == PurePath('/west_top/sub/directory')
 
-def test_get_projects(fs_topdir):
+def test_get_projects(tmp_workspace):
     # Coverage for get_projects.
 
     content = '''\
@@ -1034,12 +1008,12 @@ def test_get_projects(fs_topdir):
     assert e.value.args[1] == []
 
     # For the remainder of the tests, make a manifest file.
-    with open(fs_topdir / 'mp' / 'west.yml', 'w') as f:
+    with open(tmp_workspace / 'mp' / 'west.yml', 'w') as f:
         f.write(content)
 
     # Asking for an uncloned project should fail if only_cloned=False.
     # The ValueError args are (unknown, uncloned).
-    manifest = MF(topdir=fs_topdir)
+    manifest = MF(topdir=tmp_workspace)
     with pytest.raises(ValueError) as e:
         manifest.get_projects(['foo'], only_cloned=True)
     unknown, uncloned = e.value.args
@@ -1057,7 +1031,7 @@ def test_get_projects(fs_topdir):
     projects = manifest.get_projects(['manifest'])
     assert len(projects) == 1
     assert projects[0].name == 'manifest'
-    assert projects[0].abspath == fs_topdir / 'mp'
+    assert projects[0].abspath == tmp_workspace / 'mp'
 
     # No project_ids means "all projects".
     projects = manifest.get_projects([])
@@ -1071,11 +1045,40 @@ def test_get_projects(fs_topdir):
     assert uncloned[0].name == 'manifest'
     assert uncloned[1].name == 'foo'
 
-def test_as_dict_and_yaml(fs_topdir_content):
+def test_as_dict_and_yaml(manifest_repo):
     # coverage for as_dict, as_frozen_dict, as_yaml, as_frozen_yaml.
 
+    # keep content_str and content_dict in sync.
+    content_str = '''\
+    manifest:
+      projects:
+      - name: p1
+        url: https://example.com/p1
+      - name: p2
+        url: https://example.com/p2
+        revision: deadbeef
+        path: project-two
+        clone-depth: 1
+        west-commands: commands.yml
+    '''
+    content_dict = {'manifest':
+                    {'projects':
+                     [{'name': 'p1',
+                       'url': 'https://example.com/p1',
+                       'revision': 'master'},
+                      {'name': 'p2',
+                       'url': 'https://example.com/p2',
+                       'revision': 'deadbeef',
+                       'path': 'project-two',
+                       'clone-depth': 1,
+                       'west-commands': 'commands.yml'}],
+                     'self': {}}}
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write(content_str)
+
     fake_sha = 'the-sha'
-    frozen_expected = deepcopy(FS_TOPDIR_CONTENT_DICT)
+    frozen_expected = deepcopy(content_dict)
     for p in frozen_expected['manifest']['projects']:
         p['revision'] = fake_sha
 
@@ -1086,8 +1089,8 @@ def test_as_dict_and_yaml(fs_topdir_content):
 
     as_dict = manifest.as_dict()
     yaml_roundtrip = yaml.safe_load(manifest.as_yaml())
-    assert as_dict == FS_TOPDIR_CONTENT_DICT
-    assert yaml_roundtrip == FS_TOPDIR_CONTENT_DICT
+    assert as_dict == content_dict
+    assert yaml_roundtrip == content_dict
 
     # With no cloned projects, however, we should not be able to freeze.
 
@@ -1377,12 +1380,10 @@ def test_import_with_fork_and_proj():
     for a, e in zip(actual, expected):
         check_proj_consistency(a, e)
 
-def test_import_project_list(fs_topdir):
+def test_import_project_list(manifest_repo):
     # We should be able to import a list of files from a project at a
     # revision. The files should come from git, not the file system.
 
-    manifest_repo = fs_topdir / 'mp'
-    create_repo(manifest_repo)
     with open(manifest_repo / 'west.yml', 'w') as f:
         f.write('''\
         manifest:
@@ -1396,7 +1397,8 @@ def test_import_project_list(fs_topdir):
             path: mp
         ''')
 
-    p1 = fs_topdir / 'p1'
+    topdir = manifest_repo.topdir
+    p1 = topdir / 'p1'
     create_repo(p1)
     create_branch(p1, 'manifest-rev', checkout=True)
     add_commit(p1, 'add m1.yml and m2.yml',
@@ -1419,20 +1421,18 @@ def test_import_project_list(fs_topdir):
     assert (p1 / 'm2.yml').check(file=0, dir=0)
 
     actual = MF().projects
-    expected = [ManifestProject(path='mp', topdir=fs_topdir),
-                Project('p1', 'p1-url', topdir=fs_topdir),
-                Project('p2', 'p2-url', topdir=fs_topdir),
-                Project('p3', 'p3-url', topdir=fs_topdir)]
+    expected = [ManifestProject(path='mp', topdir=topdir),
+                Project('p1', 'p1-url', topdir=topdir),
+                Project('p2', 'p2-url', topdir=topdir),
+                Project('p3', 'p3-url', topdir=topdir)]
 
     for a, e in zip(actual, expected):
         check_proj_consistency(a, e)
 
-def test_import_project_directory(fs_topdir):
+def test_import_project_directory(manifest_repo):
     # We should be able to import manifest files in a directory from a
     # revision. The files should come from git, not the file system.
 
-    manifest_repo = fs_topdir / 'mp'
-    create_repo(manifest_repo)
     with open(manifest_repo / 'west.yml', 'w') as f:
         f.write('''\
         manifest:
@@ -1444,7 +1444,8 @@ def test_import_project_directory(fs_topdir):
             path: mp
         ''')
 
-    p1 = fs_topdir / 'p1'
+    topdir = manifest_repo.topdir
+    p1 = topdir / 'p1'
     create_repo(p1)
     create_branch(p1, 'manifest-rev', checkout=True)
     add_commit(p1, 'add directory of submanifests',
@@ -1472,19 +1473,17 @@ def test_import_project_directory(fs_topdir):
     assert (p1 / 'd').check(file=0, dir=0)
 
     actual = MF().projects
-    expected = [ManifestProject(path='mp', topdir=fs_topdir),
-                Project('p1', 'p1-url', topdir=fs_topdir),
-                Project('p2', 'p2-url', topdir=fs_topdir),
-                Project('p3', 'p3-url', topdir=fs_topdir)]
+    expected = [ManifestProject(path='mp', topdir=topdir),
+                Project('p1', 'p1-url', topdir=topdir),
+                Project('p2', 'p2-url', topdir=topdir),
+                Project('p3', 'p3-url', topdir=topdir)]
 
     for a, e in zip(actual, expected):
         check_proj_consistency(a, e)
 
-def test_import_project_err_malformed(fs_topdir):
+def test_import_project_err_malformed(manifest_repo):
     # Checks for erroneous or malformed imports from projects.
 
-    manifest_repo = fs_topdir / 'mp'
-    create_repo(manifest_repo)
     with open(manifest_repo / 'west.yml', 'w') as f:
         f.write('''\
         manifest:
@@ -1494,7 +1493,7 @@ def test_import_project_err_malformed(fs_topdir):
             import: true
         ''')
 
-    p = fs_topdir / 'p'
+    p = manifest_repo / '..' / 'p'
     subm = p / 'west.yml'
     create_repo(p)
     create_branch(p, 'manifest-rev', checkout=True)
@@ -1538,12 +1537,10 @@ def test_import_project_err_malformed(fs_topdir):
     with pytest.raises(ManifestImportFailed):
         MF()
 
-def test_import_project_submanifest_commands(fs_topdir):
+def test_import_project_submanifest_commands(manifest_repo):
     # If a project has no west-commands, but an imported manifest
     # inside it defines some, they should be inherited in the parent.
 
-    manifest_repo = fs_topdir / 'mp'
-    create_repo(manifest_repo)
     with open(manifest_repo / 'west.yml', 'w') as f:
         f.write('''\
         manifest:
@@ -1555,7 +1552,7 @@ def test_import_project_submanifest_commands(fs_topdir):
             - m2.yml
         ''')
 
-    p1 = fs_topdir / 'p1'
+    p1 = manifest_repo / '..' / 'p1'
     create_repo(p1)
     create_branch(p1, 'manifest-rev', checkout=True)
     add_commit(p1, 'add m1.yml and m2.yml',
@@ -1583,14 +1580,12 @@ def test_import_project_submanifest_commands(fs_topdir):
     expected = ['m1-commands.yml', 'm2-commands.yml']
     assert p1.west_commands == expected
 
-def test_import_project_submanifest_commands_both(fs_topdir):
+def test_import_project_submanifest_commands_both(manifest_repo):
     # Like test_import_project_submanifest_commands, but making sure
     # that if multiple west-commands appear throughout the imported
     # manifests, then west_commands is a list of all of them, resolved
     # in import order.
 
-    manifest_repo = fs_topdir / 'mp'
-    create_repo(manifest_repo)
     with open(manifest_repo / 'west.yml', 'w') as f:
         f.write('''\
         manifest:
@@ -1603,7 +1598,7 @@ def test_import_project_submanifest_commands_both(fs_topdir):
             west-commands: p1-commands.yml
         ''')
 
-    p1 = fs_topdir / 'p1'
+    p1 = manifest_repo / '..' / 'p1'
     create_repo(p1)
     create_branch(p1, 'manifest-rev', checkout=True)
     add_commit(p1, 'add m1.yml and m2.yml',
@@ -1764,39 +1759,38 @@ def test_import_self_directory(content, tmpdir):
 
     # Resolve the manifest. The split-manifest/west.d content comes
     # from the file system in this case.
-    topdir = str(tmpdir)
     actual = Manifest.from_data(manifests['west.yml'],
-                                manifest_path='split-manifest', topdir=topdir,
+                                manifest_path='split-manifest', topdir=tmpdir,
                                 importer=make_importer(call_map),
                                 import_flags=FPI).projects
 
     expected = [
-        ManifestProject(path='split-manifest', topdir=topdir),
+        ManifestProject(path='split-manifest', topdir=tmpdir),
         # Projects from 01-libraries.yml come first.
         Project('my-1', 'downstream.com/my-lib-1', revision='my-1-rev',
-                path='lib/my-1', topdir=topdir),
+                path='lib/my-1', topdir=tmpdir),
         Project('my-2', 'downstream.com/my-lib-2', revision='my-2-rev',
-                path='lib/my-2', topdir=topdir),
+                path='lib/my-2', topdir=tmpdir),
         # Next, projects from 02-vendor-hals.yml.
         Project('hal_nordic', 'downstream.com/hal_nordic',
                 revision='my-hal-rev', path='modules/hal/nordic',
-                topdir=topdir),
+                topdir=tmpdir),
         Project('hal_downstream_sauce', 'downstream.com/hal_downstream_only',
                 revision='my-down-hal-rev', path='modules/hal/downstream_only',
-                topdir=topdir),
+                topdir=tmpdir),
         # After that, 03-applications.yml.
         Project('my-app', 'downstream.com/my-app', revision='my-app-rev',
-                path='applications/my-app', topdir=topdir),
+                path='applications/my-app', topdir=tmpdir),
         # upstream is the only element of our projects list, so it's
         # after all the self-imports.
         Project('upstream', 'upstream.com/upstream', revision='refs/tags/v1.0',
-                path='upstream', topdir=topdir),
+                path='upstream', topdir=tmpdir),
         # Projects we imported from upstream are last. Projects
         # present upstream which we have already defined should be
         # ignored and not appear here.
         Project('segger', 'upstream.com/segger',
                 revision='segger-upstream-rev',
-                path='modules/debug/segger', topdir=topdir),
+                path='modules/debug/segger', topdir=tmpdir),
     ]
 
     # Since this test is a bit more complicated than some others,
@@ -1827,11 +1821,8 @@ def test_import_self_bool():
           import: false''')
     assert 'of boolean' in str(e.value)
 
-def test_import_self_err_malformed(fs_topdir):
+def test_import_self_err_malformed(manifest_repo):
     # Checks for erroneous or malformed imports from self.
-
-    manifest_repo = fs_topdir / 'mp'
-    create_repo(manifest_repo)
 
     with open(manifest_repo / 'west.yml', 'w') as f:
         f.write('''\
@@ -1847,46 +1838,38 @@ def test_import_self_err_malformed(fs_topdir):
     assert 'not found' in str_value
     assert 'not-a-file' in str_value
 
-def test_import_self_submanifest_commands(fs_topdir):
+def test_import_self_submanifest_commands(manifest_repo):
     # If we import a sub-manifest from 'self' that has west commands
     # in its own self section, those should be treated as if they were
     # declared in the top-level self section.
 
-    manifest_repo = fs_topdir / 'mp'
-    create_repo(manifest_repo)
-
-    top = '''\
-    manifest:
-      projects:
-      - name: p1
-        url: u1
-      self:
-        import: sub-manifest.yml
-    '''
     with open(manifest_repo / 'west.yml', 'w') as f:
-        f.write(top)
+        f.write('''\
+        manifest:
+          projects:
+          - name: p1
+            url: u1
+          self:
+            import: sub-manifest.yml
+        ''')
 
-    sub = '''\
-    manifest:
-      projects:
-      - name: p2
-        url: u2
-      self:
-        west-commands: sub-commands.yml
-    '''
     with open(manifest_repo / 'sub-manifest.yml', 'w') as f:
-        f.write(sub)
+        f.write('''\
+        manifest:
+          projects:
+          - name: p2
+            url: u2
+          self:
+            west-commands: sub-commands.yml
+        ''')
 
     mp = MF().projects[MANIFEST_PROJECT_INDEX]
     assert mp.west_commands == 'sub-commands.yml'
 
-def test_import_self_submanifest_commands_both(fs_topdir):
+def test_import_self_submanifest_commands_both(manifest_repo):
     # Like test_import_self_submanifest_commands, but making sure that
     # if multiple west-commands appear throughout the imported manifests,
     # then west_commands is a list of all of them, resolved in import order.
-
-    manifest_repo = fs_topdir / 'mp'
-    create_repo(manifest_repo)
 
     top = '''\
     manifest:
@@ -1911,7 +1894,7 @@ def test_import_self_submanifest_commands_both(fs_topdir):
     with open(manifest_repo / 'sub-manifest.yml', 'w') as f:
         f.write(sub)
 
-    mp = MF(topdir=fs_topdir).projects[MANIFEST_PROJECT_INDEX]
+    mp = MF().projects[MANIFEST_PROJECT_INDEX]
     assert mp.west_commands == ['sub-commands.yml', 'top-commands.yml']
 
 def test_import_flags_ignore(tmpdir):
@@ -1935,11 +1918,10 @@ def test_import_flags_ignore(tmpdir):
     ''', import_flags=ImportFlag.IGNORE)
     assert m.get_projects(['foo'])
 
-def test_import_map_name_whitelist(fs_topdir):
+def test_import_map_name_whitelist(manifest_repo):
     # This tests an example from the documentation which uses
     # name-whitelist.
 
-    manifest_repo = fs_topdir / 'mp'
     with open(manifest_repo / 'west.yml', 'w') as f:
         f.write('''
         manifest:
@@ -1959,7 +1941,7 @@ def test_import_map_name_whitelist(fs_topdir):
             path: mp
         ''')
 
-    mainline = fs_topdir / 'mainline'
+    mainline = manifest_repo.topdir / 'mainline'
     create_repo(mainline)
     create_branch(mainline, 'manifest-rev', checkout=True)
     add_commit(mainline, 'mainline/west.yml',
@@ -1998,16 +1980,13 @@ def test_import_map_name_whitelist(fs_topdir):
         url: https://git.example.com/mainline/lib2
     ''',
                  manifest_path='mp',
-                 topdir=fs_topdir).projects
+                 topdir=manifest_repo.topdir).projects
 
     for a, e in zip(actual, expected):
         check_proj_consistency(a, e)
 
-def test_import_map_filter_propagation(fs_topdir):
+def test_import_map_filter_propagation(manifest_repo):
     # Blacklists and whitelists need to propagate down imports.
-
-    manifest_repo = fs_topdir / 'mp'
-    create_repo(manifest_repo)
 
     # For this test, we'll write a west.yml which imports level2.yml
     # with various whitelist and blacklist settings. The file
