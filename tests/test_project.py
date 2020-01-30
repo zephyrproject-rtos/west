@@ -12,6 +12,7 @@ import pytest
 from west import configuration as config
 from west.manifest import Manifest, ManifestProject, Project, \
     ManifestImportFailed
+from west.manifest import ImportFlag as MIF
 from conftest import create_workspace, create_repo, add_commit, add_tag, \
     check_output, cmd, GIT, rev_parse, check_proj_consistency
 
@@ -324,6 +325,76 @@ def test_update_tag_to_tag(west_init_tmpdir):
     assert ur.tr_mr_1 == v2_0
     assert ur.tr_head_0 == v1_0
     assert ur.tr_head_1 == v2_0
+
+def test_update_some_with_imports(repos_tmpdir):
+    # 'west update project1 project2' should work fine even when
+    # imports are used, as long as the relevant projects are all
+    # defined in the manifest repository.
+    #
+    # It currently should fail with a helpful message if the projects
+    # are resolved via project imports.
+
+    remotes = repos_tmpdir / 'repos'
+    zephyr = remotes / 'zephyr'
+    net_tools = remotes / 'net-tools'
+
+    ws = repos_tmpdir / 'ws'
+    create_workspace(ws, and_git=True)
+    manifest_repo = ws / 'mp'
+    create_repo(manifest_repo)
+    add_commit(manifest_repo, 'manifest repo commit',
+               # zephyr revision is implicitly master:
+               files={'west.yml':
+                      f'''
+                      manifest:
+                        projects:
+                        - name: zephyr
+                          url: {zephyr}
+                          import: true
+                        self:
+                          import: foo.yml
+                      ''',
+                      'foo.yml':
+                      f'''
+                      manifest:
+                        projects:
+                        - name: net-tools
+                          url: {net_tools}
+                      '''})
+
+    cmd(f'init -l {manifest_repo}')
+
+    # Updating unknown projects should fail as always.
+
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('update unknown-project', cwd=ws)
+
+    # Updating a list of projects when some are resolved via project
+    # imports must fail.
+
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('update Kconfiglib net-tools', cwd=ws)
+
+    # Updates of projects defined in the manifest repository or all
+    # projects must succeed, and behave the same as if no imports
+    # existed.
+
+    cmd('update net-tools', cwd=ws)
+    with pytest.raises(ManifestImportFailed):
+        Manifest.from_file(topdir=ws)
+    manifest = Manifest.from_file(topdir=ws, import_flags=MIF.IGNORE_PROJECTS)
+    projects = manifest.get_projects(['net-tools', 'zephyr'])
+    net_tools_project = projects[0]
+    zephyr_project = projects[1]
+    assert net_tools_project.is_cloned()
+    assert not zephyr_project.is_cloned()
+
+    cmd('update zephyr', cwd=ws)
+    assert zephyr_project.is_cloned()
+
+    cmd('update', cwd=ws)
+    manifest = Manifest.from_file(topdir=ws)
+    assert manifest.get_projects(['Kconfiglib'])[0].is_cloned()
 
 def test_init_again(west_init_tmpdir):
     # Test that 'west init' on an initialized tmpdir errors out

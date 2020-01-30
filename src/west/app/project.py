@@ -20,7 +20,7 @@ from west import log
 from west import util
 from west.commands import WestCommand, CommandError
 from west.manifest import ImportFlag, Manifest, MANIFEST_PROJECT_INDEX, \
-    ManifestProject, _manifest_content_at
+    ManifestProject, _manifest_content_at, ManifestImportFailed
 from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
 from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
 from west.manifest import QUAL_REFS_WEST as QUAL_REFS
@@ -71,10 +71,7 @@ class _ProjectCommand(WestCommand):
             # Die with an error message on unknown or uncloned projects.
             unknown, uncloned = ve.args
             if unknown:
-                s = 's' if len(unknown) > 1 else ''
-                names = ' '.join(unknown)
-                log.die(f'unknown project name{s}/path{s}: {names}\n'
-                        '  Hint: use "west list" to list all projects.')
+                die_unknown(unknown)
             elif only_cloned and uncloned:
                 s = 's' if len(uncloned) > 1 else ''
                 names = ' '.join(p.name for p in uncloned)
@@ -683,19 +680,25 @@ class Update(_ProjectCommand):
 
     def update_some(self, args):
         # The 'west update PROJECT [...]' style invocation is only
-        # possible for "flat" manifests, i.e. manifests without import
-        # statements.
+        # implemented for projects defined within the manifest
+        # repository.
+        #
+        # It's unclear how to do this properly in the case of
+        # a project A whose definition is imported from
+        # another project B, especially when B.revision is not
+        # a fixed SHA. Do we forcibly need to update B first?
+        # Should we skip it? Should it be configurable? Etc.
+        #
+        # For now, just refuse to do so. We can try to relax
+        # this restriction if it proves cumbersome.
 
-        if self.manifest.has_imports:
-            log.die("refusing to update just some projects because "
-                    "manifest imports are in use\n"
-                    '  Project arguments: {}\n'
-                    '  Manifest file with imports: {}\n'
-                    '  Please run "west update" (with no arguments) instead.'.
-                    format(' '.join(args.projects), self.manifest.path))
+        if not self.has_manifest or self.manifest.has_imports:
+            projects = self.toplevel_projects(args)
+        else:
+            projects = self._projects(args.projects)
 
         failed = []
-        for project in self._projects(args.projects):
+        for project in projects:
             if isinstance(project, ManifestProject):
                 continue
             try:
@@ -703,6 +706,39 @@ class Update(_ProjectCommand):
             except subprocess.CalledProcessError:
                 failed.append(project)
         self._handle_failed(args, failed)
+
+    def toplevel_projects(self, args):
+        # Return a list of projects from args.projects, or scream and
+        # die if any projects are either unknown or not defined in the
+        # manifest repository.
+
+        ids = args.projects
+        assert ids
+
+        mr_projects, mr_unknown = projects_unknown(
+            Manifest.from_file(import_flags=ImportFlag.IGNORE_PROJECTS), ids)
+
+        if not mr_unknown:
+            return mr_projects
+
+        try:
+            manifest = Manifest.from_file()
+        except ManifestImportFailed:
+            log.die('one or more projects are unknown or defined via '
+                    'imports; please run plain "west update".')
+
+        projects, unknown = projects_unknown(manifest, ids)
+        if unknown:
+            die_unknown(unknown)
+        else:
+            # All of the ids are known projects, but some of them
+            # are not defined in the manifest repository.
+            mr_unknown_set = set(mr_unknown)
+            from_projects = [p for p in ids if p in mr_unknown_set]
+            log.die(f'refusing to update project: ' +
+                    " ".join(from_projects) + '\n' +
+                    '  It or they were resolved via project imports.\n'
+                    '  Only plain "west update" can currently update them.')
 
     def fetch_strategy(self, args):
         cfg = config.get('update', 'fetch', fallback=None)
@@ -1050,6 +1086,30 @@ def _post_checkout_help(project, branch, sha, is_ancestor):
                 f'git -C {rel} rebase {sha} {branch}')
         log.dbg('(To do this automatically in the future,',
                 'use "west update --rebase".)')
+
+def projects_unknown(manifest, projects):
+    # Retrieve the projects with get_projects(project,
+    # only_cloned=False). Return a pair: (projects, unknown)
+    # containing either a projects list and None or None and a list of
+    # unknown project IDs.
+
+    try:
+        return (manifest.get_projects(projects, only_cloned=False), None)
+    except ValueError as ve:
+        if len(ve.args) != 2:
+            raise          # not directly raised by get_projects()
+        unknown = ve.args[0]
+        if not unknown:
+            raise   # only_cloned is False, so this "can't happen"
+        return (None, unknown)
+
+def die_unknown(unknown):
+    # Scream and die about unknown projects.
+
+    s = 's' if len(unknown) > 1 else ''
+    names = ' '.join(unknown)
+    log.die(f'unknown project name{s}/path{s}: {names}\n'
+            '  Hint: use "west list" to list all projects.')
 
 @lru_cache(maxsize=1)
 def warn_once_if_no_git():
