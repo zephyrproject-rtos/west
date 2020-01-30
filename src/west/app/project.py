@@ -901,14 +901,10 @@ def _maybe_sha(rev):
 def _clone(project):
     log.small_banner(f'{project.name}: cloning and initializing')
     project.git(f'init {project.abspath}', cwd=util.west_topdir())
-    # The "origin" remote is added to follow the practice that 'origin'
-    # is the remote a Git repository was always cloned from.
-    #
-    # However, west doesn't fetch from this remote: it always forms
-    # a fetch URL from the manifest file and fetches that directly.
-    #
-    # The URL of this remote can thus be changed by the user at will.
-    project.git(f'remote add -- origin {project.url}')
+    # This remote is added as a convenience for the user.
+    # However, west always fetches project data by URL, not remote name.
+    # The user is therefore free to change the URL of this remote.
+    project.git(f'remote add -- {project.remote_name} {project.url}')
 
 def _rev_type(project, rev=None):
     # Returns a "refined" revision type of rev (default:
