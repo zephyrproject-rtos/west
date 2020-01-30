@@ -820,7 +820,7 @@ class Manifest:
         return Project(name, url, pd.get('revision', defaults.revision),
                        pd.get('path', name), clone_depth=pd.get('clone-depth'),
                        west_commands=pd.get('west-commands'),
-                       topdir=self.topdir)
+                       topdir=self.topdir, remote_name=remote)
 
     def _import_from_project(self, project, imp, projects, filter_fn):
         # Recursively resolve a manifest import from 'project'.
@@ -1056,6 +1056,8 @@ class Project:
       the project
     - ``topdir``: the top level directory of the west workspace
       the project is part of, or ``None``
+    - ``remote_name``: the name of the remote which should be set up
+      when the project is being cloned (default: 'origin')
     '''
 
     def __eq__(self, other):
@@ -1072,7 +1074,8 @@ class Project:
         return f'<Project {self.name} ({path_repr}) at {self.revision}>'
 
     def __init__(self, name, url, revision=None, path=None,
-                 clone_depth=None, west_commands=None, topdir=None):
+                 clone_depth=None, west_commands=None, topdir=None,
+                 remote_name=None):
         '''Project constructor.
 
         If *topdir* is ``None``, then absolute path attributes
@@ -1087,6 +1090,8 @@ class Project:
             project, relative to its own base directory, topdir / path,
             or list of these
         :param topdir: the west workspace's top level directory
+        :param remote_name: the name of the remote which should be
+            set up if the project is being cloned (default: 'origin')
         '''
 
         self.name = name
@@ -1096,6 +1101,7 @@ class Project:
         self.clone_depth = clone_depth
         self.west_commands = west_commands
         self.topdir = topdir
+        self.remote_name = remote_name or 'origin'
 
     @property
     def path(self):
