@@ -405,12 +405,7 @@ class Manifest:
         self._importer = importer or _default_importer
         self._import_flags = import_flags
         self._load(source_data['manifest'], manifest_path,
-                   # Known projects map, from name to Project.
-                   kwargs.get('projects', {}),
-                   # name->Project predicate, Project -> Bool. True if
-                   # OK to add a project to 'projects'. A None value is
-                   # treated as a function which always returns True.
-                   kwargs.get('filter_fn'))
+                   kwargs.get('import-context', _import_ctx({}, None)))
 
     def get_projects(self, project_ids, allow_paths=True, only_cloned=False):
         '''Get a list of `Project` objects in the manifest from
@@ -560,15 +555,14 @@ class Manifest:
         else:
             raise exc
 
-    def _load(self, manifest, path_hint, projects, filter_fn):
+    def _load(self, manifest, path_hint, ctx):
         # Initialize this instance.
         #
         # - manifest: manifest data, parsed and validated
         # - path_hint: optional hint about where the manifest repo lives
-        # - projects: map from name to Project for known projects
-        # - filter_fn: predicate which returns True if it's OK to add a project
+        # - ctx: import context, an _import_ctx tuple
 
-        top_level = not bool(projects)
+        top_level = not bool(ctx.projects)
 
         if self.path:
             loading_what = self.path
@@ -587,22 +581,22 @@ class Manifest:
         # 3. Imported projects from "manifest: projects: ... import:"
 
         # Create the ManifestProject, and import projects from "self:".
-        mp = self._load_self(manifest, path_hint, projects, filter_fn)
+        mp = self._load_self(manifest, path_hint, ctx)
 
         # Add this manifest's projects to the map, then project imports.
         url_bases = {r['name']: r['url-base'] for r in
                      manifest.get('remotes', [])}
         defaults = self._load_defaults(manifest.get('defaults', {}), url_bases)
-        self._load_projects(manifest, url_bases, defaults, projects, filter_fn)
+        self._load_projects(manifest, url_bases, defaults, ctx)
 
         # The manifest is resolved. Make sure paths are unique.
-        self._check_paths_are_unique(mp, projects, top_level)
+        self._check_paths_are_unique(mp, ctx.projects, top_level)
 
         # Save the results.
-        self.projects = list(projects.values())
+        self.projects = list(ctx.projects.values())
         self.projects.insert(MANIFEST_PROJECT_INDEX, mp)
         self._projects_by_name = {'manifest': mp}
-        self._projects_by_name.update(projects)
+        self._projects_by_name.update(ctx.projects)
         self._projects_by_cpath = {}
         if self.topdir:
             for i, p in enumerate(self.projects):
@@ -614,7 +608,7 @@ class Manifest:
 
         _logger.debug(f'loaded {loading_what}')
 
-    def _load_self(self, manifest, path_hint, projects, filter_fn):
+    def _load_self(self, manifest, path_hint, ctx):
         # Handle the "self:" section in the manifest data.
 
         slf = manifest.get('self', {})
@@ -628,7 +622,7 @@ class Manifest:
                 _logger.debug('ignored self import')
             else:
                 _logger.debug(f'resolving self import {imp}')
-                self._import_from_self(mp, imp, projects, filter_fn)
+                self._import_from_self(mp, imp, ctx)
                 _logger.debug('resolved self import')
 
         return mp
@@ -642,7 +636,7 @@ class Manifest:
 
         assert not self._import_flags & ImportFlag.IGNORE
 
-    def _import_from_self(self, mp, imp, projects, filter_fn):
+    def _import_from_self(self, mp, imp, ctx):
         # Recursive helper to import projects from the manifest repository.
         #
         # - mp: the ManifestProject
@@ -667,24 +661,23 @@ class Manifest:
         if imptype == bool:
             self._malformed(f'got "self: import: {imp}" of boolean')
         elif imptype == str:
-            self._import_path_from_self(mp, imp, projects, filter_fn)
+            self._import_path_from_self(mp, imp, ctx)
         elif imptype == list:
             for subimp in imp:
-                self._import_from_self(mp, subimp, projects, filter_fn)
+                self._import_from_self(mp, subimp, ctx)
         elif imptype == dict:
             imap = self._load_imap(mp, imp)
             # Since 'imap' may introduce additional filtering
             # requirements on top of the existing 'filter_fn', we need
             # to compose them, e.g. to respect import map whitelists
             # and blacklists from higher up in the recursion tree.
-            self._import_path_from_self(mp, imap.file, projects,
-                                        _and_filters(filter_fn,
-                                                     _imap_filter(imap)))
+            self._import_path_from_self(mp, imap.file,
+                                        _new_ctx(ctx, _imap_filter(imap)))
         else:
             self._malformed(f'{mp.abspath}: "self: import: {imp}" '
                             f'has invalid type {imptype}')
 
-    def _import_path_from_self(self, mp, imp, projects, filter_fn):
+    def _import_path_from_self(self, mp, imp, ctx):
         if mp.abspath:
             # Fast path, when we're working inside a fully initialized
             # topdir.
@@ -706,12 +699,11 @@ class Manifest:
 
         if p.is_file():
             _logger.debug(f'found submanifest file: {p}')
-            self._import_pathobj_from_self(mp, p, projects, filter_fn)
+            self._import_pathobj_from_self(mp, p, ctx)
         elif p.is_dir():
             _logger.debug(f'found submanifest directory: {p}')
             for yml in filter(_is_yml, sorted(p.iterdir())):
-                self._import_pathobj_from_self(mp, p / yml, projects,
-                                               filter_fn)
+                self._import_pathobj_from_self(mp, p / yml, ctx)
         else:
             # This also happens for special files like character
             # devices, but it doesn't seem worth handling that error
@@ -719,12 +711,12 @@ class Manifest:
             self._malformed(f'{mp.abspath}: "self: import: {imp}": '
                             f'file {p} not found')
 
-    def _import_pathobj_from_self(self, mp, pathobj, projects, filter_fn):
+    def _import_pathobj_from_self(self, mp, pathobj, ctx):
         # Import a Path object, which is a manifest file in the
         # manifest repository whose ManifestProject is mp.
 
         # Destructively add the imported content into our 'projects'
-        # map, respecting our filter. The intermediate manifest is
+        # map, passing along our context. The intermediate manifest is
         # thrown away; we're basically just using __init__ as a
         # function here.
         #
@@ -735,8 +727,8 @@ class Manifest:
                          topdir=self.topdir,
                          importer=self._importer,
                          import_flags=self._import_flags,
-                         projects=projects,
-                         filter_fn=filter_fn).projects[MANIFEST_PROJECT_INDEX]
+                         **{'import-context':
+                            ctx}).projects[MANIFEST_PROJECT_INDEX]
         # submp.west_commands comes first because we
         # logically treat imports from self as if they are
         # defined before the contents in the higher level
@@ -755,8 +747,7 @@ class Manifest:
                 self._malformed(f'default remote {mdrem} is not defined')
         return _defaults(mdrem, md.get('revision', _DEFAULT_REV))
 
-    def _load_projects(self, manifest, url_bases, defaults, projects,
-                       filter_fn):
+    def _load_projects(self, manifest, url_bases, defaults, ctx):
         # Load projects and add them to the list, returning
         # information about which ones have imports that need to be
         # processed next.
@@ -767,7 +758,7 @@ class Manifest:
             project = self._load_project(pd, url_bases, defaults)
             name = project.name
 
-            if not _filter_ok(filter_fn, project):
+            if not _filter_ok(ctx.filter_fn, project):
                 _logger.debug(f'project {name} in file {self.path} ' +
                               'ignored due to filters')
                 continue
@@ -779,7 +770,7 @@ class Manifest:
             names.add(name)
 
             # Add the project to the map if it's new.
-            added = self._add_project(project, projects)
+            added = self._add_project(project, ctx.projects)
             if added:
                 # Track project imports unless we are ignoring those.
                 imp = pd.get('import')
@@ -793,7 +784,7 @@ class Manifest:
 
         # Handle imports from new projects in our "projects:" section.
         for project, imp in have_imports:
-            self._import_from_project(project, imp, projects, filter_fn)
+            self._import_from_project(project, imp, ctx)
 
     def _load_project(self, pd, url_bases, defaults):
         # pd = project data (dictionary with values parsed from the
@@ -841,13 +832,12 @@ class Manifest:
                        west_commands=pd.get('west-commands'),
                        topdir=self.topdir, remote_name=remote)
 
-    def _import_from_project(self, project, imp, projects, filter_fn):
+    def _import_from_project(self, project, imp, ctx):
         # Recursively resolve a manifest import from 'project'.
         #
         # - project: Project instance to import from
         # - imp: the parsed value of project's import key (string, list, etc.)
-        # - projects: ordered dictionary of projects
-        # - filter_fn: predicate which returns True if it's OK to add a project
+        # - ctx: import context, an _import_ctx tuple
 
         self._assert_imports_ok()
 
@@ -857,25 +847,23 @@ class Manifest:
         if imptype == bool:
             # We should not have been called unless the import was truthy.
             assert imp
-            self._import_path_from_project(project, _WEST_YML, projects,
-                                           filter_fn)
+            self._import_path_from_project(project, _WEST_YML, ctx)
         elif imptype == str:
-            self._import_path_from_project(project, imp, projects, filter_fn)
+            self._import_path_from_project(project, imp, ctx)
         elif imptype == list:
             for subimp in imp:
-                self._import_from_project(project, subimp, projects, filter_fn)
+                self._import_from_project(project, subimp, ctx)
         elif imptype == dict:
             imap = self._load_imap(project, imp)
             # Similar comments about composing filters apply here as
             # they do in _import_from_self().
-            self._import_path_from_project(project, imap.file, projects,
-                                           _and_filters(filter_fn,
-                                                        _imap_filter(imap)))
+            self._import_path_from_project(project, imap.file,
+                                           _new_ctx(ctx, _imap_filter(imap)))
         else:
             self._malformed(f'{project.name_and_path}: invalid import {imp} '
                             f'type: {imptype}')
 
-    def _import_path_from_project(self, project, path, projects, filter_fn):
+    def _import_path_from_project(self, project, path, ctx):
         # Import data from git at the given path at revision manifest-rev.
         # Fall back on self._importer if that fails.
 
@@ -898,15 +886,14 @@ class Manifest:
                 pass
 
             # Destructively add the imported content into our 'projects'
-            # map, respecting our filter.
+            # map, passing along our context.
             submp = Manifest(
                 source_data=data,
                 manifest_path=project.path,
                 topdir=self.topdir,
                 importer=self._importer,
                 import_flags=self._import_flags,
-                projects=projects,
-                filter_fn=filter_fn).projects[MANIFEST_PROJECT_INDEX]
+                **{'import-context': ctx}).projects[MANIFEST_PROJECT_INDEX]
 
             # If the submanifest has west commands, merge them
             # into project's.
@@ -1476,6 +1463,12 @@ _import_map = collections.namedtuple('_import_map',
                                      'file '
                                      'name_whitelist path_whitelist '
                                      'name_blacklist path_blacklist')
+_import_ctx = collections.namedtuple('_import_ctx', [
+    # Known projects map, from name to Project:
+    'projects',
+    # Project -> Bool. True if OK to add a project to 'projects'. A
+    # None value is treated as a function which always returns True.
+    'filter_fn'])
 _YML_EXTS = ['yml', 'yaml']
 _WEST_YML = 'west.yml'
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
@@ -1557,6 +1550,9 @@ def _load(data):
         return yaml.safe_load(data)
     except yaml.scanner.ScannerError as e:
         raise MalformedManifest(data) from e
+
+def _new_ctx(ctx, _new_filter):
+    return _import_ctx(ctx.projects, _and_filters(ctx.filter_fn, _new_filter))
 
 def _is_imap_list(value):
     # Return True if the value is a valid import map 'blacklist' or
