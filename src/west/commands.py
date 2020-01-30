@@ -167,6 +167,12 @@ class WestCommand(ABC):
     #
 
     @property
+    def has_manifest(self):
+        '''Property which is True if self.manifest is safe to access.
+        '''
+        return self._manifest is not None
+
+    @property
     def manifest(self):
         '''Property for the manifest which was passed to run().
 
