@@ -641,22 +641,31 @@ class Update(_ProjectCommand):
         # call our importer whenever it encounters an import statement
         # in a project, allowing us to control the recursion so it
         # always uses the latest manifest data.
+        self.updated = set()
 
         manifest = Manifest.from_file(importer=self.update_importer,
                                       import_flags=ImportFlag.FORCE_PROJECTS)
 
         failed = []
         for project in manifest.projects:
-            if isinstance(project, ManifestProject):
+            if (isinstance(project, ManifestProject) or
+                    project.name in self.updated):
                 continue
             try:
                 self.update(project)
+                self.updated.add(project.name)
             except subprocess.CalledProcessError:
                 failed.append(project)
         self._handle_failed(args, failed)
 
     def update_importer(self, project, path):
-        self.update(project)
+        if isinstance(project, ManifestProject):
+            if not project.is_cloned():
+                log.die("manifest repository {project.abspath} was deleted")
+        else:
+            self.update(project)
+        self.updated.add(project.name)
+
         try:
             return _manifest_content_at(project, path)
         except FileNotFoundError:
