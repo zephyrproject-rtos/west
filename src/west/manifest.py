@@ -129,11 +129,27 @@ class ImportFlag(enum.IntFlag):
 
     - IGNORE: ignore all "import:" attributes in "self:" and "projects:"
     - FORCE_PROJECTS: always invoke importer callback for "projects:" imports
+    - IGNORE_PROJECTS: ignore "import:" attributes in "projects:" only;
+      still respect "import:" in "self:"
     '''
 
     DEFAULT = 0
     IGNORE = 1
     FORCE_PROJECTS = 2
+    IGNORE_PROJECTS = 4
+
+def _flags_ok(flags):
+    # Sanity-check the combination of flags.
+    F_I = ImportFlag.IGNORE
+    F_FP = ImportFlag.FORCE_PROJECTS
+    F_IP = ImportFlag.IGNORE_PROJECTS
+
+    if (flags & F_I) or (flags & F_IP):
+        return not (flags & F_FP)
+    elif flags & (F_FP | F_IP):
+        return (flags & F_FP) ^ (flags & F_IP)
+    else:
+        return True
 
 class Manifest:
     '''The parsed contents of a west manifest file.
@@ -338,6 +354,8 @@ class Manifest:
         '''
         if source_file and source_data:
             raise ValueError('both source_file and source_data were given')
+        if not _flags_ok(import_flags):
+            raise ValueError(f'bad import_flags {import_flags:x}')
 
         self.path = None
         '''Path to the file containing the manifest, or None if
@@ -766,7 +784,8 @@ class Manifest:
                 # Track project imports unless we are ignoring those.
                 imp = pd.get('import')
                 if imp:
-                    if self._import_flags & ImportFlag.IGNORE:
+                    if self._import_flags & (ImportFlag.IGNORE |
+                                             ImportFlag.IGNORE_PROJECTS):
                         _logger.debug(
                             f'project {project}: ignored import ({imp})')
                     else:
