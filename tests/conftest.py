@@ -39,6 +39,8 @@ manifest:
     path: zephyr
 '''
 
+WEST_SKIP_SLOW_TESTS = bool(int(os.environ.get('WEST_SKIP_SLOW_TESTS', 1)))
+
 #
 # Test fixtures
 #

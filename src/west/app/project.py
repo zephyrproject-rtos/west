@@ -20,7 +20,8 @@ from west import log
 from west import util
 from west.commands import WestCommand, CommandError
 from west.manifest import ImportFlag, Manifest, MANIFEST_PROJECT_INDEX, \
-    ManifestProject, _manifest_content_at, ManifestImportFailed
+    ManifestProject, _manifest_content_at, ManifestImportFailed, \
+    _ManifestImportDepth, ManifestVersionError, MalformedManifest
 from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
 from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
 from west.manifest import QUAL_REFS_WEST as QUAL_REFS
@@ -483,9 +484,16 @@ class ManifestCommand(_ProjectCommand):
         # debug logs if enabled, which are turned off when the
         # manifest is initially parsed in main.py.
         #
-        # The code in main.py is responsible for handling any errors
-        # and printing useful messages.
-        manifest = Manifest.from_file(topdir=self.topdir)
+        # The code in main.py is usually responsible for handling any
+        # errors and printing useful messages. We re-do error checking
+        # for manifest-related errors that it won't handle.
+        try:
+            manifest = Manifest.from_file(topdir=self.topdir)
+        except _ManifestImportDepth:
+            log.die("cannot resolve manifest -- is there a loop?")
+        except (MalformedManifest, ManifestImportFailed,
+                ManifestVersionError) as e:
+            log.die('\n  '.join(str(arg) for arg in e.args))
         dump_kwargs = {'default_flow_style': False,
                        'sort_keys': False}
 

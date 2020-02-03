@@ -722,13 +722,17 @@ class Manifest:
         #
         # The only thing we need to do with it is check if the
         # submanifest has west commands, add them to mp's if so.
-        submp = Manifest(source_file=str(pathobj),
-                         manifest_path=mp.path,
-                         topdir=self.topdir,
-                         importer=self._importer,
-                         import_flags=self._import_flags,
-                         **{'import-context':
-                            ctx}).projects[MANIFEST_PROJECT_INDEX]
+        try:
+            submp = Manifest(source_file=str(pathobj),
+                             manifest_path=mp.path,
+                             topdir=self.topdir,
+                             importer=self._importer,
+                             import_flags=self._import_flags,
+                             **{'import-context':
+                                ctx}).projects[MANIFEST_PROJECT_INDEX]
+        except RecursionError as e:
+            raise _ManifestImportDepth(mp, pathobj) from e
+
         # submp.west_commands comes first because we
         # logically treat imports from self as if they are
         # defined before the contents in the higher level
@@ -887,13 +891,16 @@ class Manifest:
 
             # Destructively add the imported content into our 'projects'
             # map, passing along our context.
-            submp = Manifest(
-                source_data=data,
-                manifest_path=project.path,
-                topdir=self.topdir,
-                importer=self._importer,
-                import_flags=self._import_flags,
-                **{'import-context': ctx}).projects[MANIFEST_PROJECT_INDEX]
+            try:
+                submp = Manifest(source_data=data,
+                                 manifest_path=project.path,
+                                 topdir=self.topdir,
+                                 importer=self._importer,
+                                 import_flags=self._import_flags,
+                                 **{'import-context': ctx}
+                                 ).projects[MANIFEST_PROJECT_INDEX]
+            except RecursionError as e:
+                raise _ManifestImportDepth(project, path) from e
 
             # If the submanifest has west commands, merge them
             # into project's.
@@ -1027,6 +1034,14 @@ class ManifestImportFailed(Exception):
     def __init__(self, project, filename):
         self.project = project
         self.filename = filename
+
+    def __str__(self):
+        return (f'ManifestImportFailed: project {self.project} '
+                f'file {self.filename}')
+
+class _ManifestImportDepth(ManifestImportFailed):
+    # A hack to signal to main.py what happened.
+    pass
 
 class ManifestVersionError(Exception):
     '''The manifest required a version of west more recent than the
