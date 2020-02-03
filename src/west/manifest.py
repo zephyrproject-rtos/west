@@ -334,6 +334,9 @@ class Manifest:
 
             - `MalformedManifest`: if the manifest data is invalid
 
+            - `ManifestImportFailed`: if the manifest could not be
+              resolved due to import errors
+
             - `ManifestVersionError`: if this version of west is too
               old to parse the manifest
 
