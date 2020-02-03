@@ -41,9 +41,12 @@ QUAL_REFS_WEST = 'refs/west/'
 #:
 #: This value changes when a new version of west includes new manifest
 #: file features not supported by earlier versions of west.
-SCHEMA_VERSION = '0.6.99'
-# ^^ will be bumped to 0.7 for that release; this just marks that
-# there were changes since 0.6 and we're in a development tree.
+SCHEMA_VERSION = '0.7'
+# MAINTAINERS:
+#
+# If you want to update the schema version, you need to make sure that
+# it has the exact same value as west.version.__version__ when the
+# next release is cut.
 
 _logger = logging.getLogger(__name__)
 
