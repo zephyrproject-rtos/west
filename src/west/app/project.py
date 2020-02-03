@@ -7,6 +7,7 @@
 
 import argparse
 from functools import partial, lru_cache
+import logging
 import os
 from os.path import join, relpath, basename, dirname, exists, isdir
 import shutil
@@ -98,6 +99,18 @@ class _ProjectCommand(WestCommand):
             log.err(f'{self.name} failed for multiple projects; see above')
         raise CommandError(1)
 
+    def _setup_logging(self, args):
+        logger = logging.getLogger('west.manifest')
+
+        verbose = min(args.verbose, log.VERBOSE_EXTREME)
+        if verbose >= log.VERBOSE_NORMAL:
+            level = logging.DEBUG
+        else:
+            level = logging.INFO
+
+        logger.setLevel(level)
+        logger.addHandler(ProjectCommandLogHandler())
+
 class Init(_ProjectCommand):
 
     def __init__(self):
@@ -180,6 +193,8 @@ class Init(_ProjectCommand):
             log.die('-l cannot be combined with -m or --mr')
 
         die_if_no_git()
+
+        self._setup_logging(args)
 
         if args.local:
             topdir = self.local(args)
@@ -394,6 +409,8 @@ class List(_ProjectCommand):
         def delay(func, project):
             return DelayFormat(partial(func, project))
 
+        self._setup_logging(args)
+
         for project in self._projects(args.projects):
             # Spelling out the format keys explicitly here gives us
             # future-proofing if the internal Project representation
@@ -479,9 +496,11 @@ class ManifestCommand(_ProjectCommand):
         return parser
 
     def do_run(self, args, user_args):
-        # All of these commands need the manifest. We are deliberately
-        # loading it again instead of using self.manifest to emit
-        # debug logs if enabled, which are turned off when the
+        self._setup_logging(args)
+
+        # Since the user is explicitly managing the manifest, we are
+        # deliberately loading it again instead of using self.manifest
+        # to emit debug logs if enabled, which are turned off when the
         # manifest is initially parsed in main.py.
         #
         # The code in main.py is usually responsible for handling any
@@ -528,6 +547,7 @@ class Diff(_ProjectCommand):
 
     def do_run(self, args, ignored):
         die_if_no_git()
+        self._setup_logging(args)
 
         failed = []
         for project in self._cloned_projects(args):
@@ -555,6 +575,7 @@ class Status(_ProjectCommand):
 
     def do_run(self, args, user_args):
         die_if_no_git()
+        self._setup_logging(args)
 
         failed = []
         for project in self._cloned_projects(args):
@@ -625,6 +646,7 @@ class Update(_ProjectCommand):
 
     def do_run(self, args, user_args):
         die_if_no_git()
+        self._setup_logging(args)
 
         self.args = args
         if args.exclude_west:
@@ -877,6 +899,8 @@ class ForAll(_ProjectCommand):
         return parser
 
     def do_run(self, args, user_args):
+        self._setup_logging(args)
+
         failed = []
         for project in self._cloned_projects(args):
             log.banner(
@@ -1187,3 +1211,36 @@ class DelayFormat:
             else:
                 self.as_str = str(self.obj)
         return ('{:' + format_spec + '}').format(self.as_str)
+
+#
+# Logging helpers
+#
+
+
+class ProjectCommandLogFormatter(logging.Formatter):
+
+    def __init__(self):
+        super().__init__(fmt='%(name)s: %(message)s')
+
+
+class ProjectCommandLogHandler(logging.Handler):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFormatter(ProjectCommandLogFormatter())
+
+    def emit(self, record):
+        fmt = self.format(record)
+        lvl = record.levelno
+        if lvl > logging.CRITICAL:
+            log.die(fmt)
+        elif lvl >= logging.ERROR:
+            log.err(fmt)
+        elif lvl >= logging.WARNING:
+            log.wrn(fmt)
+        elif lvl >= logging.INFO:
+            log.inf(fmt)
+        elif lvl >= logging.DEBUG:
+            log.dbg(fmt)
+        else:
+            log.dbg(fmt, level=log.VERBOSE_EXTREME)
