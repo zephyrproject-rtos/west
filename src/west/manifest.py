@@ -871,6 +871,7 @@ class Manifest:
         # Import data from git at the given path at revision manifest-rev.
         # Fall back on self._importer if that fails.
 
+        _logger.debug(f'resolving import {path} for {project}')
         imported = self._import_content_from_project(project, path)
         if imported is None:
             # This can happen if self._importer returns None.
@@ -906,9 +907,9 @@ class Manifest:
             # into project's.
             project.west_commands = self._merge_wcs(
                 project.west_commands, submp.west_commands)
+        _logger.debug(f'done resolving import {path} for {project}')
 
     def _import_content_from_project(self, project, path):
-        _logger.debug(f'resolving import {path} for {project}')
         if not (self._import_flags & ImportFlag.FORCE_PROJECTS) and \
            project.is_cloned():
             try:
@@ -977,7 +978,8 @@ class Manifest:
 
         if project.name not in projects:
             projects[project.name] = project
-            _logger.debug(f'added project {project.name}' +
+            _logger.debug(f'added project {project.name} '
+                          f'revision {project.revision}' +
                           (f' from {self.path}' if self.path else ''))
             return True
         else:
