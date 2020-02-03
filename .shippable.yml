@@ -18,4 +18,5 @@ build:
     - export PATH=$PATH:$HOME/.local/bin
     - pip3 install tox
     - mkdir -p shippable/{testresults,codecoverage}
+    - export WEST_SKIP_SLOW_TESTS=0
     - tox -- --junitxml=$PWD/shippable/testresults/nosetests.xml --cov-report=xml:$PWD/shippable/codecoverage/coverage.xml tests

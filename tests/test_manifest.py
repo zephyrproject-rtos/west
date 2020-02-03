@@ -22,10 +22,12 @@ import yaml
 
 from west.manifest import Manifest, Project, ManifestProject, \
     MalformedManifest, ManifestVersionError, ManifestImportFailed, \
-    manifest_path, ImportFlag, validate, MANIFEST_PROJECT_INDEX
+    manifest_path, ImportFlag, validate, MANIFEST_PROJECT_INDEX, \
+    _ManifestImportDepth
 
 from conftest import create_workspace, create_repo, checkout_branch, \
-    create_branch, add_commit, GIT, check_proj_consistency
+    create_branch, add_commit, GIT, check_proj_consistency, \
+    WEST_SKIP_SLOW_TESTS
 
 FPI = ImportFlag.FORCE_PROJECTS  # to force project imports to use the callback
 
@@ -2015,6 +2017,30 @@ def test_import_map_filter_propagation(manifest_repo):
     projects = load_manifest({'path-blacklist': 'p1'}).projects
     assert len(projects) == 2
     assert projects[1].name == 'n2'
+
+@pytest.mark.skipif(WEST_SKIP_SLOW_TESTS,
+                    reason='use WEST_SKIP_SLOW_TESTS=0 to enable')
+def test_import_loop_detection_self(manifest_repo):
+    # Verify that a self-import which causes an import loop is an error.
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''
+        manifest:
+          projects: []
+          self:
+           import: foo.yml
+        ''')
+
+    with open(manifest_repo / 'foo.yml', 'w') as f:
+        f.write('''
+        manifest:
+          projects: []
+          self:
+           import: west.yml
+        ''')
+
+    with pytest.raises(_ManifestImportDepth):
+        MF()
 
 #########################################
 # Various invalid manifests

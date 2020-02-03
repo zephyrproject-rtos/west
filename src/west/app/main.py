@@ -33,7 +33,7 @@ from west.app.project import List, ManifestCommand, Diff, Status, \
     SelfUpdate, ForAll, Init, Update, Topdir
 from west.app.config import Config
 from west.manifest import Manifest, MalformedConfig, MalformedManifest, \
-    ManifestVersionError, ManifestImportFailed, \
+    ManifestVersionError, ManifestImportFailed, _ManifestImportDepth, \
     ManifestProject, MANIFEST_REV_BRANCH
 from west.util import quote_sh_list, west_topdir, WestNotFound
 from west.version import __version__
@@ -154,6 +154,10 @@ class WestApp:
             # manifest.path foo' to fix the MalformedConfig error, but
             # there's no way to know until we've parsed the command
             # line arguments.
+            if isinstance(e, _ManifestImportDepth):
+                log.wrn('recursion depth exceeded during manifest resolution; '
+                        'your manifest likely contains an import loop. '
+                        'Run "west -v manifest --resolve" to debug.')
             self.mle = e
 
     def handle_builtin_manifest_load_err(self, args):
@@ -163,7 +167,7 @@ class WestApp:
         # from the manifest itself, which we have failed to load.)
 
         # A few commands are always safe to run without a manifest.
-        no_manifest_ok = ['help', 'config', 'topdir', 'init']
+        no_manifest_ok = ['help', 'config', 'topdir', 'init', 'manifest']
 
         # Handle ManifestVersionError is a special case.
         if isinstance(self.mle, ManifestVersionError):
@@ -201,6 +205,8 @@ class WestApp:
                 # This should ordinarily only happen when the top
                 # level west.yml is not found.
                 log.die(f"file not found: {self.mle.filename}")
+            elif isinst(_ManifestImportDepth):
+                log.die('failed, likely due to manifest import loop')
             elif isinst(ManifestImportFailed):
                 if args.command == 'update':
                     return      # that's fine
