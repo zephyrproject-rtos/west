@@ -15,6 +15,7 @@ import shlex
 import subprocess
 import sys
 import textwrap
+from time import perf_counter
 
 from west.configuration import config, update_config
 from west import log
@@ -611,6 +612,10 @@ class Update(_ProjectCommand):
     def do_add_parser(self, parser_adder):
         parser = self._parser(parser_adder)
 
+        parser.add_argument('--stats', action='store_true',
+                            help='''print performance statistics for
+                            update operations''')
+
         group = parser.add_argument_group(
             title='fetching behavior',
             description='By default, west update tries to avoid fetching.')
@@ -672,6 +677,7 @@ class Update(_ProjectCommand):
         # in a project, allowing us to control the recursion so it
         # always uses the latest manifest data.
         self.updated = set()
+        self.args = args
 
         manifest = Manifest.from_file(importer=self.update_importer,
                                       import_flags=ImportFlag.FORCE_PROJECTS)
@@ -798,15 +804,33 @@ class Update(_ProjectCommand):
                                            importer=self.update_importer)
 
     def update(self, project):
+        if self.args.stats:
+            stats = dict()
+        else:
+            stats = None
+        take_stats = stats is not None
+
         log.banner(f'updating {project.name_and_path}:')
         if not project.is_cloned():
+            if take_stats:
+                start = perf_counter()
             _clone(project)
+            if take_stats:
+                stats['clone'] = perf_counter() - start
 
         if self.fs == 'always' or _rev_type(project) not in ('tag', 'commit'):
+            if take_stats:
+                start = perf_counter()
             _fetch(project)
+            if take_stats:
+                stats['fetch and update'] = perf_counter() - start
         else:
             log.dbg('skipping unnecessary fetch')
+            if take_stats:
+                start = perf_counter()
             _update_manifest_rev(project, f'{project.revision}^{{commit}}')
+            if take_stats:
+                stats['fetch and update'] = perf_counter() - start
 
         # Head of manifest-rev is now pointing to current manifest revision.
         # Thus it is safe to unconditionally clear out the refs/west space.
@@ -816,7 +840,11 @@ class Update(_ProjectCommand):
         # didn't handle this properly.
         # In future, this can be moved into _fetch() after the install base of
         # older west versions is expected to be smaller.
+        if take_stats:
+            start = perf_counter()
         _clean_west_refspace(project)
+        if take_stats:
+            stats['clean up refs/west/*'] = perf_counter() - start
 
         if not _head_ok(project):
             # If nothing is checked out (which usually only happens if we
@@ -832,20 +860,37 @@ class Update(_ProjectCommand):
             # The --detach flag is strictly redundant here, because
             # the refs/heads/<branch> form already detaches HEAD, but
             # it avoids a spammy detached HEAD warning from Git.
+            if take_stats:
+                start = perf_counter()
             project.git('checkout --detach ' + QUAL_MANIFEST_REV)
+            if take_stats:
+                stats['checkout new manifest-rev'] = perf_counter() - start
 
         try:
+            if take_stats:
+                start = perf_counter()
             sha = project.sha(QUAL_MANIFEST_REV)
+            if take_stats:
+                stats['get new manifest-rev SHA'] = perf_counter() - start
         except subprocess.CalledProcessError:
             # This is a sign something's really wrong. Add more help.
             log.err(f'no SHA for branch {MANIFEST_REV} '
                     f'in {project.name_and_path}; was the branch deleted?')
             raise
 
+        if take_stats:
+            start = perf_counter()
         cp = project.git('rev-parse --abbrev-ref HEAD', capture_stdout=True)
+        if take_stats:
+            stats['get current branch HEAD'] = perf_counter() - start
         current_branch = cp.stdout.decode('utf-8').strip()
         if current_branch != 'HEAD':
+            if take_stats:
+                start = perf_counter()
             is_ancestor = project.is_ancestor_of(sha, current_branch)
+            if take_stats:
+                stats['check if HEAD is ancestor of manifest-rev'] = \
+                    perf_counter() - start
             try_rebase = self.args.rebase
         else:  # HEAD means no branch is checked out.
             # If no branch is checked out, 'rebase' and
@@ -861,14 +906,27 @@ class Update(_ProjectCommand):
         elif try_rebase:
             # Attempt a rebase.
             log.small_banner(f'{project.name}: rebasing to {MANIFEST_REV}')
+            if take_stats:
+                start = perf_counter()
             project.git('rebase ' + QUAL_MANIFEST_REV)
+            if take_stats:
+                stats['rebase onto new manifest-rev'] = perf_counter() - start
         else:
             # We can't keep a descendant or rebase, so just check
             # out the new detached HEAD, then print some helpful context.
+            if take_stats:
+                start = perf_counter()
             project.git('checkout --detach --quiet ' + sha)
+            if take_stats:
+                stats['checkout new manifest-rev'] = perf_counter() - start
             log.small_banner(
                 f'{project.name}: checked out {sha} as detached HEAD')
             _post_checkout_help(project, current_branch, sha, is_ancestor)
+
+        if take_stats:
+            log.inf('performance statistics:')
+            for stat, value in stats.items():
+                log.inf(f'  {stat}: {value} sec')
 
 class ForAll(_ProjectCommand):
     def __init__(self):
