@@ -1094,9 +1094,10 @@ class Project:
 
     def __repr__(self):
         return (f'Project("{self.name}", "{self.url}", '
-                f'revision="{self.revision}", path="{self.path}", '
+                f'revision="{self.revision}", path={repr(self.path)}, '
                 f'clone_depth={self.clone_depth}, '
-                f'west_commands={self.west_commands}, topdir={self.topdir})')
+                f'west_commands={self.west_commands}, '
+                f'topdir={repr(self.topdir)})')
 
     def __str__(self):
         path_repr = repr(self.abspath or self.path)
@@ -1397,8 +1398,9 @@ class ManifestProject(Project):
     '''
 
     def __repr__(self):
-        return (f'ManifestProject({self.name}, path={self.path}, '
-                f'west_commands={self.west_commands}, topdir={self.topdir})')
+        return (f'ManifestProject({self.name}, path={repr(self.path)}, '
+                f'west_commands={self.west_commands}, '
+                f'topdir={repr(self.topdir)})')
 
     def __init__(self, path=None, west_commands=None, topdir=None):
         '''
