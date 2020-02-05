@@ -13,7 +13,7 @@ import enum
 import errno
 import logging
 import os
-from pathlib import PurePath, Path
+from pathlib import PurePath, PurePosixPath, Path
 import shlex
 import subprocess
 
@@ -1554,7 +1554,10 @@ def _manifest_content_at(project, path, rev=QUAL_MANIFEST_REV_BRANCH):
     elif ptype == 'tree':
         # Importing a tree: return the content of the YAML files inside it.
         ret = []
-        pathobj = PurePath(path)
+        # Use a PurePosixPath because that's the form git seems to
+        # store internally, even on Windows. This breaks on Windows if
+        # you use PurePath.
+        pathobj = PurePosixPath(path)
         for f in filter(_is_yml, project.listdir_at(path, rev=rev)):
             ret.append(project.read_at(str(pathobj / f),
                                        rev=rev).decode('utf-8'))
