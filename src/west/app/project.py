@@ -1035,7 +1035,7 @@ def _maybe_sha(rev):
 
 def _clone(project):
     log.small_banner(f'{project.name}: cloning and initializing')
-    project.git(f'init {project.abspath}', cwd=util.west_topdir())
+    project.git(['init', project.abspath], cwd=util.west_topdir())
     # This remote is added as a convenience for the user.
     # However, west always fetches project data by URL, not remote name.
     # The user is therefore free to change the URL of this remote.
@@ -1113,9 +1113,9 @@ def _fetch(project, rev=None):
     msg = f'{project.name}: fetching, need revision {rev}'
     if project.clone_depth:
         msg += f' with --depth {project.clone_depth}'
-        depth = f'--depth={project.clone_depth}'
+        depth = ['--depth', str(project.clone_depth)]
     else:
-        depth = ''
+        depth = []
     if _maybe_sha(rev):
         # We can't in general fetch a SHA from a remote, as many hosts
         # (GitHub included) forbid it for security reasons. Let's hope
@@ -1138,7 +1138,8 @@ def _fetch(project, rev=None):
     #
     # --tags is required to get tags, since the remote is specified as a URL.
     log.small_banner(msg)
-    project.git(f'fetch -f --tags {depth} -- {project.url} {refspec}')
+    project.git(['fetch', '-f', '--tags'] + depth +
+                ['--', project.url, refspec])
     _update_manifest_rev(project, next_manifest_rev)
 
 def _head_ok(project):
