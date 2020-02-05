@@ -5,4 +5,4 @@
 # This is the Python 3 version of option 3 in:
 # https://packaging.python.org/guides/single-sourcing-package-version/#single-sourcing-the-version
 
-__version__ = '0.7.0rc1'
+__version__ = '0.7.0rc2'
