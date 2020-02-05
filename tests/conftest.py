@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
-from pathlib import PurePath
+from pathlib import Path, PurePath
 import platform
 import shlex
 import shutil
@@ -40,6 +40,8 @@ manifest:
 '''
 
 WEST_SKIP_SLOW_TESTS = bool(int(os.environ.get('WEST_SKIP_SLOW_TESTS', 1)))
+
+WINDOWS = (platform.system() == 'Windows')
 
 #
 # Test fixtures
@@ -226,7 +228,7 @@ def cmd(cmd, cwd=None, stderr=None, env=None):
     # a python subprocess so that program-level setup and teardown
     # happen fresh.
     cmd = 'west ' + cmd
-    if platform.system() != 'Windows':
+    if not WINDOWS:
         cmd = shlex.split(cmd)
     print('running:', cmd)
     if env:
@@ -369,7 +371,9 @@ def check_proj_consistency(actual, expected):
         assert a_abs == e_abs
         assert a_psx == e_psx
 
-    assert actual.url == expected.url
+    assert (actual.url == expected.url or
+            (WINDOWS and Path(expected.url).is_dir() and
+             (PurePath(actual.url) == PurePath(expected.url))))
     assert actual.clone_depth == expected.clone_depth
     assert actual.revision == expected.revision
     assert actual.west_commands == expected.west_commands
