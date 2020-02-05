@@ -1337,7 +1337,7 @@ class Project:
         '''
         if rev is None:
             rev = self.revision
-        cp = self.git(f'show {rev}:{path}', capture_stdout=True,
+        cp = self.git(['show', f'{rev}:{path}'], capture_stdout=True,
                       capture_stderr=True, cwd=cwd)
         return cp.stdout
 
