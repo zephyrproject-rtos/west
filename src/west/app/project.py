@@ -826,9 +826,9 @@ class Update(_ProjectCommand):
         if not cloned:
             if take_stats:
                 start = perf_counter()
-            _clone(project)
+            _init_project(project)
             if take_stats:
-                stats['clone'] = perf_counter() - start
+                stats['init'] = perf_counter() - start
 
         if self.fs == 'always' or _rev_type(project) not in ('tag', 'commit'):
             if take_stats:
@@ -864,9 +864,9 @@ class Update(_ProjectCommand):
         if take_stats:
             stats['check HEAD is ok'] = perf_counter() - start
         if not head_ok:
-            # If nothing is checked out (which usually only happens if we
-            # called _clone(project) above), check out 'manifest-rev' in a
-            # detached HEAD state.
+            # If nothing is checked out (which usually only happens if
+            # we called _init_project(project) above), check out
+            # 'manifest-rev' in a detached HEAD state.
             #
             # Otherwise, the initial state would have nothing checked out,
             # and HEAD would point to a non-existent refs/heads/master
@@ -1054,8 +1054,8 @@ def _maybe_sha(rev):
 
     return len(rev) <= 40
 
-def _clone(project):
-    log.small_banner(f'{project.name}: cloning and initializing')
+def _init_project(project):
+    log.small_banner(f'{project.name}: initializing')
     project.git(['init', project.abspath], cwd=util.west_topdir())
     # This remote is added as a convenience for the user.
     # However, west always fetches project data by URL, not remote name.
