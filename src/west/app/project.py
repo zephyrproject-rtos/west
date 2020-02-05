@@ -818,103 +818,33 @@ class Update(_ProjectCommand):
 
         log.banner(f'updating {project.name_and_path}:')
 
-        if take_stats:
-            start = perf_counter()
-        cloned = project.is_cloned()
-        if take_stats:
-            stats['check if cloned'] = perf_counter() - start
-        if not cloned:
-            if take_stats:
-                start = perf_counter()
-            _init_project(project)
-            if take_stats:
-                stats['init'] = perf_counter() - start
+        # Make sure we've got a project to work with.
+        self.ensure_cloned(project, stats, take_stats)
 
-        if self.fs == 'always' or _rev_type(project) not in ('tag', 'commit'):
-            if take_stats:
-                start = perf_counter()
-            _fetch(project)
-            if take_stats:
-                stats['fetch and set manifest-rev'] = perf_counter() - start
-        else:
-            log.dbg('skipping unnecessary fetch')
-            if take_stats:
-                start = perf_counter()
-            _update_manifest_rev(project, f'{project.revision}^{{commit}}')
-            if take_stats:
-                stats['set manifest-rev'] = perf_counter() - start
+        # Point refs/heads/manifest-rev at project.revision,
+        # fetching it from the remote if necessary.
+        self.set_new_manifest_rev(project, stats, take_stats)
 
-        # Head of manifest-rev is now pointing to current manifest revision.
-        # Thus it is safe to unconditionally clear out the refs/west space.
-        #
-        # Doing this here instead of in _fetch() ensures that it gets cleaned
-        # up when users upgrade from older versions of west (like 0.6.x) that
-        # didn't handle this properly.
-        # In future, this can be moved into _fetch() after the install base of
-        # older west versions is expected to be smaller.
-        if take_stats:
-            start = perf_counter()
-        _clean_west_refspace(project)
-        if take_stats:
-            stats['clean up refs/west/*'] = perf_counter() - start
+        # Clean up refs/west/*. At some point, we should only do this
+        # if we've fetched, but we're leaving it here to clean up
+        # garbage in people's repositories introduced by previous
+        # versions of west that left refs in place here.
+        self.clean_refs_west(project, stats, take_stats)
 
-        if take_stats:
-            start = perf_counter()
-        head_ok = _head_ok(project)
-        if take_stats:
-            stats['check HEAD is ok'] = perf_counter() - start
-        if not head_ok:
-            # If nothing is checked out (which usually only happens if
-            # we called _init_project(project) above), check out
-            # 'manifest-rev' in a detached HEAD state.
-            #
-            # Otherwise, the initial state would have nothing checked out,
-            # and HEAD would point to a non-existent refs/heads/master
-            # branch (that would get created if the user makes an initial
-            # commit). Among other things, this ensures the rev-parse
-            # --abbrev-ref HEAD below will always succeed.
-            #
-            # The --detach flag is strictly redundant here, because
-            # the refs/heads/<branch> form already detaches HEAD, but
-            # it avoids a spammy detached HEAD warning from Git.
-            if take_stats:
-                start = perf_counter()
-            project.git('checkout --detach ' + QUAL_MANIFEST_REV)
-            if take_stats:
-                stats['checkout new manifest-rev'] = perf_counter() - start
+        # Make sure HEAD is pointing at *something*.
+        self.ensure_head_ok(project, stats, take_stats)
 
-        try:
-            if take_stats:
-                start = perf_counter()
-            sha = project.sha(QUAL_MANIFEST_REV)
-            if take_stats:
-                stats['get new manifest-rev SHA'] = perf_counter() - start
-        except subprocess.CalledProcessError:
-            # This is a sign something's really wrong. Add more help.
-            log.err(f'no SHA for branch {MANIFEST_REV} '
-                    f'in {project.name_and_path}; was the branch deleted?')
-            raise
+        # Convert manifest-rev to a SHA.
+        sha = self.manifest_rev_sha(project, stats, take_stats)
 
-        if take_stats:
-            start = perf_counter()
-        cp = project.git('rev-parse --abbrev-ref HEAD', capture_stdout=True)
-        if take_stats:
-            stats['get current branch HEAD'] = perf_counter() - start
-        current_branch = cp.stdout.decode('utf-8').strip()
-        if current_branch != 'HEAD':
-            if take_stats:
-                start = perf_counter()
-            is_ancestor = project.is_ancestor_of(sha, current_branch)
-            if take_stats:
-                stats['check if HEAD is ancestor of manifest-rev'] = \
-                    perf_counter() - start
-            try_rebase = self.args.rebase
-        else:  # HEAD means no branch is checked out.
-            # If no branch is checked out, 'rebase' and
-            # 'keep_descendants' don't matter.
-            is_ancestor = False
-            try_rebase = False
+        # Based on the new manifest-rev SHA, HEAD, and the --rebase
+        # and --keep-descendants options, decide what we need to do
+        # now.
+        current_branch, is_ancestor, try_rebase = self.decide_update_strategy(
+            project, sha, stats, take_stats)
 
+        # Finish the update. This may be a nop if we're keeping
+        # descendants.
         if self.args.keep_descendants and is_ancestor:
             # A descendant is currently checked out and keep_descendants was
             # given, so there's nothing more to do.
@@ -940,6 +870,7 @@ class Update(_ProjectCommand):
                 f'{project.name}: checked out {sha} as detached HEAD')
             _post_checkout_help(project, current_branch, sha, is_ancestor)
 
+        # Print performance statistics.
         if take_stats:
             update_total = perf_counter() - update_start
             slop = update_total - sum(stats.values())
@@ -948,6 +879,131 @@ class Update(_ProjectCommand):
             log.inf('performance statistics:')
             for stat, value in stats.items():
                 log.inf(f'  {stat}: {value} sec')
+
+    @staticmethod
+    def ensure_cloned(project, stats, take_stats):
+        # update() helper. Make sure project is cloned and initialized.
+
+        if take_stats:
+            start = perf_counter()
+        cloned = project.is_cloned()
+        if take_stats:
+            stats['check if cloned'] = perf_counter() - start
+        if not cloned:
+            if take_stats:
+                start = perf_counter()
+            _init_project(project)
+            if take_stats:
+                stats['init'] = perf_counter() - start
+
+    def set_new_manifest_rev(self, project, stats, take_stats):
+        # update() helper. Make sure project's manifest-rev is set to
+        # the latest value it should be.
+
+        if self.fs == 'always' or _rev_type(project) not in ('tag', 'commit'):
+            if take_stats:
+                start = perf_counter()
+            _fetch(project)
+            if take_stats:
+                stats['fetch and set manifest-rev'] = perf_counter() - start
+        else:
+            log.dbg('skipping unnecessary fetch')
+            if take_stats:
+                start = perf_counter()
+            _update_manifest_rev(project, f'{project.revision}^{{commit}}')
+            if take_stats:
+                stats['set manifest-rev'] = perf_counter() - start
+
+    @staticmethod
+    def clean_refs_west(project, stats, take_stats):
+        # update() helper. Make sure refs/west/* is empty after
+        # setting the new manifest-rev.
+        #
+        # Head of manifest-rev is now pointing to current manifest revision.
+        # Thus it is safe to unconditionally clear out the refs/west space.
+        #
+        # Doing this here instead of in _fetch() ensures that it gets cleaned
+        # up when users upgrade from older versions of west (like 0.6.x) that
+        # didn't handle this properly.
+        # In future, this can be moved into _fetch() after the install base of
+        # older west versions is expected to be smaller.
+        if take_stats:
+            start = perf_counter()
+        _clean_west_refspace(project)
+        if take_stats:
+            stats['clean up refs/west/*'] = perf_counter() - start
+
+    @staticmethod
+    def ensure_head_ok(project, stats, take_stats):
+        # update() helper. Ensure HEAD points at something reasonable.
+
+        if take_stats:
+            start = perf_counter()
+        head_ok = _head_ok(project)
+        if take_stats:
+            stats['check HEAD is ok'] = perf_counter() - start
+        if not head_ok:
+            # If nothing is checked out (which usually only happens if
+            # we called _init_project(project) above), check out
+            # 'manifest-rev' in a detached HEAD state.
+            #
+            # Otherwise, the initial state would have nothing checked
+            # out, and HEAD would point to a non-existent
+            # refs/heads/master branch (that would get created if the
+            # user makes an initial commit). Among other things, this
+            # ensures the rev-parse --abbrev-ref HEAD which happens
+            # later in the update() will always succeed.
+            #
+            # The --detach flag is strictly redundant here, because
+            # the refs/heads/<branch> form already detaches HEAD, but
+            # it avoids a spammy detached HEAD warning from Git.
+            if take_stats:
+                start = perf_counter()
+            project.git('checkout --detach ' + QUAL_MANIFEST_REV)
+            if take_stats:
+                stats['checkout new manifest-rev'] = perf_counter() - start
+
+    @staticmethod
+    def manifest_rev_sha(project, stats, take_stats):
+        # update() helper. Get the SHA for manifest-rev.
+
+        try:
+            if take_stats:
+                start = perf_counter()
+            return project.sha(QUAL_MANIFEST_REV)
+            if take_stats:
+                stats['get new manifest-rev SHA'] = perf_counter() - start
+        except subprocess.CalledProcessError:
+            # This is a sign something's really wrong. Add more help.
+            log.err(f'no SHA for branch {MANIFEST_REV} '
+                    f'in {project.name_and_path}; was the branch deleted?')
+            raise
+
+    def decide_update_strategy(self, project, sha, stats, take_stats):
+        # update() helper. Decide on whether we have an ancestor
+        # branch or whether we should try to rebase.
+
+        if take_stats:
+            start = perf_counter()
+        cp = project.git('rev-parse --abbrev-ref HEAD', capture_stdout=True)
+        if take_stats:
+            stats['get current branch HEAD'] = perf_counter() - start
+        current_branch = cp.stdout.decode('utf-8').strip()
+        if current_branch != 'HEAD':
+            if take_stats:
+                start = perf_counter()
+            is_ancestor = project.is_ancestor_of(sha, current_branch)
+            if take_stats:
+                stats['check if HEAD is ancestor of manifest-rev'] = \
+                    perf_counter() - start
+            try_rebase = self.args.rebase
+        else:  # HEAD means no branch is checked out.
+            # If no branch is checked out, 'rebase' and
+            # 'keep_descendants' don't matter.
+            is_ancestor = False
+            try_rebase = False
+
+        return current_branch, is_ancestor, try_rebase
 
 class ForAll(_ProjectCommand):
     def __init__(self):
