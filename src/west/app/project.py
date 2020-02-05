@@ -811,12 +811,19 @@ class Update(_ProjectCommand):
     def update(self, project):
         if self.args.stats:
             stats = dict()
+            update_start = perf_counter()
         else:
             stats = None
         take_stats = stats is not None
 
         log.banner(f'updating {project.name_and_path}:')
-        if not project.is_cloned():
+
+        if take_stats:
+            start = perf_counter()
+        cloned = project.is_cloned()
+        if take_stats:
+            stats['check if cloned'] = perf_counter() - start
+        if not cloned:
             if take_stats:
                 start = perf_counter()
             _clone(project)
@@ -828,14 +835,14 @@ class Update(_ProjectCommand):
                 start = perf_counter()
             _fetch(project)
             if take_stats:
-                stats['fetch and update'] = perf_counter() - start
+                stats['fetch and set manifest-rev'] = perf_counter() - start
         else:
             log.dbg('skipping unnecessary fetch')
             if take_stats:
                 start = perf_counter()
             _update_manifest_rev(project, f'{project.revision}^{{commit}}')
             if take_stats:
-                stats['fetch and update'] = perf_counter() - start
+                stats['set manifest-rev'] = perf_counter() - start
 
         # Head of manifest-rev is now pointing to current manifest revision.
         # Thus it is safe to unconditionally clear out the refs/west space.
@@ -851,7 +858,12 @@ class Update(_ProjectCommand):
         if take_stats:
             stats['clean up refs/west/*'] = perf_counter() - start
 
-        if not _head_ok(project):
+        if take_stats:
+            start = perf_counter()
+        head_ok = _head_ok(project)
+        if take_stats:
+            stats['check HEAD is ok'] = perf_counter() - start
+        if not head_ok:
             # If nothing is checked out (which usually only happens if we
             # called _clone(project) above), check out 'manifest-rev' in a
             # detached HEAD state.
@@ -929,6 +941,10 @@ class Update(_ProjectCommand):
             _post_checkout_help(project, current_branch, sha, is_ancestor)
 
         if take_stats:
+            update_total = perf_counter() - update_start
+            slop = update_total - sum(stats.values())
+            stats['other work'] = slop
+            stats['TOTAL'] = update_total
             log.inf('performance statistics:')
             for stat, value in stats.items():
                 log.inf(f'  {stat}: {value} sec')
