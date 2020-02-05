@@ -1418,7 +1418,7 @@ class ManifestProject(Project):
         self.topdir = topdir
         self._abspath = None
         self._posixpath = None
-        self._path = os.path.normpath(path) if path else None
+        self._path = path
 
         # Extension commands.
         self.west_commands = west_commands
