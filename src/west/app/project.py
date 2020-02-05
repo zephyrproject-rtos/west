@@ -10,12 +10,14 @@ from functools import partial, lru_cache
 import logging
 import os
 from os.path import join, relpath, basename, dirname, exists, isdir
+from pathlib import PurePath
 import shutil
 import shlex
 import subprocess
 import sys
 import textwrap
 from time import perf_counter
+from urllib.parse import urlparse
 
 from west.configuration import config, update_config
 from west import log
@@ -27,8 +29,6 @@ from west.manifest import ImportFlag, Manifest, MANIFEST_PROJECT_INDEX, \
 from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
 from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
 from west.manifest import QUAL_REFS_WEST as QUAL_REFS
-from urllib.parse import urlparse
-import posixpath
 
 #
 # Project-related or multi-repo commands, like "init", "update",
@@ -274,7 +274,12 @@ class Init(_ProjectCommand):
         if manifest_project.path:
             manifest_path = manifest_project.path
         else:
-            manifest_path = posixpath.basename(urlparse(manifest_url).path)
+            # We use PurePath() here in case manifest_url is a
+            # windows-style path. That does the right thing in that
+            # case, without affecting POSIX platforms, where PurePath
+            # is PurePosixPath.
+            manifest_path = PurePath(urlparse(manifest_url).path).name
+
         manifest_abspath = join(topdir, manifest_path)
 
         log.dbg('moving', tempdir, 'to', manifest_abspath,
