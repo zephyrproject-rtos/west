@@ -262,6 +262,8 @@ def create_workspace(workspace_dir, and_git=False):
 
 def create_repo(path):
     # Initializes a Git repository in 'path', and adds an initial commit to it
+    if not isinstance(path, str):
+        path = str(path)
 
     subprocess.check_call([GIT, 'init', path])
 
@@ -304,6 +306,8 @@ def add_commit(repo, msg, files=None, reconfigure=True):
     # Edit any files as specified by the user and add them to the index.
     if files:
         for path, contents in files.items():
+            if not isinstance(path, str):
+                path = str(path)
             dirname, basename = os.path.dirname(path), os.path.basename(path)
             fulldir = os.path.join(repo, dirname)
             if not os.path.isdir(fulldir):
