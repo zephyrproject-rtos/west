@@ -6,6 +6,7 @@ import re
 import shlex
 import subprocess
 import textwrap
+from pathlib import PurePath
 
 import pytest
 
@@ -653,7 +654,7 @@ def test_topdir_in_workspace(west_init_tmpdir):
     # Running west topdir anywhere inside of a workspace ought to
     # work, and return the same thing.
 
-    expected = str(west_init_tmpdir)
+    expected = PurePath(str(west_init_tmpdir)).as_posix()
 
     # This should be available immediately after west init.
     assert cmd('topdir').strip() == expected

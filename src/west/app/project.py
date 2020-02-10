@@ -1062,7 +1062,7 @@ class Topdir(_ProjectCommand):
         return self._parser(parser_adder)
 
     def do_run(self, args, user_args):
-        log.inf(self.topdir)
+        log.inf(PurePath(self.topdir).as_posix())
 
 class SelfUpdate(_ProjectCommand):
     def __init__(self):
