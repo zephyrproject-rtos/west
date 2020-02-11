@@ -459,7 +459,10 @@ class Manifest:
             else:
                 project = self._projects_by_name.get(pid)
             if project is None and allow_paths:
-                project = self._projects_by_cpath.get(util.canon_path(pid))
+                if pid == self.projects[MANIFEST_PROJECT_INDEX].path:
+                    project = self.projects[MANIFEST_PROJECT_INDEX]
+                else:
+                    project = self._projects_by_cpath.get(util.canon_path(pid))
 
             if project is None:
                 unknown.append(pid)
