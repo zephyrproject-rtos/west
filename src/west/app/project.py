@@ -848,11 +848,16 @@ class Update(_ProjectCommand):
         if self.args.keep_descendants and is_ancestor:
             # A descendant is currently checked out and keep_descendants was
             # given, so there's nothing more to do.
-            log.small_banner(f'{project.name}: left descendant branch '
-                             f'"{current_branch}" checked out')
+            log.inf(f'west update: left descendant branch '
+                    f'"{current_branch}" checked out; current status:')
+            if take_stats:
+                start = perf_counter()
+            project.git('status')
+            if take_stats:
+                stats['get current status'] = perf_counter - start
         elif try_rebase:
             # Attempt a rebase.
-            log.small_banner(f'{project.name}: rebasing to {MANIFEST_REV}')
+            log.inf(f'west update: rebasing to {MANIFEST_REV} {sha}')
             if take_stats:
                 start = perf_counter()
             project.git('rebase ' + QUAL_MANIFEST_REV)
@@ -863,11 +868,9 @@ class Update(_ProjectCommand):
             # out the new detached HEAD, then print some helpful context.
             if take_stats:
                 start = perf_counter()
-            project.git('checkout --detach --quiet ' + sha)
+            project.git('checkout --detach ' + sha)
             if take_stats:
                 stats['checkout new manifest-rev'] = perf_counter() - start
-            log.small_banner(
-                f'{project.name}: checked out {sha} as detached HEAD')
             _post_checkout_help(project, current_branch, sha, is_ancestor)
 
         # Print performance statistics.
