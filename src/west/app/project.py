@@ -1314,8 +1314,6 @@ def die_if_no_git():
 # Top-level west directory, containing west itself and the manifest.
 WEST_DIR = '.west'
 
-# Manifest repository directory under WEST_DIR.
-MANIFEST = 'manifest'
 # Default manifest repository URL.
 MANIFEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/zephyr'
 # Default revision to check out of the manifest repository.
