@@ -1018,8 +1018,13 @@ class Manifest:
         # Merge two west_commands attributes. Try to keep the result a
         # str if possible, but upgrade it to a list if both wc1 and
         # wc2 are truthy.
+        #
+        # Filter out duplicates to make sure that if the user imports
+        # a manifest and redundantly specifies its west-commands,
+        # we don't get the same entries twice.
         if wc1 and wc2:
-            return _ensure_list(wc1) + _ensure_list(wc2)
+            wc1 = _ensure_list(wc1)
+            return wc1 + [wc for wc in _ensure_list(wc2) if wc not in wc1]
         else:
             return wc1 or wc2
 
