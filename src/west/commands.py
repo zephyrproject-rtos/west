@@ -216,6 +216,12 @@ class WestExtCommandSpec:
         It may do some additional steps (like importing the definition of
         the command) before constructing it, however.'''
 
+    def __repr__(self):
+        return (f'<WestExtCommandSpec name={repr(self.name)}'
+                f' project {self.project.name}'
+                f' help={repr(self.help)}'
+                f' factory={self.factory}>')
+
 def extension_commands(manifest=None):
     # Get descriptions of available extension commands.
     #
