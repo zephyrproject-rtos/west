@@ -17,14 +17,29 @@ Pre-release test plan
    - Debian stable (if its Python 3 is still supported)
    - Debian testing
 
-3. Create and update a default (Zephyr) workspace on all of the platforms from
-   1. ::
+3. Build alpha N (N=1 to start, then N=2 if you need more commits, etc.) and
+   upload to pypi.
+
+   Make sure to check if west.manifest.SCHEMA_VERSION also needs an update
+   before uploading. ::
+
+   git clean -ffdx
+   WEST_VERSION=X.YaN python3 setup.py sdist bdist_wheel
+   twine upload -u zephyr-project dist/*
+
+4. Install the alpha on test platforms.
+
+   pip3 install west==X.YaN
+
+5. Create and update a default (Zephyr) workspace on all of the platforms from
+   1., using the installed alpha::
 
      $ west init zephyrproject
      $ cd zephyrproject; west update
 
-4. Do Zephyr specific testing in the Zephyr workspace on all of the platforms
-   from 1. ::
+6. Do the following Zephyr specific testing in the Zephyr workspace on all of
+   the platforms from 1. Skip QEMU tests on non-Linux platforms, and make sure
+   ZEPHYR_BASE is unset in the calling environment. ::
 
      $ west build -b qemu_x86 -s zephyr/samples/hello_world -d build-qemu-x86
      $ west build -d build-qemu-x86 -t run
@@ -40,29 +55,15 @@ Pre-release test plan
      $ west debugserver -d build-nrf52
      $ west attach -d build-nrf52
 
-5. Bump src/west/version.py to tag and upload an RC version, e.g. vX.Y.Zrc1
-   using below steps.
-
-   Make sure to check if west.manifest.SCHEMA_VERSION also needs an update.
-
-6. Upload the rc to PyPI using below steps.
-
-7. For each of the platforms in 1., upgrade to the RC::
-
-     pip install --U --pre west
-
-   Now repeat steps 3. -- 5., and repeat step 4. in an existing workspace.
    (It's still a pass if ``west build`` requires ``--pristine``.)
 
-Tagging the release
--------------------
+7. Assuming that all went well (if it didn't, go fix it and repeat),
+   get the version bump committed, either to master or the release branch as
+   appropriate. See below for release branch information.
 
-Create and push a GPG signed tag.
-
-  $ git tag -a -s vX.Y.Z -m 'West vX.Y.Z
-
-  Signed-off-by: Your Name <your.name@example.com>'
-  $ git push origin vX.Y.Z
+   For the first release (e.g. vX.Y.0), master should point to the release
+   branch commit. Thereafter, the release branch is allowed to fork from master
+   to just take bugfixes etc.
 
 Building and uploading the release wheels
 -----------------------------------------
@@ -76,8 +77,20 @@ You need the zephyr-project PyPI credentials for the 'twine upload' command. ::
 The 'git clean' step is important. We've anecdotally observed broken wheels
 being generated from dirty repositories.
 
+Tagging the release
+-------------------
+
+Create and push a GPG signed tag.
+
+  $ git tag -a -s vX.Y.Z -m 'West vX.Y.Z
+
+  Signed-off-by: Your Name <your.name@example.com>'
+  $ git push origin vX.Y.Z
+
 Cut a release branch
 --------------------
 
-If you've cut a new minor version (vX.Y.0), cut a release branch, vX.Y-branch.
-Fixes for versions vX.Y.Z should go to that branch.
+If you've cut a new minor version (vX.Y.0), also cut a release branch,
+vX.Y-branch. Subsequent fixes for versions vX.Y.Z should go to that branch
+after being backported from master (or the other way around in case of an
+urgent hotfix).
