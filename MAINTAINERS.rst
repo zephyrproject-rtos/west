@@ -23,37 +23,38 @@ Pre-release test plan
    Make sure to check if west.manifest.SCHEMA_VERSION also needs an update
    before uploading. ::
 
-   git clean -ffdx
-   WEST_VERSION=X.YaN python3 setup.py sdist bdist_wheel
-   twine upload -u zephyr-project dist/*
+     git clean -ffdx
+     WEST_VERSION=X.YaN python3 setup.py sdist bdist_wheel
+     twine upload -u zephyr-project dist/*
 
-4. Install the alpha on test platforms.
+4. Install the alpha on test platforms. ::
 
-   pip3 install west==X.YaN
+     pip3 install west==X.YaN
 
 5. Create and update a default (Zephyr) workspace on all of the platforms from
    1., using the installed alpha::
 
-     $ west init zephyrproject
-     $ cd zephyrproject; west update
+     west init zephyrproject
+     cd zephyrproject
+     west update
 
 6. Do the following Zephyr specific testing in the Zephyr workspace on all of
    the platforms from 1. Skip QEMU tests on non-Linux platforms, and make sure
    ZEPHYR_BASE is unset in the calling environment. ::
 
-     $ west build -b qemu_x86 -s zephyr/samples/hello_world -d build-qemu-x86
-     $ west build -d build-qemu-x86 -t run
+     west build -b qemu_x86 -s zephyr/samples/hello_world -d build-qemu-x86
+     west build -d build-qemu-x86 -t run
 
-     $ west build -b qemu_cortex_m3 -s zephyr/samples/hello_world -d build-qemu-m3
-     $ west build -d build-qemu-m3 -t run
+     west build -b qemu_cortex_m3 -s zephyr/samples/hello_world -d build-qemu-m3
+     west build -d build-qemu-m3 -t run
 
      # This example uses a Nordic board. Do this for as many boards
      # as you have access to / volunteers for.
-     $ west build -b nrf52_pca10040 -s zephyr/samples/hello_world -d build-nrf52
-     $ west flash -d build-nrf52
-     $ west debug -d build-nrf52
-     $ west debugserver -d build-nrf52
-     $ west attach -d build-nrf52
+     west build -b nrf52_pca10040 -s zephyr/samples/hello_world -d build-nrf52
+     west flash -d build-nrf52
+     west debug -d build-nrf52
+     west debugserver -d build-nrf52
+     west attach -d build-nrf52
 
    (It's still a pass if ``west build`` requires ``--pristine``.)
 
@@ -70,9 +71,9 @@ Building and uploading the release wheels
 
 You need the zephyr-project PyPI credentials for the 'twine upload' command. ::
 
-  $ git clean -ffdx
-  $ python3 setup.py sdist bdist_wheel
-  $ twine upload -u zephyr-project dist/*
+  git clean -ffdx
+  python3 setup.py sdist bdist_wheel
+  twine upload -u zephyr-project dist/*
 
 The 'git clean' step is important. We've anecdotally observed broken wheels
 being generated from dirty repositories.
@@ -80,12 +81,13 @@ being generated from dirty repositories.
 Tagging the release
 -------------------
 
-Create and push a GPG signed tag.
+Create and push a GPG signed tag. ::
 
-  $ git tag -a -s vX.Y.Z -m 'West vX.Y.Z
+  git tag -a -s vX.Y.Z -m 'West vX.Y.Z
 
   Signed-off-by: Your Name <your.name@example.com>'
-  $ git push origin vX.Y.Z
+
+  git push origin vX.Y.Z
 
 Cut a release branch
 --------------------
