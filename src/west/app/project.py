@@ -299,7 +299,7 @@ class Init(_ProjectCommand):
         except PermissionError:
             log.die(f'Cannot initialize in {directory}: permission denied')
         except FileExistsError:
-            log.die(f'Something else created {directory} concurrently')
+            log.die(f'Cannot initialize in {directory}: it already exists')
         except Exception as e:
             log.die(f"Can't create {directory}: {e}")
 
