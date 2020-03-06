@@ -166,20 +166,25 @@ def msg(*args, color=None, stream=sys.stdout):
     if _use_colors():
         _reset_colors(stream)
 
+def use_color():
+    '''Returns True if the configuration requests colored output.'''
+    return _use_colors(warn=False)
+
 _COLOR_UI_WARNED = False
 
-def _use_colors():
+def _use_colors(warn=True):
     # Convenience function for reading the color.ui setting
     try:
         return config.config.getboolean('color', 'ui', fallback=True)
     except ValueError as e:
-        global _COLOR_UI_WARNED
-        if not _COLOR_UI_WARNED:
-            print(f"WARNING: invalid color.ui value: {e}.",
-                  file=sys.stderr)
-            print('         To fix, run: "west config color.ui <true|false>"',
-                  file=sys.stderr)
-            _COLOR_UI_WARNED = True
+        if warn:
+            global _COLOR_UI_WARNED
+            if not _COLOR_UI_WARNED:
+                print(f"WARNING: invalid color.ui value: {e}.",
+                      file=sys.stderr)
+                print('         To fix: "west config color.ui <true|false>"',
+                      file=sys.stderr)
+                _COLOR_UI_WARNED = True
         return False
 
 def _reset_colors(file):
