@@ -66,6 +66,9 @@ Pre-release test plan
    branch commit. Thereafter, the release branch is allowed to fork from master
    to just take bugfixes etc.
 
+8. Push a commit to master updating version.py to vX.Y.99, kicking off
+   development for the next release.
+
 Building and uploading the release wheels
 -----------------------------------------
 
