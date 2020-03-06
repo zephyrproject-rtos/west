@@ -556,16 +556,30 @@ class Diff(_ProjectCommand):
         self._setup_logging(args)
 
         failed = []
+        no_diff = 0
+        # We may need to force git to use colors if the user wants them,
+        # which it won't do ordinarily since stdout is not a terminal.
+        color = ['--color=always'] if log.use_color() else []
+
         for project in self._cloned_projects(args):
-            log.banner(f'diff for {project.name_and_path}:')
             # Use paths that are relative to the base directory to make it
             # easier to see where the changes are
-            try:
-                project.git(['diff', f'--src-prefix={project.path}/',
-                             f'--dst-prefix={project.path}/'])
-            except subprocess.CalledProcessError:
+            cp = project.git(['diff', f'--src-prefix={project.path}/',
+                              f'--dst-prefix={project.path}/',
+                              '--exit-code'] + color,
+                             capture_stdout=True, capture_stderr=True,
+                             check=False)
+            if cp.returncode == 0:
+                no_diff += 1
+            if cp.returncode == 1 or log.VERBOSE > log.VERBOSE_NONE:
+                log.banner(f'diff for {project.name_and_path}:')
+                log.inf(cp.stdout.decode('utf-8'))
+            elif cp.returncode:
                 failed.append(project)
-        self._handle_failed(args, failed)
+        if failed:
+            self._handle_failed(args, failed)
+        elif log.VERBOSE <= log.VERBOSE_NONE:
+            log.inf(f"Empty diff in {no_diff} projects.")
 
 class Status(_ProjectCommand):
     def __init__(self):
