@@ -476,6 +476,10 @@ class ManifestCommand(_ProjectCommand):
               If the manifest can be parsed, print nothing and exit
               successfully.
 
+            - --path: print the path to the top level manifest file.
+              If this file uses imports, it will not contain all the
+              manifest data.
+
             If the manifest file does not use imports, and all project
             revisions are SHAs, the --freeze and --resolve output will
             be identical after a "west update".
@@ -494,6 +498,8 @@ class ManifestCommand(_ProjectCommand):
         group.add_argument('--validate', action='store_true',
                            help='''validate the current manifest,
                            exiting with an error if there are issues''')
+        group.add_argument('--path', action='store_true',
+                           help="print the top level manifest file's path")
 
         group = parser.add_argument_group('options for --resolve and --freeze')
         group.add_argument('-o', '--out',
@@ -528,6 +534,8 @@ class ManifestCommand(_ProjectCommand):
             self._dump(args, manifest.as_yaml(**dump_kwargs))
         elif args.freeze:
             self._dump(args, manifest.as_frozen_yaml(**dump_kwargs))
+        elif args.path:
+            log.inf(manifest.path)
         else:
             # Can't happen.
             raise RuntimeError(f'internal error: unhandled args {args}')
