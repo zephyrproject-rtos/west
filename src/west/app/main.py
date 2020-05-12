@@ -296,6 +296,10 @@ class WestApp:
                             version=f'West version: v{__version__}',
                             help='print the program version and exit')
 
+        parser.add_argument('--color', default='auto',
+                            choices=['always', 'auto', 'never'],
+                            help='select when colored output should be used')
+
         subparser_gen = parser.add_subparsers(metavar='<command>',
                                               dest='command')
 
@@ -307,6 +311,16 @@ class WestApp:
         # spec and re-parse arguments before running.
 
         args, unknown = self.west_parser.parse_known_args(args=argv)
+
+        # Makes ANSI color escapes work on Windows, and strips them when
+        # stdout/stderr isn't a terminal
+        if args.color == 'always':
+            strip = False
+        elif args.color == 'auto':
+            strip = None
+        else: # args.color == 'never'
+            strip = True
+        colorama.init(strip=strip)
 
         # Set up logging verbosity before running the command, so e.g.
         # verbose messages related to argument handling errors work
@@ -758,10 +772,6 @@ def main(argv=None):
     # logging.ERROR level. We want to handle those ourselves as
     # needed.
     logging.getLogger('pykwalify').setLevel(logging.CRITICAL)
-
-    # Makes ANSI color escapes work on Windows, and strips them when
-    # stdout/stderr isn't a terminal
-    colorama.init()
 
     # Create the WestApp instance and let it run.
     app = WestApp()
