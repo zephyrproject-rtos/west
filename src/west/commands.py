@@ -9,6 +9,8 @@ import importlib
 import itertools
 import os
 import sys
+from types import ModuleType
+from typing import Dict
 
 import pykwalify
 import yaml
@@ -25,6 +27,16 @@ west commands subclass.
 This package also provides support for extension commands.'''
 
 __all__ = ['CommandContextError', 'CommandError', 'WestCommand']
+
+_EXT_SCHEMA_PATH = os.path.join(os.path.dirname(__file__),
+                                'west-commands-schema.yml')
+
+# Cache which maps files implementing extension commands to their
+# imported modules.
+_EXT_MODULES_CACHE: Dict[str, ModuleType] = {}
+# Infinite iterator of "fresh" extension command module names.
+_EXT_MODULES_NAME_IT = (f'west.commands.ext.cmd_{i}'
+                        for i in itertools.count(1))
 
 class CommandError(RuntimeError):
     '''Indicates that a command failed.'''
@@ -345,16 +357,6 @@ def _commands_module_from_file(file):
     _EXT_MODULES_CACHE[file] = mod
 
     return mod
-
-_EXT_SCHEMA_PATH = os.path.join(os.path.dirname(__file__),
-                                'west-commands-schema.yml')
-
-# Cache which maps files implementing extension commands to their
-# imported modules.
-_EXT_MODULES_CACHE = {}
-# Infinite iterator of "fresh" extension command module names.
-_EXT_MODULES_NAME_IT = (f'west.commands.ext.cmd_{i}'
-                        for i in itertools.count(1))
 
 class _ExtFactory:
 
