@@ -14,6 +14,7 @@ from west import configuration as config
 
 import colorama
 import sys
+from typing import NoReturn
 
 VERBOSE_NONE = 0
 '''Default verbosity level, no dbg() messages printed.'''
@@ -134,7 +135,7 @@ def err(*args, fatal=False):
     if _use_colors():
         _reset_colors(sys.stderr)
 
-def die(*args, exit_code=1):
+def die(*args, exit_code=1) -> NoReturn:
     '''Print a fatal error, and abort the program.
 
     :param args: sequence of arguments to print.
