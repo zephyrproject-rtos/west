@@ -1630,7 +1630,7 @@ def _is_imap_ok(imap, project):
     # Return True if a project passes an import map's filters,
     # and False otherwise.
 
-    nwl, pwl, nbl, pbl = [_ensure_list(l) for l in
+    nwl, pwl, nbl, pbl = [_ensure_list(lst) for lst in
                           (imap.name_whitelist, imap.path_whitelist,
                            imap.name_blacklist, imap.path_blacklist)]
     name = project.name
