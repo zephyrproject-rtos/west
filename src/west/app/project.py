@@ -785,7 +785,7 @@ class Update(_ProjectCommand):
             # are not defined in the manifest repository.
             mr_unknown_set = set(mr_unknown)
             from_projects = [p for p in ids if p in mr_unknown_set]
-            log.die(f'refusing to update project: ' +
+            log.die('refusing to update project: ' +
                     " ".join(from_projects) + '\n' +
                     '  It or they were resolved via project imports.\n'
                     '  Only plain "west update" can currently update them.')
