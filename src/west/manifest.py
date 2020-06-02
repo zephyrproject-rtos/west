@@ -303,7 +303,7 @@ def validate(data):
         pykwalify.core.Core(source_data=data,
                             schema_files=[_SCHEMA_PATH]).validate()
     except pykwalify.errors.SchemaError as se:
-        raise MalformedManifest(se._msg) from se
+        raise MalformedManifest(se.msg) from se
 
 #
 # Exception types
