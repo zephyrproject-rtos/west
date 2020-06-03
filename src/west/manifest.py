@@ -24,6 +24,10 @@ import yaml
 from west import util
 import west.configuration as cfg
 
+#
+# Public constants
+#
+
 #: Index in a Manifest.projects attribute where the `ManifestProject`
 #: instance for the workspace is stored.
 MANIFEST_PROJECT_INDEX = 0
@@ -48,7 +52,185 @@ SCHEMA_VERSION = '0.7'
 # it has the exact same value as west.version.__version__ when the
 # next release is cut.
 
+#
+# Internal helpers
+#
+
+# Logging
+
 _logger = logging.getLogger(__name__)
+
+# Manifest locating, parsing, loading, etc.
+
+_defaults = collections.namedtuple('_defaults', 'remote revision')
+
+_DEFAULT_REV = 'master'
+_YML_EXTS = ['yml', 'yaml']
+_WEST_YML = 'west.yml'
+_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
+_SCHEMA_VER = parse_version(SCHEMA_VERSION)
+_EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
+_EARLIEST_VER = parse_version(_EARLIEST_VER_STR)
+
+def _is_yml(path):
+    return os.path.splitext(str(path))[1][1:] in _YML_EXTS
+
+def _load(data):
+    try:
+        return yaml.safe_load(data)
+    except yaml.scanner.ScannerError as e:
+        raise MalformedManifest(data) from e
+
+def _mpath(cp=None, topdir=None):
+    # Return the value of the manifest.path configuration option
+    # in *cp*, a ConfigParser. If not given, create a new one and
+    # load configuration options with the given *topdir* as west
+    # workspace root.
+    #
+    # TODO: write a cfg.get(section, key)
+    # wrapper, with friends for update and delete, to avoid
+    # requiring this boilerplate.
+    if cp is None:
+        cp = cfg._configparser()
+    cfg.read_config(configfile=cfg.ConfigFile.LOCAL, config=cp, topdir=topdir)
+
+    try:
+        return cp.get('manifest', 'path')
+    except (configparser.NoOptionError, configparser.NoSectionError) as e:
+        raise MalformedConfig('no "manifest.path" config option is set') from e
+
+# Manifest import handling
+
+def _default_importer(project, file):
+    raise ManifestImportFailed(project, file)
+
+def _manifest_content_at(project, path, rev=QUAL_MANIFEST_REV_BRANCH):
+    # Get a list of manifest data from project at path
+    #
+    # The data are loaded from Git at ref QUAL_MANIFEST_REV_BRANCH,
+    # *NOT* the file system.
+    #
+    # If path is a tree at that ref, the contents of the YAML files
+    # inside path are returned, as strings. If it's a file at that
+    # ref, it's a string with its contents.
+    #
+    # Though this module and the "west update" implementation share
+    # this code, it's an implementation detail, not API.
+
+    _logger.debug(f'{project.name}: looking up path {path} type at {rev}')
+
+    # Returns 'blob', 'tree', etc. for path at revision, if it exists.
+    out = project.git(['ls-tree', rev, path], capture_stdout=True,
+                      capture_stderr=True).stdout
+
+    if not out:
+        # It's a bit inaccurate to raise FileNotFoundError for
+        # something that isn't actually file, but this is internal
+        # API, and git is a content addressable file system, so close
+        # enough!
+        raise OSError(errno.ENOENT, os.strerror(errno.ENOENT), path)
+
+    ptype = out.decode('utf-8').split()[1]
+
+    if ptype == 'blob':
+        # Importing a file: just return its content.
+        return project.read_at(path, rev=rev).decode('utf-8')
+    elif ptype == 'tree':
+        # Importing a tree: return the content of the YAML files inside it.
+        ret = []
+        # Use a PurePosixPath because that's the form git seems to
+        # store internally, even on Windows. This breaks on Windows if
+        # you use PurePath.
+        pathobj = PurePosixPath(path)
+        for f in filter(_is_yml, project.listdir_at(path, rev=rev)):
+            ret.append(project.read_at(str(pathobj / f),
+                                       rev=rev).decode('utf-8'))
+        return ret
+    else:
+        raise MalformedManifest(f"can't decipher project {project.name} "
+                                f'path {path} revision {rev} '
+                                f'(git type: {ptype})')
+
+_import_map = collections.namedtuple('_import_map',
+                                     'file '
+                                     'name_whitelist path_whitelist '
+                                     'name_blacklist path_blacklist')
+
+def _is_imap_list(value):
+    # Return True if the value is a valid import map 'blacklist' or
+    # 'whitelist'. Empty strings and lists are OK, and list nothing.
+
+    return (isinstance(value, str) or
+            (isinstance(value, list) and
+             all(isinstance(item, str) for item in value)))
+
+def _imap_filter(imap):
+    # Returns either None (if no filter is necessary) or a predicate
+    # function for the given import map.
+
+    if any([imap.name_whitelist, imap.path_whitelist,
+            imap.name_blacklist, imap.path_blacklist]):
+        return lambda project: _is_imap_ok(imap, project)
+    else:
+        return None
+
+def _ensure_list(item):
+    # Converts item to a list containing it if item is a string, or
+    # returns item.
+
+    if isinstance(item, str):
+        return [item]
+    return item
+
+def _is_imap_ok(imap, project):
+    # Return True if a project passes an import map's filters,
+    # and False otherwise.
+
+    nwl, pwl, nbl, pbl = [_ensure_list(lst) for lst in
+                          (imap.name_whitelist, imap.path_whitelist,
+                           imap.name_blacklist, imap.path_blacklist)]
+    name = project.name
+    path = PurePath(project.path)
+    blacklisted = (name in nbl) or any(path.match(p) for p in pbl)
+    whitelisted = (name in nwl) or any(path.match(p) for p in pwl)
+    no_whitelists = not (nwl or pwl)
+
+    if blacklisted:
+        return whitelisted
+    else:
+        return whitelisted or no_whitelists
+
+_import_ctx = collections.namedtuple('_import_ctx', [
+    # Known projects map, from name to Project:
+    'projects',
+    # Project -> Bool. True if OK to add a project to 'projects'. A
+    # None value is treated as a function which always returns True.
+    'filter_fn'])
+
+def _new_ctx(ctx, _new_filter):
+    return _import_ctx(ctx.projects, _and_filters(ctx.filter_fn, _new_filter))
+
+def _filter_ok(filter_fn, project):
+    # Returns True if the given filter_fn allows the project to be added
+    # to the current working list in a None-safe way.
+
+    return (filter_fn is None) or filter_fn(project)
+
+def _and_filters(filter_fn1, filter_fn2):
+    # Return a filter function which is the logical AND of the two
+    # arguments. Any filter_fn which is None is treated as an
+    # always-true predicate.
+    #
+    # The return value therefore needs to be used with _filter_ok().
+
+    if filter_fn1 and filter_fn2:
+        return lambda project: (filter_fn1(project) and filter_fn2(project))
+    else:
+        return filter_fn1 or filter_fn2
+
+#
+# Public functions
+#
 
 def manifest_path():
     '''Absolute path of the manifest file in the current workspace.
@@ -123,6 +305,57 @@ def validate(data):
     except pykwalify.errors.SchemaError as se:
         raise MalformedManifest(se._msg) from se
 
+#
+# Exception types
+#
+
+class MalformedManifest(Exception):
+    '''Manifest parsing failed due to invalid data.
+    '''
+
+class MalformedConfig(Exception):
+    '''The west configuration was malformed in a way that made a
+    manifest operation fail.
+    '''
+
+class ManifestImportFailed(Exception):
+    '''An operation required to resolve a manifest failed.
+
+    Attributes:
+
+    - ``project``: the Project instance with the missing manifest data
+    - ``filename``: the missing file
+    '''
+
+    def __init__(self, project, filename):
+        self.project = project
+        self.filename = filename
+
+    def __str__(self):
+        return (f'ManifestImportFailed: project {self.project} '
+                f'file {self.filename}')
+
+class ManifestVersionError(Exception):
+    '''The manifest required a version of west more recent than the
+    current version.
+    '''
+
+    def __init__(self, version, file=None):
+        self.version = version
+        '''The minimum version of west that was required.'''
+
+        self.file = file
+        '''The file that required this version of west.'''
+
+class _ManifestImportDepth(ManifestImportFailed):
+    # A hack to signal to main.py what happened.
+    pass
+
+#
+# The main Manifest class and its public helper types, like Project
+# and ImportFlag.
+#
+
 class ImportFlag(enum.IntFlag):
     '''Bit flags for handling imports when resolving a manifest.
 
@@ -153,6 +386,426 @@ def _flags_ok(flags):
         return (flags & F_FP) ^ (flags & F_IP)
     else:
         return True
+
+class Project:
+    '''Represents a project defined in a west manifest.
+
+    Attributes:
+
+    - ``name``: project's unique name
+    - ``url``: project fetch URL
+    - ``revision``: revision to fetch from ``url`` when the
+      project is updated
+    - ``path``: relative path to the project within the workspace
+      (i.e. from ``topdir`` if that is set)
+    - ``abspath``: absolute path to the project in the native path name
+      format (or ``None`` if ``topdir`` is)
+    - ``posixpath``: like ``abspath``, but with slashes (``/``) as
+      path separators
+    - ``clone_depth``: clone depth to fetch when first cloning the
+      project, or ``None`` (the revision should not be a SHA
+      if this is used)
+    - ``west_commands``: list of places to find extension commands in
+      the project
+    - ``topdir``: the top level directory of the west workspace
+      the project is part of, or ``None``
+    - ``remote_name``: the name of the remote which should be set up
+      when the project is being cloned (default: 'origin')
+    '''
+
+    def __eq__(self, other):
+        return NotImplemented
+
+    def __repr__(self):
+        return (f'Project("{self.name}", "{self.url}", '
+                f'revision="{self.revision}", path={repr(self.path)}, '
+                f'clone_depth={self.clone_depth}, '
+                f'west_commands={self.west_commands}, '
+                f'topdir={repr(self.topdir)})')
+
+    def __str__(self):
+        path_repr = repr(self.abspath or self.path)
+        return f'<Project {self.name} ({path_repr}) at {self.revision}>'
+
+    def __init__(self, name, url, revision=None, path=None,
+                 clone_depth=None, west_commands=None, topdir=None,
+                 remote_name=None):
+        '''Project constructor.
+
+        If *topdir* is ``None``, then absolute path attributes
+        (``abspath`` and ``posixpath``) will also be ``None``.
+
+        :param name: project's ``name:`` attribute in the manifest
+        :param url: fetch URL
+        :param revision: fetch revision
+        :param path: path (relative to topdir), or None for *name*
+        :param clone_depth: depth to use for initial clone
+        :param west_commands: path to west commands directory in the
+            project, relative to its own base directory, topdir / path,
+            or list of these
+        :param topdir: the west workspace's top level directory
+        :param remote_name: the name of the remote which should be
+            set up if the project is being cloned (default: 'origin')
+        '''
+
+        self.name = name
+        self.url = url
+        self.revision = revision or _DEFAULT_REV
+        self.clone_depth = clone_depth
+        self.path = path or name
+        self.west_commands = west_commands
+        self.topdir = topdir
+        self.remote_name = remote_name or 'origin'
+
+    @property
+    def path(self):
+        return self._path
+
+    @path.setter
+    def path(self, path):
+        self._path = str(path)
+
+        # Invalidate the absolute path attributes. They'll get
+        # computed again next time they're accessed.
+        self._abspath = None
+        self._posixpath = None
+
+    @property
+    def abspath(self):
+        if self._abspath is None and self.topdir:
+            self._abspath = os.path.realpath(os.path.join(self.topdir,
+                                                          self.path))
+        return self._abspath
+
+    @property
+    def posixpath(self):
+        if self._posixpath is None and self.topdir:
+            self._posixpath = PurePath(self.abspath).as_posix()
+        return self._posixpath
+
+    @property
+    def name_and_path(self):
+        return f'{self.name} ({self.path})'
+
+    def as_dict(self):
+        '''Return a representation of this object as a dict, as it
+        would be parsed from an equivalent YAML manifest.
+        '''
+        ret = {}
+        ret['name'] = self.name
+        ret['url'] = self.url
+        ret['revision'] = self.revision
+        if self.path != self.name:
+            ret['path'] = self.path
+        if self.clone_depth:
+            ret['clone-depth'] = self.clone_depth
+        if self.west_commands:
+            ret['west-commands'] = self.west_commands
+
+        return ret
+
+    #
+    # Git helpers
+    #
+
+    def git(self, cmd, extra_args=(), capture_stdout=False,
+            capture_stderr=False, check=True, cwd=None):
+        '''Run a git command in the project repository.
+
+        Returns a ``subprocess.CompletedProcess``.
+
+        :param cmd: git command as a string (or list of strings)
+        :param extra_args: sequence of additional arguments to pass to
+            the git command (useful mostly if *cmd* is a string).
+        :param capture_stdout: if True, git's standard output is
+            captured in the ``CompletedProcess`` instead of being
+            printed.
+        :param capture_stderr: Like *capture_stdout*, but for standard
+            error. Use with caution: this may prevent error messages
+            from being shown to the user.
+        :param check: if given, ``subprocess.CalledProcessError`` is
+            raised if git finishes with a non-zero return code
+        :param cwd: directory to run git in (default: ``self.abspath``)
+        '''
+        if isinstance(cmd, str):
+            cmd_list = shlex.split(cmd)
+        else:
+            cmd_list = list(cmd)
+
+        extra_args = list(extra_args)
+
+        if cwd is None:
+            if self.abspath is not None:
+                cwd = self.abspath
+            else:
+                raise ValueError('no abspath; cwd must be given')
+
+        args = ['git'] + cmd_list + extra_args
+        cmd_str = util.quote_sh_list(args)
+
+        _logger.debug(f"running '{cmd_str}' in {cwd}")
+        popen = subprocess.Popen(
+            args, cwd=cwd,
+            stdout=subprocess.PIPE if capture_stdout else None,
+            stderr=subprocess.PIPE if capture_stderr else None)
+
+        stdout, stderr = popen.communicate()
+
+        # We use logger style % formatting here to avoid the
+        # potentially expensive overhead of formatting long
+        # stdout/stderr strings if the current log level isn't DEBUG,
+        # which is the usual case.
+        _logger.debug('"%s" exit code: %d stdout: %r stderr: %r',
+                      cmd_str, popen.returncode, stdout, stderr)
+
+        if check and popen.returncode:
+            raise subprocess.CalledProcessError(popen.returncode, cmd_list,
+                                                output=stdout, stderr=stderr)
+        else:
+            return subprocess.CompletedProcess(popen.args, popen.returncode,
+                                               stdout, stderr)
+
+    def sha(self, rev, cwd=None):
+        '''Get the SHA for a project revision.
+
+        :param rev: git revision (HEAD, v2.0.0, etc.) as a string
+        :param cwd: directory to run command in (default:
+            self.abspath)
+        '''
+        # Though we capture stderr, it will be available as the stderr
+        # attribute in the CalledProcessError raised by git() in
+        # Python 3.5 and above if this call fails.
+        cp = self.git(f'rev-parse {rev}', capture_stdout=True, cwd=cwd,
+                      capture_stderr=True)
+        # Assumption: SHAs are hex values and thus safe to decode in ASCII.
+        # It'll be fun when we find out that was wrong and how...
+        return cp.stdout.decode('ascii').strip()
+
+    def is_ancestor_of(self, rev1, rev2, cwd=None):
+        '''Check if 'rev1' is an ancestor of 'rev2' in this project.
+
+        Returns True if rev1 is an ancestor commit of rev2 in the
+        given project; rev1 and rev2 can be anything that resolves to
+        a commit. (If rev1 and rev2 refer to the same commit, the
+        return value is True, i.e. a commit is considered an ancestor
+        of itself.) Returns False otherwise.
+
+        :param rev1: commit that could be the ancestor of *rev2*
+        :param rev2: commit that could be a descendant or *rev1*
+        :param cwd: directory to run command in (default:
+            ``self.abspath``)
+        '''
+        rc = self.git(f'merge-base --is-ancestor {rev1} {rev2}',
+                      check=False, cwd=cwd).returncode
+
+        if rc == 0:
+            return True
+        elif rc == 1:
+            return False
+        else:
+            raise RuntimeError(f'unexpected git merge-base result {rc}')
+
+    def is_up_to_date_with(self, rev, cwd=None):
+        '''Check if the project is up to date with *rev*, returning
+        ``True`` if so.
+
+        This is equivalent to ``is_ancestor_of(rev, 'HEAD',
+        cwd=cwd)``.
+
+        :param rev: base revision to check if project is up to date
+            with.
+        :param cwd: directory to run command in (default:
+            ``self.abspath``)
+        '''
+        return self.is_ancestor_of(rev, 'HEAD', cwd=cwd)
+
+    def is_up_to_date(self, cwd=None):
+        '''Check if the project HEAD is up to date with the manifest.
+
+        This is equivalent to ``is_up_to_date_with(self.revision,
+        cwd=cwd)``.
+
+        :param cwd: directory to run command in (default:
+            ``self.abspath``)
+        '''
+        return self.is_up_to_date_with(self.revision, cwd=cwd)
+
+    def is_cloned(self, cwd=None):
+        '''Returns ``True`` if ``self.abspath`` looks like a git
+        repository's top-level directory, and ``False`` otherwise.
+
+        :param cwd: directory to run command in (default:
+            ``self.abspath``)
+        '''
+        if not os.path.isdir(self.abspath):
+            return False
+
+        # --is-inside-work-tree doesn't require that the directory is
+        # the top-level directory of a Git repository. Use --show-cdup
+        # instead, which prints an empty string (i.e., just a newline,
+        # which we strip) for the top-level directory.
+        _logger.debug(f'{self.name}: checking if cloned')
+        res = self.git('rev-parse --show-cdup', check=False,
+                       capture_stderr=True, capture_stdout=True)
+
+        return not (res.returncode or res.stdout.strip())
+
+    def read_at(self, path, rev=None, cwd=None):
+        '''Read file contents in the project at a specific revision.
+
+        The file contents are returned as a bytes object. The caller
+        should decode them if necessary.
+
+        :param path: relative path to file in this project
+        :param rev: revision to read *path* from (default: ``self.revision``)
+        :param cwd:  directory to run command in (default: ``self.abspath``)
+        '''
+        if rev is None:
+            rev = self.revision
+        cp = self.git(['show', f'{rev}:{path}'], capture_stdout=True,
+                      capture_stderr=True, cwd=cwd)
+        return cp.stdout
+
+    def listdir_at(self, path, rev=None, cwd=None, encoding=None):
+        '''List directory contents in the project at a specific revision.
+
+        The return value is a list of the directory's contents as
+        strings.
+
+        :param path: relative path to file in this project
+        :param rev: revision to read *path* from (default: ``self.revision``)
+        :param cwd: directory to run command in (default: ``self.abspath``)
+        :param encoding: directory contents encoding (default: 'utf-8')
+        '''
+        if rev is None:
+            rev = self.revision
+        if encoding is None:
+            encoding = 'utf-8'
+
+        # git-ls-tree -z means we get NUL-separated output with no quoting
+        # of the file names. Using 'git-show' or 'git-cat-file -p'
+        # wouldn't work for files with special characters in their names.
+        out = self.git(['ls-tree', '-z', f'{rev}:{path}'],
+                       capture_stdout=True, capture_stderr=True).stdout
+
+        # A tab character separates the SHA from the file name in each
+        # NUL-separated entry.
+        return [f.decode(encoding).split('\t', 1)[1]
+                for f in out.split(b'\x00') if f]
+
+# FIXME: this whole class should just go away. See #327.
+class ManifestProject(Project):
+    '''Represents the manifest repository as a `Project`.
+
+    Meaningful attributes:
+
+    - ``name``: the string ``"manifest"``
+    - ``topdir``: the top level directory of the west workspace
+      the manifest project controls, or ``None``
+    - ``path``: relative path to the manifest repository within the
+      workspace, or ``None`` (i.e. from ``topdir`` if that is set)
+    - ``abspath``: absolute path to the manifest repository in the
+      native path name format (or ``None`` if ``topdir`` is)
+    - ``posixpath``: like ``abspath``, but with slashes (``/``) as
+      path separators
+    - ``west_commands``:``west_commands:`` key in the manifest's
+      ``self:`` map. This may be a list of such if the self
+      section imports multiple additional files with west commands.
+
+    Other readable attributes included for Project compatibility:
+
+    - ``url``: always ``None``; the west manifest is not
+      version-controlled by west itself, even though 'west init'
+      can fetch a manifest repository from a Git remote
+    - ``revision``: ``"HEAD"``
+    - ``clone_depth``: ``None``, because ``url`` is
+    '''
+
+    def __repr__(self):
+        return (f'ManifestProject({self.name}, path={repr(self.path)}, '
+                f'west_commands={self.west_commands}, '
+                f'topdir={repr(self.topdir)})')
+
+    def __init__(self, path=None, west_commands=None, topdir=None):
+        '''
+        :param path: Relative path to the manifest repository in the
+            west workspace, if known.
+        :param west_commands: path to the YAML file in the manifest
+            repository configuring its extension commands, if any.
+        :param topdir: Root of the west workspace the manifest
+            project is inside. If not given, all absolute path
+            attributes (abspath and posixpath) will be None.
+        '''
+        self.name = 'manifest'
+
+        # Path related attributes
+        self.topdir = topdir
+        self._abspath = None
+        self._posixpath = None
+        self._path = path
+
+        # Extension commands.
+        self.west_commands = west_commands
+
+    @property
+    def path(self):
+        return self._path
+
+    @path.setter
+    def path(self, path):
+        self._path = path
+
+        # Invalidate the absolute path attributes. They'll get
+        # computed again next time they're accessed.
+        self._abspath = None
+        self._posixpath = None
+
+    @property
+    def abspath(self):
+        if self._abspath is None and self.topdir and self.path:
+            self._abspath = os.path.realpath(os.path.join(self.topdir,
+                                                          self.path))
+        return self._abspath
+
+    @property
+    def posixpath(self):
+        if self._posixpath is None and self.abspath:
+            self._posixpath = PurePath(self.abspath).as_posix()
+        return self._posixpath
+
+    @property
+    def url(self):
+        return None
+
+    @url.setter
+    def url(self, url):
+        raise ValueError(url)
+
+    @property
+    def revision(self):
+        return 'HEAD'
+
+    @revision.setter
+    def revision(self, revision):
+        raise ValueError(revision)
+
+    @property
+    def clone_depth(self):
+        return None
+
+    @clone_depth.setter
+    def clone_depth(self, clone_depth):
+        raise ValueError(clone_depth)
+
+    def as_dict(self):
+        '''Return a representation of this object as a dict, as it would be
+        parsed from an equivalent YAML manifest.'''
+        ret = {}
+        if self.path:
+            ret['path'] = self.path
+        if self.west_commands:
+            ret['west-commands'] = self.west_commands
+        return ret
 
 class Manifest:
     '''The parsed contents of a west manifest file.
@@ -391,7 +1044,7 @@ class Manifest:
         except TypeError as te:
             self._malformed(te.args[0], parent=te)
 
-        self.projects = None
+        self._projects = []
         '''Sequence of `Project` objects representing manifest
         projects.
 
@@ -552,6 +1205,10 @@ class Manifest:
         '''
         return yaml.safe_dump(self.as_frozen_dict(), **kwargs)
 
+    @property
+    def projects(self):
+        return self._projects
+
     def _malformed(self, complaint, parent=None):
         context = (f'file: {self.path} ' if self.path else 'data')
         args = [f'Malformed manifest {context}',
@@ -602,8 +1259,8 @@ class Manifest:
         self._check_paths_are_unique(mp, ctx.projects, top_level)
 
         # Save the results.
-        self.projects = list(ctx.projects.values())
-        self.projects.insert(MANIFEST_PROJECT_INDEX, mp)
+        self._projects = list(ctx.projects.values())
+        self._projects.insert(MANIFEST_PROJECT_INDEX, mp)
         self._projects_by_name = {'manifest': mp}
         self._projects_by_name.update(ctx.projects)
         self._projects_by_cpath = {}
@@ -1027,627 +1684,3 @@ class Manifest:
             return wc1 + [wc for wc in _ensure_list(wc2) if wc not in wc1]
         else:
             return wc1 or wc2
-
-
-class MalformedManifest(Exception):
-    '''Manifest parsing failed due to invalid data.
-    '''
-
-class MalformedConfig(Exception):
-    '''The west configuration was malformed in a way that made a
-    manifest operation fail.
-    '''
-
-class ManifestImportFailed(Exception):
-    '''An operation required to resolve a manifest failed.
-
-    Attributes:
-
-    - ``project``: the Project instance with the missing manifest data
-    - ``filename``: the missing file
-    '''
-
-    def __init__(self, project, filename):
-        self.project = project
-        self.filename = filename
-
-    def __str__(self):
-        return (f'ManifestImportFailed: project {self.project} '
-                f'file {self.filename}')
-
-class _ManifestImportDepth(ManifestImportFailed):
-    # A hack to signal to main.py what happened.
-    pass
-
-class ManifestVersionError(Exception):
-    '''The manifest required a version of west more recent than the
-    current version.
-    '''
-
-    def __init__(self, version, file=None):
-        self.version = version
-        '''The minimum version of west that was required.'''
-
-        self.file = file
-        '''The file that required this version of west.'''
-
-class Project:
-    '''Represents a project defined in a west manifest.
-
-    Attributes:
-
-    - ``name``: project's unique name
-    - ``url``: project fetch URL
-    - ``revision``: revision to fetch from ``url`` when the
-      project is updated
-    - ``path``: relative path to the project within the workspace
-      (i.e. from ``topdir`` if that is set)
-    - ``abspath``: absolute path to the project in the native path name
-      format (or ``None`` if ``topdir`` is)
-    - ``posixpath``: like ``abspath``, but with slashes (``/``) as
-      path separators
-    - ``clone_depth``: clone depth to fetch when first cloning the
-      project, or ``None`` (the revision should not be a SHA
-      if this is used)
-    - ``west_commands``: list of places to find extension commands in
-      the project
-    - ``topdir``: the top level directory of the west workspace
-      the project is part of, or ``None``
-    - ``remote_name``: the name of the remote which should be set up
-      when the project is being cloned (default: 'origin')
-    '''
-
-    def __eq__(self, other):
-        return NotImplemented
-
-    def __repr__(self):
-        return (f'Project("{self.name}", "{self.url}", '
-                f'revision="{self.revision}", path={repr(self.path)}, '
-                f'clone_depth={self.clone_depth}, '
-                f'west_commands={self.west_commands}, '
-                f'topdir={repr(self.topdir)})')
-
-    def __str__(self):
-        path_repr = repr(self.abspath or self.path)
-        return f'<Project {self.name} ({path_repr}) at {self.revision}>'
-
-    def __init__(self, name, url, revision=None, path=None,
-                 clone_depth=None, west_commands=None, topdir=None,
-                 remote_name=None):
-        '''Project constructor.
-
-        If *topdir* is ``None``, then absolute path attributes
-        (``abspath`` and ``posixpath``) will also be ``None``.
-
-        :param name: project's ``name:`` attribute in the manifest
-        :param url: fetch URL
-        :param revision: fetch revision
-        :param path: path (relative to topdir), or None for *name*
-        :param clone_depth: depth to use for initial clone
-        :param west_commands: path to west commands directory in the
-            project, relative to its own base directory, topdir / path,
-            or list of these
-        :param topdir: the west workspace's top level directory
-        :param remote_name: the name of the remote which should be
-            set up if the project is being cloned (default: 'origin')
-        '''
-
-        self.name = name
-        self.url = url
-        self.revision = revision or _DEFAULT_REV
-        self.path = path or name
-        self.clone_depth = clone_depth
-        self.west_commands = west_commands
-        self.topdir = topdir
-        self.remote_name = remote_name or 'origin'
-
-    @property
-    def path(self):
-        return self._path
-
-    @path.setter
-    def path(self, path):
-        self._path = path
-
-        # Invalidate the absolute path attributes. They'll get
-        # computed again next time they're accessed.
-        self._abspath = None
-        self._posixpath = None
-
-    @property
-    def abspath(self):
-        if self._abspath is None and self.topdir:
-            self._abspath = os.path.realpath(os.path.join(self.topdir,
-                                                          self.path))
-        return self._abspath
-
-    @property
-    def posixpath(self):
-        if self._posixpath is None and self.topdir:
-            self._posixpath = PurePath(self.abspath).as_posix()
-        return self._posixpath
-
-    @property
-    def name_and_path(self):
-        return f'{self.name} ({self.path})'
-
-    def as_dict(self):
-        '''Return a representation of this object as a dict, as it
-        would be parsed from an equivalent YAML manifest.
-        '''
-        ret = {}
-        ret['name'] = self.name
-        ret['url'] = self.url
-        ret['revision'] = self.revision
-        if self.path != self.name:
-            ret['path'] = self.path
-        if self.clone_depth:
-            ret['clone-depth'] = self.clone_depth
-        if self.west_commands:
-            ret['west-commands'] = self.west_commands
-
-        return ret
-
-    #
-    # Git helpers
-    #
-
-    def git(self, cmd, extra_args=(), capture_stdout=False,
-            capture_stderr=False, check=True, cwd=None):
-        '''Run a git command in the project repository.
-
-        Returns a ``subprocess.CompletedProcess``.
-
-        :param cmd: git command as a string (or list of strings)
-        :param extra_args: sequence of additional arguments to pass to
-            the git command (useful mostly if *cmd* is a string).
-        :param capture_stdout: if True, git's standard output is
-            captured in the ``CompletedProcess`` instead of being
-            printed.
-        :param capture_stderr: Like *capture_stdout*, but for standard
-            error. Use with caution: this may prevent error messages
-            from being shown to the user.
-        :param check: if given, ``subprocess.CalledProcessError`` is
-            raised if git finishes with a non-zero return code
-        :param cwd: directory to run git in (default: ``self.abspath``)
-        '''
-        if isinstance(cmd, str):
-            cmd_list = shlex.split(cmd)
-        else:
-            cmd_list = list(cmd)
-
-        extra_args = list(extra_args)
-
-        if cwd is None:
-            if self.abspath is not None:
-                cwd = self.abspath
-            else:
-                raise ValueError('no abspath; cwd must be given')
-
-        args = ['git'] + cmd_list + extra_args
-        cmd_str = util.quote_sh_list(args)
-
-        _logger.debug(f"running '{cmd_str}' in {cwd}")
-        popen = subprocess.Popen(
-            args, cwd=cwd,
-            stdout=subprocess.PIPE if capture_stdout else None,
-            stderr=subprocess.PIPE if capture_stderr else None)
-
-        stdout, stderr = popen.communicate()
-
-        # We use logger style % formatting here to avoid the
-        # potentially expensive overhead of formatting long
-        # stdout/stderr strings if the current log level isn't DEBUG,
-        # which is the usual case.
-        _logger.debug('"%s" exit code: %d stdout: %r stderr: %r',
-                      cmd_str, popen.returncode, stdout, stderr)
-
-        if check and popen.returncode:
-            raise subprocess.CalledProcessError(popen.returncode, cmd_list,
-                                                output=stdout, stderr=stderr)
-        else:
-            return subprocess.CompletedProcess(popen.args, popen.returncode,
-                                               stdout, stderr)
-
-    def sha(self, rev, cwd=None):
-        '''Get the SHA for a project revision.
-
-        :param rev: git revision (HEAD, v2.0.0, etc.) as a string
-        :param cwd: directory to run command in (default:
-            self.abspath)
-        '''
-        # Though we capture stderr, it will be available as the stderr
-        # attribute in the CalledProcessError raised by git() in
-        # Python 3.5 and above if this call fails.
-        cp = self.git(f'rev-parse {rev}', capture_stdout=True, cwd=cwd,
-                      capture_stderr=True)
-        # Assumption: SHAs are hex values and thus safe to decode in ASCII.
-        # It'll be fun when we find out that was wrong and how...
-        return cp.stdout.decode('ascii').strip()
-
-    def is_ancestor_of(self, rev1, rev2, cwd=None):
-        '''Check if 'rev1' is an ancestor of 'rev2' in this project.
-
-        Returns True if rev1 is an ancestor commit of rev2 in the
-        given project; rev1 and rev2 can be anything that resolves to
-        a commit. (If rev1 and rev2 refer to the same commit, the
-        return value is True, i.e. a commit is considered an ancestor
-        of itself.) Returns False otherwise.
-
-        :param rev1: commit that could be the ancestor of *rev2*
-        :param rev2: commit that could be a descendant or *rev1*
-        :param cwd: directory to run command in (default:
-            ``self.abspath``)
-        '''
-        rc = self.git(f'merge-base --is-ancestor {rev1} {rev2}',
-                      check=False, cwd=cwd).returncode
-
-        if rc == 0:
-            return True
-        elif rc == 1:
-            return False
-        else:
-            raise RuntimeError(f'unexpected git merge-base result {rc}')
-
-    def is_up_to_date_with(self, rev, cwd=None):
-        '''Check if the project is up to date with *rev*, returning
-        ``True`` if so.
-
-        This is equivalent to ``is_ancestor_of(rev, 'HEAD',
-        cwd=cwd)``.
-
-        :param rev: base revision to check if project is up to date
-            with.
-        :param cwd: directory to run command in (default:
-            ``self.abspath``)
-        '''
-        return self.is_ancestor_of(rev, 'HEAD', cwd=cwd)
-
-    def is_up_to_date(self, cwd=None):
-        '''Check if the project HEAD is up to date with the manifest.
-
-        This is equivalent to ``is_up_to_date_with(self.revision,
-        cwd=cwd)``.
-
-        :param cwd: directory to run command in (default:
-            ``self.abspath``)
-        '''
-        return self.is_up_to_date_with(self.revision, cwd=cwd)
-
-    def is_cloned(self, cwd=None):
-        '''Returns ``True`` if ``self.abspath`` looks like a git
-        repository's top-level directory, and ``False`` otherwise.
-
-        :param cwd: directory to run command in (default:
-            ``self.abspath``)
-        '''
-        if not os.path.isdir(self.abspath):
-            return False
-
-        # --is-inside-work-tree doesn't require that the directory is
-        # the top-level directory of a Git repository. Use --show-cdup
-        # instead, which prints an empty string (i.e., just a newline,
-        # which we strip) for the top-level directory.
-        _logger.debug(f'{self.name}: checking if cloned')
-        res = self.git('rev-parse --show-cdup', check=False,
-                       capture_stderr=True, capture_stdout=True)
-
-        return not (res.returncode or res.stdout.strip())
-
-    def read_at(self, path, rev=None, cwd=None):
-        '''Read file contents in the project at a specific revision.
-
-        The file contents are returned as a bytes object. The caller
-        should decode them if necessary.
-
-        :param path: relative path to file in this project
-        :param rev: revision to read *path* from (default: ``self.revision``)
-        :param cwd:  directory to run command in (default: ``self.abspath``)
-        '''
-        if rev is None:
-            rev = self.revision
-        cp = self.git(['show', f'{rev}:{path}'], capture_stdout=True,
-                      capture_stderr=True, cwd=cwd)
-        return cp.stdout
-
-    def listdir_at(self, path, rev=None, cwd=None, encoding=None):
-        '''List directory contents in the project at a specific revision.
-
-        The return value is a list of the directory's contents as
-        strings.
-
-        :param path: relative path to file in this project
-        :param rev: revision to read *path* from (default: ``self.revision``)
-        :param cwd: directory to run command in (default: ``self.abspath``)
-        :param encoding: directory contents encoding (default: 'utf-8')
-        '''
-        if rev is None:
-            rev = self.revision
-        if encoding is None:
-            encoding = 'utf-8'
-
-        # git-ls-tree -z means we get NUL-separated output with no quoting
-        # of the file names. Using 'git-show' or 'git-cat-file -p'
-        # wouldn't work for files with special characters in their names.
-        out = self.git(['ls-tree', '-z', f'{rev}:{path}'],
-                       capture_stdout=True, capture_stderr=True).stdout
-
-        # A tab character separates the SHA from the file name in each
-        # NUL-separated entry.
-        return [f.decode(encoding).split('\t', 1)[1]
-                for f in out.split(b'\x00') if f]
-
-# FIXME: this whole class should just go away. See #327.
-class ManifestProject(Project):
-    '''Represents the manifest repository as a `Project`.
-
-    Meaningful attributes:
-
-    - ``name``: the string ``"manifest"``
-    - ``topdir``: the top level directory of the west workspace
-      the manifest project controls, or ``None``
-    - ``path``: relative path to the manifest repository within the
-      workspace, or ``None`` (i.e. from ``topdir`` if that is set)
-    - ``abspath``: absolute path to the manifest repository in the
-      native path name format (or ``None`` if ``topdir`` is)
-    - ``posixpath``: like ``abspath``, but with slashes (``/``) as
-      path separators
-    - ``west_commands``:``west_commands:`` key in the manifest's
-      ``self:`` map. This may be a list of such if the self
-      section imports multiple additional files with west commands.
-
-    Other readable attributes included for Project compatibility:
-
-    - ``url``: always ``None``; the west manifest is not
-      version-controlled by west itself, even though 'west init'
-      can fetch a manifest repository from a Git remote
-    - ``revision``: ``"HEAD"``
-    - ``clone_depth``: ``None``, because ``url`` is
-    '''
-
-    def __repr__(self):
-        return (f'ManifestProject({self.name}, path={repr(self.path)}, '
-                f'west_commands={self.west_commands}, '
-                f'topdir={repr(self.topdir)})')
-
-    def __init__(self, path=None, west_commands=None, topdir=None):
-        '''
-        :param path: Relative path to the manifest repository in the
-            west workspace, if known.
-        :param west_commands: path to the YAML file in the manifest
-            repository configuring its extension commands, if any.
-        :param topdir: Root of the west workspace the manifest
-            project is inside. If not given, all absolute path
-            attributes (abspath and posixpath) will be None.
-        '''
-        self.name = 'manifest'
-
-        # Path related attributes
-        self.topdir = topdir
-        self._abspath = None
-        self._posixpath = None
-        self._path = path
-
-        # Extension commands.
-        self.west_commands = west_commands
-
-    @property
-    def path(self):
-        return self._path
-
-    @path.setter
-    def path(self, path):
-        self._path = path
-
-        # Invalidate the absolute path attributes. They'll get
-        # computed again next time they're accessed.
-        self._abspath = None
-        self._posixpath = None
-
-    @property
-    def abspath(self):
-        if self._abspath is None and self.topdir and self.path:
-            self._abspath = os.path.realpath(os.path.join(self.topdir,
-                                                          self.path))
-        return self._abspath
-
-    @property
-    def posixpath(self):
-        if self._posixpath is None and self.abspath:
-            self._posixpath = PurePath(self.abspath).as_posix()
-        return self._posixpath
-
-    @property
-    def url(self):
-        return None
-
-    @url.setter
-    def url(self, url):
-        raise ValueError(url)
-
-    @property
-    def revision(self):
-        return 'HEAD'
-
-    @revision.setter
-    def revision(self, revision):
-        raise ValueError(revision)
-
-    @property
-    def clone_depth(self):
-        return None
-
-    @clone_depth.setter
-    def clone_depth(self, clone_depth):
-        raise ValueError(clone_depth)
-
-    def as_dict(self):
-        '''Return a representation of this object as a dict, as it would be
-        parsed from an equivalent YAML manifest.'''
-        ret = {}
-        if self.path:
-            ret['path'] = self.path
-        if self.west_commands:
-            ret['west-commands'] = self.west_commands
-        return ret
-
-_defaults = collections.namedtuple('_defaults', 'remote revision')
-_import_map = collections.namedtuple('_import_map',
-                                     'file '
-                                     'name_whitelist path_whitelist '
-                                     'name_blacklist path_blacklist')
-_import_ctx = collections.namedtuple('_import_ctx', [
-    # Known projects map, from name to Project:
-    'projects',
-    # Project -> Bool. True if OK to add a project to 'projects'. A
-    # None value is treated as a function which always returns True.
-    'filter_fn'])
-_YML_EXTS = ['yml', 'yaml']
-_WEST_YML = 'west.yml'
-_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
-_SCHEMA_VER = parse_version(SCHEMA_VERSION)
-_EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
-_EARLIEST_VER = parse_version(_EARLIEST_VER_STR)
-_DEFAULT_REV = 'master'
-
-def _mpath(cp=None, topdir=None):
-    # Return the value of the manifest.path configuration option
-    # in *cp*, a ConfigParser. If not given, create a new one and
-    # load configuration options with the given *topdir* as west
-    # workspace root.
-    #
-    # TODO: write a cfg.get(section, key)
-    # wrapper, with friends for update and delete, to avoid
-    # requiring this boilerplate.
-    if cp is None:
-        cp = cfg._configparser()
-    cfg.read_config(configfile=cfg.ConfigFile.LOCAL, config=cp, topdir=topdir)
-
-    try:
-        return cp.get('manifest', 'path')
-    except (configparser.NoOptionError, configparser.NoSectionError) as e:
-        raise MalformedConfig('no "manifest.path" config option is set') from e
-
-def _manifest_content_at(project, path, rev=QUAL_MANIFEST_REV_BRANCH):
-    # Get a list of manifest data from project at path
-    #
-    # The data are loaded from Git at ref QUAL_MANIFEST_REV_BRANCH,
-    # *NOT* the file system.
-    #
-    # If path is a tree at that ref, the contents of the YAML files
-    # inside path are returned, as strings. If it's a file at that
-    # ref, it's a string with its contents.
-    #
-    # Though this module and the "west update" implementation share
-    # this code, it's an implementation detail, not API.
-
-    _logger.debug(f'{project.name}: looking up path {path} type at {rev}')
-
-    # Returns 'blob', 'tree', etc. for path at revision, if it exists.
-    out = project.git(['ls-tree', rev, path], capture_stdout=True,
-                      capture_stderr=True).stdout
-
-    if not out:
-        # It's a bit inaccurate to raise FileNotFoundError for
-        # something that isn't actually file, but this is internal
-        # API, and git is a content addressable file system, so close
-        # enough!
-        raise OSError(errno.ENOENT, os.strerror(errno.ENOENT), path)
-
-    ptype = out.decode('utf-8').split()[1]
-
-    if ptype == 'blob':
-        # Importing a file: just return its content.
-        return project.read_at(path, rev=rev).decode('utf-8')
-    elif ptype == 'tree':
-        # Importing a tree: return the content of the YAML files inside it.
-        ret = []
-        # Use a PurePosixPath because that's the form git seems to
-        # store internally, even on Windows. This breaks on Windows if
-        # you use PurePath.
-        pathobj = PurePosixPath(path)
-        for f in filter(_is_yml, project.listdir_at(path, rev=rev)):
-            ret.append(project.read_at(str(pathobj / f),
-                                       rev=rev).decode('utf-8'))
-        return ret
-    else:
-        raise MalformedManifest(f"can't decipher project {project.name} "
-                                f'path {path} revision {rev} '
-                                f'(git type: {ptype})')
-
-def _is_yml(path):
-    return os.path.splitext(str(path))[1][1:] in _YML_EXTS
-
-def _default_importer(project, file):
-    raise ManifestImportFailed(project, file)
-
-def _load(data):
-    try:
-        return yaml.safe_load(data)
-    except yaml.scanner.ScannerError as e:
-        raise MalformedManifest(data) from e
-
-def _new_ctx(ctx, _new_filter):
-    return _import_ctx(ctx.projects, _and_filters(ctx.filter_fn, _new_filter))
-
-def _is_imap_list(value):
-    # Return True if the value is a valid import map 'blacklist' or
-    # 'whitelist'. Empty strings and lists are OK, and list nothing.
-
-    return (isinstance(value, str) or
-            (isinstance(value, list) and
-             all(isinstance(item, str) for item in value)))
-
-def _filter_ok(filter_fn, project):
-    # Returns True if the given filter_fn allows the project to be added
-    # to the current working list in a None-safe way.
-
-    return (filter_fn is None) or filter_fn(project)
-
-def _and_filters(filter_fn1, filter_fn2):
-    # Return a filter function which is the logical AND of the two
-    # arguments. Any filter_fn which is None is treated as an
-    # always-true predicate.
-    #
-    # The return value therefore needs to be used with _filter_ok().
-
-    if filter_fn1 and filter_fn2:
-        return lambda project: (filter_fn1(project) and filter_fn2(project))
-    else:
-        return filter_fn1 or filter_fn2
-
-def _imap_filter(imap):
-    # Returns either None (if no filter is necessary) or a predicate
-    # function for the given import map.
-
-    if any([imap.name_whitelist, imap.path_whitelist,
-            imap.name_blacklist, imap.path_blacklist]):
-        return lambda project: _is_imap_ok(imap, project)
-    else:
-        return None
-
-def _is_imap_ok(imap, project):
-    # Return True if a project passes an import map's filters,
-    # and False otherwise.
-
-    nwl, pwl, nbl, pbl = [_ensure_list(lst) for lst in
-                          (imap.name_whitelist, imap.path_whitelist,
-                           imap.name_blacklist, imap.path_blacklist)]
-    name = project.name
-    path = PurePath(project.path)
-    blacklisted = (name in nbl) or any(path.match(p) for p in pbl)
-    whitelisted = (name in nwl) or any(path.match(p) for p in pwl)
-    no_whitelists = not (nwl or pwl)
-
-    if blacklisted:
-        return whitelisted
-    else:
-        return whitelisted or no_whitelists
-
-def _ensure_list(item):
-    # Converts item to a list containing it if item is a string, or
-    # returns item.
-
-    if isinstance(item, str):
-        return [item]
-    return item
