@@ -322,10 +322,10 @@ def validate(data):
         min_version_str = str(data['version'])
         min_version = parse_version(min_version_str)
         if min_version > _SCHEMA_VER:
-            raise ManifestVersionError(min_version)
+            raise ManifestVersionError(min_version_str)
         elif min_version < _EARLIEST_VER:
             raise MalformedManifest(
-                f'invalid version {min_version}; '
+                f'invalid version {min_version_str}; '
                 f'lowest schema version is {_EARLIEST_VER_STR}')
 
     try:
