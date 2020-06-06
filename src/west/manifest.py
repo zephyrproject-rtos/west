@@ -16,6 +16,7 @@ import os
 from pathlib import PurePath, PurePosixPath, Path
 import shlex
 import subprocess
+from typing import Any, Callable, List, Optional, Union
 
 from packaging.version import parse as parse_version
 import pykwalify.core
@@ -56,6 +57,31 @@ SCHEMA_VERSION = '0.7'
 # Internal helpers
 #
 
+# Type aliases
+
+# What we would eventually like to accept for paths. Using more
+# pathlib.Path internally would let us do comparisons with == and
+# support better hashing, which will make life easier on Windows.
+# However, right now, paths are 'str' in a variety of places, and we
+# are using west.util.canon_path(). See #273 on GitHub.
+PathType = Union[str, os.PathLike]
+
+# The value of a west-commands as passed around during manifest
+# resolution. It can become a list due to resolving imports, even
+# though it's just a str in each individual file right now.
+WestCommandsType = Union[str, List[str]]
+
+# Type for the importer callback passed to the manifest constructor.
+# (ImportedContentType is just an alias for what it gives back.)
+ImportedContentType = Optional[Union[str, List[str]]]
+ImporterType = Callable[['Project', str], ImportedContentType]
+
+# Type for an import map filter function, which takes a Project and
+# returns a bool. The various whitelists and blacklists are used to
+# create these filter functions. A None value is treated as a function
+# which always returns True.
+ImapFilterFnType = Optional[Callable[['Project'], bool]]
+
 # Logging
 
 _logger = logging.getLogger(__name__)
@@ -72,16 +98,17 @@ _SCHEMA_VER = parse_version(SCHEMA_VERSION)
 _EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
 _EARLIEST_VER = parse_version(_EARLIEST_VER_STR)
 
-def _is_yml(path):
+def _is_yml(path: PathType) -> bool:
     return os.path.splitext(str(path))[1][1:] in _YML_EXTS
 
-def _load(data):
+def _load(data: str) -> Any:
     try:
         return yaml.safe_load(data)
     except yaml.scanner.ScannerError as e:
         raise MalformedManifest(data) from e
 
-def _west_commands_list(west_commands):
+def _west_commands_list(west_commands: Optional[WestCommandsType]) -> \
+        List[str]:
     # Convert the raw data from a manifest file to a list of
     # west_commands locations. (If it's already a list, make a
     # defensive copy.)
@@ -93,7 +120,7 @@ def _west_commands_list(west_commands):
     else:
         return list(west_commands)
 
-def _west_commands_maybe_delist(west_commands):
+def _west_commands_maybe_delist(west_commands: List[str]) -> WestCommandsType:
     # Convert a west_commands list to a string if there's
     # just one element, otherwise return the list itself.
 
@@ -102,7 +129,7 @@ def _west_commands_maybe_delist(west_commands):
     else:
         return west_commands
 
-def _west_commands_merge(wc1, wc2):
+def _west_commands_merge(wc1: List[str], wc2: List[str]) -> List[str]:
     # Merge two west_commands lists, filtering out duplicates.
 
     if wc1 and wc2:
@@ -110,7 +137,8 @@ def _west_commands_merge(wc1, wc2):
     else:
         return wc1 or wc2
 
-def _mpath(cp=None, topdir=None):
+def _mpath(cp: Optional[configparser.ConfigParser] = None,
+           topdir: Optional[str] = None) -> str:
     # Return the value of the manifest.path configuration option
     # in *cp*, a ConfigParser. If not given, create a new one and
     # load configuration options with the given *topdir* as west
@@ -130,10 +158,12 @@ def _mpath(cp=None, topdir=None):
 
 # Manifest import handling
 
-def _default_importer(project, file):
+def _default_importer(project: 'Project', file: str) -> NoReturn:
     raise ManifestImportFailed(project, file)
 
-def _manifest_content_at(project, path, rev=QUAL_MANIFEST_REV_BRANCH):
+def _manifest_content_at(project: 'Project', path: str,
+                         rev: str = QUAL_MANIFEST_REV_BRANCH) \
+                                -> ImportedContentType:
     # Get a list of manifest data from project at path
     #
     # The data are loaded from Git at ref QUAL_MANIFEST_REV_BRANCH,
@@ -185,7 +215,7 @@ _import_map = collections.namedtuple('_import_map',
                                      'name_whitelist path_whitelist '
                                      'name_blacklist path_blacklist')
 
-def _is_imap_list(value):
+def _is_imap_list(value: Any) -> bool:
     # Return True if the value is a valid import map 'blacklist' or
     # 'whitelist'. Empty strings and lists are OK, and list nothing.
 
@@ -193,9 +223,9 @@ def _is_imap_list(value):
             (isinstance(value, list) and
              all(isinstance(item, str) for item in value)))
 
-def _imap_filter(imap):
-    # Returns either None (if no filter is necessary) or a predicate
-    # function for the given import map.
+def _imap_filter(imap: _import_map) -> ImapFilterFnType:
+    # Returns either None (if no filter is necessary) or a
+    # filter function for the given import map.
 
     if any([imap.name_whitelist, imap.path_whitelist,
             imap.name_blacklist, imap.path_blacklist]):
@@ -203,7 +233,7 @@ def _imap_filter(imap):
     else:
         return None
 
-def _ensure_list(item):
+def _ensure_list(item: Union[str, List[str]]) -> List[str]:
     # Converts item to a list containing it if item is a string, or
     # returns item.
 
@@ -211,7 +241,7 @@ def _ensure_list(item):
         return [item]
     return item
 
-def _is_imap_ok(imap, project):
+def _is_imap_ok(imap: _import_map, project: 'Project') -> bool:
     # Return True if a project passes an import map's filters,
     # and False otherwise.
 
@@ -236,24 +266,25 @@ _import_ctx = collections.namedtuple('_import_ctx', [
     # None value is treated as a function which always returns True.
     'filter_fn'])
 
-def _new_ctx(ctx, _new_filter):
+def _new_ctx(ctx: _import_ctx, _new_filter: ImapFilterFnType):
     return _import_ctx(ctx.projects, _and_filters(ctx.filter_fn, _new_filter))
 
-def _filter_ok(filter_fn, project):
-    # Returns True if the given filter_fn allows the project to be added
-    # to the current working list in a None-safe way.
+def _filter_ok(filter_fn: ImapFilterFnType,
+               project: 'Project') -> bool:
+    # filter_fn(project) if filter_fn is not None; True otherwise.
 
     return (filter_fn is None) or filter_fn(project)
 
-def _and_filters(filter_fn1, filter_fn2):
-    # Return a filter function which is the logical AND of the two
-    # arguments. Any filter_fn which is None is treated as an
-    # always-true predicate.
-    #
-    # The return value therefore needs to be used with _filter_ok().
+def _and_filters(filter_fn1: ImapFilterFnType,
+                 filter_fn2: ImapFilterFnType) -> ImapFilterFnType:
+    # Return a filter_fn which is the logical AND of the two
+    # arguments.
 
     if filter_fn1 and filter_fn2:
-        return lambda project: (filter_fn1(project) and filter_fn2(project))
+        # These type annotated versions silence mypy warnings.
+        fn1: Callable[['Project'], bool] = filter_fn1
+        fn2: Callable[['Project'], bool] = filter_fn2
+        return lambda project: (fn1(project) and fn2(project))
     else:
         return filter_fn1 or filter_fn2
 
@@ -403,7 +434,7 @@ class ImportFlag(enum.IntFlag):
     FORCE_PROJECTS = 2
     IGNORE_PROJECTS = 4
 
-def _flags_ok(flags):
+def _flags_ok(flags: ImportFlag) -> bool:
     # Sanity-check the combination of flags.
     F_I = ImportFlag.IGNORE
     F_FP = ImportFlag.FORCE_PROJECTS
