@@ -387,7 +387,7 @@ class ManifestImportFailed(Exception):
     - ``filename``: the missing file
     '''
 
-    def __init__(self, project, filename):
+    def __init__(self, project: 'Project', filename: str):
         self.project = project
         self.filename = filename
 
@@ -400,7 +400,7 @@ class ManifestVersionError(Exception):
     current version.
     '''
 
-    def __init__(self, version, file=None):
+    def __init__(self, version: str, file: str = None):
         self.version = version
         '''The minimum version of west that was required.'''
 
