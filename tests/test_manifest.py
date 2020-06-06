@@ -96,13 +96,13 @@ def test_project_init():
     assert p.abspath is None
     assert p.posixpath is None
     assert p.clone_depth is None
-    assert p.west_commands is None
+    assert p.west_commands == []
     assert p.topdir is None
 
     p = Project('p', 'some-url', clone_depth=4, west_commands='foo',
                 topdir=TOPDIR)
     assert p.clone_depth == 4
-    assert p.west_commands == 'foo'
+    assert p.west_commands == ['foo']
     assert p.topdir == TOPDIR
     assert p.abspath == os.path.join(TOPDIR, 'p')
     assert p.posixpath == TOPDIR_POSIX + '/p'
@@ -459,7 +459,7 @@ def test_project_west_commands():
       url: https://foo.com
       west-commands: some-path/west-commands.yml
     ''')
-    assert m.projects[1].west_commands == 'some-path/west-commands.yml'
+    assert m.projects[1].west_commands == ['some-path/west-commands.yml']
 
 def test_project_git_methods(tmpdir):
     # Test the internal consistency of the various methods that call
@@ -551,7 +551,7 @@ def test_manifest_project():
     mp = m.projects[0]
     assert mp.name == 'manifest'
     assert mp.path == 'my-path'
-    assert mp.west_commands == 'cmds.yml'
+    assert mp.west_commands == ['cmds.yml']
     assert mp.topdir is None
     assert mp.abspath is None
     assert mp.posixpath is None
@@ -576,7 +576,7 @@ def test_manifest_project():
     assert mp.topdir is not None
     assert PurePath(nodrive(mp.abspath)) == PurePath('/west_top/my-path')
     assert mp.posixpath is not None
-    assert mp.west_commands == 'cmds.yml'
+    assert mp.west_commands == ['cmds.yml']
     assert mp.url is None
     assert mp.revision == 'HEAD'
     assert mp.clone_depth is None
@@ -1828,7 +1828,7 @@ def test_import_self_submanifest_commands(manifest_repo):
         ''')
 
     mp = MF().projects[MANIFEST_PROJECT_INDEX]
-    assert mp.west_commands == 'sub-commands.yml'
+    assert mp.west_commands == ['sub-commands.yml']
 
 def test_import_self_submanifest_commands_both(manifest_repo):
     # Like test_import_self_submanifest_commands, but making sure that

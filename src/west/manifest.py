@@ -81,6 +81,35 @@ def _load(data):
     except yaml.scanner.ScannerError as e:
         raise MalformedManifest(data) from e
 
+def _west_commands_list(west_commands):
+    # Convert the raw data from a manifest file to a list of
+    # west_commands locations. (If it's already a list, make a
+    # defensive copy.)
+
+    if west_commands is None:
+        return []
+    elif isinstance(west_commands, str):
+        return [west_commands]
+    else:
+        return list(west_commands)
+
+def _west_commands_maybe_delist(west_commands):
+    # Convert a west_commands list to a string if there's
+    # just one element, otherwise return the list itself.
+
+    if len(west_commands) == 1:
+        return west_commands[0]
+    else:
+        return west_commands
+
+def _west_commands_merge(wc1, wc2):
+    # Merge two west_commands lists, filtering out duplicates.
+
+    if wc1 and wc2:
+        return wc1 + [wc for wc in wc2 if wc not in wc1]
+    else:
+        return wc1 or wc2
+
 def _mpath(cp=None, topdir=None):
     # Return the value of the manifest.path configuration option
     # in *cp*, a ConfigParser. If not given, create a new one and
@@ -405,8 +434,8 @@ class Project:
     - ``clone_depth``: clone depth to fetch when first cloning the
       project, or ``None`` (the revision should not be a SHA
       if this is used)
-    - ``west_commands``: list of places to find extension commands in
-      the project
+    - ``west_commands``: list of YAML files where extension commands in
+      the project are declared
     - ``topdir``: the top level directory of the west workspace
       the project is part of, or ``None``
     - ``remote_name``: the name of the remote which should be set up
@@ -440,8 +469,8 @@ class Project:
         :param revision: fetch revision
         :param path: path (relative to topdir), or None for *name*
         :param clone_depth: depth to use for initial clone
-        :param west_commands: path to west commands directory in the
-            project, relative to its own base directory, topdir / path,
+        :param west_commands: path to a west commands specification YAML
+            file in the project, relative to its base directory,
             or list of these
         :param topdir: the west workspace's top level directory
         :param remote_name: the name of the remote which should be
@@ -453,7 +482,7 @@ class Project:
         self.revision = revision or _DEFAULT_REV
         self.clone_depth = clone_depth
         self.path = path or name
-        self.west_commands = west_commands
+        self.west_commands = _west_commands_list(west_commands)
         self.topdir = topdir
         self.remote_name = remote_name or 'origin'
 
@@ -500,7 +529,8 @@ class Project:
         if self.clone_depth:
             ret['clone-depth'] = self.clone_depth
         if self.west_commands:
-            ret['west-commands'] = self.west_commands
+            ret['west-commands'] = \
+                _west_commands_maybe_delist(self.west_commands)
 
         return ret
 
@@ -730,8 +760,9 @@ class ManifestProject(Project):
         '''
         :param path: Relative path to the manifest repository in the
             west workspace, if known.
-        :param west_commands: path to the YAML file in the manifest
-            repository configuring its extension commands, if any.
+        :param west_commands: path to a west commands specification YAML
+            file in the project, relative to its base directory,
+            or list of these
         :param topdir: Root of the west workspace the manifest
             project is inside. If not given, all absolute path
             attributes (abspath and posixpath) will be None.
@@ -745,7 +776,7 @@ class ManifestProject(Project):
         self._path = path
 
         # Extension commands.
-        self.west_commands = west_commands
+        self.west_commands = _west_commands_list(west_commands)
 
     @property
     def path(self):
@@ -804,7 +835,8 @@ class ManifestProject(Project):
         if self.path:
             ret['path'] = self.path
         if self.west_commands:
-            ret['west-commands'] = self.west_commands
+            ret['west-commands'] = \
+                _west_commands_maybe_delist(self.west_commands)
         return ret
 
 class Manifest:
@@ -1403,8 +1435,8 @@ class Manifest:
         # logically treat imports from self as if they are
         # defined before the contents in the higher level
         # manifest.
-        mp.west_commands = self._merge_wcs(submp.west_commands,
-                                           mp.west_commands)
+        mp.west_commands = _west_commands_merge(submp.west_commands,
+                                                mp.west_commands)
 
     def _load_defaults(self, md, url_bases):
         # md = manifest defaults (dictionary with values parsed from
@@ -1571,7 +1603,7 @@ class Manifest:
 
             # If the submanifest has west commands, merge them
             # into project's.
-            project.west_commands = self._merge_wcs(
+            project.west_commands = _west_commands_merge(
                 project.west_commands, submp.west_commands)
         _logger.debug(f'done resolving import {path} for {project}')
 
@@ -1669,18 +1701,3 @@ class Manifest:
                 self._malformed(f'project {name} path "{project.path}" '
                                 f'is taken by project {other.name}')
             ppaths[pp] = project
-
-    @staticmethod
-    def _merge_wcs(wc1, wc2):
-        # Merge two west_commands attributes. Try to keep the result a
-        # str if possible, but upgrade it to a list if both wc1 and
-        # wc2 are truthy.
-        #
-        # Filter out duplicates to make sure that if the user imports
-        # a manifest and redundantly specifies its west-commands,
-        # we don't get the same entries twice.
-        if wc1 and wc2:
-            wc1 = _ensure_list(wc1)
-            return wc1 + [wc for wc in _ensure_list(wc2) if wc not in wc1]
-        else:
-            return wc1 or wc2
