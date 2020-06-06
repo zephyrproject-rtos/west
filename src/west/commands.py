@@ -268,23 +268,14 @@ def _ext_specs(project):
 
     ret = []
 
-    # As an internal implementation detail, we allow the internal
-    # representation of a project to have sequences as their
-    # west_commands attribute value. This is required for manifest
-    # imports, where e.g. the final ManifestProject.west_commands
-    # might contain the results of importing multiple repositories.
-    if isinstance(project.west_commands, str):
-        commands = [project.west_commands]
-    else:
-        commands = list(project.west_commands)
-    for cmd in commands:
+    for cmd in project.west_commands:
         spec_file = os.path.join(project.abspath, cmd)
 
         # Verify project.west_commands isn't trying a directory traversal
         # outside of the project.
         if escapes_directory(spec_file, project.abspath):
             raise ExtensionCommandError(
-                f'west-commands file {project.west_commands} '
+                f'west-commands file {cmd} '
                 f'escapes project path {project.path}')
 
         # The project may not be cloned yet, or this might be coming
