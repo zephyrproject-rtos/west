@@ -292,7 +292,7 @@ def _and_filters(filter_fn1: ImapFilterFnType,
 # Public functions
 #
 
-def manifest_path():
+def manifest_path() -> str:
     '''Absolute path of the manifest file in the current workspace.
 
     Exceptions raised:
@@ -313,7 +313,7 @@ def manifest_path():
         raise OSError(errno.ENOENT, os.strerror(errno.ENOENT), ret)
     return ret
 
-def validate(data):
+def validate(data: Any) -> None:
     '''Validate manifest data
 
     Returns if the manifest data is valid and can be loaded by this
