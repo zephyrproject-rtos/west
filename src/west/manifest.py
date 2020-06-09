@@ -744,11 +744,11 @@ class ManifestProject(Project):
 
     Other readable attributes included for Project compatibility:
 
-    - ``url``: always ``None``; the west manifest is not
+    - ``url``: the empty string; the west manifest is not
       version-controlled by west itself, even though 'west init'
       can fetch a manifest repository from a Git remote
     - ``revision``: ``"HEAD"``
-    - ``clone_depth``: ``None``, because ``url`` is
+    - ``clone_depth``: ``None``, because there's no URL
     '''
 
     def __repr__(self):
@@ -768,6 +768,11 @@ class ManifestProject(Project):
             attributes (abspath and posixpath) will be None.
         '''
         self.name = 'manifest'
+
+        # Pretending that this is a Project, even though it's not (#327)
+        self.url = ''
+        self.revision = 'HEAD'
+        self.clone_depth = None
 
         # Path related attributes
         self.topdir = topdir
@@ -803,30 +808,6 @@ class ManifestProject(Project):
         if self._posixpath is None and self.abspath:
             self._posixpath = PurePath(self.abspath).as_posix()
         return self._posixpath
-
-    @property
-    def url(self):
-        return None
-
-    @url.setter
-    def url(self, url):
-        raise ValueError(url)
-
-    @property
-    def revision(self):
-        return 'HEAD'
-
-    @revision.setter
-    def revision(self, revision):
-        raise ValueError(revision)
-
-    @property
-    def clone_depth(self):
-        return None
-
-    @clone_depth.setter
-    def clone_depth(self, clone_depth):
-        raise ValueError(clone_depth)
 
     def as_dict(self):
         '''Return a representation of this object as a dict, as it would be
