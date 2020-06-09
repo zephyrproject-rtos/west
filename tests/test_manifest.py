@@ -535,7 +535,7 @@ def test_manifest_project():
     assert mp.topdir is None
     assert mp.abspath is None
     assert mp.posixpath is None
-    assert mp.url is None
+    assert mp.url == ''
     assert mp.revision == 'HEAD'
     assert mp.clone_depth is None
 
@@ -555,7 +555,7 @@ def test_manifest_project():
     assert mp.topdir is None
     assert mp.abspath is None
     assert mp.posixpath is None
-    assert mp.url is None
+    assert mp.url == ''
     assert mp.revision == 'HEAD'
     assert mp.clone_depth is None
 
@@ -577,7 +577,7 @@ def test_manifest_project():
     assert PurePath(nodrive(mp.abspath)) == PurePath('/west_top/my-path')
     assert mp.posixpath is not None
     assert mp.west_commands == ['cmds.yml']
-    assert mp.url is None
+    assert mp.url == ''
     assert mp.revision == 'HEAD'
     assert mp.clone_depth is None
 
