@@ -784,30 +784,11 @@ class ManifestProject(Project):
         self.west_commands = _west_commands_list(west_commands)
 
     @property
-    def path(self):
-        return self._path
-
-    @path.setter
-    def path(self, path):
-        self._path = path
-
-        # Invalidate the absolute path attributes. They'll get
-        # computed again next time they're accessed.
-        self._abspath = None
-        self._posixpath = None
-
-    @property
     def abspath(self):
         if self._abspath is None and self.topdir and self.path:
             self._abspath = os.path.realpath(os.path.join(self.topdir,
                                                           self.path))
         return self._abspath
-
-    @property
-    def posixpath(self):
-        if self._posixpath is None and self.abspath:
-            self._posixpath = PurePath(self.abspath).as_posix()
-        return self._posixpath
 
     def as_dict(self):
         '''Return a representation of this object as a dict, as it would be
