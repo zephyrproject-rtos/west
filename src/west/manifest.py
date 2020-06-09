@@ -508,7 +508,7 @@ class Project:
 
     @property
     def posixpath(self):
-        if self._posixpath is None and self.topdir:
+        if self._posixpath is None and self.abspath is not None:
             self._posixpath = PurePath(self.abspath).as_posix()
         return self._posixpath
 
