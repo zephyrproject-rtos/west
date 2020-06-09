@@ -383,7 +383,7 @@ def _flags_ok(flags):
     if (flags & F_I) or (flags & F_IP):
         return not (flags & F_FP)
     elif flags & (F_FP | F_IP):
-        return (flags & F_FP) ^ (flags & F_IP)
+        return bool((flags & F_FP) ^ (flags & F_IP))
     else:
         return True
 
