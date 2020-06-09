@@ -667,7 +667,7 @@ class Project:
         :param cwd: directory to run command in (default:
             ``self.abspath``)
         '''
-        if not os.path.isdir(self.abspath):
+        if not self.abspath or not os.path.isdir(self.abspath):
             return False
 
         # --is-inside-work-tree doesn't require that the directory is
