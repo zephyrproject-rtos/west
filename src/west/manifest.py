@@ -16,7 +16,7 @@ import os
 from pathlib import PurePath, PurePosixPath, Path
 import shlex
 import subprocess
-from typing import Any, Callable, List, Optional, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Union
 
 from packaging.version import parse as parse_version
 import pykwalify.core
@@ -487,9 +487,13 @@ class Project:
         path_repr = repr(self.abspath or self.path)
         return f'<Project {self.name} ({path_repr}) at {self.revision}>'
 
-    def __init__(self, name, url, revision=None, path=None,
-                 clone_depth=None, west_commands=None, topdir=None,
-                 remote_name=None):
+    def __init__(self, name: str, url: str,
+                 revision: Optional[str] = None,
+                 path: Optional[str] = None,
+                 clone_depth: Optional[int] = None,
+                 west_commands: Optional[WestCommandsType] = None,
+                 topdir: Optional[str] = None,
+                 remote_name: Optional[str] = None):
         '''Project constructor.
 
         If *topdir* is ``None``, then absolute path attributes
@@ -518,40 +522,40 @@ class Project:
         self.remote_name = remote_name or 'origin'
 
     @property
-    def path(self):
+    def path(self) -> str:
         return self._path
 
     @path.setter
-    def path(self, path):
-        self._path = str(path)
+    def path(self, path: PathType) -> None:
+        self._path: str = str(path)
 
         # Invalidate the absolute path attributes. They'll get
         # computed again next time they're accessed.
-        self._abspath = None
-        self._posixpath = None
+        self._abspath: Optional[str] = None
+        self._posixpath: Optional[str] = None
 
     @property
-    def abspath(self):
+    def abspath(self) -> Optional[str]:
         if self._abspath is None and self.topdir:
             self._abspath = os.path.realpath(os.path.join(self.topdir,
                                                           self.path))
         return self._abspath
 
     @property
-    def posixpath(self):
+    def posixpath(self) -> Optional[str]:
         if self._posixpath is None and self.abspath is not None:
             self._posixpath = PurePath(self.abspath).as_posix()
         return self._posixpath
 
     @property
-    def name_and_path(self):
+    def name_and_path(self) -> str:
         return f'{self.name} ({self.path})'
 
-    def as_dict(self):
+    def as_dict(self) -> Dict:
         '''Return a representation of this object as a dict, as it
         would be parsed from an equivalent YAML manifest.
         '''
-        ret = {}
+        ret: Dict = {}
         ret['name'] = self.name
         ret['url'] = self.url
         ret['revision'] = self.revision
@@ -569,11 +573,13 @@ class Project:
     # Git helpers
     #
 
-    def git(self, cmd, extra_args=(), capture_stdout=False,
-            capture_stderr=False, check=True, cwd=None):
+    def git(self, cmd: Union[str, List[str]],
+            extra_args: Iterable[str] = (),
+            capture_stdout: bool = False,
+            capture_stderr: bool = False,
+            check: bool = True,
+            cwd: Optional[PathType] = None) -> subprocess.CompletedProcess:
         '''Run a git command in the project repository.
-
-        Returns a ``subprocess.CompletedProcess``.
 
         :param cmd: git command as a string (or list of strings)
         :param extra_args: sequence of additional arguments to pass to
@@ -626,7 +632,7 @@ class Project:
             return subprocess.CompletedProcess(popen.args, popen.returncode,
                                                stdout, stderr)
 
-    def sha(self, rev, cwd=None):
+    def sha(self, rev: str, cwd: Optional[PathType] = None) -> str:
         '''Get the SHA for a project revision.
 
         :param rev: git revision (HEAD, v2.0.0, etc.) as a string
@@ -642,7 +648,8 @@ class Project:
         # It'll be fun when we find out that was wrong and how...
         return cp.stdout.decode('ascii').strip()
 
-    def is_ancestor_of(self, rev1, rev2, cwd=None):
+    def is_ancestor_of(self, rev1: str, rev2: str,
+                       cwd: Optional[str] = None) -> bool:
         '''Check if 'rev1' is an ancestor of 'rev2' in this project.
 
         Returns True if rev1 is an ancestor commit of rev2 in the
@@ -666,7 +673,7 @@ class Project:
         else:
             raise RuntimeError(f'unexpected git merge-base result {rc}')
 
-    def is_up_to_date_with(self, rev, cwd=None):
+    def is_up_to_date_with(self, rev: str, cwd: Optional[str] = None) -> bool:
         '''Check if the project is up to date with *rev*, returning
         ``True`` if so.
 
@@ -680,7 +687,7 @@ class Project:
         '''
         return self.is_ancestor_of(rev, 'HEAD', cwd=cwd)
 
-    def is_up_to_date(self, cwd=None):
+    def is_up_to_date(self, cwd: Optional[str] = None) -> bool:
         '''Check if the project HEAD is up to date with the manifest.
 
         This is equivalent to ``is_up_to_date_with(self.revision,
@@ -691,7 +698,7 @@ class Project:
         '''
         return self.is_up_to_date_with(self.revision, cwd=cwd)
 
-    def is_cloned(self, cwd=None):
+    def is_cloned(self, cwd: Optional[str] = None) -> bool:
         '''Returns ``True`` if ``self.abspath`` looks like a git
         repository's top-level directory, and ``False`` otherwise.
 
@@ -711,11 +718,9 @@ class Project:
 
         return not (res.returncode or res.stdout.strip())
 
-    def read_at(self, path, rev=None, cwd=None):
+    def read_at(self, path: str, rev: Optional[str] = None,
+                cwd: Optional[str] = None) -> bytes:
         '''Read file contents in the project at a specific revision.
-
-        The file contents are returned as a bytes object. The caller
-        should decode them if necessary.
 
         :param path: relative path to file in this project
         :param rev: revision to read *path* from (default: ``self.revision``)
@@ -727,11 +732,13 @@ class Project:
                       capture_stderr=True, cwd=cwd)
         return cp.stdout
 
-    def listdir_at(self, path, rev=None, cwd=None, encoding=None):
-        '''List directory contents in the project at a specific revision.
+    def listdir_at(self, path: str, rev: Optional[str] = None,
+                   cwd: Optional[str] = None,
+                   encoding: Optional[str] = None) -> List[str]:
+        '''List of directory contents in the project at a specific revision.
 
-        The return value is a list of the directory's contents as
-        strings.
+        The return value is the directory contents as a list of files and
+        subdirectories.
 
         :param path: relative path to file in this project
         :param rev: revision to read *path* from (default: ``self.revision``)
@@ -815,16 +822,16 @@ class ManifestProject(Project):
         self.west_commands = _west_commands_list(west_commands)
 
     @property
-    def abspath(self):
+    def abspath(self) -> Optional[str]:
         if self._abspath is None and self.topdir and self.path:
             self._abspath = os.path.realpath(os.path.join(self.topdir,
                                                           self.path))
         return self._abspath
 
-    def as_dict(self):
+    def as_dict(self) -> Dict:
         '''Return a representation of this object as a dict, as it would be
         parsed from an equivalent YAML manifest.'''
-        ret = {}
+        ret: Dict = {}
         if self.path:
             ret['path'] = self.path
         if self.west_commands:
