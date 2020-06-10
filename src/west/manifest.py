@@ -1391,7 +1391,7 @@ class Manifest:
                              **{'import-context':
                                 ctx}).projects[MANIFEST_PROJECT_INDEX]
         except RecursionError as e:
-            raise _ManifestImportDepth(mp, pathobj) from e
+            raise _ManifestImportDepth(mp, str(pathobj)) from e
 
         # submp.west_commands comes first because we
         # logically treat imports from self as if they are
