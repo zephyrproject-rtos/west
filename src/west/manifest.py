@@ -1057,8 +1057,11 @@ class Manifest:
         # any internal attributes needed to implement the public API.
         self._importer = importer or _default_importer
         self._import_flags = import_flags
+        ctx = kwargs.get('import-context')
+        if ctx is not None:
+            assert isinstance(ctx, _import_ctx)
         self._load(source_data['manifest'], manifest_path,
-                   kwargs.get('import-context', _import_ctx({}, None)))
+                   ctx or _import_ctx({}, None))
 
     def get_projects(self, project_ids, allow_paths=True, only_cloned=False):
         '''Get a list of `Project` objects in the manifest from
