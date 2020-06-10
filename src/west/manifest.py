@@ -16,7 +16,8 @@ import os
 from pathlib import PurePath, PurePosixPath, Path
 import shlex
 import subprocess
-from typing import Any, Callable, Dict, Iterable, List, Optional, Union
+from typing import Any, Callable, Dict, Iterable, List, NoReturn, \
+    Optional, Union
 
 from packaging.version import parse as parse_version
 import pykwalify.core
@@ -81,6 +82,10 @@ ImporterType = Callable[['Project', str], ImportedContentType]
 # create these filter functions. A None value is treated as a function
 # which always returns True.
 ImapFilterFnType = Optional[Callable[['Project'], bool]]
+
+# The parsed contents of a manifest YAML file as returned by _load(),
+# after sanitychecking with validate().
+ManifestDataType = Union[str, Dict]
 
 # Logging
 
@@ -844,7 +849,7 @@ class Manifest:
     '''
 
     @staticmethod
-    def from_file(source_file=None, **kwargs):
+    def from_file(source_file: Optional[str] = None, **kwargs) -> 'Manifest':
         '''Manifest object factory given a source YAML file.
 
         The default behavior is to find the current west workspace's
@@ -937,7 +942,7 @@ class Manifest:
         return Manifest(**kwargs)
 
     @staticmethod
-    def from_data(source_data, **kwargs):
+    def from_data(source_data: ManifestDataType, **kwargs) -> 'Manifest':
         '''Manifest object factory given parsed YAML data.
 
         This factory does not read any configuration files.
@@ -964,9 +969,13 @@ class Manifest:
         kwargs.update({'source_data': source_data})
         return Manifest(**kwargs)
 
-    def __init__(self, source_file=None, source_data=None,
-                 manifest_path=None, topdir=None, importer=None,
-                 import_flags=0, **kwargs):
+    def __init__(self, source_file: Optional[str] = None,
+                 source_data: Optional[ManifestDataType] = None,
+                 manifest_path: Optional[str] = None,
+                 topdir: Optional[str] = None,
+                 importer: Optional[ImporterType] = None,
+                 import_flags: ImportFlag = ImportFlag.DEFAULT,
+                 **kwargs: Dict[str, Any]):
         '''
         Using `from_file` or `from_data` is usually easier than direct
         instantiation.
@@ -1076,7 +1085,12 @@ class Manifest:
         except TypeError as te:
             self._malformed(te.args[0], parent=te)
 
-        self._projects = []
+        # The above validate() and exception handling block's job is
+        # to ensure this, but pacify the type checker in a way that
+        # crashes if something goes wrong with that.
+        assert isinstance(source_data, dict)
+
+        self._projects: List[Project] = []
         '''Sequence of `Project` objects representing manifest
         projects.
 
@@ -1086,14 +1100,14 @@ class Manifest:
         (or resolution order if the manifest contains imports).
         '''
 
-        self.topdir = topdir
+        self.topdir: Optional[str] = topdir
         '''The west workspace's top level directory, or None.'''
 
-        self.has_imports = False
+        self.has_imports: bool = False
 
         # Set up the public attributes documented above, as well as
         # any internal attributes needed to implement the public API.
-        self._importer = importer or _default_importer
+        self._importer: ImporterType = importer or _default_importer
         self._import_flags = import_flags
         ctx = kwargs.get('import-context')
         if ctx is not None:
@@ -1101,7 +1115,9 @@ class Manifest:
         self._load(source_data['manifest'], manifest_path,
                    ctx or _import_ctx({}, None))
 
-    def get_projects(self, project_ids, allow_paths=True, only_cloned=False):
+    def get_projects(self, project_ids: Iterable[str],
+                     allow_paths: bool = True,
+                     only_cloned: bool = False) -> List[Project]:
         '''Get a list of `Project` objects in the manifest from
         *project_ids*.
 
@@ -1127,9 +1143,9 @@ class Manifest:
         :param only_cloned: raise an exception for uncloned projects
         '''
         projects = list(self.projects)
-        unknown = []   # all project_ids which don't resolve to a Project
-        uncloned = []  # if only_cloned, resolved Projects which aren't cloned
-        ret = []       # result list of resolved Projects
+        unknown: List[str] = []  # project_ids which don't resolve to a Project
+        uncloned: List[Project] = [] # if only_cloned, the uncloned Projects
+        ret: List[Project] = []  # result list of resolved Projects
 
         # If no project_ids are specified, use all projects.
         if not project_ids:
@@ -1143,7 +1159,8 @@ class Manifest:
         # returning the result or raising ValueError.
         for pid in project_ids:
             if pid == 'manifest':
-                project = self.projects[MANIFEST_PROJECT_INDEX]
+                project: Optional[Project] = \
+                    self.projects[MANIFEST_PROJECT_INDEX]
             else:
                 project = self._projects_by_name.get(pid)
             if project is None and allow_paths:
@@ -1164,9 +1181,11 @@ class Manifest:
             raise ValueError(unknown, uncloned)
         return ret
 
-    def _as_dict_helper(self, pdict=None):
-        # pdict: a function which is given a project, and returns its
-        #   dict representation. By default, it's Project.as_dict.
+    def _as_dict_helper(
+            self, pdict: Optional[Callable[[Project], Dict]] = None) \
+            -> Dict:
+        # pdict: returns a Project's dict representation.
+        #        By default, it's Project.as_dict.
         if pdict is None:
             pdict = Project.as_dict
 
@@ -1177,14 +1196,14 @@ class Manifest:
         # This relies on insertion-ordered dictionaries for
         # predictability, which is a CPython 3.6 implementation detail
         # and Python 3.7+ guarantee.
-        r = {}
+        r: Dict[str, Any] = {}
         r['manifest'] = {}
         r['manifest']['projects'] = project_dicts
         r['manifest']['self'] = self.projects[MANIFEST_PROJECT_INDEX].as_dict()
 
         return r
 
-    def as_dict(self):
+    def as_dict(self) -> Dict:
         '''Returns a dict representing self, fully resolved.
 
         The value is "resolved" in that the result is as if all
@@ -1193,7 +1212,7 @@ class Manifest:
         '''
         return self._as_dict_helper()
 
-    def as_frozen_dict(self):
+    def as_frozen_dict(self) -> Dict:
         '''Returns a dict representing self, but frozen.
 
         The value is "frozen" in that all project revisions are the
@@ -1217,7 +1236,7 @@ class Manifest:
 
         return self._as_dict_helper(pdict=pdict)
 
-    def as_yaml(self, **kwargs):
+    def as_yaml(self, **kwargs) -> str:
         '''Returns a YAML representation for self, fully resolved.
 
         The value is "resolved" in that the result is as if all
@@ -1228,7 +1247,7 @@ class Manifest:
         '''
         return yaml.safe_dump(self.as_dict(), **kwargs)
 
-    def as_frozen_yaml(self, **kwargs):
+    def as_frozen_yaml(self, **kwargs) -> str:
         '''Returns a YAML representation for self, but frozen.
 
         The value is "frozen" in that all project revisions are the
@@ -1241,10 +1260,11 @@ class Manifest:
         return yaml.safe_dump(self.as_frozen_dict(), **kwargs)
 
     @property
-    def projects(self):
+    def projects(self) -> List[Project]:
         return self._projects
 
-    def _malformed(self, complaint, parent=None):
+    def _malformed(self, complaint: str,
+                   parent: Optional[Exception] = None) -> NoReturn:
         context = (f'file: {self.path} ' if self.path else 'data')
         args = [f'Malformed manifest {context}',
                 f'Schema file: {_SCHEMA_PATH}']
@@ -1256,12 +1276,13 @@ class Manifest:
         else:
             raise exc
 
-    def _load(self, manifest, path_hint, ctx):
+    def _load(self, manifest: Dict[str, Any], path_hint: Optional[str],
+              ctx: _import_ctx) -> None:
         # Initialize this instance.
         #
         # - manifest: manifest data, parsed and validated
-        # - path_hint: optional hint about where the manifest repo lives
-        # - ctx: import context, an _import_ctx tuple
+        # - path_hint: hint about where the manifest repo lives
+        # - ctx: recursive import context
 
         top_level = not bool(ctx.projects)
 
@@ -1296,9 +1317,9 @@ class Manifest:
         # Save the results.
         self._projects = list(ctx.projects.values())
         self._projects.insert(MANIFEST_PROJECT_INDEX, mp)
-        self._projects_by_name = {'manifest': mp}
+        self._projects_by_name: Dict[str, Project] = {'manifest': mp}
         self._projects_by_name.update(ctx.projects)
-        self._projects_by_cpath = {}
+        self._projects_by_cpath: Dict[str, Project] = {}
         if self.topdir:
             for i, p in enumerate(self.projects):
                 if i == MANIFEST_PROJECT_INDEX and not p.abspath:
@@ -1309,7 +1330,8 @@ class Manifest:
 
         _logger.debug(f'loaded {loading_what}')
 
-    def _load_self(self, manifest, path_hint, ctx):
+    def _load_self(self, manifest: Dict[str, Any], path_hint: Optional[str],
+                   ctx: _import_ctx) -> ManifestProject:
         # Handle the "self:" section in the manifest data.
 
         slf = manifest.get('self', {})
@@ -1328,7 +1350,7 @@ class Manifest:
 
         return mp
 
-    def _assert_imports_ok(self):
+    def _assert_imports_ok(self) -> None:
         # Sanity check that we aren't calling code that does importing
         # if the flags tell us not to.
         #
@@ -1337,14 +1359,12 @@ class Manifest:
 
         assert not self._import_flags & ImportFlag.IGNORE
 
-    def _import_from_self(self, mp, imp, ctx):
+    def _import_from_self(self, mp: ManifestProject, imp: Any,
+                          ctx: _import_ctx) -> None:
         # Recursive helper to import projects from the manifest repository.
         #
-        # - mp: the ManifestProject
-        # - imp: "self: import: <imp>" value from manifest data
-        # - projects: ordered map of Project instances we've already got
-        # - filter_fn: predicate for whether it's OK to add a project,
-        #   or None if all projects are OK
+        # The 'imp' argument is the loaded value of "foo" in "self:
+        # import: foo".
         #
         # All data is read from the file system. Requests to read
         # files which don't exist or aren't ordinary files/directories
@@ -1378,7 +1398,8 @@ class Manifest:
             self._malformed(f'{mp.abspath}: "self: import: {imp}" '
                             f'has invalid type {imptype}')
 
-    def _import_path_from_self(self, mp, imp, ctx):
+    def _import_path_from_self(self, mp: ManifestProject, imp: Any,
+                               ctx: _import_ctx) -> None:
         if mp.abspath:
             # Fast path, when we're working inside a fully initialized
             # topdir.
@@ -1388,6 +1409,7 @@ class Manifest:
             # this happens too often, something may be wrong with how
             # we've implemented this. We'd like to avoid too many git
             # commands, as subprocesses are slow on windows.
+            assert self.path is not None  # to ensure and satisfy type checker
             start = Path(self.path).parent
             _logger.debug(
                 f'searching for manifest repository root from {start}')
@@ -1412,7 +1434,8 @@ class Manifest:
             self._malformed(f'{mp.abspath}: "self: import: {imp}": '
                             f'file {p} not found')
 
-    def _import_pathobj_from_self(self, mp, pathobj, ctx):
+    def _import_pathobj_from_self(self, mp: ManifestProject, pathobj: Path,
+                                  ctx: _import_ctx) -> None:
         # Import a Path object, which is a manifest file in the
         # manifest repository whose ManifestProject is mp.
 
@@ -1424,13 +1447,13 @@ class Manifest:
         # The only thing we need to do with it is check if the
         # submanifest has west commands, add them to mp's if so.
         try:
+            kwargs: Dict[str, Any] = {'import-context': ctx}
             submp = Manifest(source_file=str(pathobj),
                              manifest_path=mp.path,
                              topdir=self.topdir,
                              importer=self._importer,
                              import_flags=self._import_flags,
-                             **{'import-context':
-                                ctx}).projects[MANIFEST_PROJECT_INDEX]
+                             **kwargs).projects[MANIFEST_PROJECT_INDEX]
         except RecursionError as e:
             raise _ManifestImportDepth(mp, str(pathobj)) from e
 
@@ -1441,10 +1464,10 @@ class Manifest:
         mp.west_commands = _west_commands_merge(submp.west_commands,
                                                 mp.west_commands)
 
-    def _load_defaults(self, md, url_bases):
+    def _load_defaults(self, md: Dict, url_bases: Dict[str, str]) -> _defaults:
         # md = manifest defaults (dictionary with values parsed from
         # the manifest)
-        mdrem = md.get('remote')
+        mdrem: Optional[str] = md.get('remote')
         if mdrem:
             # The default remote name, if provided, must refer to a
             # well-defined remote.
@@ -1452,7 +1475,10 @@ class Manifest:
                 self._malformed(f'default remote {mdrem} is not defined')
         return _defaults(mdrem, md.get('revision', _DEFAULT_REV))
 
-    def _load_projects(self, manifest, url_bases, defaults, ctx):
+    def _load_projects(self, manifest: Dict[str, Any],
+                       url_bases: Dict[str, str],
+                       defaults: _defaults,
+                       ctx: _import_ctx) -> None:
         # Load projects and add them to the list, returning
         # information about which ones have imports that need to be
         # processed next.
@@ -1491,7 +1517,8 @@ class Manifest:
         for project, imp in have_imports:
             self._import_from_project(project, imp, ctx)
 
-    def _load_project(self, pd, url_bases, defaults):
+    def _load_project(self, pd: Dict, url_bases: Dict[str, str],
+                      defaults: _defaults) -> Project:
         # pd = project data (dictionary with values parsed from the
         # manifest)
 
@@ -1537,12 +1564,13 @@ class Manifest:
                        west_commands=pd.get('west-commands'),
                        topdir=self.topdir, remote_name=remote)
 
-    def _import_from_project(self, project, imp, ctx):
+    def _import_from_project(self, project: Project, imp: Any,
+                             ctx: _import_ctx):
         # Recursively resolve a manifest import from 'project'.
         #
         # - project: Project instance to import from
         # - imp: the parsed value of project's import key (string, list, etc.)
-        # - ctx: import context, an _import_ctx tuple
+        # - ctx: recursive import context
 
         self._assert_imports_ok()
 
@@ -1568,7 +1596,8 @@ class Manifest:
             self._malformed(f'{project.name_and_path}: invalid import {imp} '
                             f'type: {imptype}')
 
-    def _import_path_from_project(self, project, path, ctx):
+    def _import_path_from_project(self, project: Project, path: str,
+                                  ctx: _import_ctx) -> None:
         # Import data from git at the given path at revision manifest-rev.
         # Fall back on self._importer if that fails.
 
@@ -1587,20 +1616,26 @@ class Manifest:
                 # Force a fallback onto manifest_path=project.path.
                 # The subpath to the manifest file itself will not be
                 # available, so that's the best we can do.
-                del data['manifest']['self']['path']
+                #
+                # Perhaps there's a cleaner way to convince mypy that
+                # the validate() postcondition is that we've got a
+                # real manifest and this is safe, but maybe just
+                # fixing this hack would be best. For now, silence the
+                # type checker on this line.
+                del data['manifest']['self']['path']  # type: ignore
             except KeyError:
                 pass
 
             # Destructively add the imported content into our 'projects'
             # map, passing along our context.
             try:
+                kwargs: Dict[str, Any] = {'import-context': ctx}
                 submp = Manifest(source_data=data,
                                  manifest_path=project.path,
                                  topdir=self.topdir,
                                  importer=self._importer,
                                  import_flags=self._import_flags,
-                                 **{'import-context': ctx}
-                                 ).projects[MANIFEST_PROJECT_INDEX]
+                                 **kwargs).projects[MANIFEST_PROJECT_INDEX]
             except RecursionError as e:
                 raise _ManifestImportDepth(project, path) from e
 
@@ -1610,7 +1645,8 @@ class Manifest:
                 project.west_commands, submp.west_commands)
         _logger.debug(f'done resolving import {path} for {project}')
 
-    def _import_content_from_project(self, project, path):
+    def _import_content_from_project(self, project: Project,
+                                     path: str) -> ImportedContentType:
         if not (self._import_flags & ImportFlag.FORCE_PROJECTS) and \
            project.is_cloned():
             try:
@@ -1636,7 +1672,7 @@ class Manifest:
 
         return content
 
-    def _load_imap(self, project, imp):
+    def _load_imap(self, project: Project, imp: Dict) -> _import_map:
         # Convert a parsed self or project import value from YAML into
         # an _import_map namedtuple.
 
@@ -1673,7 +1709,8 @@ class Manifest:
 
         return ret
 
-    def _add_project(self, project, projects):
+    def _add_project(self, project: Project,
+                     projects: Dict[str, Project]) -> bool:
         # Add the project to our map if we don't already know about it.
         # Return the result.
 
@@ -1686,12 +1723,14 @@ class Manifest:
         else:
             return False
 
-    def _check_paths_are_unique(self, mp, projects, top_level):
+    def _check_paths_are_unique(self, mp: ManifestProject,
+                                projects: Dict[str, Project],
+                                top_level: bool) -> None:
         # TODO: top_level can probably go away when #327 is done.
 
-        ppaths = {}
+        ppaths: Dict[PurePath, Project] = {}
         if mp.path:
-            mppath = PurePath(mp.path)
+            mppath: Optional[PurePath] = PurePath(mp.path)
         else:
             mppath = None
         for name, project in projects.items():
