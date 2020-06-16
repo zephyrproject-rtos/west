@@ -321,11 +321,9 @@ def manifest_path() -> str:
 def validate(data: Any) -> None:
     '''Validate manifest data
 
-    Returns if the manifest data is valid and can be loaded by this
-    version of west (though this may fail if the manifest contains
-    imports which cannot be resolved).
-
-    Raises an exception otherwise.
+    Raises an exception if the manifest data is not valid for loading
+    by this version of west. (Actually attempting to load the data may
+    still fail if the it contains imports which cannot be resolved.)
 
     :param data: YAML manifest data as a string or object
     '''
