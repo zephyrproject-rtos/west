@@ -8,7 +8,7 @@
 
 '''Zephyr RTOS meta-tool (west) main module
 
-Only the main() method in here is public API.
+Nothing in here is public API.
 '''
 
 import argparse
@@ -754,14 +754,6 @@ def dump_traceback():
     return name
 
 def main(argv=None):
-    '''Run the application with argument list ``argv``.
-
-    The argument list is identical to the command-line west application
-    arguments, see ``west help``
-
-    :param argv: argument list, the list of valid arguments can be seen by
-        invoking ``west help``
-    '''
     # Silence validation errors from pykwalify, which are logged at
     # logging.ERROR level. We want to handle those ourselves as
     # needed.
