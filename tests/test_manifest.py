@@ -504,6 +504,11 @@ def test_project_git_methods(tmpdir):
     assert p.listdir_at('', rev=a_sha) == ['a.txt']
     assert sorted(p.listdir_at('', rev=b_sha)) == ['a.txt', 'b.txt']
 
+    # p.git() should be able to take a cwd kwarg which is a PathLike
+    # or a str.
+    p.git('log -1', cwd=path)
+    p.git('log -1', cwd=str(path))
+
     # Basic checks for functions which operate on commits.
     assert a_content_at(a_sha) == 'a'
     assert p.is_ancestor_of(start_sha, a_sha)
