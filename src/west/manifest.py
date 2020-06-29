@@ -18,7 +18,7 @@ import shlex
 import subprocess
 import sys
 from typing import Any, Callable, Dict, Iterable, List, NoReturn, \
-    Optional, Union
+    Optional, TYPE_CHECKING, Union
 
 from packaging.version import parse as parse_version
 import pykwalify.core
@@ -1332,6 +1332,10 @@ class Manifest:
                     # When from_data() is called without a path hint, mp
                     # can have a topdir but no path, and thus no abspath.
                     continue
+                if TYPE_CHECKING:
+                    # The typing module can't tell that self.topdir
+                    # being truthy guarantees p.abspath is a str, not None.
+                    assert p.abspath
                 self._projects_by_cpath[util.canon_path(p.abspath)] = p
 
         _logger.debug(f'loaded {loading_what}')
