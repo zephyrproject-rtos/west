@@ -37,13 +37,13 @@ lowest.
 
 import configparser
 import os
-import pathlib
+from pathlib import PureWindowsPath, Path
 import platform
 from enum import Enum
 
 import configobj
 
-from west.util import west_dir, WestNotFound, canon_path
+from west.util import west_dir, WestNotFound
 
 def _configparser():            # for internal use
     return configparser.ConfigParser(allow_no_value=True)
@@ -198,6 +198,11 @@ def _location(cfg, topdir=None):
     # Its existence is also relied on in the test cases, to ensure
     # that the WEST_CONFIG_xyz variables are respected and we're not about
     # to clobber the user's own configuration files.
+    #
+    # Make sure to use pathlib's / operator override to join paths in
+    # any cases which might run on Windows, then call fspath() on the
+    # final result. This lets the standard library do the work of
+    # producing a canonical string name.
     env = os.environ
 
     if cfg == ConfigFile.ALL:
@@ -223,8 +228,8 @@ def _location(cfg, topdir=None):
             #
             # See https://github.com/zephyrproject-rtos/west/issues/300
             # for details.
-            pd = pathlib.PureWindowsPath(os.environ['ProgramData'])
-            return str(pd / 'west' / 'config')
+            pd = PureWindowsPath(os.environ['ProgramData'])
+            return os.fspath(pd / 'west' / 'config')
         else:
             raise ValueError('unsupported platform ' + plat)
     elif cfg == ConfigFile.GLOBAL:
@@ -233,16 +238,15 @@ def _location(cfg, topdir=None):
         elif platform.system() == 'Linux' and 'XDG_CONFIG_HOME' in env:
             return os.path.join(env['XDG_CONFIG_HOME'], 'west', 'config')
         else:
-            return canon_path(
-                os.path.join(os.path.expanduser('~'), '.westconfig'))
+            return os.fspath(Path.home() / '.westconfig')
     elif cfg == ConfigFile.LOCAL:
         if topdir:
-            return os.path.join(topdir, '.west', 'config')
+            return os.fspath(Path(topdir) / '.west' / 'config')
         elif 'WEST_CONFIG_LOCAL' in env:
             return env['WEST_CONFIG_LOCAL']
         else:
             # Might raise WestNotFound!
-            return os.path.join(west_dir(), 'config')
+            return os.fspath(Path(west_dir()) / 'config')
     else:
         raise ValueError(f'invalid configuration file {cfg}')
 
@@ -267,11 +271,11 @@ def _ensure_config(configfile, topdir):
     # Ensure the given configfile exists, returning its path. May
     # raise permissions errors, WestNotFound, etc.
     loc = _location(configfile, topdir=topdir)
-    path = pathlib.Path(loc)
+    path = Path(loc)
 
     if path.is_file():
         return loc
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.touch(exist_ok=True)
-    return canon_path(str(path))
+    return os.fspath(path)
