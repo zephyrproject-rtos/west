@@ -25,6 +25,7 @@ import pykwalify.core
 import yaml
 
 from west import util
+from west.util import PathType
 import west.configuration as cfg
 
 #
@@ -60,13 +61,6 @@ SCHEMA_VERSION = '0.7'
 #
 
 # Type aliases
-
-# What we would eventually like to accept for paths. Using more
-# pathlib.Path internally would let us do comparisons with == and
-# support better hashing, which will make life easier on Windows.
-# However, right now, paths are 'str' in a variety of places, and we
-# are using west.util.canon_path(). See #273 on GitHub.
-PathType = Union[str, os.PathLike]
 
 # The value of a west-commands as passed around during manifest
 # resolution. It can become a list due to resolving imports, even
