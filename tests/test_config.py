@@ -66,7 +66,7 @@ def config_tmpdir(tmpdir):
 def cfg(f=ALL, topdir=None):
     # Load a fresh configuration object at the given level, and return it.
     cp = configparser.ConfigParser(allow_no_value=True)
-    config.read_config(config_file=f, config=cp, topdir=topdir)
+    config.read_config(configfile=f, config=cp, topdir=topdir)
     return cp
 
 def test_config_global():
