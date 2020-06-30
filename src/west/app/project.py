@@ -261,7 +261,7 @@ class Init(_ProjectCommand):
         if not exists(temp_manifest):
             log.die(f'can\'t init: no "west.yml" found in {tempdir}\n'
                     f'  Hint: check --manifest-url={manifest_url} and '
-                    '--manifest-rev={manifest_rev}\n'
+                    f'--manifest-rev={manifest_rev}\n'
                     f'  You may need to remove {west_dir} before retrying.')
 
         # Parse the manifest to get the manifest path, if it declares one.
