@@ -71,8 +71,7 @@ class ConfigFile(Enum):
     GLOBAL = 3
     LOCAL = 4
 
-def read_config(configfile=None, config=config, topdir=None,
-                config_file=None):
+def read_config(configfile=None, config=config, topdir=None):
     '''Read configuration files into *config*.
 
     Reads the files given by *configfile*, storing the values into the
@@ -96,14 +95,9 @@ def read_config(configfile=None, config=config, topdir=None,
     :param configfile: a `west.configuration.ConfigFile`
     :param config: configuration object to read into
     :param topdir: west workspace root to read local options from
-    :param config_file: deprecated alternative for *configfile*
     '''
-    if configfile is not None and config_file is not None:
-        raise ValueError('use "configfile" or "config_file"; not both')
     if configfile is None:
         configfile = ConfigFile.ALL
-    if config_file is not None:
-        configfile = config_file
     config.read(_gather_configs(configfile, topdir), encoding='utf-8')
 
 def update_config(section, key, value, configfile=ConfigFile.LOCAL,
