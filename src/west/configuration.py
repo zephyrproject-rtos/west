@@ -40,10 +40,11 @@ import os
 from pathlib import PureWindowsPath, Path
 import platform
 from enum import Enum
+from typing import Any, Optional, List
 
 import configobj
 
-from west.util import west_dir, WestNotFound
+from west.util import west_dir, WestNotFound, PathType
 
 def _configparser():            # for internal use
     return configparser.ConfigParser(allow_no_value=True)
@@ -71,7 +72,9 @@ class ConfigFile(Enum):
     GLOBAL = 3
     LOCAL = 4
 
-def read_config(configfile=None, config=config, topdir=None):
+def read_config(configfile: Optional[ConfigFile] = None,
+                config: configparser.ConfigParser = config,
+                topdir: Optional[PathType] = None) -> None:
     '''Read configuration files into *config*.
 
     Reads the files given by *configfile*, storing the values into the
@@ -100,8 +103,9 @@ def read_config(configfile=None, config=config, topdir=None):
         configfile = ConfigFile.ALL
     config.read(_gather_configs(configfile, topdir), encoding='utf-8')
 
-def update_config(section, key, value, configfile=ConfigFile.LOCAL,
-                  topdir=None):
+def update_config(section: str, key: str, value: Any,
+                  configfile: ConfigFile = ConfigFile.LOCAL,
+                  topdir: Optional[PathType] = None) -> None:
     '''Sets ``section.key`` to *value* in the given configuration file.
 
     :param section: config section; will be created if it does not exist
@@ -131,7 +135,9 @@ def update_config(section, key, value, configfile=ConfigFile.LOCAL,
     updater[section][key] = value
     updater.write()
 
-def delete_config(section, key, configfile=None, topdir=None):
+def delete_config(section: str, key: str,
+                  configfile: Optional[ConfigFile] = None,
+                  topdir: Optional[PathType] = None) -> None:
     '''Delete the option section.key from the given file or files.
 
     :param section: section whose key to delete
@@ -189,7 +195,7 @@ def delete_config(section, key, configfile=None, topdir=None):
     if not found:
         raise KeyError(f'{section}.{key}')
 
-def _location(cfg, topdir=None):
+def _location(cfg: ConfigFile, topdir: Optional[PathType] = None) -> str:
     # Making this a function that gets called each time you ask for a
     # configuration file makes it respect updated environment
     # variables (such as XDG_CONFIG_HOME, PROGRAMDATA) if they're set
@@ -250,7 +256,7 @@ def _location(cfg, topdir=None):
     else:
         raise ValueError(f'invalid configuration file {cfg}')
 
-def _gather_configs(cfg, topdir):
+def _gather_configs(cfg: ConfigFile, topdir: Optional[PathType]) -> List[str]:
     # Find the paths to the given configuration files, in increasing
     # precedence order.
     ret = []
@@ -267,7 +273,7 @@ def _gather_configs(cfg, topdir):
 
     return ret
 
-def _ensure_config(configfile, topdir):
+def _ensure_config(configfile: ConfigFile, topdir: Optional[PathType]) -> str:
     # Ensure the given configfile exists, returning its path. May
     # raise permissions errors, WestNotFound, etc.
     loc = _location(configfile, topdir=topdir)
