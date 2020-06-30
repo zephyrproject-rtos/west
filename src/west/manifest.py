@@ -13,7 +13,7 @@ import enum
 import errno
 import logging
 import os
-from pathlib import PurePath, PurePosixPath, Path
+from pathlib import PurePosixPath, Path
 import shlex
 import subprocess
 import sys
@@ -91,7 +91,6 @@ _logger = logging.getLogger(__name__)
 _defaults = collections.namedtuple('_defaults', 'remote revision')
 
 _DEFAULT_REV = 'master'
-_YML_EXTS = ['yml', 'yaml']
 _WEST_YML = 'west.yml'
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
 _SCHEMA_VER = parse_version(SCHEMA_VERSION)
@@ -99,7 +98,7 @@ _EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
 _EARLIEST_VER = parse_version(_EARLIEST_VER_STR)
 
 def _is_yml(path: PathType) -> bool:
-    return os.path.splitext(str(path))[1][1:] in _YML_EXTS
+    return Path(path).suffix in ['.yml', '.yaml']
 
 def _load(data: str) -> Any:
     try:
@@ -138,7 +137,7 @@ def _west_commands_merge(wc1: List[str], wc2: List[str]) -> List[str]:
         return wc1 or wc2
 
 def _mpath(cp: Optional[configparser.ConfigParser] = None,
-           topdir: Optional[str] = None) -> str:
+           topdir: Optional[PathType] = None) -> str:
     # Return the value of the manifest.path configuration option
     # in *cp*, a ConfigParser. If not given, create a new one and
     # load configuration options with the given *topdir* as west
@@ -161,7 +160,7 @@ def _mpath(cp: Optional[configparser.ConfigParser] = None,
 def _default_importer(project: 'Project', file: str) -> NoReturn:
     raise ManifestImportFailed(project, file)
 
-def _manifest_content_at(project: 'Project', path: str,
+def _manifest_content_at(project: 'Project', path: PathType,
                          rev: str = QUAL_MANIFEST_REV_BRANCH) \
                                 -> ImportedContentType:
     # Get a list of manifest data from project at path
@@ -176,6 +175,7 @@ def _manifest_content_at(project: 'Project', path: str,
     # Though this module and the "west update" implementation share
     # this code, it's an implementation detail, not API.
 
+    path = os.fspath(path)
     _logger.debug(f'{project.name}: looking up path {path} type at {rev}')
 
     # Returns 'blob', 'tree', etc. for path at revision, if it exists.
@@ -198,12 +198,10 @@ def _manifest_content_at(project: 'Project', path: str,
         # Importing a tree: return the content of the YAML files inside it.
         ret = []
         # Use a PurePosixPath because that's the form git seems to
-        # store internally, even on Windows. This breaks on Windows if
-        # you use PurePath.
+        # store internally, even on Windows.
         pathobj = PurePosixPath(path)
         for f in filter(_is_yml, project.listdir_at(path, rev=rev)):
-            ret.append(project.read_at(str(pathobj / f),
-                                       rev=rev).decode('utf-8'))
+            ret.append(project.read_at(pathobj / f, rev=rev).decode('utf-8'))
         return ret
     else:
         raise MalformedManifest(f"can't decipher project {project.name} "
@@ -249,7 +247,7 @@ def _is_imap_ok(imap: _import_map, project: 'Project') -> bool:
                           (imap.name_whitelist, imap.path_whitelist,
                            imap.name_blacklist, imap.path_blacklist)]
     name = project.name
-    path = PurePath(project.path)
+    path = Path(project.path)
     blacklisted = (name in nbl) or any(path.match(p) for p in pbl)
     whitelisted = (name in nwl) or any(path.match(p) for p in pwl)
     no_whitelists = not (nwl or pwl)
@@ -382,12 +380,12 @@ class ManifestImportFailed(Exception):
     Attributes:
 
     - ``project``: the Project instance with the missing manifest data
-    - ``filename``: the missing file
+    - ``filename``: the missing file, as a str
     '''
 
-    def __init__(self, project: 'Project', filename: str):
+    def __init__(self, project: 'Project', filename: PathType):
         self.project = project
-        self.filename = filename
+        self.filename = os.fspath(filename)
 
     def __str__(self):
         return (f'ManifestImportFailed: project {self.project} '
@@ -398,12 +396,12 @@ class ManifestVersionError(Exception):
     current version.
     '''
 
-    def __init__(self, version: str, file: str = None):
+    def __init__(self, version: str, file: Optional[PathType] = None):
         self.version = version
         '''The minimum version of west that was required.'''
 
-        self.file = file
-        '''The file that required this version of west.'''
+        self.file = os.fspath(file) if file else None
+        '''The file that required this version of west, if any.'''
 
 class _ManifestImportDepth(ManifestImportFailed):
     # A hack to signal to main.py what happened.
@@ -487,10 +485,10 @@ class Project:
 
     def __init__(self, name: str, url: str,
                  revision: Optional[str] = None,
-                 path: Optional[str] = None,
+                 path: Optional[PathType] = None,
                  clone_depth: Optional[int] = None,
                  west_commands: Optional[WestCommandsType] = None,
-                 topdir: Optional[str] = None,
+                 topdir: Optional[PathType] = None,
                  remote_name: Optional[str] = None):
         '''Project constructor.
 
@@ -514,9 +512,9 @@ class Project:
         self.url = url
         self.revision = revision or _DEFAULT_REV
         self.clone_depth = clone_depth
-        self.path = path or name
+        self.path = os.fspath(path or name)
         self.west_commands = _west_commands_list(west_commands)
-        self.topdir = topdir
+        self.topdir = os.fspath(topdir) if topdir else None
         self.remote_name = remote_name or 'origin'
 
     @property
@@ -525,7 +523,7 @@ class Project:
 
     @path.setter
     def path(self, path: PathType) -> None:
-        self._path: str = str(path)
+        self._path: str = os.fspath(path)
 
         # Invalidate the absolute path attributes. They'll get
         # computed again next time they're accessed.
@@ -535,14 +533,14 @@ class Project:
     @property
     def abspath(self) -> Optional[str]:
         if self._abspath is None and self.topdir:
-            self._abspath = os.path.realpath(os.path.join(self.topdir,
-                                                          self.path))
+            self._abspath = os.path.abspath(Path(self.topdir) /
+                                            self.path)
         return self._abspath
 
     @property
     def posixpath(self) -> Optional[str]:
         if self._posixpath is None and self.abspath is not None:
-            self._posixpath = PurePath(self.abspath).as_posix()
+            self._posixpath = Path(self.abspath).as_posix()
         return self._posixpath
 
     @property
@@ -654,7 +652,7 @@ class Project:
         return cp.stdout.decode('ascii').strip()
 
     def is_ancestor_of(self, rev1: str, rev2: str,
-                       cwd: Optional[str] = None) -> bool:
+                       cwd: Optional[PathType] = None) -> bool:
         '''Check if 'rev1' is an ancestor of 'rev2' in this project.
 
         Returns True if rev1 is an ancestor commit of rev2 in the
@@ -678,7 +676,8 @@ class Project:
         else:
             raise RuntimeError(f'unexpected git merge-base result {rc}')
 
-    def is_up_to_date_with(self, rev: str, cwd: Optional[str] = None) -> bool:
+    def is_up_to_date_with(self, rev: str,
+                           cwd: Optional[PathType] = None) -> bool:
         '''Check if the project is up to date with *rev*, returning
         ``True`` if so.
 
@@ -692,7 +691,7 @@ class Project:
         '''
         return self.is_ancestor_of(rev, 'HEAD', cwd=cwd)
 
-    def is_up_to_date(self, cwd: Optional[str] = None) -> bool:
+    def is_up_to_date(self, cwd: Optional[PathType] = None) -> bool:
         '''Check if the project HEAD is up to date with the manifest.
 
         This is equivalent to ``is_up_to_date_with(self.revision,
@@ -703,7 +702,7 @@ class Project:
         '''
         return self.is_up_to_date_with(self.revision, cwd=cwd)
 
-    def is_cloned(self, cwd: Optional[str] = None) -> bool:
+    def is_cloned(self, cwd: Optional[PathType] = None) -> bool:
         '''Returns ``True`` if ``self.abspath`` looks like a git
         repository's top-level directory, and ``False`` otherwise.
 
@@ -718,13 +717,13 @@ class Project:
         # instead, which prints an empty string (i.e., just a newline,
         # which we strip) for the top-level directory.
         _logger.debug(f'{self.name}: checking if cloned')
-        res = self.git('rev-parse --show-cdup', check=False,
+        res = self.git('rev-parse --show-cdup', check=False, cwd=cwd,
                        capture_stderr=True, capture_stdout=True)
 
         return not (res.returncode or res.stdout.strip())
 
-    def read_at(self, path: str, rev: Optional[str] = None,
-                cwd: Optional[str] = None) -> bytes:
+    def read_at(self, path: PathType, rev: Optional[str] = None,
+                cwd: Optional[PathType] = None) -> bytes:
         '''Read file contents in the project at a specific revision.
 
         :param path: relative path to file in this project
@@ -733,12 +732,12 @@ class Project:
         '''
         if rev is None:
             rev = self.revision
-        cp = self.git(['show', f'{rev}:{path}'], capture_stdout=True,
-                      capture_stderr=True, cwd=cwd)
+        cp = self.git(['show', f'{rev}:{os.fspath(path)}'],
+                      capture_stdout=True, capture_stderr=True, cwd=cwd)
         return cp.stdout
 
-    def listdir_at(self, path: str, rev: Optional[str] = None,
-                   cwd: Optional[str] = None,
+    def listdir_at(self, path: PathType, rev: Optional[str] = None,
+                   cwd: Optional[PathType] = None,
                    encoding: Optional[str] = None) -> List[str]:
         '''List of directory contents in the project at a specific revision.
 
@@ -758,7 +757,7 @@ class Project:
         # git-ls-tree -z means we get NUL-separated output with no quoting
         # of the file names. Using 'git-show' or 'git-cat-file -p'
         # wouldn't work for files with special characters in their names.
-        out = self.git(['ls-tree', '-z', f'{rev}:{path}'],
+        out = self.git(['ls-tree', '-z', f'{rev}:{os.fspath(path)}'], cwd=cwd,
                        capture_stdout=True, capture_stderr=True).stdout
 
         # A tab character separates the SHA from the file name in each
@@ -799,7 +798,9 @@ class ManifestProject(Project):
                 f'west_commands={self.west_commands}, '
                 f'topdir={repr(self.topdir)})')
 
-    def __init__(self, path=None, west_commands=None, topdir=None):
+    def __init__(self, path: Optional[PathType] = None,
+                 west_commands: Optional[WestCommandsType] = None,
+                 topdir: Optional[PathType] = None):
         '''
         :param path: Relative path to the manifest repository in the
             west workspace, if known.
@@ -810,18 +811,22 @@ class ManifestProject(Project):
             project is inside. If not given, all absolute path
             attributes (abspath and posixpath) will be None.
         '''
-        self.name = 'manifest'
+        self.name: str = 'manifest'
 
         # Pretending that this is a Project, even though it's not (#327)
-        self.url = ''
-        self.revision = 'HEAD'
-        self.clone_depth = None
+        self.url: str = ''
+        self.revision: str = 'HEAD'
+        self.clone_depth: Optional[int] = None
+        # The following type: ignore is necessary since every Project
+        # actually has a non-None _path attribute, so the parent class
+        # defines its type as 'str', where here we need it to be
+        # an Optional[str].
+        self._path = os.fspath(path) if path else None  # type: ignore
 
         # Path related attributes
-        self.topdir = topdir
-        self._abspath = None
-        self._posixpath = None
-        self._path = path
+        self.topdir: Optional[str] = os.fspath(topdir) if topdir else None
+        self._abspath: Optional[str] = None
+        self._posixpath: Optional[str] = None
 
         # Extension commands.
         self.west_commands = _west_commands_list(west_commands)
@@ -849,7 +854,8 @@ class Manifest:
     '''
 
     @staticmethod
-    def from_file(source_file: Optional[str] = None, **kwargs) -> 'Manifest':
+    def from_file(source_file: Optional[PathType] = None,
+                  **kwargs) -> 'Manifest':
         '''Manifest object factory given a source YAML file.
 
         The default behavior is to find the current west workspace's
@@ -924,7 +930,7 @@ class Manifest:
                 real_topdir = util.west_topdir(start=topdir, fall_back=False)
             except util.WestNotFound:
                 raise ValueError(msg)
-            if PurePath(topdir) != PurePath(real_topdir):
+            if Path(topdir) != Path(real_topdir):
                 raise ValueError(f'{msg}; but {real_topdir} is')
 
             # Read manifest.path from topdir/.west/config, and use it
@@ -969,10 +975,10 @@ class Manifest:
         kwargs.update({'source_data': source_data})
         return Manifest(**kwargs)
 
-    def __init__(self, source_file: Optional[str] = None,
+    def __init__(self, source_file: Optional[PathType] = None,
                  source_data: Optional[ManifestDataType] = None,
-                 manifest_path: Optional[str] = None,
-                 topdir: Optional[str] = None,
+                 manifest_path: Optional[PathType] = None,
+                 topdir: Optional[PathType] = None,
                  importer: Optional[ImporterType] = None,
                  import_flags: ImportFlag = ImportFlag.DEFAULT,
                  **kwargs: Dict[str, Any]):
@@ -1057,14 +1063,14 @@ class Manifest:
         if not _flags_ok(import_flags):
             raise ValueError(f'bad import_flags {import_flags:x}')
 
-        self.path = None
+        self.path: Optional[str] = None
         '''Path to the file containing the manifest, or None if
         created from data rather than the file system.
         '''
 
         if source_file:
-            with open(source_file, 'r') as f:
-                source_data = f.read()
+            source_file = Path(source_file)
+            source_data = source_file.read_text()
             self.path = os.path.abspath(source_file)
 
         if not source_data:
@@ -1100,8 +1106,10 @@ class Manifest:
         (or resolution order if the manifest contains imports).
         '''
 
-        self.topdir: Optional[str] = topdir
+        self.topdir: Optional[str] = None
         '''The west workspace's top level directory, or None.'''
+        if topdir:
+            self.topdir = os.fspath(topdir)
 
         self.has_imports: bool = False
 
@@ -1112,10 +1120,17 @@ class Manifest:
         ctx = kwargs.get('import-context')
         if ctx is not None:
             assert isinstance(ctx, _import_ctx)
-        self._load(source_data['manifest'], manifest_path,
+        if manifest_path:
+            mpath: Optional[Path] = Path(manifest_path)
+        else:
+            mpath = None
+        self._load(source_data['manifest'],
+                   mpath,
                    ctx or _import_ctx({}, None))
 
-    def get_projects(self, project_ids: Iterable[str],
+    def get_projects(self,
+                     # any str name is also a PathType
+                     project_ids: Iterable[PathType],
                      allow_paths: bool = True,
                      only_cloned: bool = False) -> List[Project]:
         '''Get a list of `Project` objects in the manifest from
@@ -1136,15 +1151,15 @@ class Manifest:
         `Project` objects at index 1.
 
         :param project_ids: a sequence of projects, identified by name
-            (these are matched first) or path (as a fallback, but only
-            with *allow_paths*)
-        :param allow_paths: if true, *project_ids* may also contain
-            relative or absolute project paths
+            or (absolute or relative) path. Names are matched first; path
+            checking can be disabled with *allow_paths*.
+        :param allow_paths: if false, *project_ids* is assumed to contain
+            names only, not paths
         :param only_cloned: raise an exception for uncloned projects
         '''
         projects = list(self.projects)
-        unknown: List[str] = []  # project_ids which don't resolve to a Project
-        uncloned: List[Project] = [] # if only_cloned, the uncloned Projects
+        unknown: List[PathType] = []  # project_ids with no Projects
+        uncloned: List[Project] = []  # if only_cloned, the uncloned Projects
         ret: List[Project] = []  # result list of resolved Projects
 
         # If no project_ids are specified, use all projects.
@@ -1157,17 +1172,27 @@ class Manifest:
 
         # Otherwise, resolve each of the project_ids to a project,
         # returning the result or raising ValueError.
+        mp = self.projects[MANIFEST_PROJECT_INDEX]
+        if mp.path is not None:
+            mpath: Optional[Path] = Path(mp.path).resolve()
+        else:
+            mpath = None
         for pid in project_ids:
-            if pid == 'manifest':
-                project: Optional[Project] = \
-                    self.projects[MANIFEST_PROJECT_INDEX]
-            else:
-                project = self._projects_by_name.get(pid)
-            if project is None and allow_paths:
-                if pid == self.projects[MANIFEST_PROJECT_INDEX].path:
-                    project = self.projects[MANIFEST_PROJECT_INDEX]
+            if isinstance(pid, str):
+                if pid == 'manifest':
+                    project: Optional[Project] = mp
                 else:
-                    project = self._projects_by_cpath.get(util.canon_path(pid))
+                    project = self._projects_by_name.get(pid)
+            else:
+                project = None
+
+            if project is None and allow_paths:
+                rpath = Path(pid).resolve()
+
+                if mpath is not None and rpath == mpath:
+                    project = mp
+                else:
+                    project = self._projects_by_rpath.get(rpath)
 
             if project is None:
                 unknown.append(pid)
@@ -1276,7 +1301,8 @@ class Manifest:
         else:
             raise exc
 
-    def _load(self, manifest: Dict[str, Any], path_hint: Optional[str],
+    def _load(self, manifest: Dict[str, Any],
+              path_hint: Optional[Path],  # not PathType!
               ctx: _import_ctx) -> None:
         # Initialize this instance.
         #
@@ -1319,7 +1345,7 @@ class Manifest:
         self._projects.insert(MANIFEST_PROJECT_INDEX, mp)
         self._projects_by_name: Dict[str, Project] = {'manifest': mp}
         self._projects_by_name.update(ctx.projects)
-        self._projects_by_cpath: Dict[str, Project] = {}
+        self._projects_by_rpath: Dict[Path, Project] = {}  # resolved paths
         if self.topdir:
             for i, p in enumerate(self.projects):
                 if i == MANIFEST_PROJECT_INDEX and not p.abspath:
@@ -1330,11 +1356,12 @@ class Manifest:
                     # The typing module can't tell that self.topdir
                     # being truthy guarantees p.abspath is a str, not None.
                     assert p.abspath
-                self._projects_by_cpath[util.canon_path(p.abspath)] = p
+                self._projects_by_rpath[Path(p.abspath).resolve()] = p
 
         _logger.debug(f'loaded {loading_what}')
 
-    def _load_self(self, manifest: Dict[str, Any], path_hint: Optional[str],
+    def _load_self(self, manifest: Dict[str, Any],
+                   path_hint: Optional[Path],
                    ctx: _import_ctx) -> ManifestProject:
         # Handle the "self:" section in the manifest data.
 
@@ -1452,14 +1479,14 @@ class Manifest:
         # submanifest has west commands, add them to mp's if so.
         try:
             kwargs: Dict[str, Any] = {'import-context': ctx}
-            submp = Manifest(source_file=str(pathobj),
+            submp = Manifest(source_file=pathobj,
                              manifest_path=mp.path,
                              topdir=self.topdir,
                              importer=self._importer,
                              import_flags=self._import_flags,
                              **kwargs).projects[MANIFEST_PROJECT_INDEX]
         except RecursionError as e:
-            raise _ManifestImportDepth(mp, str(pathobj)) from e
+            raise _ManifestImportDepth(mp, pathobj) from e
 
         # submp.west_commands comes first because we
         # logically treat imports from self as if they are
@@ -1732,13 +1759,13 @@ class Manifest:
                                 top_level: bool) -> None:
         # TODO: top_level can probably go away when #327 is done.
 
-        ppaths: Dict[PurePath, Project] = {}
+        ppaths: Dict[Path, Project] = {}
         if mp.path:
-            mppath: Optional[PurePath] = PurePath(mp.path)
+            mppath: Optional[Path] = Path(mp.path)
         else:
             mppath = None
         for name, project in projects.items():
-            pp = PurePath(project.path)
+            pp = Path(project.path)
             if top_level and pp == mppath:
                 self._malformed(f'project {name} path "{project.path}" '
                                 'is taken by the manifest repository')
