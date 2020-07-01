@@ -834,8 +834,8 @@ class ManifestProject(Project):
     @property
     def abspath(self) -> Optional[str]:
         if self._abspath is None and self.topdir and self.path:
-            self._abspath = os.path.realpath(os.path.join(self.topdir,
-                                                          self.path))
+            self._abspath = os.path.abspath(os.path.join(self.topdir,
+                                                         self.path))
         return self._abspath
 
     def as_dict(self) -> Dict:
