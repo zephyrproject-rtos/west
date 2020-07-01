@@ -114,7 +114,7 @@ class WestCommand(ABC):
         :param args: known arguments parsed via `WestCommand.add_parser`
         :param unknown: unknown arguments present on the command line;
             must be empty unless ``accepts_unknown_args`` is true
-        :param topdir: west workspace topdir, accessible as
+        :param topdir: west workspace topdir, accessible as a str via
             ``self.topdir`` from `WestCommand.do_run`
         :param manifest: `west.manifest.Manifest` or ``None``,
             accessible as ``self.manifest`` from `WestCommand.do_run`
@@ -123,7 +123,7 @@ class WestCommand(ABC):
             self.parser.error(f'unexpected arguments: {unknown}')
         if not topdir and self.requires_workspace:
             log.die(_no_topdir_msg(os.getcwd(), self.name))
-        self.topdir = topdir
+        self.topdir = os.fspath(topdir) if topdir else None
         self.manifest = manifest
         self.do_run(args, unknown)
 
