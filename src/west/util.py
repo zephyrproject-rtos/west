@@ -11,10 +11,7 @@ import shlex
 import textwrap
 from typing import List, Optional, Union
 
-# What we would eventually like to accept for paths everywhere in
-# west's APIs. However, right now, paths are 'str' in a variety of
-# places, and we are using west.util.canon_path() to create strings we
-# can compare with ==. See #273 on GitHub.
+# What west's APIs accept for paths.
 #
 # Here, os.PathLike objects should return str from their __fspath__
 # methods, not bytes. We could try to do something like the approach
@@ -22,18 +19,6 @@ from typing import List, Optional, Union
 # as os.PathLike[str] if TYPE_CHECKING and plain os.PathLike
 # otherwise, but it doesn't seem worth it.
 PathType = Union[str, os.PathLike]
-
-def canon_path(path: str) -> str:
-    '''Returns a canonical version of the path.
-
-    This is currently ``os.path.normcase(os.path.abspath(path))``. The
-    path separator is converted to os.sep on platforms where that
-    matters (Windows).
-
-    :param path: path whose canonical name to return; need not
-                 refer to an existing file.
-    '''
-    return os.path.normcase(os.path.abspath(path))
 
 def escapes_directory(path: PathType, directory: PathType) -> bool:
     '''Returns True if `path` escapes parent directory `directory`.
