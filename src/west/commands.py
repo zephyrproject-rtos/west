@@ -8,6 +8,7 @@ from collections import OrderedDict
 import importlib
 import itertools
 import os
+from pathlib import Path
 import sys
 from types import ModuleType
 from typing import Dict
@@ -337,12 +338,17 @@ def _commands_module_from_file(file):
     global _EXT_MODULES_CACHE
     global _EXT_MODULES_NAME_IT
 
-    file = os.path.normcase(os.path.realpath(file))
-    if file in _EXT_MODULES_CACHE:
-        return _EXT_MODULES_CACHE[file]
+    # Use an absolute pathobj to handle canonicalization, e.g.:
+    #
+    # - Windows and macOS have case insensitive names
+    # - Windows accepts slash or backslash as separator
+    # - POSIX operating systems have symlinks
+    pathobj = Path(file).resolve()
+    if pathobj in _EXT_MODULES_CACHE:
+        return _EXT_MODULES_CACHE[pathobj]
 
     mod_name = next(_EXT_MODULES_NAME_IT)
-    spec = importlib.util.spec_from_file_location(mod_name, file)
+    spec = importlib.util.spec_from_file_location(mod_name, os.fspath(pathobj))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     _EXT_MODULES_CACHE[file] = mod
