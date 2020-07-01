@@ -9,8 +9,8 @@ import argparse
 from functools import partial, lru_cache
 import logging
 import os
-from os.path import join, relpath, basename, dirname, exists, isdir
-from pathlib import PurePath
+from os.path import abspath, relpath, exists
+from pathlib import PurePath, Path
 import shutil
 import shlex
 import subprocess
@@ -207,17 +207,17 @@ class Init(_ProjectCommand):
     def die_already(self, where, also=None):
         log.die(f'already initialized in {where}, aborting.{also or ""}')
 
-    def local(self, args):
+    def local(self, args) -> Path:
         if args.manifest_rev is not None:
             log.die('--mr cannot be used with -l')
 
-        manifest_dir = util.canon_path(args.directory or os.getcwd())
-        manifest_file = join(manifest_dir, 'west.yml')
-        topdir = dirname(manifest_dir)
-        rel_manifest = basename(manifest_dir)
-        west_dir = os.path.join(topdir, WEST_DIR)
+        manifest_dir = Path(args.directory or os.getcwd())
+        manifest_file = manifest_dir / 'west.yml'
+        topdir = manifest_dir.parent
+        rel_manifest = manifest_dir.name
+        west_dir = topdir / WEST_DIR
 
-        if not exists(manifest_file):
+        if not manifest_file.is_file():
             log.die(f'can\'t init: no "west.yml" found in {manifest_dir}')
 
         log.banner('Initializing from existing manifest repository',
@@ -225,15 +225,15 @@ class Init(_ProjectCommand):
         log.small_banner(f'Creating {west_dir} and local configuration file')
         self.create(west_dir)
         os.chdir(topdir)
-        update_config('manifest', 'path', rel_manifest)
+        update_config('manifest', 'path', os.fspath(rel_manifest))
 
         return topdir
 
-    def bootstrap(self, args):
+    def bootstrap(self, args) -> Path:
         manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
         manifest_rev = args.manifest_rev or MANIFEST_REV_DEFAULT
-        topdir = util.canon_path(args.directory or os.getcwd())
-        west_dir = join(topdir, WEST_DIR)
+        topdir = Path(abspath(args.directory or os.getcwd()))
+        west_dir = topdir / WEST_DIR
 
         try:
             already = util.west_topdir(topdir, fall_back=False)
@@ -242,23 +242,23 @@ class Init(_ProjectCommand):
             pass
 
         log.banner('Initializing in', topdir)
-        if not isdir(topdir):
+        if not topdir.is_dir():
             self.create(topdir, exist_ok=False)
 
         # Clone the manifest repository into a temporary directory.
-        tempdir = join(west_dir, 'manifest-tmp')
-        if exists(tempdir):
+        tempdir: Path = west_dir / 'manifest-tmp'
+        if tempdir.is_dir():
             log.dbg('removing existing temporary manifest directory', tempdir)
             shutil.rmtree(tempdir)
         try:
-            self.clone_manifest(manifest_url, manifest_rev, tempdir)
+            self.clone_manifest(manifest_url, manifest_rev, os.fspath(tempdir))
         except subprocess.CalledProcessError:
             shutil.rmtree(tempdir, ignore_errors=True)
             raise
 
         # Verify the manifest file exists.
-        temp_manifest = join(tempdir, 'west.yml')
-        if not exists(temp_manifest):
+        temp_manifest = tempdir / 'west.yml'
+        if not temp_manifest.is_file():
             log.die(f'can\'t init: no "west.yml" found in {tempdir}\n'
                     f'  Hint: check --manifest-url={manifest_url} and '
                     f'--manifest-rev={manifest_rev}\n'
@@ -280,12 +280,12 @@ class Init(_ProjectCommand):
             # is PurePosixPath.
             manifest_path = PurePath(urlparse(manifest_url).path).name
 
-        manifest_abspath = join(topdir, manifest_path)
+        manifest_abspath = topdir / manifest_path
 
         log.dbg('moving', tempdir, 'to', manifest_abspath,
                 level=log.VERBOSE_EXTREME)
         try:
-            shutil.move(tempdir, manifest_abspath)
+            shutil.move(os.fspath(tempdir), os.fspath(manifest_abspath))
         except shutil.Error as e:
             log.die(e)
         log.small_banner('setting manifest.path to', manifest_path)
@@ -293,9 +293,9 @@ class Init(_ProjectCommand):
 
         return topdir
 
-    def create(self, directory, exist_ok=True):
+    def create(self, directory: Path, exist_ok: bool = True) -> None:
         try:
-            os.makedirs(directory, exist_ok=exist_ok)
+            directory.mkdir(parents=True, exist_ok=exist_ok)
         except PermissionError:
             log.die(f'Cannot initialize in {directory}: permission denied')
         except FileExistsError:
@@ -309,7 +309,8 @@ class Init(_ProjectCommand):
                 level=log.VERBOSE_VERY)
         subprocess.check_call(args, cwd=cwd)
 
-    def clone_manifest(self, url, rev, dest, exist_ok=False):
+    def clone_manifest(self, url: str, rev: str, dest: str,
+                       exist_ok=False) -> None:
         log.small_banner(f'Cloning manifest repository from {url}, rev. {rev}')
         if not exist_ok and exists(dest):
             log.die(f'refusing to clone into existing location {dest}')
