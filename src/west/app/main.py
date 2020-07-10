@@ -140,7 +140,12 @@ class WestApp:
         # from the manifest itself, which we have failed to load.)
 
         # A few commands are always safe to run without a manifest.
-        no_manifest_ok = ['help', 'config', 'topdir', 'init', 'manifest']
+        # The update command is sometimes safe and sometimes not, but
+        # we need to include it in this list because it's the only way
+        # to fix a manifest-rev revision in a project which is being
+        # imported to point from a bogus manifest to a non-bogus one.
+        no_manifest_ok = ['help', 'config', 'topdir', 'init', 'manifest',
+                          'update']
 
         # Handle ManifestVersionError is a special case.
         if isinstance(self.mle, ManifestVersionError):
@@ -361,6 +366,13 @@ class WestApp:
             # No need to dump_traceback() here. The command is responsible
             # for logging its own errors.
             sys.exit(ce.returncode)
+        except MalformedManifest as mm:
+            # We can get here because 'west update' is allowed to run
+            # even when an invalid manifest was detected, as a way to
+            # try to fix a previous update that left 'manifest-rev'
+            # branches pointing at revisions with invalid manifest
+            # data in projects that get imported.
+            log.die('\n  '.join(str(arg) for arg in mm.args))
 
     def run_extension(self, name, argv):
         # Check a program invariant. We should never get here
