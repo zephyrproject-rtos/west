@@ -6,7 +6,7 @@ import re
 import shlex
 import subprocess
 import textwrap
-from pathlib import PurePath
+from pathlib import Path, PurePath
 
 import pytest
 
@@ -396,6 +396,87 @@ def test_update_some_with_imports(repos_tmpdir):
     cmd('update', cwd=ws)
     manifest = Manifest.from_file(topdir=ws)
     assert manifest.get_projects(['Kconfiglib'])[0].is_cloned()
+
+
+def test_update_recovery(tmpdir):
+    # Make sure that the final 'west update' can recover from the
+    # following turn of events:
+    #
+    #   1. 'm' is the manifest repository, 'p' is a project
+    #   2. m/west.yml imports p at revision 'rbad'; p/west.yml at rbad
+    #      contains an invalid manifest
+    #   3. user runs 'west update', setting p's manifest-rev to rbad
+    #      (and failing the update)
+    #   4. user updates m/west.yml to point at p revision 'rgood',
+    #      which contains good manifest data
+    #   5. user runs 'west update' again
+    #
+    # The 'west update' in the last step should fix p's manifest-rev,
+    # pointing it at rgood, and should succeed.
+
+    # create path objects and string representations
+    workspace = Path(tmpdir) / 'workspace'
+    workspacestr = os.fspath(workspace)
+
+    m = workspace / 'm'
+    p = workspace / 'p'
+
+    # Set up the workspace repositories.
+    workspace.mkdir()
+    create_repo(m)
+    create_repo(p)
+
+    # Create revision rbad, which contains a bogus manifest, in p.
+    add_commit(p, 'rbad commit message', files={'west.yml': 'bogus_data'},
+               reconfigure=False)
+    rbad = rev_parse(p, 'HEAD')
+
+    # Create revision rgood, which contains a good manifest, in p.
+    add_commit(p, 'rgood commit message',
+               files={'west.yml': 'manifest:\n  projects: []'},
+               reconfigure=False)
+    rgood = rev_parse(p, 'HEAD')
+
+    # Set up the initial, 'bad' manifest.
+    #
+    # Use an invalid local file as the fetch URL: there's no reason
+    # west should be fetching from the remote.
+    with open(m / 'west.yml', 'w') as m_manifest:
+        m_manifest.write(f'''
+        manifest:
+          projects:
+          - name: p
+            url: file://{tmpdir}/should-not-be-fetched
+            revision: {rbad}
+            import: true
+        ''')
+
+    # Use west init -l + west update to point p's manifest-rev at rbad.
+    cmd(f'init -l {m}', cwd=workspacestr)
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('update', cwd=workspacestr)
+
+    # Make sure p's manifest-rev points to the bad revision as expected.
+    prev = rev_parse(p, 'refs/heads/manifest-rev')
+    assert prev == rbad
+
+    # Fix the main manifest to point at rgood.
+    with open(m / 'west.yml', 'w') as m_manifest:
+        m_manifest.write(f'''
+        manifest:
+          projects:
+          - name: p
+            url: file://{tmpdir}/should-not-be-fetched
+            revision: {rgood}
+            import: true
+        ''')
+
+    # Run the update, making sure it succeeds and p's manifest-rev
+    # is fixed.
+    cmd('update', cwd=workspacestr)
+    prev = rev_parse(p, 'refs/heads/manifest-rev')
+    assert prev == rgood
+
 
 def test_init_again(west_init_tmpdir):
     # Test that 'west init' on an initialized tmpdir errors out
