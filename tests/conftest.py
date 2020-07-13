@@ -239,6 +239,9 @@ def cmd(cmd, cwd=None, stderr=None, env=None):
         for k in os.environ:
             if k not in env:
                 print(f'\t{k}: deleted, was: {os.environ[k]}')
+    if cwd is not None:
+        cwd = os.fspath(cwd)
+        print(f'in {cwd}')
     try:
         return check_output(cmd, cwd=cwd, stderr=stderr, env=env)
     except subprocess.CalledProcessError:
@@ -264,8 +267,7 @@ def create_workspace(workspace_dir, and_git=False):
 
 def create_repo(path):
     # Initializes a Git repository in 'path', and adds an initial commit to it
-    if not isinstance(path, str):
-        path = str(path)
+    path = os.fspath(path)
 
     subprocess.check_call([GIT, 'init', path])
 
@@ -300,7 +302,7 @@ def add_commit(repo, msg, files=None, reconfigure=True):
     #
     # If 'reconfigure' is True, the user.name and user.email git
     # configuration variables will be set in 'repo' using config_repo().
-    repo = str(repo)
+    repo = os.fspath(repo)
 
     if reconfigure:
         config_repo(repo)
