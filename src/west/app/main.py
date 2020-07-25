@@ -181,7 +181,7 @@ class WestApp:
                                     list(self.mle.args)))
             elif isinst(FileNotFoundError):
                 # This should ordinarily only happen when the top
-                # level west.yml is not found.
+                # level manifest is not found.
                 log.die(f"file not found: {self.mle.filename}")
             elif isinst(_ManifestImportDepth):
                 log.die('failed, likely due to manifest import loop')

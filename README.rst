@@ -15,10 +15,10 @@ Basic Usage
 -----------
 
 West lets you manage multiple Git repositories under a single directory using a
-single file, called the *west manifest file*, or *manifest* for short. The
-manifest file is named ``west.yml``. You use ``west init`` to set up this
-directory, then ``west update`` to fetch and/or update the repositories named
-in the manifest.
+single file, called the *west manifest file*, or *manifest* for short.
+By default the manifest file is named ``west.yml``.
+You use ``west init`` to set up this directory, then ``west update`` to fetch
+and/or update the repositories named in the manifest.
 
 By default, west uses `upstream Zephyr's manifest file
 <https://github.com/zephyrproject-rtos/zephyr/blob/master/west.yml>`_, but west
@@ -45,7 +45,8 @@ What just happened:
   creating working trees in the installation directory ``zephyrproject``.
 
 Use ``west init -m`` to specify another manifest repository. Use ``--mr`` to
-use a revision other than ``master``.
+use a revision other than ``master``. Use ``--mf`` to use a manifest file other
+than ``west.yml``.
 
 Additional Commands
 -------------------

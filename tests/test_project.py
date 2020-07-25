@@ -589,6 +589,70 @@ def test_init_local_missing_west_yml_failure(repos_tmpdir):
         cmd(f'init -l "{zephyr_install_dir}"')
 
 
+def test_init_local_with_manifest_filename(repos_tmpdir):
+    # Test 'west init --mf -l' on a local repo
+
+    manifest = repos_tmpdir / 'repos' / 'zephyr'
+    workspace = repos_tmpdir / 'workspace'
+    zephyr_install_dir = workspace / 'zephyr'
+
+    # Do a local clone of manifest repo
+    clone(str(manifest), str(zephyr_install_dir))
+    os.rename(str(zephyr_install_dir / 'west.yml'),
+              str(zephyr_install_dir / 'project.yml'))
+
+    # fails because west.yml is missing
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd(f'init -l "{zephyr_install_dir}"')
+
+    # create a manifest with a syntax error so we can test if it's being parsed
+    with open(zephyr_install_dir / 'west.yml', 'w') as f:
+        f.write('[')
+
+    cwd = os.getcwd()
+    cmd(f'init -l "{zephyr_install_dir}"')
+
+    # init with a local manifest doesn't parse the file, so let's access it
+    workspace.chdir()
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('list')
+
+    os.chdir(cwd)
+    shutil.move(workspace / '.west', workspace / '.west-syntaxerror')
+
+    # success
+    cmd(f'init --mf project.yml -l "{zephyr_install_dir}"')
+    workspace.chdir()
+    config.read_config()
+    cmd('update')
+
+
+def test_init_with_manifest_filename(repos_tmpdir):
+    # Test 'west init --mf' on a normal repo
+
+    west_tmpdir = repos_tmpdir / 'workspace'
+    manifest = repos_tmpdir / 'repos' / 'zephyr'
+
+    with open(manifest / 'west.yml', 'r') as f:
+        manifest_data = f.read()
+
+    # also creates a west.yml with a syntax error to verify west doesn't even
+    # try to load the file
+    add_commit(str(manifest), 'rename manifest',
+               files={'west.yml': '[', 'project.yml': manifest_data})
+
+    # syntax error
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd(f'init -m "{manifest}" "{west_tmpdir}"')
+    shutil.move(west_tmpdir, repos_tmpdir / 'workspace-syntaxerror')
+
+    # success
+    cmd(f'init -m "{manifest}" --mf project.yml "{west_tmpdir}"')
+    west_tmpdir.chdir()
+    config.read_config()
+    cmd('update')
+
+
 def test_extension_command_execution(west_init_tmpdir):
     with pytest.raises(subprocess.CalledProcessError):
         cmd('test-extension')

@@ -124,7 +124,7 @@ class Init(_ProjectCommand):
               1. Creates a .west directory and clones a manifest repository
                  from a git URL to a temporary subdirectory of .west,
                  .west/<tmpdir>.
-              2. Parses the manifest file, .west/<tmpdir>/west.yml.
+              2. Parses the manifest file, .west/<tmpdir>/<manifest.file>.
                  This file's contents can specify manifest.path, the location
                  of the manifest repository in the workspace, like so:
 
@@ -161,6 +161,8 @@ class Init(_ProjectCommand):
         parser.add_argument('--mr', '--manifest-rev', dest='manifest_rev',
                             help='''manifest revision to check out and use;
                             cannot be combined with -l''')
+        parser.add_argument('--mf', '--manifest-file', dest='manifest_file',
+                            help='manifest file name to use')
         parser.add_argument('-l', '--local', action='store_true',
                             help='''use an existing local manifest repository
                             instead of cloning one; cannot be combined with
@@ -212,13 +214,15 @@ class Init(_ProjectCommand):
             log.die('--mr cannot be used with -l')
 
         manifest_dir = Path(args.directory or os.getcwd())
-        manifest_file = manifest_dir / 'west.yml'
+        manifest_filename = args.manifest_file or 'west.yml'
+        manifest_file = manifest_dir / manifest_filename
         topdir = manifest_dir.parent
         rel_manifest = manifest_dir.name
         west_dir = topdir / WEST_DIR
 
         if not manifest_file.is_file():
-            log.die(f'can\'t init: no "west.yml" found in {manifest_dir}')
+            log.die(f'can\'t init: no {manifest_filename} found in '
+                    f'{manifest_dir}')
 
         log.banner('Initializing from existing manifest repository',
                    rel_manifest)
@@ -226,6 +230,7 @@ class Init(_ProjectCommand):
         self.create(west_dir)
         os.chdir(topdir)
         update_config('manifest', 'path', os.fspath(rel_manifest))
+        update_config('manifest', 'file', manifest_filename, topdir=topdir)
 
         return topdir
 
@@ -257,9 +262,11 @@ class Init(_ProjectCommand):
             raise
 
         # Verify the manifest file exists.
-        temp_manifest = tempdir / 'west.yml'
+        temp_manifest_filename = args.manifest_file or 'west.yml'
+        temp_manifest = tempdir / temp_manifest_filename
         if not temp_manifest.is_file():
-            log.die(f'can\'t init: no "west.yml" found in {tempdir}\n'
+            log.die(f'can\'t init: no {temp_manifest_filename} found in '
+                    f'{tempdir}\n'
                     f'  Hint: check --manifest-url={manifest_url} and '
                     f'--manifest-rev={manifest_rev}\n'
                     f'  You may need to remove {west_dir} before retrying.')
@@ -290,6 +297,8 @@ class Init(_ProjectCommand):
             log.die(e)
         log.small_banner('setting manifest.path to', manifest_path)
         update_config('manifest', 'path', manifest_path, topdir=topdir)
+        update_config('manifest', 'file', temp_manifest_filename,
+                      topdir=topdir)
 
         return topdir
 
@@ -640,15 +649,15 @@ class Update(_ProjectCommand):
     def __init__(self):
         super().__init__(
             'update',
-            'update projects described in west.yml',
+            'update projects described in west manifest',
             textwrap.dedent('''\
             Updates each project repository to the revision specified in
-            the manifest file, west.yml, as follows:
+            the manifest file, as follows:
 
               1. Fetch the project's remote to ensure the manifest
                  revision is available locally
               2. Reset the manifest-rev branch to the revision in
-                 west.yml
+                 the manifest
               3. Check out the new manifest-rev commit as a detached HEAD
                  (but see "checked out branches")
 

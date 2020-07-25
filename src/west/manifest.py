@@ -17,7 +17,7 @@ import shlex
 import subprocess
 import sys
 from typing import Any, Callable, Dict, Iterable, List, NoReturn, \
-    NamedTuple, Optional, TYPE_CHECKING, Union
+    NamedTuple, Optional, Tuple, TYPE_CHECKING, Union
 
 from packaging.version import parse as parse_version
 import pykwalify.core
@@ -138,7 +138,7 @@ def _west_commands_merge(wc1: List[str], wc2: List[str]) -> List[str]:
         return wc1 or wc2
 
 def _mpath(cp: Optional[configparser.ConfigParser] = None,
-           topdir: Optional[PathType] = None) -> str:
+           topdir: Optional[PathType] = None) -> Tuple[str, str]:
     # Return the value of the manifest.path configuration option
     # in *cp*, a ConfigParser. If not given, create a new one and
     # load configuration options with the given *topdir* as west
@@ -152,7 +152,10 @@ def _mpath(cp: Optional[configparser.ConfigParser] = None,
     cfg.read_config(configfile=cfg.ConfigFile.LOCAL, config=cp, topdir=topdir)
 
     try:
-        return cp.get('manifest', 'path')
+        path = cp.get('manifest', 'path')
+        filename = cp.get('manifest', 'file', fallback=_WEST_YML)
+
+        return (path, filename)
     except (configparser.NoOptionError, configparser.NoSectionError) as e:
         raise MalformedConfig('no "manifest.path" config option is set') from e
 
@@ -308,10 +311,11 @@ def manifest_path() -> str:
         - `MalformedConfig` if the configuration file has no
           ``manifest.path`` key
 
-        - ``FileNotFoundError`` if no ``west.yml`` exists in
-          ``manifest.path``
+        - ``FileNotFoundError`` if no manifest file exists as determined by
+          ``manifest.path`` and ``manifest.file``
     '''
-    ret = os.path.join(util.west_topdir(), _mpath(), _WEST_YML)
+    (mpath, mname) = _mpath()
+    ret = os.path.join(util.west_topdir(), mpath, mname)
     # It's kind of annoying to manually instantiate a FileNotFoundError.
     # This seems to be the best way.
     if not os.path.isfile(ret):
@@ -897,7 +901,7 @@ class Manifest:
             - If neither *source_file* nor *topdir* is given, the file
               system is searched for *topdir*. That workspace's
               ``manifest.path`` configuration option is used to find
-              *source_file*, ``topdir/<manifest.path>/west.yml``.
+              *source_file*, ``topdir/<manifest.path>/<manifest.file>``.
 
             - If only *source_file* is given, *topdir* is found
               starting there. The directory containing *source_file*
@@ -932,10 +936,10 @@ class Manifest:
                 # neither source_file nor topdir: search the filesystem
                 # for the workspace and use its manifest.path.
                 topdir = util.west_topdir()
-                mpath = _mpath(topdir=topdir)
+                (mpath, mname) = _mpath(topdir=topdir)
                 kwargs.update({
                     'topdir': topdir,
-                    'source_file': os.path.join(topdir, mpath, _WEST_YML),
+                    'source_file': os.path.join(topdir, mpath, mname),
                     'manifest_path': mpath
                 })
             else:
@@ -960,8 +964,8 @@ class Manifest:
 
             # Read manifest.path from topdir/.west/config, and use it
             # to locate source_file.
-            mpath = _mpath(topdir=topdir)
-            source_file = os.path.join(topdir, mpath, _WEST_YML)
+            (mpath, mname) = _mpath(topdir=topdir)
+            source_file = os.path.join(topdir, mpath, mname)
             kwargs.update({
                 'source_file': source_file,
                 'manifest_path': mpath,
@@ -1747,7 +1751,7 @@ class Manifest:
             except FileNotFoundError:
                 # We may need to fetch a new manifest-rev, e.g. if
                 # revision is a branch that didn't used to have a
-                # west.yml, but now does.
+                # manifest, but now does.
                 content = self._importer(project, path)
             except subprocess.CalledProcessError:
                 # We may need a new manifest-rev, e.g. if revision is
