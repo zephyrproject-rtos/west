@@ -5,7 +5,7 @@
 # This is the Python 3 version of option 3 in:
 # https://packaging.python.org/guides/single-sourcing-package-version/#single-sourcing-the-version
 
-__version__ = '0.7.2'
+__version__ = '0.7.3'
 # MAINTAINERS:
 #
 # Make sure to update west.manifest.SCHEMA_VERSION if there have been
