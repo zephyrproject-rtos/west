@@ -16,6 +16,7 @@ Pre-release test plan
    - the latest Ubuntu release (if different than the latest LTS)
    - Debian stable (if its Python 3 is still supported)
    - Debian testing
+   - Fedora
 
 3. Build alpha N (N=1 to start, then N=2 if you need more commits, etc.) and
    upload to pypi.
@@ -50,7 +51,7 @@ Pre-release test plan
 
      # This example uses a Nordic board. Do this for as many boards
      # as you have access to / volunteers for.
-     west build -b nrf52_pca10040 -s zephyr/samples/hello_world -d build-nrf52
+     west build -b nrf52dk_nrf52832 -s zephyr/samples/hello_world -d build-nrf52
      west flash -d build-nrf52
      west debug -d build-nrf52
      west debugserver -d build-nrf52
