@@ -4,6 +4,7 @@ import collections
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import textwrap
 from pathlib import Path, PurePath
@@ -116,6 +117,32 @@ def test_list(west_update_tmpdir):
 
     with pytest.raises(subprocess.CalledProcessError):
         cmd('list NOT_A_PROJECT')
+
+
+def test_list_manifest(west_update_tmpdir):
+    # The manifest's "self: path:" should only be used to print
+    # path-type format strings with --manifest-path-from-yaml.
+
+    os.mkdir('manifest_moved')
+    shutil.copy('zephyr/west.yml', 'manifest_moved/west.yml')
+    cmd('config manifest.path manifest_moved')
+
+    path = cmd('list -f "{path}" manifest').strip()
+    abspath = cmd('list -f "{abspath}" manifest').strip()
+    posixpath = cmd('list -f "{posixpath}" manifest').strip()
+    assert path == 'manifest_moved'
+    assert Path(abspath) == west_update_tmpdir / 'manifest_moved'
+    assert posixpath == Path(west_update_tmpdir).as_posix() + '/manifest_moved'
+
+    path = cmd('list --manifest-path-from-yaml '
+               '-f "{path}" manifest').strip()
+    abspath = cmd('list --manifest-path-from-yaml '
+                  '-f "{abspath}" manifest').strip()
+    posixpath = cmd('list --manifest-path-from-yaml '
+                    '-f "{posixpath}" manifest').strip()
+    assert path == 'zephyr'
+    assert Path(abspath) == Path(str(west_update_tmpdir / 'zephyr'))
+    assert posixpath == Path(west_update_tmpdir).as_posix() + '/zephyr'
 
 
 def test_manifest_freeze(west_update_tmpdir):
