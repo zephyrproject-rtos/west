@@ -388,6 +388,11 @@ class List(_ProjectCommand):
             '''))
         parser.add_argument('-a', '--all', action='store_true',
                             help='ignored for backwards compatibility'),
+        parser.add_argument('--manifest-path-from-yaml', action='store_true',
+                            help='''print the manifest repository's path
+                            according to the manifest file YAML, which may
+                            disagree with the manifest.path configuration
+                            option'''),
         parser.add_argument('-f', '--format', default=default_fmt,
                             help='''format string to use to list each
                             project; see FORMAT STRINGS below.''')
@@ -427,12 +432,25 @@ class List(_ProjectCommand):
             # as SHAs, unless they are specifically requested, and then
             # ensures they are only computed once.
             try:
+                if (isinstance(project, ManifestProject) and not
+                        args.manifest_path_from_yaml):
+                    # Special-case the manifest repository while it's
+                    # still showing up in the 'projects' list. Yet
+                    # more evidence we should tackle #327.
+                    path = config.get('manifest', 'path')
+                    apath = abspath(os.path.join(self.topdir, path))
+                    ppath = Path(apath).as_posix()
+                else:
+                    path = project.path
+                    apath = project.abspath
+                    ppath = project.posixpath
+
                 result = args.format.format(
                     name=project.name,
                     url=project.url or 'N/A',
-                    path=project.path,
-                    abspath=project.abspath,
-                    posixpath=project.posixpath,
+                    path=path,
+                    abspath=apath,
+                    posixpath=ppath,
                     revision=project.revision or 'N/A',
                     clone_depth=project.clone_depth or "None",
                     cloned=delay(cloned_thunk, project),
