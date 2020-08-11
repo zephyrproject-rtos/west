@@ -932,10 +932,11 @@ class Manifest:
                 # neither source_file nor topdir: search the filesystem
                 # for the workspace and use its manifest.path.
                 topdir = util.west_topdir()
+                mpath = _mpath(topdir=topdir)
                 kwargs.update({
                     'topdir': topdir,
-                    'source_file': os.path.join(topdir, _mpath(topdir=topdir),
-                                                _WEST_YML)
+                    'source_file': os.path.join(topdir, mpath, _WEST_YML),
+                    'manifest_path': mpath
                 })
             else:
                 # Just source_file: find topdir starting there.
