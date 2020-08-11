@@ -1041,7 +1041,7 @@ def test_as_dict_and_yaml(manifest_repo):
                        'path': 'project-two',
                        'clone-depth': 1,
                        'west-commands': 'commands.yml'}],
-                     'self': {}}}
+                     'self': {'path': os.path.basename(manifest_repo)}}}
 
     with open(manifest_repo / 'west.yml', 'w') as f:
         f.write(content_str)
