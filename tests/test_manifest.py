@@ -1051,12 +1051,21 @@ def test_as_dict_and_yaml(manifest_repo):
     for p in frozen_expected['manifest']['projects']:
         p['revision'] = fake_sha
 
+    # Manifest.from_file() and Manifest.from_file(topdir=<topdir>) shall
+    # produce result when given topdir is identical to what util.west_topdir()
+    # produces.
     manifest = MF()
+
+    manifest_topdir = MF(topdir=os.path.dirname(manifest_repo))
 
     # We can always call as_dict() and as_yaml(), regardless of what's
     # cloned.
 
     as_dict = manifest.as_dict()
+
+    as_dict_topdir = manifest_topdir.as_dict()
+    assert as_dict == as_dict_topdir
+
     yaml_roundtrip = yaml.safe_load(manifest.as_yaml())
     assert as_dict == content_dict
     assert yaml_roundtrip == content_dict
