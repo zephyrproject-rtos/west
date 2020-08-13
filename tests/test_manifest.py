@@ -61,7 +61,7 @@ def tmp_workspace(tmpdir):
 @pytest.fixture
 def manifest_repo(tmp_workspace):
     # This creates a temporary manifest repository, changes directory
-    # to its topdir, and returns a pathlike to the manifest repository.
+    # to it, and returns a pathlike for it.
 
     manifest_repo = tmp_workspace / 'mp'
     create_repo(manifest_repo)
