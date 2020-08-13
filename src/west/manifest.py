@@ -430,10 +430,25 @@ class ImportFlag(enum.IntFlag):
     "self: import:", and running git to resolve a "projects:" import.
     Other flags:
 
-    - IGNORE: ignore all "import:" attributes in "self:" and "projects:"
+    - IGNORE: ignore projects added via "import:" in "self:" and "projects:"
     - FORCE_PROJECTS: always invoke importer callback for "projects:" imports
-    - IGNORE_PROJECTS: ignore "import:" attributes in "projects:" only;
-      still respect "import:" in "self:"
+    - IGNORE_PROJECTS: ignore projects added via "import:" in "projects:" only;
+      including any projects added via "import:" in "self:"
+
+    Note that any "path-prefix:" values set in an "import:" still take
+    effect for the project itself even when IGNORE or IGNORE_PROJECTS are
+    given. For example, in this manifest:
+
+    manifest:
+      projects:
+      - name: foo
+        import:
+          path-prefix: bar
+
+    Project 'foo' has path 'bar/foo' regardless of whether IGNORE or
+    IGNORE_PROJECTS is given. This ensures the Project has the same path
+    attribute as it normally would if imported projects weren't being
+    ignored.
     '''
 
     DEFAULT = 0
