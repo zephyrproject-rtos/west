@@ -1750,6 +1750,7 @@ class Manifest:
         if project.name not in projects:
             projects[project.name] = project
             _logger.debug(f'added project {project.name} '
+                          f'path {project.path} '
                           f'revision {project.revision}' +
                           (f' from {self.path}' if self.path else ''))
             return True
