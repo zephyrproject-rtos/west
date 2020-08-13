@@ -1420,7 +1420,7 @@ class Manifest:
             for subimp in imp:
                 self._import_from_self(mp, subimp, ctx)
         elif imptype == dict:
-            imap = self._load_imap(mp, imp)
+            imap = self._load_imap(imp, f'manifest file {mp.abspath}')
             # Since 'imap' may introduce additional filtering
             # requirements on top of the existing 'filter_fn', we need
             # to compose them, e.g. to respect import map whitelists
@@ -1620,7 +1620,7 @@ class Manifest:
             for subimp in imp:
                 self._import_from_project(project, subimp, ctx)
         elif imptype == dict:
-            imap = self._load_imap(project, imp)
+            imap = self._load_imap(imp, f'project {project.name}')
             # Similar comments about composing filters apply here as
             # they do in _import_from_self().
             self._import_path_from_project(project, imap.file,
@@ -1705,7 +1705,7 @@ class Manifest:
 
         return content
 
-    def _load_imap(self, project: Project, imp: Dict) -> _import_map:
+    def _load_imap(self, imp: Dict, src: str) -> _import_map:
         # Convert a parsed self or project import value from YAML into
         # an _import_map namedtuple.
 
@@ -1717,27 +1717,21 @@ class Manifest:
                           copy.pop('name-blacklist', []),
                           copy.pop('path-blacklist', []))
 
-        # Find a useful name for the project on error.
-        if isinstance(project, ManifestProject):
-            what = f'manifest file {project.abspath}'
-        else:
-            what = f'project {project.name}'
-
         # Check that the value is OK.
         if copy:
             # We popped out all of the valid keys already.
-            self._malformed(f'{what}: invalid import contents: {copy}')
+            self._malformed(f'{src}: invalid import contents: {copy}')
         elif not _is_imap_list(ret.name_whitelist):
-            self._malformed(f'{what}: bad import name-whitelist '
+            self._malformed(f'{src}: bad import name-whitelist '
                             f'{ret.name_whitelist}')
         elif not _is_imap_list(ret.path_whitelist):
-            self._malformed(f'{what}: bad import path-whitelist '
+            self._malformed(f'{src}: bad import path-whitelist '
                             f'{ret.path_whitelist}')
         elif not _is_imap_list(ret.name_blacklist):
-            self._malformed(f'{what}: bad import name-blacklist '
+            self._malformed(f'{src}: bad import name-blacklist '
                             f'{ret.name_blacklist}')
         elif not _is_imap_list(ret.path_blacklist):
-            self._malformed(f'{what}: bad import path-blacklist '
+            self._malformed(f'{src}: bad import path-blacklist '
                             f'{ret.path_blacklist}')
 
         return ret
