@@ -264,7 +264,7 @@ _import_ctx = collections.namedtuple('_import_ctx', [
     # None value is treated as a function which always returns True.
     'filter_fn'])
 
-def _new_ctx(ctx: _import_ctx, _new_filter: ImapFilterFnType):
+def _new_ctx(ctx: _import_ctx, _new_filter: ImapFilterFnType) -> _import_ctx:
     return _import_ctx(ctx.projects, _and_filters(ctx.filter_fn, _new_filter))
 
 def _filter_ok(filter_fn: ImapFilterFnType,
