@@ -384,6 +384,7 @@ class ManifestImportFailed(Exception):
     '''
 
     def __init__(self, project: 'Project', filename: PathType):
+        super().__init__(project, filename)
         self.project = project
         self.filename = os.fspath(filename)
 
@@ -397,6 +398,7 @@ class ManifestVersionError(Exception):
     '''
 
     def __init__(self, version: str, file: Optional[PathType] = None):
+        super().__init__(version, file)
         self.version = version
         '''The minimum version of west that was required.'''
 
@@ -437,7 +439,7 @@ def _flags_ok(flags: ImportFlag) -> bool:
     F_IP = ImportFlag.IGNORE_PROJECTS
 
     if (flags & F_I) or (flags & F_IP):
-        return not (flags & F_FP)
+        return not flags & F_FP
     elif flags & (F_FP | F_IP):
         return bool((flags & F_FP) ^ (flags & F_IP))
     else:
