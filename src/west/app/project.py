@@ -541,8 +541,10 @@ class ManifestCommand(_ProjectCommand):
             manifest = Manifest.from_file(topdir=self.topdir)
         except _ManifestImportDepth:
             log.die("cannot resolve manifest -- is there a loop?")
-        except (MalformedManifest, ManifestImportFailed,
-                ManifestVersionError) as e:
+        except ManifestImportFailed as mif:
+            log.die(f"manifest import failed\n  Project: {mif.project}\n  "
+                    f"File: {mif.filename}")
+        except (MalformedManifest, ManifestVersionError) as e:
             log.die('\n  '.join(str(arg) for arg in e.args))
         dump_kwargs = {'default_flow_style': False,
                        'sort_keys': False}
