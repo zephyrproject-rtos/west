@@ -12,7 +12,7 @@
 from copy import deepcopy
 from glob import glob
 import os
-from pathlib import PurePath
+from pathlib import PurePath, Path
 import platform
 import subprocess
 from unittest.mock import patch
@@ -26,7 +26,7 @@ from west.manifest import Manifest, Project, ManifestProject, \
     _ManifestImportDepth
 
 from conftest import create_workspace, create_repo, checkout_branch, \
-    create_branch, add_commit, GIT, check_proj_consistency, \
+    create_branch, add_commit, rev_parse, GIT, check_proj_consistency, \
     WEST_SKIP_SLOW_TESTS
 
 FPI = ImportFlag.FORCE_PROJECTS  # to force project imports to use the callback
@@ -2022,6 +2022,219 @@ def test_import_map_filter_propagation(manifest_repo):
     projects = load_manifest({'path-blacklist': 'p1'}).projects
     assert len(projects) == 2
     assert projects[1].name == 'n2'
+
+def test_import_path_prefix_basics(manifest_repo):
+    # The semantics for "import: {path-prefix: ...}" are that the
+    # path-prefix is:
+    #
+    # - prepended to each project.path, including the imported project
+    # - inserted properly into each project.abspath, project.posixpath
+    # - allowed to, but not required to, have multiple components
+
+    # Save typing
+    topdir = manifest_repo.topdir
+
+    # Create some projects to import from and some manifest data
+    # inside each.
+    prefixes = {
+        1: 'prefix-1',
+        2: 'prefix/2',
+        3: 'pre/fix/3'
+    }
+    revs = {}
+    for i in [1, 2, 3]:
+        p = Path(topdir / prefixes[i] / f'project-{i}')
+        create_repo(p)
+        create_branch(p, 'manifest-rev', checkout=True)
+        add_commit(p, f'project-{i} manifest',
+                   files={
+                       'west.yml': f'''
+                       manifest:
+                         projects:
+                         - name: not-cloned-{i}
+                           url: https://example.com/not-cloned-{i}
+                       '''
+                   },
+                   reconfigure=False)
+        revs[i] = rev_parse(p, 'HEAD')
+
+    # Create the main manifest file, which imports these with
+    # different prefixes.
+    add_commit(manifest_repo, 'add main manifest with import',
+               files={
+                   'west.yml': f'''
+                   manifest:
+                     remotes:
+                     - name: r
+                       url-base: https://example.com
+                     defaults:
+                       remote: r
+
+                     projects:
+                     - name: project-1
+                       revision: {revs[1]}
+                       import:
+                         path-prefix: {prefixes[1]}
+                     - name: project-2
+                       revision: {revs[2]}
+                       import:
+                         path-prefix: {prefixes[2]}
+                     - name: project-3
+                       revision: {revs[3]}
+                       import:
+                         path-prefix: {prefixes[3]}
+                   '''
+               },
+               reconfigure=False)
+
+    # Check semantics for directly imported projects and nested imports.
+    actual = MF(topdir=topdir).projects
+    expected = [ManifestProject(path='mp', topdir=topdir),
+                # Projects in main west.yml with proper path-prefixing
+                # applied.
+                Project('project-1', 'https://example.com/project-1',
+                        revision=revs[1],
+                        path='prefix-1/project-1',
+                        topdir=topdir, remote_name='r'),
+                Project('project-2', 'https://example.com/project-2',
+                        revision=revs[2],
+                        path='prefix/2/project-2',
+                        topdir=topdir, remote_name='r'),
+                Project('project-3', 'https://example.com/project-3',
+                        revision=revs[3],
+                        path='pre/fix/3/project-3',
+                        topdir=topdir, remote_name='r'),
+                # Imported projects from submanifests. These aren't
+                # actually cloned on the file system, but that doesn't
+                # matter for this test.
+                Project('not-cloned-1', 'https://example.com/not-cloned-1',
+                        path='prefix-1/not-cloned-1', topdir=topdir),
+                Project('not-cloned-2', 'https://example.com/not-cloned-2',
+                        path='prefix/2/not-cloned-2', topdir=topdir),
+                Project('not-cloned-3', 'https://example.com/not-cloned-3',
+                        path='pre/fix/3/not-cloned-3', topdir=topdir)]
+    for a, e in zip(actual, expected):
+        check_proj_consistency(a, e)
+
+def test_import_path_prefix_self(manifest_repo):
+    # The semantics for "self: import: {path-prefix: ...}" are similar
+    # to when it's used from a project, except the path-prefix is not
+    # prepended to the manifest repository's path.
+
+    # Save typing
+    topdir = manifest_repo.topdir
+
+    # Create the main manifest file.
+    add_commit(manifest_repo, 'add main manifest with import',
+               files={
+                   'west.yml': '''
+                   manifest:
+                     projects: []
+                     self:
+                       path: mp
+                       import:
+                         file: foo.yml
+                         path-prefix: bar
+                   ''',
+
+                   'foo.yml': '''
+                   manifest:
+                     projects: []
+                   '''
+               },
+               reconfigure=False)
+
+    # Check semantics for directly imported projects and nested imports.
+    actual = MF(topdir=topdir).projects[0]
+    expected = ManifestProject(path='mp', topdir=topdir)
+    check_proj_consistency(actual, expected)
+
+def test_import_path_prefix_propagation(manifest_repo):
+    # An "import: {path-prefix: foo}" of a manifest which itself
+    # contains an "import: {path-prefix: bar}" should have a combined
+    # path-prefix foo/bar, etc.
+
+    # Save typing
+    topdir = manifest_repo.topdir
+
+    # Create the main manifest file.
+    add_commit(manifest_repo, 'add main manifest with import',
+               files={
+                   'west.yml': '''
+                   manifest:
+                     projects: []
+                     self:
+                       path: mp
+                       import:
+                         file: foo.yml
+                         path-prefix: prefix/1
+                   ''',
+
+                   'foo.yml': '''
+                   manifest:
+                     projects: []
+                     self:
+                       import:
+                         file: bar.yml
+                         path-prefix: prefix-2
+                   ''',
+
+                   'bar.yml': '''
+                   manifest:
+                     projects:
+                     - name: project-1
+                       path: project-one-path
+                       url: https://example.com/project-1
+                     - name: project-2
+                       url: https://example.com/project-2
+                   '''
+               },
+               reconfigure=False)
+
+    # Check semantics for directly imported projects and nested imports.
+    actual = MF(topdir=topdir).projects[1:]
+    expected = [Project('project-1', 'https://example.com/project-1',
+                        path='prefix/1/prefix-2/project-one-path',
+                        topdir=topdir),
+                Project('project-2', 'https://example.com/project-2',
+                        path='prefix/1/prefix-2/project-2',
+                        topdir=topdir)]
+    for a, e in zip(actual, expected):
+        check_proj_consistency(a, e)
+
+def test_import_path_prefix_no_escape(manifest_repo):
+    # An "import: {path-prefix: ...}" must not escape (or even equal) topdir.
+
+    topdir = manifest_repo.topdir
+
+    manifest_template = '''
+    manifest:
+      projects:
+      - name: project
+        url: https://example.com/project
+        import:
+          path-prefix: THE_PATH_PREFIX
+    '''
+
+    def mfst(path_prefix):
+        return manifest_template.replace('THE_PATH_PREFIX', path_prefix)
+
+    # As a base case, make sure we can parse this manifest with an
+    # OK path-prefix.
+    add_commit(manifest_repo, 'OK',
+               files={'west.yml': mfst('ext')},
+               reconfigure=False)
+    m = MF(topdir=topdir, import_flags=ImportFlag.IGNORE)
+    assert (Path(m.projects[1].abspath) ==
+            Path(topdir) / 'ext' / 'project')
+
+    # An invalid path-prefix, all other things equal, should fail.
+    add_commit(manifest_repo, 'NOK 1',
+               files={'west.yml': mfst('..')},
+               reconfigure=False)
+    with pytest.raises(MalformedManifest) as excinfo:
+        MF(topdir=topdir, import_flags=ImportFlag.IGNORE)
+    assert 'is not a subdirectory' in str(excinfo.value)
 
 @pytest.mark.skipif(WEST_SKIP_SLOW_TESTS,
                     reason='use WEST_SKIP_SLOW_TESTS=0 to enable')
