@@ -25,7 +25,7 @@ import pykwalify.core
 import yaml
 
 from west import util
-from west.util import PathType
+from west.util import PathType, escapes_directory
 import west.configuration as cfg
 
 #
@@ -211,7 +211,8 @@ def _manifest_content_at(project: 'Project', path: PathType,
 _import_map = collections.namedtuple('_import_map',
                                      'file '
                                      'name_whitelist path_whitelist '
-                                     'name_blacklist path_blacklist')
+                                     'name_blacklist path_blacklist '
+                                     'path_prefix')
 
 def _is_imap_list(value: Any) -> bool:
     # Return True if the value is a valid import map 'blacklist' or
@@ -262,10 +263,18 @@ _import_ctx = collections.namedtuple('_import_ctx', [
     'projects',
     # Project -> Bool. True if OK to add a project to 'projects'. A
     # None value is treated as a function which always returns True.
-    'filter_fn'])
+    'filter_fn',
+    # pathlib.Path. Cumulative path-prefix for any parsed projects.
+    'path_prefix'
+])
 
-def _new_ctx(ctx: _import_ctx, _new_filter: ImapFilterFnType) -> _import_ctx:
-    return _import_ctx(ctx.projects, _and_filters(ctx.filter_fn, _new_filter))
+def _new_ctx(ctx: _import_ctx, imap: _import_map) -> _import_ctx:
+    # Combine the map data from "some-map" in a manifest's
+    # "import: some-map" into an existing import context type,
+    # returning the new context.
+    return _import_ctx(ctx.projects,
+                       _and_filters(ctx.filter_fn, _imap_filter(imap)),
+                       ctx.path_prefix / imap.path_prefix)
 
 def _filter_ok(filter_fn: ImapFilterFnType,
                project: 'Project') -> bool:
@@ -1128,7 +1137,7 @@ class Manifest:
             mpath = None
         self._load(source_data['manifest'],
                    mpath,
-                   ctx or _import_ctx({}, None))
+                   ctx or _import_ctx({}, None, Path('.')))
 
     def get_projects(self,
                      # any str name is also a PathType
@@ -1421,12 +1430,14 @@ class Manifest:
                 self._import_from_self(mp, subimp, ctx)
         elif imptype == dict:
             imap = self._load_imap(imp, f'manifest file {mp.abspath}')
-            # Since 'imap' may introduce additional filtering
-            # requirements on top of the existing 'filter_fn', we need
-            # to compose them, e.g. to respect import map whitelists
-            # and blacklists from higher up in the recursion tree.
+            # imap may introduce additional constraints on the
+            # existing ctx, such as a stricter filter_fn or a longer
+            # path_prefix.
+            #
+            # Compose them using _new_ctx() to pass along the updated
+            # context to the recursive import.
             self._import_path_from_self(mp, imap.file,
-                                        _new_ctx(ctx, _imap_filter(imap)))
+                                        _new_ctx(ctx, imap))
         else:
             self._malformed(f'{mp.abspath}: "self: import: {imp}" '
                             f'has invalid type {imptype}')
@@ -1519,7 +1530,7 @@ class Manifest:
         have_imports = []
         names = set()
         for pd in manifest['projects']:
-            project = self._load_project(pd, url_bases, defaults)
+            project = self._load_project(pd, url_bases, defaults, ctx)
             name = project.name
 
             if not _filter_ok(ctx.filter_fn, project):
@@ -1551,7 +1562,7 @@ class Manifest:
             self._import_from_project(project, imp, ctx)
 
     def _load_project(self, pd: Dict, url_bases: Dict[str, str],
-                      defaults: _defaults) -> Project:
+                      defaults: _defaults, ctx: _import_ctx) -> Project:
         # pd = project data (dictionary with values parsed from the
         # manifest)
 
@@ -1592,10 +1603,43 @@ class Manifest:
                 f'project {name} '
                 'has no remote or url and no default remote is set')
 
-        return Project(name, url, pd.get('revision', defaults.revision),
-                       pd.get('path', name), clone_depth=pd.get('clone-depth'),
-                       west_commands=pd.get('west-commands'),
-                       topdir=self.topdir, remote_name=remote)
+        # The project's path needs to respect any import: path-prefix,
+        # regardless of self._import_flags. The 'ignore' type flags
+        # just mean ignore the imported data. The path-prefix in this
+        # manifest affects the project no matter what.
+        imp = pd.get('import', None)
+        if isinstance(imp, dict):
+            pfx = self._load_imap(imp, f'project {name}').path_prefix
+        else:
+            pfx = ''
+
+        # Historically, path attributes came directly from the manifest data
+        # itself and were passed along to the Project constructor unmodified.
+        # When we added path-prefix support, we needed to introduce pathlib
+        # wrappers around the pd['path'] value as is done here.
+        #
+        # Since west is a git wrapper and git prefers to work with
+        # POSIX paths in general, we've decided for now to force paths
+        # to POSIX style in all circumstances. If this breaks
+        # anything, we can always revisit, maybe adding a 'nativepath'
+        # attribute or something like that.
+        path = (ctx.path_prefix / pfx / pd.get('path', name)).as_posix()
+
+        ret = Project(name, url, pd.get('revision', defaults.revision),
+                      path, clone_depth=pd.get('clone-depth'),
+                      west_commands=pd.get('west-commands'),
+                      topdir=self.topdir, remote_name=remote)
+
+        if self.topdir:
+            assert isinstance(ret.abspath, str)
+            apath = Path(ret.abspath)
+            topdir = Path(self.topdir)
+            if escapes_directory(apath, topdir) or apath == topdir:
+                self._malformed(f'project {name} absolute path {apath} '
+                                'is not a subdirectory of topdir ' +
+                                self.topdir)
+
+        return ret
 
     def _import_from_project(self, project: Project, imp: Any,
                              ctx: _import_ctx):
@@ -1621,10 +1665,10 @@ class Manifest:
                 self._import_from_project(project, subimp, ctx)
         elif imptype == dict:
             imap = self._load_imap(imp, f'project {project.name}')
-            # Similar comments about composing filters apply here as
+            # Similar comments about composing ctx and imap apply here as
             # they do in _import_from_self().
             self._import_path_from_project(project, imap.file,
-                                           _new_ctx(ctx, _imap_filter(imap)))
+                                           _new_ctx(ctx, imap))
         else:
             self._malformed(f'{project.name_and_path}: invalid import {imp} '
                             f'type: {imptype}')
@@ -1715,7 +1759,8 @@ class Manifest:
                           copy.pop('name-whitelist', []),
                           copy.pop('path-whitelist', []),
                           copy.pop('name-blacklist', []),
-                          copy.pop('path-blacklist', []))
+                          copy.pop('path-blacklist', []),
+                          copy.pop('path-prefix', ''))
 
         # Check that the value is OK.
         if copy:
@@ -1733,6 +1778,10 @@ class Manifest:
         elif not _is_imap_list(ret.path_blacklist):
             self._malformed(f'{src}: bad import path-blacklist '
                             f'{ret.path_blacklist}')
+        elif not isinstance(ret.path_prefix, str):
+            self._malformed(f'{src}: bad import path-prefix '
+                            f'{ret.path_prefix}; expected str, not '
+                            f'{type(ret.path_prefix)}')
 
         return ret
 
