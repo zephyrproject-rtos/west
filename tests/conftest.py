@@ -344,7 +344,7 @@ def add_tag(repo, tag, commit='HEAD', msg=None):
 
 def rev_parse(repo, revision):
     out = subprocess.check_output([GIT, 'rev-parse', revision], cwd=repo)
-    return out.decode(sys.getdefaultencoding())
+    return out.decode(sys.getdefaultencoding()).strip()
 
 def check_proj_consistency(actual, expected):
     # Check equality of all project fields (projects themselves are
