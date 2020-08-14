@@ -7,7 +7,6 @@
 Parser and abstract data types for west manifests.
 '''
 
-import collections
 import configparser
 import enum
 import errno
@@ -18,7 +17,7 @@ import shlex
 import subprocess
 import sys
 from typing import Any, Callable, Dict, Iterable, List, NoReturn, \
-    Optional, TYPE_CHECKING, Union
+    NamedTuple, Optional, TYPE_CHECKING, Union
 
 from packaging.version import parse as parse_version
 import pykwalify.core
@@ -88,7 +87,9 @@ _logger = logging.getLogger(__name__)
 
 # Manifest locating, parsing, loading, etc.
 
-_defaults = collections.namedtuple('_defaults', 'remote revision')
+class _defaults(NamedTuple):
+    remote: Optional[str]
+    revision: str
 
 _DEFAULT_REV = 'master'
 _WEST_YML = 'west.yml'
@@ -208,11 +209,13 @@ def _manifest_content_at(project: 'Project', path: PathType,
                                 f'path {path} revision {rev} '
                                 f'(git type: {ptype})')
 
-_import_map = collections.namedtuple('_import_map',
-                                     'file '
-                                     'name_whitelist path_whitelist '
-                                     'name_blacklist path_blacklist '
-                                     'path_prefix')
+class _import_map(NamedTuple):
+    file: str
+    name_whitelist: List[str]
+    path_whitelist: List[str]
+    name_blacklist: List[str]
+    path_blacklist: List[str]
+    path_prefix: str
 
 def _is_imap_list(value: Any) -> bool:
     # Return True if the value is a valid import map 'blacklist' or
@@ -258,15 +261,10 @@ def _is_imap_ok(imap: _import_map, project: 'Project') -> bool:
     else:
         return whitelisted or no_whitelists
 
-_import_ctx = collections.namedtuple('_import_ctx', [
-    # Known projects map, from name to Project:
-    'projects',
-    # Project -> Bool. True if OK to add a project to 'projects'. A
-    # None value is treated as a function which always returns True.
-    'filter_fn',
-    # pathlib.Path. Cumulative path-prefix for any parsed projects.
-    'path_prefix'
-])
+class _import_ctx(NamedTuple):
+    projects: Dict[str, 'Project']
+    filter_fn: ImapFilterFnType
+    path_prefix: Path
 
 def _new_ctx(ctx: _import_ctx, imap: _import_map) -> _import_ctx:
     # Combine the map data from "some-map" in a manifest's
