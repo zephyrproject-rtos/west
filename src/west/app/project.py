@@ -1084,7 +1084,12 @@ class ForAll(_ProjectCommand):
         for project in self._cloned_projects(args):
             log.banner(
                 f'running "{args.subcommand}" in {project.name_and_path}:')
-            rc = subprocess.Popen(args.subcommand, shell=True,
+            # Bandit: normally, shell=True is a security concern. In
+            # this case, the user has explicitly given us this command
+            # to execute in a shell. We are doing exactly what they
+            # are asking for and there's no security issue here that
+            # the user isn't responsible for understanding.
+            rc = subprocess.Popen(args.subcommand, shell=True,  # nosec
                                   cwd=project.abspath).wait()
             if rc:
                 failed.append(project)
