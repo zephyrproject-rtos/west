@@ -1,7 +1,15 @@
-Notes for maintainers cutting a release.
+Notes for maintainers.
 
 Pre-release test plan
 ---------------------
+
+0. If no release branch exists, fork the version numbers in the release branch
+   (vX.Y-branch) and the master branch. See "Cutting a release branch", below,
+   for details.
+
+   The rest of these steps should be done in the release branch::
+
+     git checkout vX.Y-branch
 
 1. Make tox happy on the following first-party platforms:
 
@@ -19,14 +27,8 @@ Pre-release test plan
    - Fedora
 
 3. Build alpha N (N=1 to start, then N=2 if you need more commits, etc.) and
-   upload to pypi.
-
-   Make sure to check if west.manifest.SCHEMA_VERSION also needs an update
-   before uploading. ::
-
-     git clean -ffdx
-     WEST_VERSION=X.YaN python3 setup.py sdist bdist_wheel
-     twine upload -u zephyr-project dist/*
+   upload to pypi. See "Building and uploading the release wheels" below for
+   a procedure.
 
 4. Install the alpha on test platforms. ::
 
@@ -59,16 +61,14 @@ Pre-release test plan
 
    (It's still a pass if ``west build`` requires ``--pristine``.)
 
-7. Assuming that all went well (if it didn't, go fix it and repeat),
-   get the version bump committed, either to master or the release branch as
-   appropriate. See below for release branch information.
+7. Assuming that all went well (if it didn't, go fix it and repeat), update
+   __version__ to 'X.Y.Z' (i.e. drop the 'aN' suffix that denotes alpha N), tag
+   the release (see "Tagging the release" for a procedure) and upload to PyPI
+   (see "Building and uploading the release wheels" for a procedure).
 
-   For the first release (e.g. vX.Y.0), master should point to the release
-   branch commit. Thereafter, the release branch is allowed to fork from master
-   to just take bugfixes etc.
-
-8. Push a commit to master updating version.py to vX.Y.99, kicking off
-   development for the next release.
+8. Send email to the Zephyr lists, announce@ and users@, notifying them of the
+   new release. Include 'git shortlog' data of the new commits since the last
+   release to give credit to all contributors.
 
 Building and uploading the release wheels
 -----------------------------------------
@@ -93,10 +93,45 @@ Create and push a GPG signed tag. ::
 
   git push origin vX.Y.Z
 
-Cut a release branch
---------------------
+Cutting a release branch
+------------------------
 
-If you've cut a new minor version (vX.Y.0), also cut a release branch,
-vX.Y-branch. Subsequent fixes for versions vX.Y.Z should go to that branch
-after being backported from master (or the other way around in case of an
-urgent hotfix).
+To cut a new release branch, just get confirmation from the other
+maintainers that it's time and push it manually to GitHub.
+
+The release branch for minor version vX.Y.0 should be named "vX.Y-branch".
+
+Subsequent fixes for patch versions vX.Y.Z should go to vX.Y-branch after
+being backported from master (or the other way around in case of an urgent
+hotfix).
+
+In vX.Y-branch, in src/west/version.py, set __version__ to X.Y.0a1.
+Don't include this commit in the master branch.
+
+Summary of the outcome:
+
+- precondition: vX.Y-branch does not exist, master is at version X.(Y-1).99
+- postcondition: v.X.Y-branch exists and is at version vX.Y.0a1, master is at
+  version vX.Y.99
+
+Check if west.manifest.SCHEMA_VERSION also needs an update. The rule is that
+SCHEMA_VERSION should be updated to X.Y if this release is introducing
+manifest schema changes that earlier versions of west cannot parse.
+
+Don't change SCHEMA_VERSION from its current value if the manifest syntax is
+fully compatible with what west X.(Y-1) can handle.
+
+Don't introduce incompatible manifest changes in patch versions. That violates
+semantic versioning. If v0.7.3 can parse it, v0.7.2 should be able to parse it,
+too.
+
+Send this as a pull request to the newly created release branch. (This
+requires a PR and review because getting the release number wrong would
+upload potentially buggy software to anyone who runs 'pip install west'.)
+
+In master (but not the release branch), set __version__ to X.Y.99. Send this
+commit as a PR to master. Make sure any SCHEMA_VERSION updates are reflected in
+master too.
+
+From this point forward, the master branch is moving independently from the
+release branch.
