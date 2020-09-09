@@ -428,24 +428,15 @@ class _ManifestImportDepth(ManifestImportFailed):
 class ImportFlag(enum.IntFlag):
     '''Bit flags for handling imports when resolving a manifest.
 
-    The DEFAULT (0) value allows reading the file system to resolve
-    "self: import:", and running git to resolve a "projects:" import.
-    Other flags:
-
-    - IGNORE: ignore projects added via "import:" in "self:" and "projects:"
-    - FORCE_PROJECTS: always invoke importer callback for "projects:" imports
-    - IGNORE_PROJECTS: ignore projects added via "import:" in "projects:" only;
-      including any projects added via "import:" in "self:"
-
     Note that any "path-prefix:" values set in an "import:" still take
     effect for the project itself even when IGNORE or IGNORE_PROJECTS are
-    given. For example, in this manifest:
+    given. For example, in this manifest::
 
-    manifest:
-      projects:
-      - name: foo
-        import:
-          path-prefix: bar
+       manifest:
+         projects:
+         - name: foo
+           import:
+             path-prefix: bar
 
     Project 'foo' has path 'bar/foo' regardless of whether IGNORE or
     IGNORE_PROJECTS is given. This ensures the Project has the same path
@@ -453,9 +444,18 @@ class ImportFlag(enum.IntFlag):
     ignored.
     '''
 
+    #: The default value, 0, reads the file system to resolve
+    #: "self: import:", and runs git to resolve a "projects:" import.
     DEFAULT = 0
+
+    #: Ignore projects added via "import:" in "self:" and "projects:"
     IGNORE = 1
+
+    #: Always invoke importer callback for "projects:" imports
     FORCE_PROJECTS = 2
+
+    #: Ignore projects added via "import:" : in "projects:" only;
+    #: including any projects added via "import:" : in "self:"
     IGNORE_PROJECTS = 4
 
 def _flags_ok(flags: ImportFlag) -> bool:
