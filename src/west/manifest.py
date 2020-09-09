@@ -48,7 +48,7 @@ QUAL_REFS_WEST = 'refs/west/'
 #:
 #: This value changes when a new version of west includes new manifest
 #: file features not supported by earlier versions of west.
-SCHEMA_VERSION = '0.7'
+SCHEMA_VERSION = '0.8'
 # MAINTAINERS:
 #
 # If you want to update the schema version, you need to make sure that
