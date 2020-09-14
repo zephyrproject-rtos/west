@@ -627,6 +627,19 @@ def test_init_local_with_manifest_filename(repos_tmpdir):
     cmd('update')
 
 
+def test_init_local_with_empty_path(repos_tmpdir):
+    # Test "west init -l ." + "west update".
+    # Regression test for:
+    # https://github.com/zephyrproject-rtos/west/issues/435
+
+    local_manifest_dir = repos_tmpdir / 'workspace' / 'zephyr'
+    clone(str(repos_tmpdir / 'repos' / 'zephyr'), str(local_manifest_dir))
+    os.chdir(local_manifest_dir)
+    cmd('init -l .')
+    cmd('update')
+    assert (repos_tmpdir / 'workspace' / 'subdir' / 'Kconfiglib').check(dir=1)
+
+
 def test_init_with_manifest_filename(repos_tmpdir):
     # Test 'west init --mf' on a normal repo
 
