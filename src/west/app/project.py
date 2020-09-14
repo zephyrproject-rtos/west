@@ -213,7 +213,12 @@ class Init(_ProjectCommand):
         if args.manifest_rev is not None:
             log.die('--mr cannot be used with -l')
 
-        manifest_dir = Path(args.directory or os.getcwd())
+        # We need to resolve this to handle the case that args.directory
+        # is '.'. In that case, Path('.').parent is just Path('.') instead of
+        # Path('..').
+        #
+        # https://docs.python.org/3/library/pathlib.html#pathlib.PurePath.parent
+        manifest_dir = Path(args.directory or os.getcwd()).resolve()
         manifest_filename = args.manifest_file or 'west.yml'
         manifest_file = manifest_dir / manifest_filename
         topdir = manifest_dir.parent
