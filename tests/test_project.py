@@ -942,6 +942,75 @@ def test_update_recovery(tmpdir):
     assert prev == rgood
 
 
+def setup_cache_workspace(workspace, foo_head, bar_head):
+    # Shared helper code that sets up a workspace used to test the
+    # 'west update --foo-cache' options.
+
+    create_workspace(workspace)
+
+    manifest_project = workspace / 'mp'
+    with open(manifest_project / 'west.yml', 'w') as f:
+        f.write(f'''
+        manifest:
+          projects:
+          - name: foo
+            path: subdir/foo
+            url: should-not-be-fetched
+            revision: {foo_head}
+          - name: bar
+            url: should-not-be-fetched
+            revision: {bar_head}
+        ''')
+
+
+def test_update_name_cache(tmpdir):
+    # Test that 'west update --name-cache' works and doesn't hit the
+    # network if it doesn't have to.
+
+    name_cache_dir = tmpdir / 'name_cache'
+
+    create_repo(name_cache_dir / 'foo')
+    create_repo(name_cache_dir / 'bar')
+
+    foo_head = rev_parse(name_cache_dir / 'foo', 'HEAD')
+    bar_head = rev_parse(name_cache_dir / 'bar', 'HEAD')
+
+    workspace = tmpdir / 'workspace'
+    setup_cache_workspace(workspace, foo_head, bar_head)
+
+    cmd(f'update --name-cache {name_cache_dir}', cwd=workspace)
+
+    assert (workspace / 'subdir' / 'foo').check(dir=1)
+    assert (workspace / 'bar').check(dir=1)
+
+    assert rev_parse(workspace / 'subdir' / 'foo', 'HEAD') == foo_head
+    assert rev_parse(workspace / 'bar', 'HEAD') == bar_head
+
+
+def test_update_path_cache(tmpdir):
+    # Test that 'west update --path-cache' works and doesn't hit the
+    # network if it doesn't have to.
+
+    path_cache_dir = tmpdir / 'path_cache_dir'
+
+    create_repo(path_cache_dir / 'subdir' / 'foo')
+    create_repo(path_cache_dir / 'bar')
+
+    foo_head = rev_parse(path_cache_dir / 'subdir' / 'foo', 'HEAD')
+    bar_head = rev_parse(path_cache_dir / 'bar', 'HEAD')
+
+    workspace = tmpdir / 'workspace'
+    setup_cache_workspace(workspace, foo_head, bar_head)
+
+    cmd(f'update --path-cache {path_cache_dir}', cwd=workspace)
+
+    assert (workspace / 'subdir' / 'foo').check(dir=1)
+    assert (workspace / 'bar').check(dir=1)
+
+    assert rev_parse(workspace / 'subdir' / 'foo', 'HEAD') == foo_head
+    assert rev_parse(workspace / 'bar', 'HEAD') == bar_head
+
+
 def test_init_again(west_init_tmpdir):
     # Test that 'west init' on an initialized tmpdir errors out
     # with a message that indicates it's already initialized.

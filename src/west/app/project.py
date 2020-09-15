@@ -732,6 +732,18 @@ class Update(_ProjectCommand):
                             update operations''')
 
         group = parser.add_argument_group(
+            title='local project clone caches',
+            description=textwrap.dedent('''\
+            Projects are usually initialized by fetching from their URLs, but
+            they can also be cloned from caches on the local file system.'''))
+        group.add_argument('--name-cache',
+                           help='''cached repositories are in subdirectories
+                           matching the names of projects to update''')
+        group.add_argument('--path-cache',
+                           help='''cached repositories are in the same relative
+                           paths as the workspace being updated''')
+
+        group = parser.add_argument_group(
             title='fetching behavior',
             description='By default, west update tries to avoid fetching.')
         group.add_argument('-f', '--fetch', dest='fetch_strategy',
@@ -1060,8 +1072,7 @@ class Update(_ProjectCommand):
             for stat, value in stats.items():
                 log.inf(f'  {stat}: {value} sec')
 
-    @staticmethod
-    def ensure_cloned(project, stats, take_stats):
+    def ensure_cloned(self, project, stats, take_stats):
         # update() helper. Make sure project is cloned and initialized.
 
         if take_stats:
@@ -1072,17 +1083,80 @@ class Update(_ProjectCommand):
         if not cloned:
             if take_stats:
                 start = perf_counter()
-
-            log.small_banner(f'{project.name}: initializing')
-            project.git(['init', project.abspath], cwd=util.west_topdir())
-            # This remote is added as a convenience for the user.
-            # However, west always fetches project data by URL, not
-            # remote name. The user is therefore free to change the
-            # URL of this remote.
-            project.git(f'remote add -- {project.remote_name} {project.url}')
-
+            self.init_project(project)
             if take_stats:
                 stats['init'] = perf_counter() - start
+
+    def init_project(self, project):
+        # update() helper. Initialize an uncloned project repository.
+        # If there's a local clone available, it uses that. Otherwise,
+        # it just creates the local repository and sets up the
+        # convenience remote without fetching anything from the network.
+
+        cache_dir = self.project_cache(project)
+
+        if cache_dir is None:
+            log.small_banner(f'{project.name}: initializing')
+            project.git(['init', project.abspath], cwd=self.topdir)
+            # This remote is added as a convenience for the user.
+            # However, west always fetches project data by URL, not name.
+            # The user is therefore free to change the URL of this remote.
+            project.git(f'remote add -- {project.remote_name} {project.url}')
+        else:
+            log.small_banner(f'{project.name}: cloning from {cache_dir}')
+            # Clone the project from a local cache repository. Set the
+            # remote name to the value that would be used without a
+            # cache.
+            project.git(['clone', '--origin', project.remote_name,
+                         cache_dir, project.abspath], cwd=self.topdir)
+            # Reset the remote's URL to the project's fetch URL.
+            project.git(['remote', 'set-url', project.remote_name,
+                         project.url])
+            # Make sure we have a detached HEAD so we can delete the
+            # local branch created by git clone.
+            project.git('checkout --quiet --detach HEAD')
+            # Find the name of any local branch created by git clone.
+            # West commits to only touching 'manifest-rev' in the
+            # local branch name space.
+            local_branches = project.git(
+                ['for-each-ref', '--format', '%(refname)', 'refs/heads/*'],
+                capture_stdout=True).stdout.decode('utf-8').splitlines()
+            # This should contain at most one branch in current
+            # versions of git, but we might as well get them all just
+            # in case that changes.
+            for branch in local_branches:
+                if not branch:
+                    continue
+                # This is safe: it can't be garbage collected by git before we
+                # have a chance to use it, because we have another ref, namely
+                # f'refs/remotes/{project.remote_name}/{branch}'.
+                project.git(['update-ref', '-d', branch])
+
+    def project_cache(self, project):
+        # Find the absolute path to a pre-existing local clone of a project
+        # and return it. If the search fails, return None.
+        name_cache, path_cache = self.args.name_cache, self.args.path_cache
+
+        if name_cache is not None:
+            maybe = Path(name_cache) / project.name
+            if maybe.is_dir():
+                log.dbg(f'found {project.name} in --name-cache {name_cache}',
+                        level=log.VERBOSE_VERY)
+                return os.fspath(maybe)
+            else:
+                log.dbg(f'{project.name} not in --name-cache {name_cache}',
+                        level=log.VERBOSE_VERY)
+        elif self.args.path_cache is not None:
+            maybe = Path(self.args.path_cache) / project.path
+            if maybe.is_dir():
+                log.dbg(f'found {project.path} in --path-cache {path_cache}',
+                        level=log.VERBOSE_VERY)
+                return os.fspath(maybe)
+            else:
+                log.dbg(f'{project.path} not in --path-cache {path_cache}',
+                        level=log.VERBOSE_VERY)
+
+        return None
 
     def set_new_manifest_rev(self, project, stats, take_stats):
         # update() helper. Make sure project's manifest-rev is set to
@@ -1132,7 +1206,7 @@ class Update(_ProjectCommand):
             stats['check HEAD is ok'] = perf_counter() - start
         if not head_ok:
             # If nothing is checked out (which usually only happens if
-            # ensure_cloned() above had to create a new repo), check out
+            # we called Update.init_project() above), check out
             # 'manifest-rev' in a detached HEAD state.
             #
             # Otherwise, the initial state would have nothing checked
