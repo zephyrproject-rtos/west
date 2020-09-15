@@ -164,9 +164,11 @@ class Init(_ProjectCommand):
         parser.add_argument('--mf', '--manifest-file', dest='manifest_file',
                             help='manifest file name to use')
         parser.add_argument('-l', '--local', action='store_true',
-                            help='''use an existing local manifest repository
-                            instead of cloning one; cannot be combined with
-                            -m or --mr.''')
+                            help='''use "directory" as an existing local
+                            manifest repository instead of cloning one from
+                            MANIFEST_URL; .west is created next to "directory"
+                            in this case, and manifest.path points at
+                            "directory"''')
 
         parser.add_argument(
             'directory', nargs='?', default=None,
