@@ -1652,7 +1652,7 @@ class Manifest:
             assert isinstance(ret.abspath, str)
             apath = Path(ret.abspath)
             topdir = Path(self.topdir)
-            if escapes_directory(apath, topdir) or apath == topdir:
+            if escapes_directory(apath.parent, topdir) or apath == topdir:
                 self._malformed(f'project {name} absolute path {apath} '
                                 'is not a subdirectory of topdir ' +
                                 self.topdir)
