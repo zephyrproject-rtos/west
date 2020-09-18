@@ -72,7 +72,7 @@ ImportedContentType = Optional[Union[str, List[str]]]
 ImporterType = Callable[['Project', str], ImportedContentType]
 
 # Type for an import map filter function, which takes a Project and
-# returns a bool. The various whitelists and blacklists are used to
+# returns a bool. The various allowlists and blocklists are used to
 # create these filter functions. A None value is treated as a function
 # which always returns True.
 ImapFilterFnType = Optional[Callable[['Project'], bool]]
@@ -214,15 +214,15 @@ def _manifest_content_at(project: 'Project', path: PathType,
 
 class _import_map(NamedTuple):
     file: str
-    name_whitelist: List[str]
-    path_whitelist: List[str]
-    name_blacklist: List[str]
-    path_blacklist: List[str]
+    name_allowlist: List[str]
+    path_allowlist: List[str]
+    name_blocklist: List[str]
+    path_blocklist: List[str]
     path_prefix: str
 
 def _is_imap_list(value: Any) -> bool:
-    # Return True if the value is a valid import map 'blacklist' or
-    # 'whitelist'. Empty strings and lists are OK, and list nothing.
+    # Return True if the value is a valid import map 'blocklist' or
+    # 'allowlist'. Empty strings and lists are OK, and list nothing.
 
     return (isinstance(value, str) or
             (isinstance(value, list) and
@@ -232,8 +232,8 @@ def _imap_filter(imap: _import_map) -> ImapFilterFnType:
     # Returns either None (if no filter is necessary) or a
     # filter function for the given import map.
 
-    if any([imap.name_whitelist, imap.path_whitelist,
-            imap.name_blacklist, imap.path_blacklist]):
+    if any([imap.name_allowlist, imap.path_allowlist,
+            imap.name_blocklist, imap.path_blocklist]):
         return lambda project: _is_imap_ok(imap, project)
     else:
         return None
@@ -251,18 +251,18 @@ def _is_imap_ok(imap: _import_map, project: 'Project') -> bool:
     # and False otherwise.
 
     nwl, pwl, nbl, pbl = [_ensure_list(lst) for lst in
-                          (imap.name_whitelist, imap.path_whitelist,
-                           imap.name_blacklist, imap.path_blacklist)]
+                          (imap.name_allowlist, imap.path_allowlist,
+                           imap.name_blocklist, imap.path_blocklist)]
     name = project.name
     path = Path(project.path)
-    blacklisted = (name in nbl) or any(path.match(p) for p in pbl)
-    whitelisted = (name in nwl) or any(path.match(p) for p in pwl)
-    no_whitelists = not (nwl or pwl)
+    blocked = (name in nbl) or any(path.match(p) for p in pbl)
+    allowed = (name in nwl) or any(path.match(p) for p in pwl)
+    no_allowlists = not (nwl or pwl)
 
-    if blacklisted:
-        return whitelisted
+    if blocked:
+        return allowed
     else:
-        return whitelisted or no_whitelists
+        return allowed or no_allowlists
 
 class _import_ctx(NamedTuple):
     projects: Dict[str, 'Project']
@@ -1787,29 +1787,43 @@ class Manifest:
 
         # Work on a copy in case the caller needs the full value.
         copy = dict(imp)
+        # Preserve deprecated whitelist/blacklist terms
+        name_allowlist = copy.pop(
+            'name-allowlist', copy.pop('name-whitelist', [])
+        )
+        path_allowlist = copy.pop(
+            'path-allowlist', copy.pop('path-whitelist', [])
+        )
+        name_blocklist = copy.pop(
+            'name-blocklist', copy.pop('name-blacklist', [])
+        )
+        path_blocklist = copy.pop(
+            'path-blocklist', copy.pop('path-blacklist', [])
+        )
+
         ret = _import_map(copy.pop('file', _WEST_YML),
-                          copy.pop('name-whitelist', []),
-                          copy.pop('path-whitelist', []),
-                          copy.pop('name-blacklist', []),
-                          copy.pop('path-blacklist', []),
+                          name_allowlist,
+                          path_allowlist,
+                          name_blocklist,
+                          path_blocklist,
                           copy.pop('path-prefix', ''))
 
         # Check that the value is OK.
         if copy:
             # We popped out all of the valid keys already.
             self._malformed(f'{src}: invalid import contents: {copy}')
-        elif not _is_imap_list(ret.name_whitelist):
-            self._malformed(f'{src}: bad import name-whitelist '
-                            f'{ret.name_whitelist}')
-        elif not _is_imap_list(ret.path_whitelist):
-            self._malformed(f'{src}: bad import path-whitelist '
-                            f'{ret.path_whitelist}')
-        elif not _is_imap_list(ret.name_blacklist):
-            self._malformed(f'{src}: bad import name-blacklist '
-                            f'{ret.name_blacklist}')
-        elif not _is_imap_list(ret.path_blacklist):
-            self._malformed(f'{src}: bad import path-blacklist '
-                            f'{ret.path_blacklist}')
+        elif not _is_imap_list(ret.name_allowlist):
+            self._malformed(f'{src}: bad import name-allowlist '
+                            f'{ret.name_allowlist}')
+        elif not _is_imap_list(ret.path_allowlist):
+            self._malformed(f'{src}: bad import path-allowlist '
+                            f'{ret.path_allowlist}')
+        elif not _is_imap_list(ret.name_blocklist):
+            self._malformed(f'{src}: bad import name-blocklist '
+                            f'{ret.name_blocklist}')
+        elif not _is_imap_list(ret.path_blocklist):
+            self._malformed(f'{src}: bad import path-blocklist '
+                            f'{ret.path_blocklist}')
         elif not isinstance(ret.path_prefix, str):
             self._malformed(f'{src}: bad import path-prefix '
                             f'{ret.path_prefix}; expected str, not '
