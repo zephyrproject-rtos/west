@@ -1896,9 +1896,76 @@ def test_import_flags_ignore(tmpdir):
     ''', import_flags=ImportFlag.IGNORE)
     assert m.get_projects(['foo'])
 
-def test_import_map_name_whitelist(manifest_repo):
-    # This tests an example from the documentation which uses
-    # name-whitelist.
+def test_import_map_name_allowlist(manifest_repo):
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''
+        manifest:
+          projects:
+            - name: mainline
+              url: https://git.example.com/mainline/manifest
+              import:
+                name-allowlist:
+                  - mainline-app
+                  - lib2
+            - name: downstream-app
+              url: https://git.example.com/downstream/app
+            - name: lib3
+              path: libraries/lib3
+              url: https://git.example.com/downstream/lib3
+          self:
+            path: mp
+        ''')
+
+    mainline = manifest_repo.topdir / 'mainline'
+    create_repo(mainline)
+    create_branch(mainline, 'manifest-rev', checkout=True)
+    add_commit(mainline, 'mainline/west.yml',
+               files={'west.yml':
+                      '''
+                      manifest:
+                        projects:
+                          - name: mainline-app
+                            path: examples/app
+                            url: https://git.example.com/mainline/app
+                          - name: lib
+                            path: libraries/lib
+                            url: https://git.example.com/mainline/lib
+                          - name: lib2
+                            path: libraries/lib2
+                            url: https://git.example.com/mainline/lib2
+                      '''})
+    checkout_branch(mainline, 'master')
+
+    actual = MF().projects
+
+    expected = M('''\
+    projects:
+      - name: mainline
+        url: https://git.example.com/mainline/manifest
+      - name: downstream-app
+        url: https://git.example.com/downstream/app
+      - name: lib3
+        path: libraries/lib3
+        url: https://git.example.com/downstream/lib3
+      - name: mainline-app
+        path: examples/app
+        url: https://git.example.com/mainline/app
+      - name: lib2
+        path: libraries/lib2
+        url: https://git.example.com/mainline/lib2
+    ''',
+                 manifest_path='mp',
+                 topdir=manifest_repo.topdir).projects
+
+    for a, e in zip(actual, expected):
+        check_proj_consistency(a, e)
+
+def test_import_map_name_allowlist_legacy(manifest_repo):
+    # This tests the legacy support for blocklists and allowlists
+    # through the blacklist and whitelist keywords which cannot
+    # be removed because they are part of project's west.yaml
+    # and this would break users ability to use git bisect.
 
     with open(manifest_repo / 'west.yml', 'w') as f:
         f.write('''
@@ -1964,7 +2031,79 @@ def test_import_map_name_whitelist(manifest_repo):
         check_proj_consistency(a, e)
 
 def test_import_map_filter_propagation(manifest_repo):
-    # Blacklists and whitelists need to propagate down imports.
+    # blocklists and allowlists need to propagate down imports.
+
+    # For this test, we'll write a west.yml which imports level2.yml
+    # with various allowlist and blocklist settings. The file
+    # level2.yml exists only to import level3.yml, adding a layer of
+    # imports in between west.yml (which defines the filters)
+    # and level3.yml (which defines the projects being filtered).
+    #
+    # We then make sure the filters are applied on level3.yml's
+    # projects in the final resolved manifest.
+
+    with open(manifest_repo / 'level2.yml', 'w') as f:
+        f.write('''
+        manifest:
+          projects: []
+          self:
+            import: level3.yml
+        ''')
+
+    with open(manifest_repo / 'level3.yml', 'w') as f:
+        f.write('''
+        manifest:
+          defaults: {remote: r}
+          remotes: [{name: r, url-base: u}]
+          projects:
+          - name: n1
+            path: p1
+          - name: n2
+            path: p2
+        ''')
+
+    # Since we need a few different test cases with the above setup,
+    # introduce some helpers. It might be nicer to make this a
+    # parametrized test at some point, but this will do.
+
+    import_map = {}
+    west_yml = {'manifest':
+                {'projects': [],
+                 'self': {'import': import_map}}}
+
+    def load_manifest(import_map_vals):
+        import_map.clear()
+        import_map['file'] = 'level2.yml'
+        import_map.update(import_map_vals)
+        with open(manifest_repo / 'west.yml', 'w') as f:
+            f.write(yaml.dump(west_yml))
+        return MF()
+
+    projects = load_manifest({'name-allowlist': 'n2'}).projects
+    assert len(projects) == 2
+    assert projects[1].name == 'n2'
+
+    projects = load_manifest({'name-blocklist': 'n2'}).projects
+    assert len(projects) == 2
+    assert projects[1].name == 'n1'
+
+    projects = load_manifest({'name-blocklist': 'n2',
+                              'name-allowlist': 'n2'}).projects
+    assert len(projects) == 2
+    assert projects[1].name == 'n2'
+
+    projects = load_manifest({'path-blocklist': 'p*'}).projects
+    assert len(projects) == 1
+
+    projects = load_manifest({'path-blocklist': 'p1'}).projects
+    assert len(projects) == 2
+    assert projects[1].name == 'n2'
+
+def test_import_map_filter_propagation_legacy(manifest_repo):
+    # This tests the legacy support for blocklists and allowlists
+    # through the blacklist and whitelist keywords which cannot
+    # be removed because they are part of project's west.yaml
+    # and this would break users ability to use git bisect.
 
     # For this test, we'll write a west.yml which imports level2.yml
     # with various whitelist and blacklist settings. The file
