@@ -24,7 +24,7 @@ import pykwalify.core
 import yaml
 
 from west import util
-from west.util import PathType, escapes_directory
+from west.util import PathType
 import west.configuration as cfg
 
 #
@@ -1648,14 +1648,28 @@ class Manifest:
                       west_commands=pd.get('west-commands'),
                       topdir=self.topdir, remote_name=remote)
 
-        if self.topdir:
-            assert isinstance(ret.abspath, str)
-            apath = Path(ret.abspath)
-            topdir = Path(self.topdir)
-            if escapes_directory(apath, topdir) or apath == topdir:
-                self._malformed(f'project {name} absolute path {apath} '
-                                'is not a subdirectory of topdir ' +
-                                self.topdir)
+        # Make sure the return Project's path does not escape the
+        # workspace. We can't use escapes_directory() as that
+        # resolves paths, which has proven to break some existing
+        # users who use symlinks to existing project repositories
+        # outside the workspace as a cache.
+        #
+        # Instead, normalize the path and make sure it's neither
+        # absolute nor starts with a '..'. This is intended to be
+        # a purely lexical operation which should therefore ignore
+        # symbolic links.
+        ret_norm = os.path.normpath(ret.path)
+
+        if os.path.isabs(ret_norm):
+            self._malformed(f'project "{ret.name}" has absolute path '
+                            f'{ret.path}; this must be relative to the '
+                            f'workspace topdir' +
+                            (f' ({self.topdir})' if self.topdir else ''))
+
+        if ret_norm.startswith('..'):
+            self._malformed(f'project "{name}" path {ret.path} '
+                            f'normalizes to {ret_norm}, which escapes '
+                            f'the workspace topdir')
 
         return ret
 

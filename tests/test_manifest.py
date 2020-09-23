@@ -2243,7 +2243,7 @@ def test_import_path_prefix_no_escape(manifest_repo):
                reconfigure=False)
     with pytest.raises(MalformedManifest) as excinfo:
         MF(topdir=topdir, import_flags=ImportFlag.IGNORE)
-    assert 'is not a subdirectory' in str(excinfo.value)
+    assert 'escapes the workspace topdir' in str(excinfo.value)
 
 @pytest.mark.skipif(WEST_SKIP_SLOW_TESTS,
                     reason='use WEST_SKIP_SLOW_TESTS=0 to enable')
