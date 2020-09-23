@@ -1,0 +1,8 @@
+# Project paths must not escape the workspace topdir after
+# normalization.
+
+manifest:
+  projects:
+    - name: nope
+      url: ignore-me
+      path: this/is/../../../not-ok
