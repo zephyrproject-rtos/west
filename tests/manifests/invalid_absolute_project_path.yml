@@ -1,0 +1,7 @@
+# Project paths must be relative.
+
+manifest:
+  projects:
+    - name: nope
+      url: ignore-me
+      path: /this/is/wrong
