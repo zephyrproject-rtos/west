@@ -586,7 +586,6 @@ def test_manifest_project():
     assert mp.revision == 'HEAD'
     assert mp.clone_depth is None
 
-@pytest.mark.xfail()
 def test_self_tag():
     # Manifests may contain a self section describing the manifest
     # repository. It should work with multiple projects and remotes as

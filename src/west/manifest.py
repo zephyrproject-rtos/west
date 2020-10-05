@@ -1395,7 +1395,14 @@ class Manifest:
         # Handle the "self:" section in the manifest data.
 
         slf = manifest.get('self', {})
-        path = slf.get('path', path_hint)
+        if 'path' in slf:
+            path = slf['path']
+            if path is None:
+                self._malformed(f'self: path: is {path}; this value '
+                                'must be nonempty if present')
+        else:
+            path = path_hint
+
         mp = ManifestProject(path=path, topdir=self.topdir,
                              west_commands=slf.get('west-commands'))
 
