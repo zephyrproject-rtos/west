@@ -586,6 +586,7 @@ def test_manifest_project():
     assert mp.revision == 'HEAD'
     assert mp.clone_depth is None
 
+@pytest.mark.xfail()
 def test_self_tag():
     # Manifests may contain a self section describing the manifest
     # repository. It should work with multiple projects and remotes as
@@ -633,6 +634,14 @@ def test_self_tag():
     - name: p
       url: u
     ''', manifest_path='mpath').projects[0].path == 'mpath'
+
+    # Empty paths are an error.
+    with pytest.raises(MalformedManifest) as e:
+        M('''\
+        projects: []
+        self:
+          path:''')
+    assert 'must be nonempty if present' in str(e.value)
 
 #########################################
 # File system tests
