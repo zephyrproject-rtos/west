@@ -1313,16 +1313,16 @@ def _post_checkout_help(project, branch, sha, is_ancestor):
         # print a message that makes it easy to get back,
         # no matter where in the workspace os.getcwd() is.
         log.wrn(f'left behind {project.name} branch "{branch}"; '
-                f'to switch back to it (fast forward), use: '
-                f'git -C {rel} checkout {branch}')
+                f'to switch back to it (fast forward):\n'
+                f'  git -C {rel} checkout {branch}')
         log.dbg('(To do this automatically in the future,',
                 'use "west update --keep-descendants".)')
     else:
         # Tell the user how they could rebase by hand, and
         # point them at west update --rebase.
         log.wrn(f'left behind {project.name} branch "{branch}"; '
-                f'to rebase onto the new HEAD: '
-                f'git -C {rel} rebase {sha} {branch}')
+                f'to rebase onto the new HEAD:\n'
+                f'  git -C {rel} rebase {sha} {branch}')
         log.dbg('(To do this automatically in the future,',
                 'use "west update --rebase".)')
 
