@@ -862,11 +862,6 @@ class Update(_ProjectCommand):
         else:
             return 'smart'
 
-    def fetch_missing_imports(self, args):
-        self.fs = 'always'      # just to be safe -- TODO needed?
-        self.manifest = Manifest.from_file(topdir=self.topdir,
-                                           importer=self.update_importer)
-
     def update(self, project):
         if self.args.stats:
             stats = dict()
