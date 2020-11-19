@@ -19,6 +19,14 @@
 #
 # --------------------------------------------------------------
 
+schema;groups:
+  type: seq
+  sequence:
+    - type: str
+    - type: int
+    - type: float
+  matching: any
+
 type: map
 mapping:
   # The "version" key is optional. It's the minimum version manifest
@@ -107,6 +115,16 @@ mapping:
           import:
             required: false
             type: any
+          groups:
+            required: false
+            include: groups
+
+  # If present, an allowlist/blocklist of project groups. Prefix a
+  # group name with "-" to block it. Give a group name as-is to
+  # allow it.
+  groups:
+    required: false
+    include: groups
 
   # The "self" key specifies values for the project containing the manifest
   # file (the "manifest repository").
