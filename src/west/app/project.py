@@ -26,6 +26,7 @@ from west.commands import WestCommand, CommandError
 from west.manifest import ImportFlag, Manifest, MANIFEST_PROJECT_INDEX, \
     ManifestProject, _manifest_content_at, ManifestImportFailed, \
     _ManifestImportDepth, ManifestVersionError, MalformedManifest
+from west.manifest import is_group as is_manifest_group
 from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
 from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
 from west.manifest import QUAL_REFS_WEST as QUAL_REFS
@@ -705,11 +706,19 @@ class Update(_ProjectCommand):
                            manifest-rev instead (leaving behind partial
                            rebases on error)''')
 
+        group = parser.add_argument_group(
+            title='advanced options')
+        group.add_argument('-g', '--groups', action='append', default=[],
+                           help='''proceed if GROUPS was appended to
+                           manifest.groups''')
+
         group = parser.add_argument_group('deprecated options')
         group.add_argument('-x', '--exclude-west', action='store_true',
                            help='ignored for backwards compatibility')
 
-        self._add_projects_arg(parser)
+        parser.add_argument('projects', metavar='PROJECT', nargs='*',
+                            help='''projects (by name or path) to operate on;
+                            defaults to all active projects''')
 
         return parser
 
@@ -720,6 +729,21 @@ class Update(_ProjectCommand):
         self.args = args
         if args.exclude_west:
             log.wrn('ignoring --exclude-west')
+
+        self.extra_groups = []
+
+        def handle(group):
+            group = group.strip()
+            if not is_manifest_group(group, dash_ok=True):
+                log.die(f'invalid --groups item {group}')
+            self.extra_groups.append(group)
+
+        for group in args.groups:
+            if ',' in group:
+                for split_group in group.split(','):
+                    handle(split_group)
+            else:
+                handle(group)
 
         # We can't blindly call self._projects() here: manifests with
         # imports are limited to plain 'west update', and cannot use
@@ -743,15 +767,19 @@ class Update(_ProjectCommand):
         self.updated = set()
         self.args = args
 
-        manifest = Manifest.from_file(importer=self.update_importer,
-                                      import_flags=ImportFlag.FORCE_PROJECTS)
+        self.manifest = Manifest.from_file(
+            importer=self.update_importer,
+            import_flags=ImportFlag.FORCE_PROJECTS)
 
         failed = []
-        for project in manifest.projects:
+        for project in self.manifest.projects:
             if (isinstance(project, ManifestProject) or
                     project.name in self.updated):
                 continue
             try:
+                if not self.project_is_active(project):
+                    log.dbg(f'project {project.name}: inactive, skipped')
+                    continue
                 self.update(project)
                 self.updated.add(project.name)
             except subprocess.CalledProcessError:
@@ -763,6 +791,14 @@ class Update(_ProjectCommand):
             if not project.is_cloned():
                 log.die("manifest repository {project.abspath} was deleted")
         else:
+            # There's no need to call self.project_is_active(),
+            # because the Manifest API guarantees that 'groups' cannot
+            # be combined with 'import' within a single project.
+            #
+            # That's good, because the semantics would be kind of hard
+            # to specify in this case.
+            assert not project.groups
+
             self.update(project)
         self.updated.add(project.name)
 
@@ -803,6 +839,7 @@ class Update(_ProjectCommand):
 
         if not self.has_manifest or self.manifest.has_imports:
             projects = self.toplevel_projects(args)
+            assert self.has_manifest  # toplevel_projects() must ensure this.
         else:
             projects = self._projects(args.projects)
 
@@ -811,6 +848,9 @@ class Update(_ProjectCommand):
             if isinstance(project, ManifestProject):
                 continue
             try:
+                if not self.project_is_active(project):
+                    log.dbg(f'project {project.name}: skipped, inactive')
+                    continue
                 self.update(project)
             except subprocess.CalledProcessError:
                 failed.append(project)
@@ -820,23 +860,25 @@ class Update(_ProjectCommand):
         # Return a list of projects from args.projects, or scream and
         # die if any projects are either unknown or not defined in the
         # manifest repository.
+        #
+        # As a side effect, ensures self.manifest is set.
 
         ids = args.projects
         assert ids
 
-        mr_projects, mr_unknown = projects_unknown(
-            Manifest.from_file(import_flags=ImportFlag.IGNORE_PROJECTS), ids)
-
+        self.manifest = Manifest.from_file(
+            import_flags=ImportFlag.IGNORE_PROJECTS)
+        mr_projects, mr_unknown = projects_unknown(self.manifest, ids)
         if not mr_unknown:
             return mr_projects
 
         try:
-            manifest = Manifest.from_file()
+            self.manifest = Manifest.from_file()
         except ManifestImportFailed:
             log.die('one or more projects are unknown or defined via '
                     'imports; please run plain "west update".')
 
-        projects, unknown = projects_unknown(manifest, ids)
+        projects, unknown = projects_unknown(self.manifest, ids)
         if unknown:
             die_unknown(unknown)
         else:
@@ -1061,6 +1103,9 @@ class Update(_ProjectCommand):
             try_rebase = False
 
         return current_branch, is_ancestor, try_rebase
+
+    def project_is_active(self, project):
+        return self.manifest.is_active(project, extra_groups=self.extra_groups)
 
 class ForAll(_ProjectCommand):
     def __init__(self):

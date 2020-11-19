@@ -640,6 +640,109 @@ def test_init_local_with_empty_path(repos_tmpdir):
     assert (repos_tmpdir / 'workspace' / 'subdir' / 'Kconfiglib').check(dir=1)
 
 
+def test_update_with_groups_allow(west_init_tmpdir):
+    # Test "west update" with increasing numbers of groups allowed.
+
+    remotes = west_init_tmpdir / '..' / 'repos'
+
+    with open(west_init_tmpdir / 'zephyr' / 'west.yml', 'w') as f:
+        # The purpose of the 'blocked' group is to ensure that a
+        # project's groups' "allowed" bits are ORed together, not
+        # ANDed together, when deciding if the project is active.
+        f.write(f'''
+        manifest:
+          defaults:
+            remote: test-local
+          remotes:
+            - name: test-local
+              url-base: {remotes}
+          projects:
+            - name: Kconfiglib
+              revision: zephyr
+              path: subdir/Kconfiglib
+              groups:
+              - allowed
+              - blocked
+            - name: tagged_repo
+              revision: v1.0
+              groups:
+              - allow-on-cmd-line
+              - blocked
+            - name: net-tools
+              groups:
+              - allow-in-config-file
+              - blocked
+          groups: [-allow-on-cmd-line,-allow-in-config-file,-blocked]
+          self:
+            path: zephyr
+        ''')
+
+    cmd('update')
+    assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=1)
+    assert (west_init_tmpdir / 'tagged_repo').check(dir=0)
+    assert (west_init_tmpdir / 'net-tools').check(dir=0)
+
+    cmd('update --groups allow-on-cmd-line')
+    assert (west_init_tmpdir / 'tagged_repo').check(dir=1)
+    assert (west_init_tmpdir / 'net-tools').check(dir=0)
+
+    cmd('config manifest.groups allow-in-config-file')
+    cmd('update')
+    assert (west_init_tmpdir / 'net-tools').check(dir=1)
+
+
+def test_update_with_groups_block(west_init_tmpdir):
+    # Test "west update" with decreasing numbers of groups blocked.
+
+    remotes = west_init_tmpdir / '..' / 'repos'
+
+    with open(west_init_tmpdir / 'zephyr' / 'west.yml', 'w') as f:
+        f.write(f'''
+        manifest:
+          defaults:
+            remote: test-local
+          remotes:
+            - name: test-local
+              url-base: {remotes}
+          projects:
+            - name: Kconfiglib
+              revision: zephyr
+              path: subdir/Kconfiglib
+              groups:
+              - block-me
+            - name: tagged_repo
+              revision: v1.0
+              groups:
+              - block-me-on-cmd-line
+            - name: net-tools
+              groups:
+              - block-me-in-config-file
+          groups: [-block-me]
+          self:
+            path: zephyr
+        ''')
+
+    cmd('config manifest.groups -- -block-me-in-config-file')
+    cmd('update --groups=-block-me-on-cmd-line')
+    assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=0)
+    assert (west_init_tmpdir / 'tagged_repo').check(dir=0)
+    assert (west_init_tmpdir / 'net-tools').check(dir=0)
+
+    cmd('config -d manifest.groups')
+    cmd('update --groups=-block-me-on-cmd-line')
+    assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=0)
+    assert (west_init_tmpdir / 'tagged_repo').check(dir=0)
+    assert (west_init_tmpdir / 'net-tools').check(dir=1)
+
+    cmd('update')
+    assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=0)
+    assert (west_init_tmpdir / 'tagged_repo').check(dir=1)
+
+    # allowlists override blocklists.
+    cmd('update --groups block-me')
+    assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=1)
+
+
 def test_init_with_manifest_filename(repos_tmpdir):
     # Test 'west init --mf' on a normal repo
 
