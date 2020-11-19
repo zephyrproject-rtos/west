@@ -23,7 +23,7 @@ import yaml
 from west.manifest import Manifest, Project, ManifestProject, \
     MalformedManifest, ManifestVersionError, ManifestImportFailed, \
     manifest_path, ImportFlag, validate, MANIFEST_PROJECT_INDEX, \
-    _ManifestImportDepth
+    _ManifestImportDepth, is_group
 
 from conftest import create_workspace, create_repo, checkout_branch, \
     create_branch, add_commit, rev_parse, GIT, check_proj_consistency, \
@@ -183,6 +183,8 @@ def test_not_both_args():
 # - paths
 # - clone depths
 # - west commands
+# - repr()
+
 def test_projects_must_have_name():
     # A project must have a name. Names must be unique.
 
@@ -520,6 +522,17 @@ def test_project_git_methods(tmpdir):
     assert p.is_up_to_date()
     p.git(f'reset --hard {a_sha}')
     assert not p.is_up_to_date()
+
+def test_project_repr():
+    m = M('''\
+    projects:
+    - name: zephyr
+      url: https://foo.com
+      revision: r
+      west-commands: some-path/west-commands.yml
+    ''')
+    assert repr(m.projects[1]) == \
+        'Project("zephyr", "https://foo.com", revision="r", path=\'zephyr\', clone_depth=None, west_commands=[\'some-path/west-commands.yml\'], topdir=None, groups=[])'  # noqa: E501
 
 #########################################
 # Tests for the manifest repository
@@ -2415,6 +2428,181 @@ def test_import_loop_detection_self(manifest_repo):
 
     with pytest.raises(_ManifestImportDepth):
         MF()
+
+#########################################
+# Manifest project groups
+
+def test_no_groups_and_import():
+    def importer(*args, **kwargs):
+        raise RuntimeError("this shouldn't be called")
+
+    with pytest.raises(MalformedManifest) as e:
+        Manifest.from_data('''
+        manifest:
+          projects:
+          - name: p
+            url: u
+            groups:
+            - g
+            import: True
+        ''',
+                           importer=importer)
+
+    assert '"groups" cannot be combined with "import"' in str(e.value)
+
+def test_invalid_groups():
+    # Invalid group values must be rejected.
+
+    def check(fmt, arg, err_must_contain):
+        with pytest.raises(MalformedManifest) as e:
+            M(fmt.format(arg))
+        assert err_must_contain in str(e.value)
+
+    fmt = '''
+    projects:
+    - name: p
+      url: u
+      groups:
+      - {}
+    '''
+
+    check(fmt, 'white space', 'invalid group "white space"')
+    check(fmt, 'no,commas', 'invalid group "no,commas"')
+    check(fmt, 'no:colons', 'invalid group "no:colons"')
+    check(fmt, '-noleadingdash', 'invalid group "-noleadingdash"')
+
+    assert not is_group('white space')
+    assert not is_group('no,commas')
+    assert not is_group('no:colons')
+    assert not is_group('-noleadingdash')
+
+    fmt_scalar_project = '''
+    projects:
+    - name: p
+      url: u
+      groups: {}
+    '''
+
+    fmt_scalar_groups = '''
+    projects: []
+    groups: {}
+    '''
+
+    # These come from pykwalify itself.
+    for fmt in [fmt_scalar_project, fmt_scalar_groups]:
+        check(fmt, 'hello', 'is not a list')
+        check(fmt, 3, 'is not a list')
+        check(fmt, 3.14, 'is not a list')
+
+def test_groups():
+    # Basic test for valid project groups, which makes sure non-string
+    # types are coerced to strings, and a missing 'groups' results
+    # in an empty list as a Project object.
+
+    fmt = '''
+    projects:
+    - name: p
+      url: u
+      {}
+    '''
+
+    def p(arg):
+        return M(fmt.format(arg)).get_projects(['p'])[0]
+
+    assert (p('groups: [1,"hello-world",3.14]').groups ==
+            ['1', 'hello-world', '3.14'])
+    assert p('groups: []').groups == []
+    assert p('').groups == []
+
+    assert is_group(1)
+    assert is_group('hello-world')
+    assert is_group(3.14)
+    assert is_group('-leadingdash', dash_ok=True)
+
+def test_invalid_manifest_groups():
+    # Test cases for invalid "manifest: groups:" lists.
+
+    def check(fmt, arg, err_must_contain):
+        with pytest.raises(MalformedManifest) as e:
+            M(fmt.format(arg))
+        assert err_must_contain in str(e.value)
+
+    fmt = '''
+    projects: []
+    groups:
+    - {}
+    '''
+
+    check(fmt, 'white space', 'contains invalid item "white space"')
+    check(fmt, 'no,commas', 'contains invalid item "no,commas"')
+    check(fmt, 'no:colons', 'contains invalid item "no:colons"')
+    # leading dashes are okay here!
+
+    def check2(groups, err_must_contain):
+        data = {'manifest': {'projects': [], 'groups': groups}}
+        with pytest.raises(MalformedManifest) as e:
+            Manifest.from_data(data)
+        assert err_must_contain in "\n".join(e.value.args)
+
+    check2([], 'may not be empty')
+    check2('hello', 'not a list')
+    check2(3, 'not a list')
+    check2(3.14, 'not a list')
+
+def test_is_active():
+    # Checks for the results of the 'groups' fields on
+    # Manifest.is_active(project).
+
+    def manifest(groups):
+        data = f"""
+        defaults:
+          remote: r
+        remotes:
+          - name: r
+            url-base: u
+        projects:
+          - name: p1
+            groups:
+              - ga
+          - name: p2
+            groups:
+              - ga
+              - gb
+          - name: p3
+        {groups}
+        """
+
+        return M(data)
+
+    def check(expected, groups, extra_groups=None):
+        # Checks that the 'expected' tuple matches the is_active() value
+        # for the p1, p2, and p3 projects in the above manifest.
+        #
+        # 'groups' is passed to the above manifest() helper.
+        #
+        # 'extra_groups' is an optional additional groups list, for
+        # testing command line additions or for faking out config file
+        # changes.
+
+        m = manifest(groups)
+        assert tuple(m.is_active(p, extra_groups=extra_groups)
+                     for p in m.get_projects(['p1', 'p2', 'p3'])) == expected
+
+    check((True, True, True), '')
+    check((True, True, True), 'groups: [ga]')
+    check((False, True, True), 'groups: [-ga]')
+    check((True, True, True), 'groups: [-gb]',
+          extra_groups=['ga'])
+    check((True, True, True), 'groups: [-gb]',
+          extra_groups=['gb'])
+    check((True, True, True), 'groups: [-ga]',
+          extra_groups=['ga'])
+    check((False, True, True), 'groups: [-ga]',
+          extra_groups=['ga', '-ga'])
+    check((True, True, True), 'groups: [-ga]',
+          extra_groups=['ga', '-gb'])
+    check((False, False, True), 'groups: [-ga]',
+          extra_groups=['-gb'])
 
 #########################################
 # Various invalid manifests

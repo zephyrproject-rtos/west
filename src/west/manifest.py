@@ -10,14 +10,16 @@ Parser and abstract data types for west manifests.
 import configparser
 import enum
 import errno
+import itertools
 import logging
 import os
 from pathlib import PurePosixPath, Path
+import re
 import shlex
 import subprocess
 import sys
 from typing import Any, Callable, Dict, Iterable, List, NoReturn, \
-    NamedTuple, Optional, Tuple, TYPE_CHECKING, Union
+    NamedTuple, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 from packaging.version import parse as parse_version
 import pykwalify.core
@@ -48,7 +50,7 @@ QUAL_REFS_WEST = 'refs/west/'
 #:
 #: This value changes when a new version of west includes new manifest
 #: file features not supported by earlier versions of west.
-SCHEMA_VERSION = '0.8'
+SCHEMA_VERSION = '0.8.99'
 # MAINTAINERS:
 #
 # If you want to update the schema version, you need to make sure that
@@ -296,6 +298,28 @@ def _and_filters(filter_fn1: ImapFilterFnType,
     else:
         return filter_fn1 or filter_fn2
 
+GroupsEltType = Union[str, int, float]
+GroupsType = List[GroupsEltType]
+
+_RESERVED_GROUP_RE = re.compile(r'(^-|[\s,:])')
+
+def _to_groups_list(value: GroupsType) -> List[str]:
+    # If 'value' is a valid 'groups: ...' value parsed from YAML,
+    # return a canonical list of string groups corresponding to it.
+
+    return [str(item) for item in value]
+
+def _update_blocked_groups(blocked_groups: Set[str],
+                           groups: Iterable[str]):
+    # Update a set of blocked groups in place based on an iterable of
+    # group names to allow ('foo') or block ('-foo').
+
+    for group in groups:
+        if group.startswith('-'):
+            blocked_groups.add(group[1:])
+        elif group in blocked_groups:
+            blocked_groups.remove(group)
+
 #
 # Public functions
 #
@@ -371,6 +395,41 @@ def validate(data: Any) -> None:
                             schema_files=[_SCHEMA_PATH]).validate()
     except pykwalify.errors.SchemaError as se:
         raise MalformedManifest(se.msg) from se
+
+def is_group(group: GroupsEltType, dash_ok=False) -> bool:
+    '''Is a project group value 'group' valid?
+
+    Valid groups are strings that don't contain whitespace, commas
+    (","), or colons (":"), and do not start with "-". As a special
+    case, groups may also be nonnegative numbers, to avoid forcing
+    users to quote these values in YAML files.
+
+    :param group: the group name to check
+    :param dash_ok: if True, permit a single leading dash ("-")
+    '''
+    # Implementation notes:
+    #
+    #     - not starting with "-" because "-foo" means "block group
+    #       foo". Numbers may not be negative for the same reason:
+    #       they'd start with "-" when converted to str.
+    #
+    #     - no commas because that's a separator character in
+    #       manifest.groups and --groups
+    #
+    #     - no whitespace mostly to guarantee that printing
+    #       comma-separated lists of groups won't cause 'word' breaks
+    #       in 'west list' pipelines to cut(1) or similar
+    #
+    #     - no colons to reserve some namespace for potential future
+    #       use; we might want to do something like
+    #       "--groups=path-prefix:foo" to create additional logical
+    #       groups based on the workspace layout or other metadata
+
+    if dash_ok and isinstance(group, str) and group.startswith('-'):
+        group = group[1:]
+
+    return ((group >= 0) if isinstance(group, (float, int)) else
+            not _RESERVED_GROUP_RE.search(group))
 
 #
 # Exception types
@@ -495,6 +554,9 @@ class Project:
       the project is part of, or ``None``
     - ``remote_name``: the name of the remote which should be set up
       when the project is being cloned (default: 'origin')
+    - ``groups``: the project's groups (as a list) as given in the manifest.
+      If the manifest data contains no groups for the project, this is
+      an empty list.
     '''
 
     def __eq__(self, other):
@@ -505,7 +567,8 @@ class Project:
                 f'revision="{self.revision}", path={repr(self.path)}, '
                 f'clone_depth={self.clone_depth}, '
                 f'west_commands={self.west_commands}, '
-                f'topdir={repr(self.topdir)})')
+                f'topdir={repr(self.topdir)}, '
+                f'groups={self.groups})')
 
     def __str__(self):
         path_repr = repr(self.abspath or self.path)
@@ -517,7 +580,8 @@ class Project:
                  clone_depth: Optional[int] = None,
                  west_commands: Optional[WestCommandsType] = None,
                  topdir: Optional[PathType] = None,
-                 remote_name: Optional[str] = None):
+                 remote_name: Optional[str] = None,
+                 groups: Optional[List[str]] = None):
         '''Project constructor.
 
         If *topdir* is ``None``, then absolute path attributes
@@ -534,6 +598,8 @@ class Project:
         :param topdir: the west workspace's top level directory
         :param remote_name: the name of the remote which should be
             set up if the project is being cloned (default: 'origin')
+        :param groups: a list of groups found in the manifest data for
+            the project, after conversion to str and validation.
         '''
 
         self.name = name
@@ -544,6 +610,7 @@ class Project:
         self.west_commands = _west_commands_list(west_commands)
         self.topdir = os.fspath(topdir) if topdir else None
         self.remote_name = remote_name or 'origin'
+        self.groups = groups or []
 
     @property
     def path(self) -> str:
@@ -819,6 +886,7 @@ class ManifestProject(Project):
       can fetch a manifest repository from a Git remote
     - ``revision``: ``"HEAD"``
     - ``clone_depth``: ``None``, because there's no URL
+    - ``groups``: the empty list
     '''
 
     def __repr__(self):
@@ -845,6 +913,7 @@ class ManifestProject(Project):
         self.url: str = ''
         self.revision: str = 'HEAD'
         self.clone_depth: Optional[int] = None
+        self.groups = []
         # The following type: ignore is necessary since every Project
         # actually has a non-None _path attribute, so the parent class
         # defines its type as 'str', where here we need it to be
@@ -894,9 +963,11 @@ class Manifest:
             - If both *source_file* and *topdir* are given, the
               returned Manifest object is based on the data in
               *source_file*, rooted at *topdir*. The configuration
-              files are not read in this case. This allows parsing a
-              manifest file "as if" its project hierarchy were rooted
-              at another location in the system.
+              variable ``manifest.path`` is ignored in this case, though
+              ``manifest.groups`` will still be read if it exists.
+
+              This allows parsing a manifest file "as if" its project
+              hierarchy were rooted at another location in the system.
 
             - If neither *source_file* nor *topdir* is given, the file
               system is searched for *topdir*. That workspace's
@@ -1142,6 +1213,9 @@ class Manifest:
 
         self.has_imports: bool = False
 
+        # This will be overwritten in _load() if necessary.
+        self._blocked_groups: Set[str] = set()
+
         # Set up the public attributes documented above, as well as
         # any internal attributes needed to implement the public API.
         self._importer: ImporterType = importer or _default_importer
@@ -1317,6 +1391,43 @@ class Manifest:
     def projects(self) -> List[Project]:
         return self._projects
 
+    def is_active(self, project: Project,
+                  extra_groups: Optional[Iterable[str]] = None) -> bool:
+        '''Is a project active?
+
+        Projects with empty 'project.groups' lists are always active.
+
+        Otherwise, if any group in 'project.groups' is allowed by this
+        manifest's 'groups:' list (and the 'manifest.groups' local
+        configuration option, if we have a workspace), returns True.
+
+        Otherwise, i.e. if all of the project's groups are blocked,
+        this returns False.
+
+        "Inactive" projects should generally be considered absent from
+        the workspace for purposes like updating it, listing projects,
+        etc.
+
+        :param project: project to check
+        :param groups_extra: additional groups allow/block list, at
+            higher precedence than the manifest or configuration file
+        '''
+        if not project.groups:
+            # Projects without any groups are always active, so just
+            # exit early. Note that this happens to treat the
+            # ManifestProject as though it's always active. This is
+            # important for keeping it in the 'west list' output for
+            # now.
+            return True
+
+        if extra_groups:
+            blocked_groups = set(self._blocked_groups)
+            _update_blocked_groups(blocked_groups, extra_groups)
+        else:
+            blocked_groups = self._blocked_groups
+
+        return any(group not in blocked_groups for group in project.groups)
+
     def _malformed(self, complaint: str,
                    parent: Optional[Exception] = None) -> NoReturn:
         context = (f'file: {self.path} ' if self.path else 'data')
@@ -1347,6 +1458,10 @@ class Manifest:
             loading_what = 'data (no file)'
 
         _logger.debug(f'loading {loading_what}')
+
+        # Figure out any allowed/blocked groups based on the manifest
+        # or local configuration file.
+        self._load_groups(manifest)
 
         # We want to make an ordered map from project names to
         # corresponding Project instances. Insertion order into this
@@ -1388,6 +1503,74 @@ class Manifest:
                 self._projects_by_rpath[Path(p.abspath).resolve()] = p
 
         _logger.debug(f'loaded {loading_what}')
+
+    def _load_groups(self, manifest_data: Dict[str, Any]):
+        # Update self._blocked_groups using data from 'manifest_data' and
+        # (if there is a workspace) the local configuration file.
+
+        if 'groups' in manifest_data:
+            groups = manifest_data['groups']
+            if not groups:
+                self._malformed(f'"manifest: groups: {groups}" '
+                                'may not be empty')
+            from_manifest = self._validated_groups('manifest data', groups)
+        else:
+            from_manifest = []
+
+        from_config = self._validated_groups('local configuration file',
+                                             self._load_config_groups())
+
+        _update_blocked_groups(self._blocked_groups,
+                               itertools.chain(from_manifest, from_config))
+
+        _logger.debug(f'blocked groups: {self._blocked_groups}')
+
+    def _validated_groups(self, source: str, groups: GroupsType) -> List[str]:
+        # Helper function for cleaning up manifest: groups: and
+        # manifest.groups values.
+
+        ret = []
+
+        for group in groups:
+            if not is_group(group, dash_ok=True):
+                self._malformed(f'{source} contains invalid item "{group}"')
+
+            ret.append(str(group))
+
+        return ret
+
+    def _load_config_groups(self) -> GroupsType:
+        # Load and return manifest.groups (converted to a list of
+        # strings) from the local configuration file if there is one.
+        #
+        # Returns [] if manifest.groups is not set and when there is
+        # no workspace.
+
+        if not self.topdir:
+            # No workspace -> do not attempt to read config options.
+            return []
+
+        cp = cfg._configparser()
+        cfg.read_config(configfile=cfg.ConfigFile.LOCAL, config=cp,
+                        topdir=self.topdir)
+
+        if 'manifest' not in cp:
+            # We may have been created from a partially set up
+            # workspace with an explicit source_file and topdir,
+            # but no manifest.path config option set.
+            return []
+
+        groups = cp['manifest'].get('groups', '')
+
+        # Be forgiving: allow empty strings or values with
+        # whitespace. Whitespace in between groups, like "foo ,bar",
+        # is removed, resulting in valid group names ['foo', 'bar'].
+        ret = []
+        for group in groups.split(','):
+            stripped = group.strip()
+            if stripped:
+                ret.append(stripped)
+        return ret
 
     def _load_self(self, manifest: Dict[str, Any],
                    path_hint: Optional[Path],
@@ -1650,10 +1833,24 @@ class Manifest:
         # attribute or something like that.
         path = (ctx.path_prefix / pfx / pd.get('path', name)).as_posix()
 
+        groups = pd.get('groups')
+        if groups:
+            self._validate_project_groups(name, groups)
+            groups = _to_groups_list(groups)
+
+        if imp and groups:
+            # Maybe there is a sensible way to combine the two of these.
+            # but it's not clear what it is. Let's avoid weird edge cases
+            # like "what do I do about a project whose group is blocklisted
+            # that I need to import data from?".
+            self._malformed(
+                f'project {name}: "groups" cannot be combined with "import"')
+
         ret = Project(name, url, pd.get('revision', defaults.revision),
                       path, clone_depth=pd.get('clone-depth'),
                       west_commands=pd.get('west-commands'),
-                      topdir=self.topdir, remote_name=remote)
+                      topdir=self.topdir, remote_name=remote,
+                      groups=groups)
 
         # Make sure the return Project's path does not escape the
         # workspace. We can't use escapes_directory() as that
@@ -1679,6 +1876,12 @@ class Manifest:
                             f'the workspace topdir')
 
         return ret
+
+    def _validate_project_groups(self, project_name, groups):
+        for group in groups:
+            if not is_group(group):
+                self._malformed(f'project {project_name}: '
+                                f'invalid group "{group}"')
 
     def _import_from_project(self, project: Project, imp: Any,
                              ctx: _import_ctx):
@@ -1845,10 +2048,11 @@ class Manifest:
 
         if project.name not in projects:
             projects[project.name] = project
-            _logger.debug(f'added project {project.name} '
-                          f'path {project.path} '
-                          f'revision {project.revision}' +
-                          (f' from {self.path}' if self.path else ''))
+            _logger.debug('added project %s path %s revision %s%s%s',
+                          project.name, project.path, project.revision,
+                          (f' from {self.path}' if self.path else ''),
+                          (f' groups {project.groups}' if project.groups
+                           else ''))
             return True
         else:
             return False
