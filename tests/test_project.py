@@ -145,6 +145,59 @@ def test_list_manifest(west_update_tmpdir):
     assert posixpath == Path(west_update_tmpdir).as_posix() + '/zephyr'
 
 
+def test_list_groups(west_init_tmpdir):
+    with open('zephyr/west.yml', 'w') as f:
+        f.write("""
+        manifest:
+          defaults:
+            remote: r
+          remotes:
+            - name: r
+              url-base: https://example.com
+          projects:
+          - name: foo
+            groups:
+            - foo-group-1
+            - foo-group-2
+          - name: bar
+            path: path-for-bar
+          - name: baz
+            groups:
+            - baz-group
+          groups: [-foo-group-1,-foo-group-2,-baz-group]
+        """)
+
+    def check(command_string, expected):
+        out_lines = cmd(command_string).splitlines()
+        assert out_lines == expected
+
+    check('list -f "{name} .{groups}. {path}"',
+          ['manifest .. zephyr',
+           'bar .. path-for-bar'])
+
+    check('list -f "{name} .{groups}. {path}" foo',
+          ['foo .foo-group-1,foo-group-2. foo'])
+
+    check('list -f "{name} .{groups}. {path}" baz',
+          ['baz .baz-group. baz'])
+
+    check('list -f "{name} .{groups}. {path}" foo bar baz',
+          ['foo .foo-group-1,foo-group-2. foo',
+           'bar .. path-for-bar',
+           'baz .baz-group. baz'])
+
+    check('list --all -f "{name} .{groups}. {path}"',
+          ['manifest .. zephyr',
+           'foo .foo-group-1,foo-group-2. foo',
+           'bar .. path-for-bar',
+           'baz .baz-group. baz'])
+
+    cmd('config manifest.groups foo-group-1')
+    check('list -f "{name} .{groups}. {path}"',
+          ['manifest .. zephyr',
+           'foo .foo-group-1,foo-group-2. foo',
+           'bar .. path-for-bar'])
+
 def test_manifest_freeze(west_update_tmpdir):
     # We should be able to freeze manifests.
     actual = cmd('manifest --freeze').splitlines()
