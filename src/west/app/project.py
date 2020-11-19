@@ -376,35 +376,38 @@ class List(_ProjectCommand):
         default_fmt = '{name:12} {path:28} {revision:40} {url}'
         parser = self._parser(
             parser_adder,
-            epilog=textwrap.dedent(f'''\
-            FORMAT STRINGS
-            --------------
+            epilog=f'''\
+{ACTIVE_PROJECTS_HELP}
 
-            Projects are listed using a Python 3 format string. Arguments
-            to the format string are accessed by name.
+FORMAT STRINGS
+--------------
 
-            The default format string is:
+Projects are listed using a Python 3 format string. Arguments
+to the format string are accessed by name.
 
-            "{default_fmt}"
+The default format string is:
 
-            The following arguments are available:
+"{default_fmt}"
 
-            - name: project name in the manifest
-            - url: full remote URL as specified by the manifest
-            - path: the relative path to the project from the top level,
-              as specified in the manifest where applicable
-            - abspath: absolute and normalized path to the project
-            - posixpath: like abspath, but in posix style, that is, with '/'
-              as the separator character instead of '\\'
-            - revision: project's revision as it appears in the manifest
-            - sha: project's revision as a SHA. Note that use of this requires
-              that the project has been cloned.
-            - cloned: "cloned" if the project has been cloned, "not-cloned"
-              otherwise
-            - clone_depth: project clone depth if specified, "None" otherwise
-            '''))
+The following arguments are available:
+
+- name: project name in the manifest
+- url: full remote URL as specified by the manifest
+- path: the relative path to the project from the top level,
+  as specified in the manifest where applicable
+- abspath: absolute and normalized path to the project
+- posixpath: like abspath, but in posix style, that is, with '/'
+  as the separator character instead of '\\'
+- revision: project's revision as it appears in the manifest
+- sha: project's revision as a SHA. Note that use of this requires
+  that the project has been cloned.
+- cloned: "cloned" if the project has been cloned, "not-cloned"
+  otherwise
+- clone_depth: project clone depth if specified, "None" otherwise
+- groups: project groups, as a comma-separated list
+''')
         parser.add_argument('-a', '--all', action='store_true',
-                            help='ignored for backwards compatibility'),
+                            help='include inactive projects'),
         parser.add_argument('--manifest-path-from-yaml', action='store_true',
                             help='''print the manifest repository's path
                             according to the manifest file YAML, which may
@@ -414,7 +417,9 @@ class List(_ProjectCommand):
                             help='''format string to use to list each
                             project; see FORMAT STRINGS below.''')
 
-        self._add_projects_arg(parser)
+        parser.add_argument('projects', metavar='PROJECT', nargs='*',
+                            help='''projects (by name or path) to operate on;
+                            see ACTIVE PROJECTS below''')
 
         return parser
 
@@ -441,6 +446,13 @@ class List(_ProjectCommand):
         self._setup_logging(args)
 
         for project in self._projects(args.projects):
+            # Skip inactive projects unless the user said
+            # --all or named some projects explicitly.
+            if not (args.all or args.projects or
+                    self.manifest.is_active(project)):
+                log.dbg(f'{project.name}: skipping, inactive')
+                continue
+
             # Spelling out the format keys explicitly here gives us
             # future-proofing if the internal Project representation
             # ever changes.
@@ -471,7 +483,8 @@ class List(_ProjectCommand):
                     revision=project.revision or 'N/A',
                     clone_depth=project.clone_depth or "None",
                     cloned=delay(cloned_thunk, project),
-                    sha=delay(sha_thunk, project))
+                    sha=delay(sha_thunk, project),
+                    groups=','.join(project.groups))
             except KeyError as e:
                 # The raised KeyError seems to just put the first
                 # invalid argument in the args tuple, regardless of
@@ -1420,6 +1433,24 @@ WEST_DIR = '.west'
 MANIFEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/zephyr'
 # Default revision to check out of the manifest repository.
 MANIFEST_REV_DEFAULT = 'master'
+
+#
+# Other shared globals.
+#
+
+ACTIVE_PROJECTS_HELP = '''\
+ACTIVE PROJECTS
+---------------
+
+Default output is limited to "active" projects as determined by the:
+
+- "groups" manifest file section
+- "manifest.groups" local configuration option in .west/config
+
+To include inactive projects as well, use "--all" or give an explicit
+list of projects (by name or path). See the west documentation for
+more details on active projects.
+'''
 
 #
 # Helper class for creating format string keys that are expensive or
