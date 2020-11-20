@@ -7,6 +7,9 @@ import os
 
 import setuptools
 
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+os.chdir(SCRIPT_DIR)
+
 with open('README.rst', 'r') as f:
     long_description = f.read()
 
