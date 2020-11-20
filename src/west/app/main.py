@@ -168,7 +168,6 @@ class WestApp:
                 # and what the user's choices are.
                 return
             else:
-                assert args.command not in no_manifest_ok
                 log.die(mve_msg(self.mle))
 
         # Other errors generally just fall back on no_manifest_ok.
