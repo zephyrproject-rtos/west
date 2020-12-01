@@ -924,6 +924,28 @@ class Update(_ProjectCommand):
         else:
             return 'smart'
 
+    def update_submodules(self, project):
+        # Updates given project submodules by using
+        # 'git submodule update --init --checkout --recursive' command
+        # from the project.path location.
+        if not project.submodules:
+            return
+
+        submodules = project.submodules
+        call_location = os.path.join(self.topdir, project.path)
+        submodules_update_strategy = ('--rebase' if self.args.rebase
+                                      else '--checkout')
+        # For the list type, update given list of submodules.
+        if isinstance(submodules, list):
+            for submodule in submodules:
+                project.git(['-C', call_location, 'submodule', 'update',
+                             '--init', submodules_update_strategy,
+                             '--recursive', submodule.path])
+        # For the bool type, update all project submodules
+        elif isinstance(submodules, bool):
+            project.git(['-C', call_location, 'submodule', 'update', '--init',
+                         submodules_update_strategy, '--recursive'])
+
     def update(self, project):
         if self.args.stats:
             stats = dict()
@@ -988,6 +1010,9 @@ class Update(_ProjectCommand):
             if take_stats:
                 stats['checkout new manifest-rev'] = perf_counter() - start
             _post_checkout_help(project, current_branch, sha, is_ancestor)
+
+        # Update project submodules, if it has any.
+        self.update_submodules(project)
 
         # Print performance statistics.
         if take_stats:

@@ -87,6 +87,14 @@ ManifestDataType = Union[str, Dict]
 
 _logger = logging.getLogger(__name__)
 
+# Type for the submodule value passed through the manifest file.
+class Submodule(NamedTuple):
+    name: str
+    path: str
+
+# Submodules might be the list of values, bool or None.
+SubmodulesType = Optional[Union[List[Submodule], bool]]
+
 # Manifest locating, parsing, loading, etc.
 
 class _defaults(NamedTuple):
@@ -577,6 +585,7 @@ class Project:
     def __init__(self, name: str, url: str,
                  revision: Optional[str] = None,
                  path: Optional[PathType] = None,
+                 submodules: Optional[SubmodulesType] = None,
                  clone_depth: Optional[int] = None,
                  west_commands: Optional[WestCommandsType] = None,
                  topdir: Optional[PathType] = None,
@@ -591,6 +600,7 @@ class Project:
         :param url: fetch URL
         :param revision: fetch revision
         :param path: path (relative to topdir), or None for *name*
+        :param submodules: submodules to pull within the project
         :param clone_depth: depth to use for initial clone
         :param west_commands: path to a west commands specification YAML
             file in the project, relative to its base directory,
@@ -604,6 +614,7 @@ class Project:
 
         self.name = name
         self.url = url
+        self.submodules = submodules
         self.revision = revision or _DEFAULT_REV
         self.clone_depth = clone_depth
         self.path = os.fspath(path or name)
@@ -911,6 +922,7 @@ class ManifestProject(Project):
 
         # Pretending that this is a Project, even though it's not (#327)
         self.url: str = ''
+        self.submodules = False
         self.revision: str = 'HEAD'
         self.clone_depth: Optional[int] = None
         self.groups = []
@@ -1074,6 +1086,16 @@ class Manifest:
         '''
         kwargs.update({'source_data': source_data})
         return Manifest(**kwargs)
+
+    @staticmethod
+    def is_submodule_ok(value: Any) -> bool:
+        if isinstance(value, dict):
+            # Check whether value contain Submodule fields of proper types.
+            if 'name' in value.keys() and 'path' in value.keys():
+                if isinstance(value['name'], str) and isinstance(value['path'],
+                                                                 str):
+                    return True
+        return False
 
     def __init__(self, source_file: Optional[PathType] = None,
                  source_data: Optional[ManifestDataType] = None,
@@ -1308,6 +1330,42 @@ class Manifest:
         if unknown or (only_cloned and uncloned):
             raise ValueError(unknown, uncloned)
         return ret
+
+    def _get_submodules(self, submodules) -> SubmodulesType:
+        '''Gets a list of `Submodules` objects or boolean from the manifest
+        *submodules*.
+
+        For submodules of list type, method checks format of all elements
+        and converts dictionaries into the Submodule objects.
+
+        For submodules set to None or submodules of bool type, method
+        does nothing, as both boolean values are valid (True - means
+        that all project submodules should be considered and False - means
+        that are not any submodules).
+
+        :param submodules: content of the manifest submodules value.
+        '''
+        self.submodules = submodules
+        self.submodules_type = type(self.submodules)
+        # For the boolean type or submodules set to None just do nothing.
+        if self.submodules is None or self.submodules_type == bool:
+            return self.submodules
+
+        # For the list type, check whether each element has proper
+        # structure and convert it to Submodules object.
+        if self.submodules_type == list:
+            for index in range(len(self.submodules)):
+                if self.is_submodule_ok(self.submodules[index]):
+                    self.submodules[index] =  \
+                        Submodule(self.submodules[index]['name'],
+                                  self.submodules[index]['path'])
+                else:
+                    self._malformed(f'Invalid submodule structure \
+                        {self.submodules[index]}')
+        else:
+            self._malformed(f'Invalid submodules {self.submodules} '
+                            f'type: {self.submodules_type}')
+        return self.submodules
 
     def _as_dict_helper(
             self, pdict: Optional[Callable[[Project], Dict]] = None) \
@@ -1846,8 +1904,11 @@ class Manifest:
             self._malformed(
                 f'project {name}: "groups" cannot be combined with "import"')
 
+        submodules = self._get_submodules(pd.get('submodules'))
+
         ret = Project(name, url, pd.get('revision', defaults.revision),
-                      path, clone_depth=pd.get('clone-depth'),
+                      path, submodules=submodules,
+                      clone_depth=pd.get('clone-depth'),
                       west_commands=pd.get('west-commands'),
                       topdir=self.topdir, remote_name=remote,
                       groups=groups)
