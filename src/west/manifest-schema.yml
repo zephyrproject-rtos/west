@@ -103,6 +103,10 @@ mapping:
           path:
             required: false
             type: str
+          # Submodules to checkout within the project
+          submodules:
+            required: false
+            type: any
           # Limits the clone depth of the project if given.
           clone-depth:
             required: false
