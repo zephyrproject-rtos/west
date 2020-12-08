@@ -181,8 +181,7 @@ def west_init_tmpdir(repos_tmpdir):
     '''Fixture for a tmpdir with 'remote' repositories and 'west init' run.
 
     Uses the remote repositories from the repos_tmpdir fixture to
-    create a west workspace using the system bootstrapper's init
-    command.
+    create a west workspace using west init.
 
     The contents of the west workspace aren't checked at all.
     This is left up to the test cases.
