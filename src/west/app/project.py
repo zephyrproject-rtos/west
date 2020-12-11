@@ -48,22 +48,20 @@ class _ProjectCommand(WestCommand):
         kwargs['formatter_class'] = argparse.RawDescriptionHelpFormatter
         return parser_adder.add_parser(self.name, **kwargs)
 
-    def _add_projects_arg(self, parser):
-        # Adds a "projects" argument to the given parser.
-
-        parser.add_argument('projects', metavar='PROJECT', nargs='*',
-                            help='''projects (by name or path) to operate on;
-                            defaults to all projects in the manifest''')
-
-    def _cloned_projects(self, args):
+    def _cloned_projects(self, args, only_active=False):
         # Returns _projects(args.projects, only_cloned=True) if
         # args.projects is not empty (i.e., explicitly given projects
         # are required to be cloned). Otherwise, returns all cloned
         # projects.
         if args.projects:
-            return self._projects(args.projects, only_cloned=True)
+            ret = self._projects(args.projects, only_cloned=True)
         else:
-            return [p for p in self.manifest.projects if p.is_cloned()]
+            ret = [p for p in self.manifest.projects if p.is_cloned()]
+
+        if args.projects or not only_active:
+            return ret
+
+        return [p for p in ret if self.manifest.is_active(p)]
 
     def _projects(self, ids, only_cloned=False):
         try:
@@ -606,8 +604,13 @@ class Diff(_ProjectCommand):
             'Runs "git diff" on each of the specified projects.')
 
     def do_add_parser(self, parser_adder):
-        parser = self._parser(parser_adder)
-        self._add_projects_arg(parser)
+        parser = self._parser(parser_adder,
+                              epilog=ACTIVE_CLONED_PROJECTS_HELP)
+        parser.add_argument('projects', metavar='PROJECT', nargs='*',
+                            help='''projects (by name or path) to operate on;
+                            defaults to active cloned projects''')
+        parser.add_argument('-a', '--all', action='store_true',
+                            help='include output for inactive projects')
         return parser
 
     def do_run(self, args, ignored):
@@ -619,8 +622,7 @@ class Diff(_ProjectCommand):
         # We may need to force git to use colors if the user wants them,
         # which it won't do ordinarily since stdout is not a terminal.
         color = ['--color=always'] if log.use_color() else []
-
-        for project in self._cloned_projects(args):
+        for project in self._cloned_projects(args, only_active=not args.all):
             # Use paths that are relative to the base directory to make it
             # easier to see where the changes are
             cp = project.git(['diff', f'--src-prefix={project.path}/',
@@ -648,8 +650,13 @@ class Status(_ProjectCommand):
             "Runs 'git status' for each of the specified projects.")
 
     def do_add_parser(self, parser_adder):
-        parser = self._parser(parser_adder)
-        self._add_projects_arg(parser)
+        parser = self._parser(parser_adder,
+                              epilog=ACTIVE_CLONED_PROJECTS_HELP)
+        parser.add_argument('projects', metavar='PROJECT', nargs='*',
+                            help='''projects (by name or path) to operate on;
+                            defaults to active cloned projects''')
+        parser.add_argument('-a', '--all', action='store_true',
+                            help='include output for inactive projects')
         return parser
 
     def do_run(self, args, user_args):
@@ -657,7 +664,7 @@ class Status(_ProjectCommand):
         self._setup_logging(args)
 
         failed = []
-        for project in self._cloned_projects(args):
+        for project in self._cloned_projects(args, only_active=not args.all):
             log.banner(f'status of {project.name_and_path}:')
             try:
                 project.git('status', extra_args=user_args)
@@ -1142,17 +1149,22 @@ class ForAll(_ProjectCommand):
             '''))
 
     def do_add_parser(self, parser_adder):
-        parser = self._parser(parser_adder)
+        parser = self._parser(parser_adder,
+                              epilog=ACTIVE_CLONED_PROJECTS_HELP)
         parser.add_argument('-c', dest='subcommand', metavar='COMMAND',
                             required=True)
-        self._add_projects_arg(parser)
+        parser.add_argument('-a', '--all', action='store_true',
+                            help='include inactive projects'),
+        parser.add_argument('projects', metavar='PROJECT', nargs='*',
+                            help='''projects (by name or path) to operate on;
+                            defaults to active cloned projects''')
         return parser
 
     def do_run(self, args, user_args):
         self._setup_logging(args)
 
         failed = []
-        for project in self._cloned_projects(args):
+        for project in self._cloned_projects(args, only_active=not args.all):
             log.banner(
                 f'running "{args.subcommand}" in {project.name_and_path}:')
             rc = subprocess.Popen(args.subcommand, shell=True,
@@ -1450,6 +1462,12 @@ Default output is limited to "active" projects as determined by the:
 To include inactive projects as well, use "--all" or give an explicit
 list of projects (by name or path). See the west documentation for
 more details on active projects.
+'''
+
+ACTIVE_CLONED_PROJECTS_HELP = f'''\
+{ACTIVE_PROJECTS_HELP}
+
+Regardless of the above, output is limited to cloned projects.
 '''
 
 #
