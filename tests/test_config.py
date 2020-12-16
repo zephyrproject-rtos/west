@@ -497,3 +497,8 @@ def test_list():
     assert sorted_list('--global') == ['pytest.baz=where']
     assert sorted_list('--local') == ['pytest.bar=what',
                                       'pytest.foo=who']
+
+@pytest.mark.xfail()
+def test_round_trip():
+    cmd('config pytest.foo bar,baz')
+    assert cmd('config pytest.foo').strip() == 'bar,baz'
