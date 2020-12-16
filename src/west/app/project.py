@@ -365,7 +365,7 @@ class List(_ProjectCommand):
     def __init__(self):
         super().__init__(
             'list',
-            'print information about projects in the west manifest',
+            'print information about projects',
             textwrap.dedent('''\
             Print information about projects in the west manifest,
             using format strings.'''))
