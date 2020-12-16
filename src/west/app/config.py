@@ -96,7 +96,7 @@ class Config(WestCommand):
     def __init__(self):
         super().__init__(
             'config',
-            'get or set configuration settings in west config files',
+            'get or set config file values',
             CONFIG_DESCRIPTION,
             requires_workspace=False)
 
