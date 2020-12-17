@@ -44,7 +44,6 @@ setuptools.setup(
         'colorama',
         'PyYAML>=5.1',
         'pykwalify',
-        'configobj',
         'setuptools',
         'packaging',
     ],

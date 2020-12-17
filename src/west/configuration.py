@@ -42,8 +42,6 @@ import platform
 from enum import Enum
 from typing import Any, Optional, List
 
-import configobj
-
 from west.util import west_dir, WestNotFound, PathType
 
 def _configparser():            # for internal use
@@ -129,11 +127,13 @@ def update_config(section: str, key: str, value: Any,
         raise ValueError(f'invalid configfile: {configfile}')
 
     filename = _ensure_config(configfile, topdir)
-    updater = configobj.ConfigObj(filename)
-    if section not in updater:
-        updater[section] = {}
-    updater[section][key] = value
-    updater.write()
+    config = _configparser()
+    config.read(filename)
+    if section not in config:
+        config[section] = {}
+    config[section][key] = value
+    with open(filename, 'w') as f:
+        config.write(f)
 
 def delete_config(section: str, key: str,
                   configfile: Optional[ConfigFile] = None,
@@ -180,14 +180,16 @@ def delete_config(section: str, key: str,
 
     found = False
     for path in to_check:
-        cobj = configobj.ConfigObj(path)
-        if section not in cobj or key not in cobj[section]:
+        config = _configparser()
+        config.read(path)
+        if section not in config or key not in config[section]:
             continue
 
-        del cobj[section][key]
-        if not cobj[section].items():
-            del cobj[section]
-        cobj.write()
+        del config[section][key]
+        if not config[section].items():
+            del config[section]
+        with open(path, 'w') as f:
+            config.write(f)
         found = True
         if stop:
             break
