@@ -438,7 +438,7 @@ The following arguments are available:
             # --all or named some projects explicitly.
             if not (args.all or args.projects or
                     self.manifest.is_active(project)):
-                log.dbg(f'{project.name}: skipping, inactive')
+                log.dbg(f'{project.name}: skipping inactive project')
                 continue
 
             # Spelling out the format keys explicitly here gives us
@@ -788,7 +788,7 @@ class Update(_ProjectCommand):
                 continue
             try:
                 if not self.project_is_active(project):
-                    log.dbg(f'project {project.name}: inactive, skipped')
+                    log.dbg(f'{project.name}: skipping inactive project')
                     continue
                 self.update(project)
                 self.updated.add(project.name)
