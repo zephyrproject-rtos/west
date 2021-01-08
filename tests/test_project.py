@@ -1179,7 +1179,6 @@ def test_update_with_groups_block(west_init_tmpdir):
     cmd('update --groups block-me')
     assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=1)
 
-@pytest.mark.xfail
 def test_update_with_groups_explicit(west_init_tmpdir):
     # Even inactive projects must be updated if the user specifically
     # requests it.
