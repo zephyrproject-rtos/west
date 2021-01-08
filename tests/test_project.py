@@ -1179,6 +1179,38 @@ def test_update_with_groups_block(west_init_tmpdir):
     cmd('update --groups block-me')
     assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=1)
 
+@pytest.mark.xfail
+def test_update_with_groups_explicit(west_init_tmpdir):
+    # Even inactive projects must be updated if the user specifically
+    # requests it.
+
+    remotes = west_init_tmpdir / '..' / 'repos'
+
+    with open(west_init_tmpdir / 'zephyr' / 'west.yml', 'w') as f:
+        f.write(f'''
+        manifest:
+          defaults:
+            remote: test-local
+          remotes:
+            - name: test-local
+              url-base: {remotes}
+          projects:
+            - name: Kconfiglib
+              revision: zephyr
+              path: subdir/Kconfiglib
+              groups:
+              - block-me
+          groups: [-block-me]
+          self:
+            path: zephyr
+        ''')
+
+    cmd('update')
+    assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=0)
+
+    cmd('update Kconfiglib')
+    assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=1)
+
 
 def test_init_with_manifest_filename(repos_tmpdir):
     # Test 'west init --mf' on a normal repo
