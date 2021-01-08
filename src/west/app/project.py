@@ -858,9 +858,6 @@ class Update(_ProjectCommand):
             if isinstance(project, ManifestProject):
                 continue
             try:
-                if not self.project_is_active(project):
-                    log.dbg(f'project {project.name}: skipped, inactive')
-                    continue
                 self.update(project)
             except subprocess.CalledProcessError:
                 failed.append(project)
