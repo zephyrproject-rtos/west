@@ -1039,7 +1039,15 @@ class Update(_ProjectCommand):
         if not cloned:
             if take_stats:
                 start = perf_counter()
-            _init_project(project)
+
+            log.small_banner(f'{project.name}: initializing')
+            project.git(['init', project.abspath], cwd=util.west_topdir())
+            # This remote is added as a convenience for the user.
+            # However, west always fetches project data by URL, not
+            # remote name. The user is therefore free to change the
+            # URL of this remote.
+            project.git(f'remote add -- {project.remote_name} {project.url}')
+
             if take_stats:
                 stats['init'] = perf_counter() - start
 
@@ -1091,7 +1099,7 @@ class Update(_ProjectCommand):
             stats['check HEAD is ok'] = perf_counter() - start
         if not head_ok:
             # If nothing is checked out (which usually only happens if
-            # we called _init_project(project) above), check out
+            # ensure_cloned() above had to create a new repo), check out
             # 'manifest-rev' in a detached HEAD state.
             #
             # Otherwise, the initial state would have nothing checked
@@ -1264,14 +1272,6 @@ def _maybe_sha(rev):
         return False
 
     return len(rev) <= 40
-
-def _init_project(project):
-    log.small_banner(f'{project.name}: initializing')
-    project.git(['init', project.abspath], cwd=util.west_topdir())
-    # This remote is added as a convenience for the user.
-    # However, west always fetches project data by URL, not remote name.
-    # The user is therefore free to change the URL of this remote.
-    project.git(f'remote add -- {project.remote_name} {project.url}')
 
 def _rev_type(project, rev=None):
     # Returns a "refined" revision type of rev (default:
