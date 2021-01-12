@@ -92,8 +92,8 @@ class Submodule(NamedTuple):
     name: str
     path: str
 
-# Submodules might be the list of values, bool or None.
-SubmodulesType = Optional[Union[List[Submodule], bool]]
+# Submodules may be a list of values or a bool.
+SubmodulesType = Union[List[Submodule], bool]
 
 # Manifest locating, parsing, loading, etc.
 
@@ -598,7 +598,7 @@ class Project:
     def __init__(self, name: str, url: str,
                  revision: Optional[str] = None,
                  path: Optional[PathType] = None,
-                 submodules: Optional[SubmodulesType] = None,
+                 submodules: SubmodulesType = False,
                  clone_depth: Optional[int] = None,
                  west_commands: Optional[WestCommandsType] = None,
                  topdir: Optional[PathType] = None,
