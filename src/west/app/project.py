@@ -1011,7 +1011,11 @@ class Update(_ProjectCommand):
             _post_checkout_help(project, current_branch, sha, is_ancestor)
 
         # Update project submodules, if it has any.
+        if take_stats:
+            start = perf_counter()
         self.update_submodules(project)
+        if take_stats:
+            stats['update submodules'] = perf_counter() - start
 
         # Print performance statistics.
         if take_stats:
