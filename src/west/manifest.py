@@ -1334,42 +1334,6 @@ class Manifest:
             raise ValueError(unknown, uncloned)
         return ret
 
-    def _get_submodules(self, submodules) -> SubmodulesType:
-        '''Gets a list of `Submodules` objects or boolean from the manifest
-        *submodules*.
-
-        For submodules of list type, method checks format of all elements
-        and converts dictionaries into the Submodule objects.
-
-        For submodules set to None or submodules of bool type, method
-        does nothing, as both boolean values are valid (True - means
-        that all project submodules should be considered and False - means
-        that are not any submodules).
-
-        :param submodules: content of the manifest submodules value.
-        '''
-        self.submodules = submodules
-        self.submodules_type = type(self.submodules)
-        # For the boolean type or submodules set to None just do nothing.
-        if self.submodules is None or self.submodules_type == bool:
-            return self.submodules
-
-        # For the list type, check whether each element has proper
-        # structure and convert it to Submodules object.
-        if self.submodules_type == list:
-            for index in range(len(self.submodules)):
-                if _is_submodule_dict_ok(self.submodules[index]):
-                    self.submodules[index] =  \
-                        Submodule(self.submodules[index]['name'],
-                                  self.submodules[index]['path'])
-                else:
-                    self._malformed(f'Invalid submodule structure \
-                        {self.submodules[index]}')
-        else:
-            self._malformed(f'Invalid submodules {self.submodules} '
-                            f'type: {self.submodules_type}')
-        return self.submodules
-
     def _as_dict_helper(
             self, pdict: Optional[Callable[[Project], Dict]] = None) \
             -> Dict:
@@ -1907,10 +1871,9 @@ class Manifest:
             self._malformed(
                 f'project {name}: "groups" cannot be combined with "import"')
 
-        submodules = self._get_submodules(pd.get('submodules'))
-
-        ret = Project(name, url, pd.get('revision', defaults.revision),
-                      path, submodules=submodules,
+        ret = Project(name, url, pd.get('revision', defaults.revision), path,
+                      submodules=self._load_submodules(pd.get('submodules'),
+                                                       f'project {name}'),
                       clone_depth=pd.get('clone-depth'),
                       west_commands=pd.get('west-commands'),
                       topdir=self.topdir, remote_name=remote,
@@ -1946,6 +1909,47 @@ class Manifest:
             if not is_group(group):
                 self._malformed(f'project {project_name}: '
                                 f'invalid group "{group}"')
+
+    def _load_submodules(self, submodules: Any, src: str) -> SubmodulesType:
+        # Gets a list of Submodules objects or boolean from the manifest
+        # *submodules* value.
+        #
+        # If submodules is a list[dict], checks the format of elements
+        # and converts the list to a List[Submodule].
+        #
+        # If submodules is a bool, returns its value (True means that
+        # all project submodules should be considered and False means
+        # all submodules should be ignored).
+        #
+        # If submodules is None, returns False.
+        #
+        # All errors raise MalformedManifest.
+        #
+        # :param submodules: content of the manifest submodules value.
+        # :param src: human readable source of the submodules data
+
+        # A missing 'submodules' is the same thing as False.
+        if submodules is None:
+            return False
+
+        # A bool should be returned as-is.
+        if isinstance(submodules, bool):
+            return submodules
+
+        # Convert lists[dict] to list[Submodules].
+        if isinstance(submodules, list):
+            ret = []
+            for index, value in enumerate(submodules):
+                if _is_submodule_dict_ok(value):
+                    ret.append(Submodule(**value))
+                else:
+                    self._malformed(f'{src}: invalid submodule element '
+                                    f'{value} at index {index}')
+            return ret
+
+        self._malformed(f'{src}: invalid submodules: {submodules} '
+                        f'has type {type(submodules)}; '
+                        'expected a list or boolean')
 
     def _import_from_project(self, project: Project, imp: Any,
                              ctx: _import_ctx):
