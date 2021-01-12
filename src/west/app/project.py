@@ -932,18 +932,17 @@ class Update(_ProjectCommand):
             return
 
         submodules = project.submodules
-        call_location = os.path.join(self.topdir, project.path)
         submodules_update_strategy = ('--rebase' if self.args.rebase
                                       else '--checkout')
         # For the list type, update given list of submodules.
         if isinstance(submodules, list):
             for submodule in submodules:
-                project.git(['-C', call_location, 'submodule', 'update',
+                project.git(['submodule', 'update',
                              '--init', submodules_update_strategy,
                              '--recursive', submodule.path])
         # For the bool type, update all project submodules
         elif isinstance(submodules, bool):
-            project.git(['-C', call_location, 'submodule', 'update', '--init',
+            project.git(['submodule', 'update', '--init',
                          submodules_update_strategy, '--recursive'])
 
     def update(self, project):
