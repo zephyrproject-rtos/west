@@ -328,6 +328,19 @@ def _update_blocked_groups(blocked_groups: Set[str],
         elif group in blocked_groups:
             blocked_groups.remove(group)
 
+def _is_submodule_dict_ok(value: Any) -> bool:
+    # Check whether value is a dict that contains the expected
+    # submodule fields of proper types.
+
+    if not isinstance(value, dict):
+        return False
+
+    if len(value) != 2:
+        return False  # Not enough keys, or too many.
+
+    return ('name' in value and isinstance(value['name'], str) and
+            'path' in value and isinstance(value['path'], str))
+
 #
 # Public functions
 #
@@ -1087,16 +1100,6 @@ class Manifest:
         kwargs.update({'source_data': source_data})
         return Manifest(**kwargs)
 
-    @staticmethod
-    def is_submodule_ok(value: Any) -> bool:
-        if isinstance(value, dict):
-            # Check whether value contain Submodule fields of proper types.
-            if 'name' in value.keys() and 'path' in value.keys():
-                if isinstance(value['name'], str) and isinstance(value['path'],
-                                                                 str):
-                    return True
-        return False
-
     def __init__(self, source_file: Optional[PathType] = None,
                  source_data: Optional[ManifestDataType] = None,
                  manifest_path: Optional[PathType] = None,
@@ -1355,7 +1358,7 @@ class Manifest:
         # structure and convert it to Submodules object.
         if self.submodules_type == list:
             for index in range(len(self.submodules)):
-                if self.is_submodule_ok(self.submodules[index]):
+                if _is_submodule_dict_ok(self.submodules[index]):
                     self.submodules[index] =  \
                         Submodule(self.submodules[index]['name'],
                                   self.submodules[index]['path'])
