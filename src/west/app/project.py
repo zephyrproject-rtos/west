@@ -719,7 +719,7 @@ class Update(_ProjectCommand):
         group = parser.add_argument_group(
             title='advanced options')
         group.add_argument('-g', '--groups', action='append', default=[],
-                           help='''proceed if GROUPS was appended to
+                           help='''proceed as if GROUPS was appended to
                            manifest.groups; may be given multiple times''')
 
         group = parser.add_argument_group('deprecated options')
