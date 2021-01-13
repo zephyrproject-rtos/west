@@ -1236,6 +1236,23 @@ def test_init_with_manifest_filename(repos_tmpdir):
     config.read_config()
     cmd('update')
 
+def test_init_with_manifest_in_subdir(repos_tmpdir):
+    # Test west init with a manifest repository that is intended to
+    # live in a nested subdirectory of the workspace topdir.
+
+    manifest = repos_tmpdir / 'repos' / 'zephyr'
+    add_commit(manifest, 'move manifest repo to subdirectory',
+               files={'west.yml':
+                      textwrap.dedent('''
+                      manifest:
+                        projects: []
+                        self:
+                          path: nested/subdirectory
+                      ''')})
+
+    workspace = repos_tmpdir / 'workspace'
+    cmd(f'init -m "{manifest}" "{workspace}"')
+    assert (workspace / 'nested' / 'subdirectory').check(dir=1)
 
 def test_extension_command_execution(west_init_tmpdir):
     with pytest.raises(subprocess.CalledProcessError):
