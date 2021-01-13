@@ -287,6 +287,7 @@ If cloning a repository:
 
         log.dbg('moving', tempdir, 'to', manifest_abspath,
                 level=log.VERBOSE_EXTREME)
+        manifest_abspath.parent.mkdir(parents=True, exist_ok=True)
         try:
             shutil.move(os.fspath(tempdir), os.fspath(manifest_abspath))
         except shutil.Error as e:
