@@ -192,7 +192,7 @@ def test_list_groups(west_init_tmpdir):
            'bar .. path-for-bar',
            'baz .baz-group. baz'])
 
-    cmd('config manifest.groups foo-group-1')
+    cmd('config manifest.groups +foo-group-1')
     check('list -f "{name} .{groups}. {path}"',
           ['manifest .. zephyr',
            'foo .foo-group-1,foo-group-2. foo',
@@ -1077,8 +1077,8 @@ def test_init_local_with_empty_path(repos_tmpdir):
     assert (repos_tmpdir / 'workspace' / 'subdir' / 'Kconfiglib').check(dir=1)
 
 
-def test_update_with_groups_allow(west_init_tmpdir):
-    # Test "west update" with increasing numbers of groups allowed.
+def test_update_with_groups_enabled(west_init_tmpdir):
+    # Test "west update" with increasing numbers of groups enabled.
 
     remotes = west_init_tmpdir / '..' / 'repos'
 
@@ -1119,16 +1119,16 @@ def test_update_with_groups_allow(west_init_tmpdir):
     assert (west_init_tmpdir / 'tagged_repo').check(dir=0)
     assert (west_init_tmpdir / 'net-tools').check(dir=0)
 
-    cmd('update --groups allow-on-cmd-line')
+    cmd('update --groups +allow-on-cmd-line')
     assert (west_init_tmpdir / 'tagged_repo').check(dir=1)
     assert (west_init_tmpdir / 'net-tools').check(dir=0)
 
-    cmd('config manifest.groups allow-in-config-file')
+    cmd('config manifest.groups +allow-in-config-file')
     cmd('update')
     assert (west_init_tmpdir / 'net-tools').check(dir=1)
 
 
-def test_update_with_groups_block(west_init_tmpdir):
+def test_update_with_groups_disabled(west_init_tmpdir):
     # Test "west update" with decreasing numbers of groups blocked.
 
     remotes = west_init_tmpdir / '..' / 'repos'
@@ -1176,7 +1176,7 @@ def test_update_with_groups_block(west_init_tmpdir):
     assert (west_init_tmpdir / 'tagged_repo').check(dir=1)
 
     # allowlists override blocklists.
-    cmd('update --groups block-me')
+    cmd('update --groups +block-me')
     assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=1)
 
 def test_update_with_groups_explicit(west_init_tmpdir):

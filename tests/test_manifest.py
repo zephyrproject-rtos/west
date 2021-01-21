@@ -2466,17 +2466,19 @@ def test_invalid_groups():
       - {}
     '''
 
-    check(fmt, '', 'invalid group ""')
+    check(fmt, '""', 'invalid group ""')
     check(fmt, 'white space', 'invalid group "white space"')
     check(fmt, 'no,commas', 'invalid group "no,commas"')
     check(fmt, 'no:colons', 'invalid group "no:colons"')
     check(fmt, '-noleadingdash', 'invalid group "-noleadingdash"')
+    check(fmt, '+noleadingplus', 'invalid group "+noleadingplus"')
 
     assert not is_group('')
     assert not is_group('white space')
     assert not is_group('no,commas')
     assert not is_group('no:colons')
     assert not is_group('-noleadingdash')
+    assert not is_group('+noleadingplus')
 
     fmt_scalar_project = '''
     projects:
@@ -2518,8 +2520,8 @@ def test_groups():
 
     assert is_group(1)
     assert is_group('hello-world')
+    assert is_group('hello+world')
     assert is_group(3.14)
-    assert is_group('-leadingdash', dash_ok=True)
 
 def test_invalid_manifest_groups():
     # Test cases for invalid "manifest: groups:" lists.
@@ -2591,18 +2593,18 @@ def test_is_active():
                      for p in m.get_projects(['p1', 'p2', 'p3'])) == expected
 
     check((True, True, True), '')
-    check((True, True, True), 'groups: [ga]')
+    check((True, True, True), 'groups: [+ga]')
     check((False, True, True), 'groups: [-ga]')
     check((True, True, True), 'groups: [-gb]',
-          extra_groups=['ga'])
+          extra_groups=['+ga'])
     check((True, True, True), 'groups: [-gb]',
-          extra_groups=['gb'])
+          extra_groups=['+gb'])
     check((True, True, True), 'groups: [-ga]',
-          extra_groups=['ga'])
+          extra_groups=['+ga'])
     check((False, True, True), 'groups: [-ga]',
-          extra_groups=['ga', '-ga'])
+          extra_groups=['+ga', '-ga'])
     check((True, True, True), 'groups: [-ga]',
-          extra_groups=['ga', '-gb'])
+          extra_groups=['+ga', '-gb'])
     check((False, False, True), 'groups: [-ga]',
           extra_groups=['-gb'])
 

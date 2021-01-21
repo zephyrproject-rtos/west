@@ -745,8 +745,12 @@ class Update(_ProjectCommand):
 
         def handle(group):
             group = group.strip()
-            if not is_manifest_group(group, dash_ok=True):
-                log.die(f'invalid --groups item {group}')
+            if not group.startswith(('-', '+')):
+                log.die(f'invalid --groups item {group}: '
+                        'must start with - or +')
+            if not is_manifest_group(group[1:]):
+                log.die(f'invalid --groups item {group}: '
+                        '"{group[1:]}" is not a valid group name')
             self.extra_groups.append(group)
 
         for group in args.groups:
