@@ -452,7 +452,7 @@ def is_group(group: GroupsEltType, dash_ok=False) -> bool:
         group = group[1:]
 
     return ((group >= 0) if isinstance(group, (float, int)) else
-            not _RESERVED_GROUP_RE.search(group))
+            bool(group and not _RESERVED_GROUP_RE.search(group)))
 
 #
 # Exception types

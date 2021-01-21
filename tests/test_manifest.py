@@ -2466,11 +2466,13 @@ def test_invalid_groups():
       - {}
     '''
 
+    check(fmt, '', 'invalid group ""')
     check(fmt, 'white space', 'invalid group "white space"')
     check(fmt, 'no,commas', 'invalid group "no,commas"')
     check(fmt, 'no:colons', 'invalid group "no:colons"')
     check(fmt, '-noleadingdash', 'invalid group "-noleadingdash"')
 
+    assert not is_group('')
     assert not is_group('white space')
     assert not is_group('no,commas')
     assert not is_group('no:colons')
