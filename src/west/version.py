@@ -5,8 +5,7 @@
 # This is the Python 3 version of option 3 in:
 # https://packaging.python.org/guides/single-sourcing-package-version/#single-sourcing-the-version
 
-# DO NOT CUT 0.9 without bumping west.manifest.SCHEMA_VERSION too.
-__version__ = '0.8.99'
+__version__ = '0.9.0a1'
 # MAINTAINERS:
 #
 # Make sure to update west.manifest.SCHEMA_VERSION if there have been
