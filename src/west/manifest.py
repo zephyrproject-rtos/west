@@ -311,7 +311,7 @@ def _and_filters(filter_fn1: ImapFilterFnType,
 GroupsEltType = Union[str, int, float]
 GroupsType = List[GroupsEltType]
 
-_RESERVED_GROUP_RE = re.compile(r'(^-|[\s,:])')
+_RESERVED_GROUP_RE = re.compile(r'(^[+-]|[\s,:])')
 
 def _to_groups_list(value: GroupsType) -> List[str]:
     # If 'value' is a valid 'groups: ...' value parsed from YAML,
@@ -319,16 +319,20 @@ def _to_groups_list(value: GroupsType) -> List[str]:
 
     return [str(item) for item in value]
 
-def _update_blocked_groups(blocked_groups: Set[str],
-                           groups: Iterable[str]):
-    # Update a set of blocked groups in place based on an iterable of
-    # group names to allow ('foo') or block ('-foo').
+def _update_disabled_groups(disabled_groups: Set[str],
+                            updates: Iterable[str]):
+    # Update a set of disabled groups in place based on 'updates', an
+    # iterable of group names to enable ('+foo') or disable ('-foo').
 
-    for group in groups:
-        if group.startswith('-'):
-            blocked_groups.add(group[1:])
-        elif group in blocked_groups:
-            blocked_groups.remove(group)
+    for update in updates:
+        if update.startswith('-'):
+            disabled_groups.add(update[1:])
+        elif update.startswith('+'):
+            group = update[1:]
+            if group in disabled_groups:
+                disabled_groups.remove(group)
+        else:
+            raise ValueError(f'{update} must start with - or +')
 
 def _is_submodule_dict_ok(value: Any) -> bool:
     # Check whether value is a dict that contains the expected
@@ -419,22 +423,22 @@ def validate(data: Any) -> None:
     except pykwalify.errors.SchemaError as se:
         raise MalformedManifest(se.msg) from se
 
-def is_group(group: GroupsEltType, dash_ok=False) -> bool:
+def is_group(group: GroupsEltType) -> bool:
     '''Is a project group value 'group' valid?
 
     Valid groups are strings that don't contain whitespace, commas
-    (","), or colons (":"), and do not start with "-". As a special
-    case, groups may also be nonnegative numbers, to avoid forcing
-    users to quote these values in YAML files.
+    (","), or colons (":"), and do not start with "-" or "+".
 
-    :param group: the group name to check
-    :param dash_ok: if True, permit a single leading dash ("-")
+    As a special case, groups may also be nonnegative numbers, to
+    avoid forcing users to quote these values in YAML files.
+
+    :param group: the group value to check
     '''
     # Implementation notes:
     #
-    #     - not starting with "-" because "-foo" means "block group
-    #       foo". Numbers may not be negative for the same reason:
-    #       they'd start with "-" when converted to str.
+    #     - not starting with "-" because "-foo" means "disable group
+    #       foo", and not starting with "+" because "+foo" means
+    #       "enable group foo".
     #
     #     - no commas because that's a separator character in
     #       manifest.groups and --groups
@@ -447,9 +451,6 @@ def is_group(group: GroupsEltType, dash_ok=False) -> bool:
     #       use; we might want to do something like
     #       "--groups=path-prefix:foo" to create additional logical
     #       groups based on the workspace layout or other metadata
-
-    if dash_ok and isinstance(group, str) and group.startswith('-'):
-        group = group[1:]
 
     return ((group >= 0) if isinstance(group, (float, int)) else
             bool(group and not _RESERVED_GROUP_RE.search(group)))
@@ -1243,7 +1244,7 @@ class Manifest:
         self.has_imports: bool = False
 
         # This will be overwritten in _load() if necessary.
-        self._blocked_groups: Set[str] = set()
+        self._disabled_groups: Set[str] = set()
 
         # Set up the public attributes documented above, as well as
         # any internal attributes needed to implement the public API.
@@ -1426,11 +1427,11 @@ class Manifest:
 
         Projects with empty 'project.groups' lists are always active.
 
-        Otherwise, if any group in 'project.groups' is allowed by this
+        Otherwise, if any group in 'project.groups' is enabled by this
         manifest's 'groups:' list (and the 'manifest.groups' local
         configuration option, if we have a workspace), returns True.
 
-        Otherwise, i.e. if all of the project's groups are blocked,
+        Otherwise, i.e. if all of the project's groups are disabled,
         this returns False.
 
         "Inactive" projects should generally be considered absent from
@@ -1438,8 +1439,9 @@ class Manifest:
         etc.
 
         :param project: project to check
-        :param groups_extra: additional groups allow/block list, at
-            higher precedence than the manifest or configuration file
+        :param extra_groups: additional groups to enable/disable,
+          as a list of '+foo' (to enable 'foo') and '-bar' (to disable
+          'bar') updates
         '''
         if not project.groups:
             # Projects without any groups are always active, so just
@@ -1450,12 +1452,12 @@ class Manifest:
             return True
 
         if extra_groups:
-            blocked_groups = set(self._blocked_groups)
-            _update_blocked_groups(blocked_groups, extra_groups)
+            disabled_groups = set(self._disabled_groups)
+            _update_disabled_groups(disabled_groups, extra_groups)
         else:
-            blocked_groups = self._blocked_groups
+            disabled_groups = self._disabled_groups
 
-        return any(group not in blocked_groups for group in project.groups)
+        return any(group not in disabled_groups for group in project.groups)
 
     def _malformed(self, complaint: str,
                    parent: Optional[Exception] = None) -> NoReturn:
@@ -1488,7 +1490,7 @@ class Manifest:
 
         _logger.debug(f'loading {loading_what}')
 
-        # Figure out any allowed/blocked groups based on the manifest
+        # Figure out any enabled/disabled groups based on the manifest
         # or local configuration file.
         self._load_groups(manifest)
 
@@ -1534,7 +1536,7 @@ class Manifest:
         _logger.debug(f'loaded {loading_what}')
 
     def _load_groups(self, manifest_data: Dict[str, Any]):
-        # Update self._blocked_groups using data from 'manifest_data' and
+        # Update self._disabled_groups using data from 'manifest_data' and
         # (if there is a workspace) the local configuration file.
 
         if 'groups' in manifest_data:
@@ -1549,22 +1551,29 @@ class Manifest:
         from_config = self._validated_groups('local configuration file',
                                              self._load_config_groups())
 
-        _update_blocked_groups(self._blocked_groups,
-                               itertools.chain(from_manifest, from_config))
+        _update_disabled_groups(self._disabled_groups,
+                                itertools.chain(from_manifest, from_config))
 
-        _logger.debug(f'blocked groups: {self._blocked_groups}')
+        _logger.debug(f'disabled groups: {self._disabled_groups}')
 
-    def _validated_groups(self, source: str, groups: GroupsType) -> List[str]:
+    def _validated_groups(self, source: str, updates: GroupsType) -> List[str]:
         # Helper function for cleaning up manifest: groups: and
         # manifest.groups values.
 
         ret = []
 
-        for group in groups:
-            if not is_group(group, dash_ok=True):
-                self._malformed(f'{source} contains invalid item "{group}"')
+        for update in updates:
+            if not isinstance(update, str):
+                update = str(update)
 
-            ret.append(str(group))
+            if update[0] not in ('+', '-'):
+                self._malformed(f'{source} contains invalid item "{update}"; '
+                                'this must begin with "+" or "-"')
+            if not is_group(update[1:]):
+                self._malformed(f'{source} contains invalid item "{update}"; '
+                                '')
+
+            ret.append(update)
 
         return ret
 
@@ -1870,7 +1879,7 @@ class Manifest:
         if imp and groups:
             # Maybe there is a sensible way to combine the two of these.
             # but it's not clear what it is. Let's avoid weird edge cases
-            # like "what do I do about a project whose group is blocklisted
+            # like "what do I do about a project whose group is disabled
             # that I need to import data from?".
             self._malformed(
                 f'project {name}: "groups" cannot be combined with "import"')
