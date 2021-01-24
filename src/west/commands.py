@@ -5,7 +5,7 @@
 
 from abc import ABC, abstractmethod
 from collections import OrderedDict
-import importlib
+import importlib.util
 import itertools
 import os
 from pathlib import Path
