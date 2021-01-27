@@ -164,7 +164,7 @@ def test_list_groups(west_init_tmpdir):
           - name: baz
             groups:
             - baz-group
-          groups: [-foo-group-1,-foo-group-2,-baz-group]
+          group-filter: [-foo-group-1,-foo-group-2,-baz-group]
         """)
 
     def check(command_string, expected):
@@ -192,7 +192,7 @@ def test_list_groups(west_init_tmpdir):
            'bar .. path-for-bar',
            'baz .baz-group. baz'])
 
-    cmd('config manifest.groups +foo-group-1')
+    cmd('config manifest.group-filter +foo-group-1')
     check('list -f "{name} .{groups}. {path}"',
           ['manifest .. zephyr',
            'foo .foo-group-1,foo-group-2. foo',
@@ -1109,7 +1109,7 @@ def test_update_with_groups_enabled(west_init_tmpdir):
               groups:
               - allow-in-config-file
               - blocked
-          groups: [-allow-on-cmd-line,-allow-in-config-file,-blocked]
+          group-filter: [-allow-on-cmd-line,-allow-in-config-file,-disabled]
           self:
             path: zephyr
         ''')
@@ -1119,11 +1119,11 @@ def test_update_with_groups_enabled(west_init_tmpdir):
     assert (west_init_tmpdir / 'tagged_repo').check(dir=0)
     assert (west_init_tmpdir / 'net-tools').check(dir=0)
 
-    cmd('update --groups +allow-on-cmd-line')
+    cmd('update --group-filter +allow-on-cmd-line')
     assert (west_init_tmpdir / 'tagged_repo').check(dir=1)
     assert (west_init_tmpdir / 'net-tools').check(dir=0)
 
-    cmd('config manifest.groups +allow-in-config-file')
+    cmd('config manifest.group-filter +allow-in-config-file')
     cmd('update')
     assert (west_init_tmpdir / 'net-tools').check(dir=1)
 
@@ -1154,19 +1154,19 @@ def test_update_with_groups_disabled(west_init_tmpdir):
             - name: net-tools
               groups:
               - block-me-in-config-file
-          groups: [-block-me]
+          group-filter: [-block-me]
           self:
             path: zephyr
         ''')
 
-    cmd('config manifest.groups -- -block-me-in-config-file')
-    cmd('update --groups=-block-me-on-cmd-line')
+    cmd('config manifest.group-filter -- -block-me-in-config-file')
+    cmd('update --group-filter=-block-me-on-cmd-line')
     assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=0)
     assert (west_init_tmpdir / 'tagged_repo').check(dir=0)
     assert (west_init_tmpdir / 'net-tools').check(dir=0)
 
-    cmd('config -d manifest.groups')
-    cmd('update --groups=-block-me-on-cmd-line')
+    cmd('config -d manifest.group-filter')
+    cmd('update --group-filter=-block-me-on-cmd-line')
     assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=0)
     assert (west_init_tmpdir / 'tagged_repo').check(dir=0)
     assert (west_init_tmpdir / 'net-tools').check(dir=1)
@@ -1176,7 +1176,7 @@ def test_update_with_groups_disabled(west_init_tmpdir):
     assert (west_init_tmpdir / 'tagged_repo').check(dir=1)
 
     # allowlists override blocklists.
-    cmd('update --groups +block-me')
+    cmd('update --group-filter +block-me')
     assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=1)
 
 def test_update_with_groups_explicit(west_init_tmpdir):
@@ -1199,7 +1199,7 @@ def test_update_with_groups_explicit(west_init_tmpdir):
               path: subdir/Kconfiglib
               groups:
               - block-me
-          groups: [-block-me]
+          group-filter: [-block-me]
           self:
             path: zephyr
         ''')

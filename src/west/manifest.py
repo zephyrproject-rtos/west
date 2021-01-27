@@ -10,7 +10,6 @@ Parser and abstract data types for west manifests.
 import configparser
 import enum
 import errno
-import itertools
 import logging
 import os
 from pathlib import PurePosixPath, Path
@@ -308,31 +307,38 @@ def _and_filters(filter_fn1: ImapFilterFnType,
     else:
         return filter_fn1 or filter_fn2
 
-GroupsEltType = Union[str, int, float]
-GroupsType = List[GroupsEltType]
+# A 'raw' element in a project 'groups:' or manifest 'group-filter:' list,
+# as it is parsed from YAML, before conversion to string.
+RawGroupType = Union[str, int, float]
+
+#: A list of group names belonging to a project, like ['foo', 'bar']
+GroupsType = List[str]
+
+#: A list of group names to enable and disable, like ['+foo', '-bar'].
+GroupFilterType = List[str]
 
 _RESERVED_GROUP_RE = re.compile(r'(^[+-]|[\s,:])')
 
-def _to_groups_list(value: GroupsType) -> List[str]:
-    # If 'value' is a valid 'groups: ...' value parsed from YAML,
-    # return a canonical list of string groups corresponding to it.
-
-    return [str(item) for item in value]
-
 def _update_disabled_groups(disabled_groups: Set[str],
-                            updates: Iterable[str]):
-    # Update a set of disabled groups in place based on 'updates', an
-    # iterable of group names to enable ('+foo') or disable ('-foo').
+                            group_filter: GroupFilterType):
+    # Update a set of disabled groups in place based on
+    # 'group_filter'.
 
-    for update in updates:
-        if update.startswith('-'):
-            disabled_groups.add(update[1:])
-        elif update.startswith('+'):
-            group = update[1:]
+    for item in group_filter:
+        if item.startswith('-'):
+            disabled_groups.add(item[1:])
+        elif item.startswith('+'):
+            group = item[1:]
             if group in disabled_groups:
                 disabled_groups.remove(group)
         else:
-            raise ValueError(f'{update} must start with - or +')
+            # We should never get here. This private helper is only
+            # meant to be invoked on valid data.
+            assert False, \
+                (f"Unexpected group filter item {item}. "
+                 "This is a west bug. Please report it to the developers "
+                 "along with as much information as you can, such as the "
+                 "stack trace that preceded this message.")
 
 def _is_submodule_dict_ok(value: Any) -> bool:
     # Check whether value is a dict that contains the expected
@@ -423,8 +429,8 @@ def validate(data: Any) -> None:
     except pykwalify.errors.SchemaError as se:
         raise MalformedManifest(se.msg) from se
 
-def is_group(group: GroupsEltType) -> bool:
-    '''Is a project group value 'group' valid?
+def is_group(raw_group: RawGroupType) -> bool:
+    '''Is a 'raw' project group value 'raw_group' valid?
 
     Valid groups are strings that don't contain whitespace, commas
     (","), or colons (":"), and do not start with "-" or "+".
@@ -432,7 +438,7 @@ def is_group(group: GroupsEltType) -> bool:
     As a special case, groups may also be nonnegative numbers, to
     avoid forcing users to quote these values in YAML files.
 
-    :param group: the group value to check
+    :param raw_group: the group value to check
     '''
     # Implementation notes:
     #
@@ -441,7 +447,7 @@ def is_group(group: GroupsEltType) -> bool:
     #       "enable group foo".
     #
     #     - no commas because that's a separator character in
-    #       manifest.groups and --groups
+    #       manifest.group-filter and 'west update --group-filter'
     #
     #     - no whitespace mostly to guarantee that printing
     #       comma-separated lists of groups won't cause 'word' breaks
@@ -449,11 +455,11 @@ def is_group(group: GroupsEltType) -> bool:
     #
     #     - no colons to reserve some namespace for potential future
     #       use; we might want to do something like
-    #       "--groups=path-prefix:foo" to create additional logical
+    #       "--group-filter=path-prefix:foo" to create additional logical
     #       groups based on the workspace layout or other metadata
 
-    return ((group >= 0) if isinstance(group, (float, int)) else
-            bool(group and not _RESERVED_GROUP_RE.search(group)))
+    return ((raw_group >= 0) if isinstance(raw_group, (float, int)) else
+            bool(raw_group and not _RESERVED_GROUP_RE.search(raw_group)))
 
 #
 # Exception types
@@ -608,7 +614,7 @@ class Project:
                  west_commands: Optional[WestCommandsType] = None,
                  topdir: Optional[PathType] = None,
                  remote_name: Optional[str] = None,
-                 groups: Optional[List[str]] = None):
+                 groups: Optional[GroupsType] = None):
         '''Project constructor.
 
         If *topdir* is ``None``, then absolute path attributes
@@ -639,7 +645,7 @@ class Project:
         self.west_commands = _west_commands_list(west_commands)
         self.topdir = os.fspath(topdir) if topdir else None
         self.remote_name = remote_name or 'origin'
-        self.groups = groups or []
+        self.groups: GroupsType = groups or []
 
     @property
     def path(self) -> str:
@@ -994,7 +1000,7 @@ class Manifest:
               returned Manifest object is based on the data in
               *source_file*, rooted at *topdir*. The configuration
               variable ``manifest.path`` is ignored in this case, though
-              ``manifest.groups`` will still be read if it exists.
+              ``manifest.group-filter`` will still be read if it exists.
 
               This allows parsing a manifest file "as if" its project
               hierarchy were rooted at another location in the system.
@@ -1129,6 +1135,10 @@ class Manifest:
               an "import:" attribute in "self:" or "projects:"; False
               otherwise
 
+            - ``group_filter``: list of strings corresponding to the
+              manifest's parsed "group-filter:" value, or an empty list
+              if there is none
+
         Exactly one of *source_file* and *source_data* must be given.
 
         If *source_file* is given:
@@ -1243,7 +1253,10 @@ class Manifest:
 
         self.has_imports: bool = False
 
-        # This will be overwritten in _load() if necessary.
+        # This will be overwritten in _load() as needed.
+        self.group_filter: GroupFilterType = []
+
+        # Extra private state for checking active projects.
         self._disabled_groups: Set[str] = set()
 
         # Set up the public attributes documented above, as well as
@@ -1422,14 +1435,15 @@ class Manifest:
         return self._projects
 
     def is_active(self, project: Project,
-                  extra_groups: Optional[Iterable[str]] = None) -> bool:
+                  extra_filter: Optional[Iterable[str]] = None) -> bool:
         '''Is a project active?
 
         Projects with empty 'project.groups' lists are always active.
 
         Otherwise, if any group in 'project.groups' is enabled by this
-        manifest's 'groups:' list (and the 'manifest.groups' local
-        configuration option, if we have a workspace), returns True.
+        manifest's 'group-filter:' list (and the
+        'manifest.group-filter' local configuration option, if we have
+        a workspace), returns True.
 
         Otherwise, i.e. if all of the project's groups are disabled,
         this returns False.
@@ -1439,9 +1453,7 @@ class Manifest:
         etc.
 
         :param project: project to check
-        :param extra_groups: additional groups to enable/disable,
-          as a list of '+foo' (to enable 'foo') and '-bar' (to disable
-          'bar') updates
+        :param extra_filter: an optional additional group filter
         '''
         if not project.groups:
             # Projects without any groups are always active, so just
@@ -1451,9 +1463,11 @@ class Manifest:
             # now.
             return True
 
-        if extra_groups:
+        if extra_filter is not None:
             disabled_groups = set(self._disabled_groups)
-            _update_disabled_groups(disabled_groups, extra_groups)
+            _update_disabled_groups(
+                disabled_groups,
+                self._validated_group_filter(None, list(extra_filter)))
         else:
             disabled_groups = self._disabled_groups
 
@@ -1490,9 +1504,9 @@ class Manifest:
 
         _logger.debug(f'loading {loading_what}')
 
-        # Figure out any enabled/disabled groups based on the manifest
-        # or local configuration file.
-        self._load_groups(manifest)
+        # Load "group-filter:", updating self.group_filter, along with
+        # extra state from the configuraiton file.
+        self._load_group_filters(manifest)
 
         # We want to make an ordered map from project names to
         # corresponding Project instances. Insertion order into this
@@ -1535,54 +1549,71 @@ class Manifest:
 
         _logger.debug(f'loaded {loading_what}')
 
-    def _load_groups(self, manifest_data: Dict[str, Any]):
-        # Update self._disabled_groups using data from 'manifest_data' and
-        # (if there is a workspace) the local configuration file.
+    def _load_group_filters(self, manifest_data: Dict[str, Any]):
+        # Update self.group_filter and self._disabled_groups from the
+        # manifest data's 'manifest: group-filter:' and the local
+        # 'manifest.group-filter' configuration file option.
 
-        if 'groups' in manifest_data:
-            groups = manifest_data['groups']
-            if not groups:
-                self._malformed(f'"manifest: groups: {groups}" '
-                                'may not be empty')
-            from_manifest = self._validated_groups('manifest data', groups)
+        if 'group-filter' not in manifest_data:
+            _logger.debug('group-filter: unset')
         else:
-            from_manifest = []
+            raw_filter: List[RawGroupType] = manifest_data['group-filter']
 
-        from_config = self._validated_groups('local configuration file',
-                                             self._load_config_groups())
+            if not raw_filter:
+                self._malformed(f'"manifest: group-filter: {raw_filter}" '
+                                'may not be empty')
 
+            self.group_filter = self._validated_group_filter('manifest',
+                                                             raw_filter)
+            _update_disabled_groups(self._disabled_groups, self.group_filter)
+
+            _logger.debug('group-filter: %s', self.group_filter)
+
+        # Adjust for the local configuration file's current
+        # manifest.group-filter option value. We only load this once,
+        # so if it changes, the user has to reload the configuration
+        # file.
         _update_disabled_groups(self._disabled_groups,
-                                itertools.chain(from_manifest, from_config))
+                                self._load_config_group_filter())
 
-        _logger.debug(f'disabled groups: {self._disabled_groups}')
+    def _validated_group_filter(
+            self, source: Optional[str], raw_filter: List[RawGroupType]
+    ) -> GroupFilterType:
+        # Helper function for cleaning up nonempty manifest:
+        # group-filter: and manifest.group-filter values.
 
-    def _validated_groups(self, source: str, updates: GroupsType) -> List[str]:
-        # Helper function for cleaning up manifest: groups: and
-        # manifest.groups values.
+        if source is not None:
+            source += ' '
+        else:
+            source = ''
 
-        ret = []
+        ret: GroupFilterType = []
+        for item in raw_filter:
+            if not isinstance(item, str):
+                item = str(item)
 
-        for update in updates:
-            if not isinstance(update, str):
-                update = str(update)
+            if (not item) or (item[0] not in ('+', '-')):
+                self._malformed(
+                    f'{source}group filter contains invalid item "{item}"; '
+                    'this must begin with "+" or "-"')
 
-            if update[0] not in ('+', '-'):
-                self._malformed(f'{source} contains invalid item "{update}"; '
-                                'this must begin with "+" or "-"')
-            if not is_group(update[1:]):
-                self._malformed(f'{source} contains invalid item "{update}"; '
-                                '')
+            group = item[1:]
+            if not is_group(group):
+                self._malformed(
+                    f'{source}group filter contains invalid item "{item}"; '
+                    f'"{group}" is an invalid group name')
 
-            ret.append(update)
+            ret.append(item)
 
         return ret
 
-    def _load_config_groups(self) -> GroupsType:
-        # Load and return manifest.groups (converted to a list of
-        # strings) from the local configuration file if there is one.
+    def _load_config_group_filter(self) -> GroupFilterType:
+        # Load and return manifest.group-filter (converted to a list
+        # of strings) from the local configuration file if there is
+        # one.
         #
-        # Returns [] if manifest.groups is not set and when there is
-        # no workspace.
+        # Returns [] if manifest.group-filter is not set and when
+        # there is no workspace.
 
         if not self.topdir:
             # No workspace -> do not attempt to read config options.
@@ -1598,16 +1629,36 @@ class Manifest:
             # but no manifest.path config option set.
             return []
 
-        groups = cp['manifest'].get('groups', '')
+        raw_filter: Optional[str] = cp['manifest'].get('group-filter', None)
 
-        # Be forgiving: allow empty strings or values with
-        # whitespace. Whitespace in between groups, like "foo ,bar",
-        # is removed, resulting in valid group names ['foo', 'bar'].
-        ret = []
-        for group in groups.split(','):
-            stripped = group.strip()
-            if stripped:
-                ret.append(stripped)
+        if not raw_filter:
+            return []
+
+        # Be forgiving: allow empty strings and values with
+        # whitespace, and ignore (but emit warnings for) invalid
+        # values.
+        #
+        # Whitespace in between groups, like "foo ,bar", is removed,
+        # resulting in valid group names ['foo', 'bar'].
+        ret: GroupFilterType = []
+        for item in raw_filter.split(','):
+            stripped = item.strip()
+            if not stripped:
+                # Don't emit a warning here. This avoids warnings if
+                # the option is set to an empty string.
+                continue
+            if not stripped[0].startswith(('-', '+')):
+                _logger.warning(
+                    f'ignoring invalid manifest.group-filter item {item}; '
+                    'this must start with "-" or "+"')
+                continue
+            if not is_group(stripped[1:]):
+                _logger.warning(
+                    f'ignoring invalid manifest.group-filter item {item}; '
+                    f'"{stripped[1:]}" is not a group name')
+                continue
+            ret.append(stripped)
+
         return ret
 
     def _load_self(self, manifest: Dict[str, Any],
@@ -1871,10 +1922,12 @@ class Manifest:
         # attribute or something like that.
         path = (ctx.path_prefix / pfx / pd.get('path', name)).as_posix()
 
-        groups = pd.get('groups')
-        if groups:
-            self._validate_project_groups(name, groups)
-            groups = _to_groups_list(groups)
+        raw_groups = pd.get('groups')
+        if raw_groups:
+            self._validate_project_groups(name, raw_groups)
+            groups: GroupsType = [str(group) for group in raw_groups]
+        else:
+            groups = []
 
         if imp and groups:
             # Maybe there is a sensible way to combine the two of these.
@@ -1917,11 +1970,12 @@ class Manifest:
 
         return ret
 
-    def _validate_project_groups(self, project_name, groups):
-        for group in groups:
-            if not is_group(group):
+    def _validate_project_groups(self, project_name: str,
+                                 raw_groups: List[RawGroupType]):
+        for raw_group in raw_groups:
+            if not is_group(raw_group):
                 self._malformed(f'project {project_name}: '
-                                f'invalid group "{group}"')
+                                f'invalid group "{raw_group}"')
 
     def _load_submodules(self, submodules: Any, src: str) -> SubmodulesType:
         # Gets a list of Submodules objects or boolean from the manifest
