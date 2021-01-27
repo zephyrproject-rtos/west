@@ -1083,8 +1083,8 @@ def test_update_with_groups_enabled(west_init_tmpdir):
     remotes = west_init_tmpdir / '..' / 'repos'
 
     with open(west_init_tmpdir / 'zephyr' / 'west.yml', 'w') as f:
-        # The purpose of the 'blocked' group is to ensure that a
-        # project's groups' "allowed" bits are ORed together, not
+        # The purpose of the 'disabled' group is to ensure that a
+        # project's groups' "enabled" bits are ORed together, not
         # ANDed together, when deciding if the project is active.
         f.write(f'''
         manifest:
@@ -1098,18 +1098,18 @@ def test_update_with_groups_enabled(west_init_tmpdir):
               revision: zephyr
               path: subdir/Kconfiglib
               groups:
-              - allowed
-              - blocked
+              - enabled
+              - disabled
             - name: tagged_repo
               revision: v1.0
               groups:
-              - allow-on-cmd-line
-              - blocked
+              - enable-on-cmd-line
+              - disabled
             - name: net-tools
               groups:
-              - allow-in-config-file
-              - blocked
-          group-filter: [-allow-on-cmd-line,-allow-in-config-file,-disabled]
+              - enable-in-config-file
+              - disabled
+          group-filter: [-enable-on-cmd-line,-enable-in-config-file,-disabled]
           self:
             path: zephyr
         ''')
@@ -1119,17 +1119,17 @@ def test_update_with_groups_enabled(west_init_tmpdir):
     assert (west_init_tmpdir / 'tagged_repo').check(dir=0)
     assert (west_init_tmpdir / 'net-tools').check(dir=0)
 
-    cmd('update --group-filter +allow-on-cmd-line')
+    cmd('update --group-filter +enable-on-cmd-line')
     assert (west_init_tmpdir / 'tagged_repo').check(dir=1)
     assert (west_init_tmpdir / 'net-tools').check(dir=0)
 
-    cmd('config manifest.group-filter +allow-in-config-file')
+    cmd('config manifest.group-filter +enable-in-config-file')
     cmd('update')
     assert (west_init_tmpdir / 'net-tools').check(dir=1)
 
 
 def test_update_with_groups_disabled(west_init_tmpdir):
-    # Test "west update" with decreasing numbers of groups blocked.
+    # Test "west update" with decreasing numbers of groups disabled.
 
     remotes = west_init_tmpdir / '..' / 'repos'
 
@@ -1146,27 +1146,27 @@ def test_update_with_groups_disabled(west_init_tmpdir):
               revision: zephyr
               path: subdir/Kconfiglib
               groups:
-              - block-me
+              - disabled
             - name: tagged_repo
               revision: v1.0
               groups:
-              - block-me-on-cmd-line
+              - disabled-on-cmd-line
             - name: net-tools
               groups:
-              - block-me-in-config-file
-          group-filter: [-block-me]
+              - disabled-in-config-file
+          group-filter: [-disabled]
           self:
             path: zephyr
         ''')
 
-    cmd('config manifest.group-filter -- -block-me-in-config-file')
-    cmd('update --group-filter=-block-me-on-cmd-line')
+    cmd('config manifest.group-filter -- -disabled-in-config-file')
+    cmd('update --group-filter=-disabled-on-cmd-line')
     assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=0)
     assert (west_init_tmpdir / 'tagged_repo').check(dir=0)
     assert (west_init_tmpdir / 'net-tools').check(dir=0)
 
     cmd('config -d manifest.group-filter')
-    cmd('update --group-filter=-block-me-on-cmd-line')
+    cmd('update --group-filter=-disabled-on-cmd-line')
     assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=0)
     assert (west_init_tmpdir / 'tagged_repo').check(dir=0)
     assert (west_init_tmpdir / 'net-tools').check(dir=1)
@@ -1175,8 +1175,8 @@ def test_update_with_groups_disabled(west_init_tmpdir):
     assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=0)
     assert (west_init_tmpdir / 'tagged_repo').check(dir=1)
 
-    # allowlists override blocklists.
-    cmd('update --group-filter +block-me')
+    # Enabling overrides disabling.
+    cmd('update --group-filter +disabled')
     assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=1)
 
 def test_update_with_groups_explicit(west_init_tmpdir):
@@ -1198,8 +1198,8 @@ def test_update_with_groups_explicit(west_init_tmpdir):
               revision: zephyr
               path: subdir/Kconfiglib
               groups:
-              - block-me
-          group-filter: [-block-me]
+              - disabled
+          group-filter: [-disabled]
           self:
             path: zephyr
         ''')
