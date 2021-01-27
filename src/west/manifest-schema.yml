@@ -19,7 +19,7 @@
 #
 # --------------------------------------------------------------
 
-schema;groups:
+schema;groups-schema:
   type: seq
   sequence:
     - type: str
@@ -121,14 +121,14 @@ mapping:
             type: any
           groups:
             required: false
-            include: groups
+            include: groups-schema
 
   # If present, an allowlist/blocklist of project groups. Prefix a
   # group name with "-" to block it. Give a group name as-is to
   # allow it.
-  groups:
+  group-filter:
     required: false
-    include: groups
+    include: groups-schema
 
   # The "self" key specifies values for the project containing the manifest
   # file (the "manifest repository").

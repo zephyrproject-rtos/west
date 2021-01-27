@@ -2487,13 +2487,13 @@ def test_invalid_groups():
       groups: {}
     '''
 
-    fmt_scalar_groups = '''
+    fmt_scalar_group_filter = '''
     projects: []
-    groups: {}
+    group-filter: {}
     '''
 
     # These come from pykwalify itself.
-    for fmt in [fmt_scalar_project, fmt_scalar_groups]:
+    for fmt in [fmt_scalar_project, fmt_scalar_group_filter]:
         check(fmt, 'hello', 'is not a list')
         check(fmt, 3, 'is not a list')
         check(fmt, 3.14, 'is not a list')
@@ -2523,8 +2523,8 @@ def test_groups():
     assert is_group('hello+world')
     assert is_group(3.14)
 
-def test_invalid_manifest_groups():
-    # Test cases for invalid "manifest: groups:" lists.
+def test_invalid_manifest_group_filters():
+    # Test cases for invalid "manifest: group-filter:" lists.
 
     def check(fmt, arg, err_must_contain):
         with pytest.raises(MalformedManifest) as e:
@@ -2533,7 +2533,7 @@ def test_invalid_manifest_groups():
 
     fmt = '''
     projects: []
-    groups:
+    group-filter:
     - {}
     '''
 
@@ -2542,8 +2542,8 @@ def test_invalid_manifest_groups():
     check(fmt, 'no:colons', 'contains invalid item "no:colons"')
     # leading dashes are okay here!
 
-    def check2(groups, err_must_contain):
-        data = {'manifest': {'projects': [], 'groups': groups}}
+    def check2(group_filter, err_must_contain):
+        data = {'manifest': {'projects': [], 'group-filter': group_filter}}
         with pytest.raises(MalformedManifest) as e:
             Manifest.from_data(data)
         assert err_must_contain in "\n".join(e.value.args)
@@ -2554,10 +2554,10 @@ def test_invalid_manifest_groups():
     check2(3.14, 'not a list')
 
 def test_is_active():
-    # Checks for the results of the 'groups' fields on
+    # Checks for the results of the 'groups' and 'group-filter' fields on
     # Manifest.is_active(project).
 
-    def manifest(groups):
+    def manifest(group_filter):
         data = f"""
         defaults:
           remote: r
@@ -2573,40 +2573,40 @@ def test_is_active():
               - ga
               - gb
           - name: p3
-        {groups}
+        {group_filter}
         """
 
         return M(data)
 
-    def check(expected, groups, extra_groups=None):
+    def check(expected, group_filter, extra_filter=None):
         # Checks that the 'expected' tuple matches the is_active() value
         # for the p1, p2, and p3 projects in the above manifest.
         #
-        # 'groups' is passed to the above manifest() helper.
+        # 'group_filter' is passed to the above manifest() helper.
         #
-        # 'extra_groups' is an optional additional groups list, for
+        # 'extra_filter' is an optional additional group filter, for
         # testing command line additions or for faking out config file
         # changes.
 
-        m = manifest(groups)
-        assert tuple(m.is_active(p, extra_groups=extra_groups)
+        m = manifest(group_filter)
+        assert tuple(m.is_active(p, extra_filter=extra_filter)
                      for p in m.get_projects(['p1', 'p2', 'p3'])) == expected
 
     check((True, True, True), '')
-    check((True, True, True), 'groups: [+ga]')
-    check((False, True, True), 'groups: [-ga]')
-    check((True, True, True), 'groups: [-gb]',
-          extra_groups=['+ga'])
-    check((True, True, True), 'groups: [-gb]',
-          extra_groups=['+gb'])
-    check((True, True, True), 'groups: [-ga]',
-          extra_groups=['+ga'])
-    check((False, True, True), 'groups: [-ga]',
-          extra_groups=['+ga', '-ga'])
-    check((True, True, True), 'groups: [-ga]',
-          extra_groups=['+ga', '-gb'])
-    check((False, False, True), 'groups: [-ga]',
-          extra_groups=['-gb'])
+    check((True, True, True), 'group-filter: [+ga]')
+    check((False, True, True), 'group-filter: [-ga]')
+    check((True, True, True), 'group-filter: [-gb]',
+          extra_filter=['+ga'])
+    check((True, True, True), 'group-filter: [-gb]',
+          extra_filter=['+gb'])
+    check((True, True, True), 'group-filter: [-ga]',
+          extra_filter=['+ga'])
+    check((False, True, True), 'group-filter: [-ga]',
+          extra_filter=['+ga', '-ga'])
+    check((True, True, True), 'group-filter: [-ga]',
+          extra_filter=['+ga', '-gb'])
+    check((False, False, True), 'group-filter: [-ga]',
+          extra_filter=['-gb'])
 
 #########################################
 # Various invalid manifests

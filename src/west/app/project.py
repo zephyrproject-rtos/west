@@ -26,7 +26,7 @@ from west.commands import WestCommand, CommandError
 from west.manifest import ImportFlag, Manifest, MANIFEST_PROJECT_INDEX, \
     ManifestProject, _manifest_content_at, ManifestImportFailed, \
     _ManifestImportDepth, ManifestVersionError, MalformedManifest
-from west.manifest import is_group as is_manifest_group
+from west.manifest import is_group as is_project_group
 from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
 from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
 from west.manifest import QUAL_REFS_WEST as QUAL_REFS
@@ -719,9 +719,11 @@ class Update(_ProjectCommand):
 
         group = parser.add_argument_group(
             title='advanced options')
-        group.add_argument('-g', '--groups', action='append', default=[],
-                           help='''proceed as if GROUPS was appended to
-                           manifest.groups; may be given multiple times''')
+        group.add_argument('--group-filter', '--gf', action='append',
+                           default=[], metavar='FILTER', dest='group_filter',
+                           help='''proceed as if FILTER was appended to
+                           manifest.group-filter; may be given multiple
+                           times''')
 
         group = parser.add_argument_group('deprecated options')
         group.add_argument('-x', '--exclude-west', action='store_true',
@@ -741,24 +743,24 @@ class Update(_ProjectCommand):
         if args.exclude_west:
             log.wrn('ignoring --exclude-west')
 
-        self.extra_groups = []
+        self.group_filter: List[str] = []
 
-        def handle(group):
-            group = group.strip()
-            if not group.startswith(('-', '+')):
-                log.die(f'invalid --groups item {group}: '
+        def handle(group_filter_item):
+            item = group_filter_item.strip()
+            if not item.startswith(('-', '+')):
+                log.die(f'invalid --group-filter item {item}: '
                         'must start with - or +')
-            if not is_manifest_group(group[1:]):
-                log.die(f'invalid --groups item {group}: '
-                        '"{group[1:]}" is not a valid group name')
-            self.extra_groups.append(group)
+            if not is_project_group(item[1:]):
+                log.die(f'invalid --group-filter item {item}: '
+                        f'"{item[1:]}" is not a valid group name')
+            self.group_filter.append(item)
 
-        for group in args.groups:
-            if ',' in group:
-                for split_group in group.split(','):
-                    handle(split_group)
+        for item in args.group_filter:
+            if ',' in item:
+                for split_item in item.split(','):
+                    handle(split_item)
             else:
-                handle(group)
+                handle(item)
 
         # We can't blindly call self._projects() here: manifests with
         # imports are limited to plain 'west update', and cannot use
@@ -1153,7 +1155,7 @@ class Update(_ProjectCommand):
         return current_branch, is_ancestor, try_rebase
 
     def project_is_active(self, project):
-        return self.manifest.is_active(project, extra_groups=self.extra_groups)
+        return self.manifest.is_active(project, extra_filter=self.group_filter)
 
 class ForAll(_ProjectCommand):
     def __init__(self):
@@ -1476,8 +1478,8 @@ ACTIVE PROJECTS
 
 Default output is limited to "active" projects as determined by the:
 
-- "groups" manifest file section
-- "manifest.groups" local configuration option in .west/config
+- "group-filter" manifest file section
+- "manifest.group-filter" local configuration option in .west/config
 
 To include inactive projects as well, use "--all" or give an explicit
 list of projects (by name or path). See the west documentation for
