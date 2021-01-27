@@ -123,9 +123,9 @@ mapping:
             required: false
             include: groups-schema
 
-  # If present, an allowlist/blocklist of project groups. Prefix a
-  # group name with "-" to block it. Give a group name as-is to
-  # allow it.
+  # If present, a list of project groups to enable and disable. Prefix
+  # a group name with "-" to disable it. Give a group name as-is to
+  # enable it.
   group-filter:
     required: false
     include: groups-schema
