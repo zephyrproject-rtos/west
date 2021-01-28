@@ -124,8 +124,7 @@ mapping:
             include: groups-schema
 
   # If present, a list of project groups to enable and disable. Prefix
-  # a group name with "-" to disable it. Give a group name as-is to
-  # enable it.
+  # a group name with "-" to disable it; prefix with "+" to enable it.
   group-filter:
     required: false
     include: groups-schema
