@@ -26,8 +26,7 @@ from west.manifest import Manifest, Project, ManifestProject, \
     _ManifestImportDepth, is_group
 
 from conftest import create_workspace, create_repo, checkout_branch, \
-    create_branch, add_commit, rev_parse, GIT, check_proj_consistency, \
-    WEST_SKIP_SLOW_TESTS
+    create_branch, add_commit, rev_parse, GIT, check_proj_consistency
 
 FPI = ImportFlag.FORCE_PROJECTS  # to force project imports to use the callback
 
@@ -2405,8 +2404,6 @@ def test_import_path_prefix_no_escape(manifest_repo):
         MF(topdir=topdir, import_flags=ImportFlag.IGNORE)
     assert 'escapes the workspace topdir' in str(excinfo.value)
 
-@pytest.mark.skipif(WEST_SKIP_SLOW_TESTS,
-                    reason='use WEST_SKIP_SLOW_TESTS=0 to enable')
 def test_import_loop_detection_self(manifest_repo):
     # Verify that a self-import which causes an import loop is an error.
 
