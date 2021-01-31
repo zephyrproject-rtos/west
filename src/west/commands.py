@@ -104,9 +104,13 @@ class WestCommand(ABC):
             self.requires_workspace = requires_installation
         else:
             self.requires_workspace = requires_workspace
-        self.requires_installation = self.requires_workspace
         self.topdir = None
         self.manifest = None
+
+    @property
+    def requires_installation(self) -> bool:
+        '''Deprecated property alias for self.requires_workspace.'''
+        return self.requires_workspace
 
     def run(self, args, unknown, topdir, manifest=None):
         '''Run the command.
