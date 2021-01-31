@@ -142,7 +142,7 @@ class WestCommand(ABC):
     def add_parser(self, parser_adder) -> argparse.ArgumentParser:
         '''Registers a parser for this command, and returns it.
 
-        The parser object is stored in a ``parser`` attribute of.
+        The parser object is stored in a ``parser`` attribute.
 
         :param parser_adder: The return value of a call to
             ``argparse.ArgumentParser.add_subparsers()``
