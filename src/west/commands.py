@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from abc import ABC, abstractmethod
+import argparse
 from collections import OrderedDict
 import importlib.util
 import itertools
@@ -14,7 +15,7 @@ import shutil
 import subprocess
 import sys
 from types import ModuleType
-from typing import Dict
+from typing import Dict, List, Optional
 
 import pykwalify
 import yaml
@@ -22,7 +23,7 @@ import yaml
 from west import log
 from west.configuration import config as _config
 from west.manifest import Manifest
-from west.util import escapes_directory, quote_sh_list
+from west.util import escapes_directory, quote_sh_list, PathType
 
 '''\
 This package provides WestCommand, which is the common abstraction all
@@ -73,8 +74,10 @@ Things to try:
 class WestCommand(ABC):
     '''Abstract superclass for a west command.'''
 
-    def __init__(self, name, help, description, accepts_unknown_args=False,
-                 requires_workspace=True, requires_installation=None):
+    def __init__(self, name: str, help: str, description: str,
+                 accepts_unknown_args: bool = False,
+                 requires_workspace: bool = True,
+                 requires_installation: bool = None):
         '''Abstract superclass for a west command.
 
         Some fields, such as *name*, *help*, and *description*,
@@ -96,15 +99,15 @@ class WestCommand(ABC):
         :param requires_installation: deprecated equivalent for
             "requires_workspace"; this may go away eventually.
         '''
-        self.name = name
-        self.help = help
-        self.description = description
-        self.accepts_unknown_args = accepts_unknown_args
+        self.name: str = name
+        self.help: str = help
+        self.description: str = description
+        self.accepts_unknown_args: bool = accepts_unknown_args
         if requires_installation is not None:
-            self.requires_workspace = requires_installation
+            self.requires_workspace: bool = requires_installation
         else:
             self.requires_workspace = requires_workspace
-        self.topdir = None
+        self.topdir: Optional[str] = None
         self.manifest = None
 
     @property
@@ -112,7 +115,8 @@ class WestCommand(ABC):
         '''Deprecated property alias for self.requires_workspace.'''
         return self.requires_workspace
 
-    def run(self, args, unknown, topdir, manifest=None):
+    def run(self, args: argparse.Namespace, unknown: List[str],
+            topdir: PathType, manifest: Optional[Manifest] = None) -> None:
         '''Run the command.
 
         This raises `west.commands.CommandContextError` if the command
@@ -135,7 +139,7 @@ class WestCommand(ABC):
         self.manifest = manifest
         self.do_run(args, unknown)
 
-    def add_parser(self, parser_adder):
+    def add_parser(self, parser_adder) -> argparse.ArgumentParser:
         '''Registers a parser for this command, and returns it.
 
         The parser object is stored in a ``parser`` attribute of.
@@ -143,11 +147,12 @@ class WestCommand(ABC):
         :param parser_adder: The return value of a call to
             ``argparse.ArgumentParser.add_subparsers()``
         '''
-        self.parser = self.do_add_parser(parser_adder)
+        parser = self.do_add_parser(parser_adder)
 
-        if self.parser is None:
+        if parser is None:
             raise ValueError('do_add_parser did not return a value')
 
+        self.parser = parser
         return self.parser
 
     #
@@ -155,7 +160,7 @@ class WestCommand(ABC):
     #
 
     @abstractmethod
-    def do_add_parser(self, parser_adder):
+    def do_add_parser(self, parser_adder) -> argparse.ArgumentParser:
         '''Subclass method for registering command line arguments.
 
         This is called by `WestCommand.add_parser` to register the
@@ -170,7 +175,7 @@ class WestCommand(ABC):
         '''
 
     @abstractmethod
-    def do_run(self, args, unknown):
+    def do_run(self, args: argparse.Namespace, unknown: List[str]):
         '''Subclasses must implement; called to run the command.
 
         :param args: ``argparse.Namespace`` of parsed arguments
@@ -187,13 +192,12 @@ class WestCommand(ABC):
     #
 
     @property
-    def has_manifest(self):
+    def has_manifest(self) -> bool:
         '''Property which is True if self.manifest is safe to access.
         '''
         return self._manifest is not None
 
-    @property
-    def manifest(self):
+    def _get_manifest(self) -> Manifest:
         '''Property for the manifest which was passed to run().
 
         If `do_run` was given a *manifest* kwarg, it is returned.
@@ -205,9 +209,13 @@ class WestCommand(ABC):
                     'Try "west manifest --validate" to debug.')
         return self._manifest
 
-    @manifest.setter
-    def manifest(self, manifest):
+    def _set_manifest(self, manifest: Optional[Manifest]):
         self._manifest = manifest
+
+    # Do not use @property decorator syntax to avoid a false positive
+    # error from mypy by using this workaround:
+    # https://github.com/python/mypy/issues/3004#issuecomment-726022329
+    manifest = property(_get_manifest, _set_manifest)
 
     #
     # Other public methods
