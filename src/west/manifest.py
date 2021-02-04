@@ -90,8 +90,8 @@ _logger = logging.getLogger(__name__)
 class Submodule(NamedTuple):
     '''Represents a Git submodule within a project.'''
 
-    name: str
     path: str
+    name: Optional[str] = None
 
 # Submodules may be a list of values or a bool.
 SubmodulesType = Union[List[Submodule], bool]
@@ -353,7 +353,8 @@ def _is_submodule_dict_ok(subm: Any) -> bool:
 
     try:
         _assert(isinstance(subm, dict))
-        _assert(len(subm) == 2)
+        # Required key
+        _assert('path' in subm)
         # Allowed keys
         for k in subm:
             _assert(k in ['path', 'name'])
