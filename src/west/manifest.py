@@ -340,18 +340,29 @@ def _update_disabled_groups(disabled_groups: Set[str],
                  "along with as much information as you can, such as the "
                  "stack trace that preceded this message.")
 
-def _is_submodule_dict_ok(value: Any) -> bool:
-    # Check whether value is a dict that contains the expected
+def _is_submodule_dict_ok(subm: Any) -> bool:
+    # Check whether subm is a dict that contains the expected
     # submodule fields of proper types.
 
-    if not isinstance(value, dict):
+    class _failed(Exception):
+        pass
+
+    def _assert(cond):
+        if not cond:
+            raise _failed()
+
+    try:
+        _assert(isinstance(subm, dict))
+        _assert(len(subm) == 2)
+        # Allowed keys
+        for k in subm:
+            _assert(k in ['path', 'name'])
+            _assert(isinstance(subm[k], str))
+
+    except _failed:
         return False
 
-    if len(value) != 2:
-        return False  # Not enough keys, or too many.
-
-    return ('name' in value and isinstance(value['name'], str) and
-            'path' in value and isinstance(value['path'], str))
+    return True
 
 #
 # Public functions
