@@ -510,8 +510,7 @@ def test_update_submodules_list(repos_tmpdir):
                         - name: zephyr
                           url: {zephyr}
                           submodules:
-                            - name: tagged_repo
-                              path: tagged_repo
+                            - path: tagged_repo
                         - name: net-tools
                           url: {net_tools}
                           submodules:
@@ -541,7 +540,7 @@ def test_update_submodules_list(repos_tmpdir):
 
     # Verify if tagged_repo submodule data are correct.
     assert zephyr_project.submodules
-    assert zephyr_project.submodules[0].name == 'tagged_repo'
+    assert zephyr_project.submodules[0].name is None
     assert zephyr_project.submodules[0].path == 'tagged_repo'
     # Verify if Kconfiglib submodule data are correct.
     assert net_tools_project.submodules
