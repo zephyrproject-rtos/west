@@ -1316,19 +1316,19 @@ def _rev_type(project, rev=None):
     else:
         return 'other'
 
-def _fetch(project, rev=None):
-    # Fetches rev (or project.revision) from project.url in a way that
+def _fetch(project):
+    # Fetches project.revision from project.url in a way that
     # guarantees any branch, tag, or SHA (that's reachable from a
     # branch or a tag) available on project.url is part of what got
     # fetched.
     #
     # Returns a git revision which hopefully can be peeled to the
-    # newly-fetched SHA corresponding to rev. "Hopefully" because
-    # there are many ways to spell a revision, and they haven't all
-    # been extensively tested.
+    # newly-fetched SHA corresponding to project.revision.
+    #
+    # "Hopefully" because there are many ways to spell a revision, and
+    # they haven't all been extensively tested.
 
-    if not rev:
-        rev = project.revision
+    rev = project.revision
 
     # Fetch the revision into the local ref space.
     #
