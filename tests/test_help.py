@@ -8,6 +8,8 @@ import sys
 from west.app.main import BUILTIN_COMMAND_GROUPS
 from conftest import cmd
 
+assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
+
 def test_builtin_help_and_dash_h(west_init_tmpdir):
     # Test "west help" and "west -h" are the same for built-in
     # functionality.

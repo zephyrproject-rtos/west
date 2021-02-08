@@ -13,6 +13,8 @@ from west import configuration as config
 
 from conftest import cmd
 
+assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
+
 SYSTEM = config.ConfigFile.SYSTEM
 GLOBAL = config.ConfigFile.GLOBAL
 LOCAL = config.ConfigFile.LOCAL
