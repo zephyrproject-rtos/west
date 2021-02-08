@@ -1330,6 +1330,19 @@ def _fetch(project):
 
     rev = project.revision
 
+    def fetch_helper(refspec):
+        # -f is needed to avoid errors in case multiple remotes are
+        # present, at least one of which contains refs that can't be
+        # fast-forwarded to our local ref space.
+        #
+        # --tags is required to get tags, since the remote is
+        # specified as a URL. We hold on to tags to avoid losing track
+        # of revisions that got left behind by branches that rebase.
+        project.git(['fetch', '-f', '--tags'] +
+                    (['--depth', str(project.clone_depth)] if
+                     project.clone_depth else []) +
+                    ['--', project.url, refspec])
+
     # Fetch the revision into the local ref space.
     #
     # The following two-step approach avoids a "trying to write
@@ -1339,33 +1352,41 @@ def _fetch(project):
     msg = f'{project.name}: fetching, need revision {rev}'
     if project.clone_depth:
         msg += f' with --depth {project.clone_depth}'
-        depth = ['--depth', str(project.clone_depth)]
-    else:
-        depth = []
-    if _maybe_sha(rev):
-        # We can't in general fetch a SHA from a remote, as many hosts
-        # (GitHub included) forbid it for security reasons. Let's hope
-        # it's reachable from some branch.
-        refspec = f'refs/heads/*:{QUAL_REFS}*'
-        next_manifest_rev = project.revision
-    else:
-        # The revision is definitely not a SHA, so it's safe to fetch directly.
-        # This avoids fetching unnecessary refs from the remote.
-        #
-        # We update manifest-rev to FETCH_HEAD instead of using a
-        # refspec in case the revision is a tag, which we can't use
-        # from a refspec.
-        refspec = project.revision
-        next_manifest_rev = 'FETCH_HEAD^{commit}'
-
-    # -f is needed to avoid errors in case multiple remotes are present,
-    # at least one of which contains refs that can't be fast-forwarded to our
-    # local ref space.
-    #
-    # --tags is required to get tags, since the remote is specified as a URL.
     log.small_banner(msg)
-    project.git(['fetch', '-f', '--tags'] + depth +
-                ['--', project.url, refspec])
+    try:
+        # We can't in general fetch a SHA from a remote, as some hosts
+        # forbid it for security reasons.
+        #
+        # If we *can* fetch the revision directly, though, that's the
+        # fastest thing to do, so try that first.
+        fetch_helper(project.revision)
+        # Update manifest-rev to FETCH_HEAD instead of a refspec in
+        # case the revision is a tag, which we can't use from a
+        # refspec.
+        next_manifest_rev = 'FETCH_HEAD^{commit}'
+    except subprocess.CalledProcessError:
+        if _maybe_sha(project.revision):
+            # The revision might be a SHA or part of one, so fall back
+            # on fetching everything and hoping it's available from
+            # somewhere.
+            #
+            # This is wasteful if the revision points at an invalid
+            # commit, but it's the safest thing to do absent specific
+            # information about what the remote git server supports.
+            log.wrn(f'failed to fetch {rev}; fetching all refs')
+            fetch_helper(f'refs/heads/*:{QUAL_REFS}*')
+            # There are potentially a bunch of new refs in refs/west,
+            # so we have to set manifest-rev to the project.revision
+            # value.
+            #
+            # If this happens to be a tag name that looks like a SHA,
+            # _update_manifest_rev() will error out. In this case, the
+            # user needs to disambiguate by setting revision to
+            # 'refs/tags/deadbeef' instead of 'deadbeef'.
+            next_manifest_rev = project.revision
+        else:
+            raise
+
     _update_manifest_rev(project, next_manifest_rev)
 
 def _head_ok(project):
