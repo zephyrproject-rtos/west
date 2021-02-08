@@ -28,6 +28,8 @@ from west.manifest import Manifest, Project, ManifestProject, \
 from conftest import create_workspace, create_repo, checkout_branch, \
     create_branch, add_commit, rev_parse, GIT, check_proj_consistency
 
+assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
+
 FPI = ImportFlag.FORCE_PROJECTS  # to force project imports to use the callback
 
 if platform.system() == 'Windows':

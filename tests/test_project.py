@@ -18,6 +18,8 @@ from west.manifest import ImportFlag as MIF
 from conftest import create_workspace, create_repo, add_commit, add_tag, \
     check_output, cmd, GIT, rev_parse, check_proj_consistency
 
+assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
+
 #
 # Helpers
 #
