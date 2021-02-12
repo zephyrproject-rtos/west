@@ -422,7 +422,7 @@ def test_update_some_with_imports(repos_tmpdir):
     net_tools = remotes / 'net-tools'
 
     ws = repos_tmpdir / 'ws'
-    create_workspace(ws, and_git=True)
+    create_workspace(ws)
     manifest_repo = ws / 'mp'
     create_repo(manifest_repo)
     add_commit(manifest_repo, 'manifest repo commit',
@@ -499,7 +499,7 @@ def test_update_submodules_list(repos_tmpdir):
 
     # Creating west workspace and manifest repository.
     ws = repos_tmpdir / 'ws'
-    create_workspace(ws, and_git=True)
+    create_workspace(ws)
     manifest_repo = ws / 'mp'
     create_repo(manifest_repo)
 
@@ -598,7 +598,7 @@ def test_update_all_submodules(repos_tmpdir):
 
     # Creating west workspace and manifest repository.
     ws = repos_tmpdir / 'ws'
-    create_workspace(ws, and_git=True)
+    create_workspace(ws)
     manifest_repo = ws / 'mp'
     create_repo(manifest_repo)
 
@@ -683,7 +683,7 @@ def test_update_no_submodules(repos_tmpdir):
 
     # Creating west workspace and manifest repository.
     ws = repos_tmpdir / 'ws'
-    create_workspace(ws, and_git=True)
+    create_workspace(ws)
     manifest_repo = ws / 'mp'
     create_repo(manifest_repo)
 
@@ -754,7 +754,7 @@ def test_update_submodules_strategy(repos_tmpdir):
 
     # Creating west workspace and manifest repository.
     ws = repos_tmpdir / 'ws'
-    create_workspace(ws, and_git=True)
+    create_workspace(ws)
     manifest_repo = ws / 'mp'
     create_repo(manifest_repo)
 
@@ -1686,7 +1686,7 @@ def test_import_project_release_fork(repos_tmpdir):
     add_tag(fork, 'fork-tag')
 
     ws = repos_tmpdir / 'ws'
-    create_workspace(ws, and_git=True)
+    create_workspace(ws)
     manifest_repo = ws / 'mp'
     create_repo(manifest_repo)
     add_commit(manifest_repo, 'manifest repo commit',
@@ -1767,7 +1767,7 @@ def test_import_project_release_dir(tmpdir):
     add_tag(imported, 'import-tag')
 
     ws = tmpdir / 'ws'
-    create_workspace(ws, and_git=True)
+    create_workspace(ws)
     manifest_repo = ws / 'mp'
     add_commit(manifest_repo, 'manifest repo commit',
                files={'west.yml':
@@ -1803,7 +1803,7 @@ def test_import_project_rolling(repos_tmpdir):
     zephyr = remotes / 'zephyr'
 
     ws = repos_tmpdir / 'ws'
-    create_workspace(ws, and_git=True)
+    create_workspace(ws)
     manifest_repo = ws / 'mp'
     create_repo(manifest_repo)
     add_commit(manifest_repo, 'manifest repo commit',
