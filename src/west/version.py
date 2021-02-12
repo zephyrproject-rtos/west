@@ -6,6 +6,8 @@
 # https://packaging.python.org/guides/single-sourcing-package-version/#single-sourcing-the-version
 
 __version__ = '0.9.99'
+# !!! DO NOT CUT 0.10 without updating west.manifest.SCHEMA_VERSION !!!
+#
 # MAINTAINERS:
 #
 # Make sure to update west.manifest.SCHEMA_VERSION if there have been
