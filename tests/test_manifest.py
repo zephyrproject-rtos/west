@@ -535,6 +535,18 @@ def test_project_repr():
     assert repr(m.projects[1]) == \
         'Project("zephyr", "https://foo.com", revision="r", path=\'zephyr\', clone_depth=None, west_commands=[\'some-path/west-commands.yml\'], topdir=None, groups=[])'  # noqa: E501
 
+def test_no_projects():
+    # An empty projects list is allowed.
+
+    m = Manifest.from_data('manifest: {}')
+    assert len(m.projects) == 1  # just ManifestProject
+
+    m = M('''
+    self:
+      path: foo
+    ''')
+    assert len(m.projects) == 1  # just ManifestProject
+
 #########################################
 # Tests for the manifest repository
 
