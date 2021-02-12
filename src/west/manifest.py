@@ -49,7 +49,7 @@ QUAL_REFS_WEST = 'refs/west/'
 #:
 #: This value changes when a new version of west includes new manifest
 #: file features not supported by earlier versions of west.
-SCHEMA_VERSION = '0.9'
+SCHEMA_VERSION = '0.10'
 # MAINTAINERS:
 #
 # If you want to update the schema version, you need to make sure that
@@ -1835,6 +1835,9 @@ class Manifest:
         # Load projects and add them to the list, returning
         # information about which ones have imports that need to be
         # processed next.
+
+        if 'projects' not in manifest:
+            return
 
         have_imports = []
         names = set()

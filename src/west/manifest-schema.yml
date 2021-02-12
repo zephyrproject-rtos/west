@@ -68,8 +68,12 @@ mapping:
 
   # The "projects" key specifies a sequence of "projects", each of which has a
   # remote, and may specify additional configuration.
+  #
+  # A manifest without projects was forbidden up through west 0.9.x,
+  # but it can be convenient to create such manifests at times, so it
+  # is now allowed.
   projects:
-    required: true
+    required: false
     type: seq
     sequence:
       - type: map

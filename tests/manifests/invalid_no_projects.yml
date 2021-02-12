@@ -1,4 +1,0 @@
-manifest:
-  remotes:
-    - name: testremote
-      url-base: https://example.com
