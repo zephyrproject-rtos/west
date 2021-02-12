@@ -245,11 +245,11 @@ def cmd(cmd, cwd=None, stderr=None, env=None):
         print('cmd: west:', shutil.which('west'), file=sys.stderr)
         raise
 
-def create_workspace(workspace_dir, and_git=False):
+def create_workspace(workspace_dir, and_git=True):
     # Manually create a bare-bones west workspace inside
     # workspace_dir. The manifest.path config option is 'mp'. The
-    # manifest repository *directory* is created, but the git
-    # repository is not initialized unless and_git is True.
+    # manifest repository directory is created, and the git
+    # repository inside is initialized unless and_git is False.
     if not os.path.isdir(workspace_dir):
         workspace_dir.mkdir()
     dot_west = workspace_dir / '.west'

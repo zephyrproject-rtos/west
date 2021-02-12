@@ -52,7 +52,7 @@ def tmp_workspace(tmpdir):
 
     # Create the manifest repository directory and skeleton config.
     topdir = tmpdir / 'topdir'
-    create_workspace(topdir)
+    create_workspace(topdir, and_git=False)
 
     # Switch to the top-level west workspace directory,
     # and give it to the test case.
