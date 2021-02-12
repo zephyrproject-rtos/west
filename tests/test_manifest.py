@@ -2441,7 +2441,9 @@ def test_import_loop_detection_self(manifest_repo):
         MF()
 
 #########################################
-# Manifest project groups
+# Manifest project group: basic tests
+#
+# Additional groups of tests follow in later sections.
 
 def test_no_groups_and_import():
     def importer(*args, **kwargs):
@@ -2618,6 +2620,110 @@ def test_is_active():
           extra_filter=['+ga', '-gb'])
     check((False, False, True), 'group-filter: [-ga]',
           extra_filter=['-gb'])
+
+#########################################
+# Manifest group-filter inheritance tests
+#
+# In schema version 0.9, "manifest: group-filter:" values -- and
+# therefore Manifest.group_filter values --are *NOT* inherited
+# across manifest imports. Only the top level manifest
+# group-filter has any effect.
+#
+# Shortly after the release, we ran into use cases that made it clear
+# this was a mistake.
+#
+# This behavior means that people who import a manifest with projects
+# that are inactive by default need to copy/paste the group-filter
+# value if they want that same default. That kind of leaky filter is
+# of no use to people who want to build on top of the default projects
+# list without knowing the details, especially across multiple
+# versions when the set of defaults may change.
+#
+# Schema version 0.10 will reverse that behavior: manifests which
+# request schema version 0.10 will get Manifest.group_filter
+# values that *ARE* inherited from imported manifests, by
+# appending these values in import order.
+#
+# For compatibility, manifests which explicitly request a 0.9 schema
+# version will get the old behavior. However, we'll also release a
+# west 0.9.1 which will warn about a missing schema-version in the top
+# level manifest if any manifest in the import hierarchy has a
+# 'group-filter:' set, and encourage an upgrade to 0.10.
+#
+# Hopefully those combined will allow us to phase out any use of 0.9.x
+# as soon as we can.
+#
+# Importantly, manifests which do not make an explicit version
+# declaration will get the 0.10 behavior starting in 0.10.
+#
+# ***  This does mean that running 'west update'    ***
+# ***  can produce different results in west 0.9.x  ***
+# **   and west 0.10.x.                             ***
+#
+# That is unfortunate, but we're going to release 0.10 as quickly as
+# we can after 0.9, so this window will be brief.
+
+@pytest.mark.xfail()
+def test_group_filter_project_import(manifest_repo):
+    # Test cases for "manifest: group-filter:" across a project import.
+
+    project = manifest_repo.topdir / 'project'
+    create_repo(project)
+
+    def project_import_helper(manifest_version_line, expected_group_filter):
+        add_commit(project, 'project.yml',
+                   files={
+                       'project.yml':
+                       '''
+                       manifest:
+                          group-filter: [-foo]
+                       '''})
+
+        with open(manifest_repo / 'west.yml', 'w') as f:
+            f.write(f'''
+            manifest:
+              {manifest_version_line}
+              projects:
+                - name: project
+                  url: ignore
+                  revision: {rev_parse(project, "HEAD")}
+                  import: project.yml
+            ''')
+
+        manifest = MF()
+        assert manifest.group_filter == expected_group_filter
+
+    project_import_helper('version: 0.9.99', ['-foo'])
+    project_import_helper('', ['-foo'])
+    project_import_helper('version: 0.9', [])
+
+@pytest.mark.xfail()
+def test_group_filter_self_import(manifest_repo):
+    # Test cases for "manifest: group-filter:" across a self import.
+
+    def self_import_helper(manifest_version_line, expected_group_filter):
+        with open(manifest_repo / 'submanifest.yml', 'w') as f:
+            f.write('''
+            manifest:
+              group-filter: [+foo]
+            ''')
+
+        with open(manifest_repo / 'west.yml', 'w') as f:
+            f.write(f'''
+            manifest:
+              {manifest_version_line}
+              group-filter: [-foo]
+              self:
+                import: submanifest.yml
+            ''')
+
+        manifest = MF()
+        assert manifest.group_filter == expected_group_filter
+
+    self_import_helper('version: 0.9.99', [])
+    self_import_helper('', [])
+    self_import_helper('version: 0.9', ['-foo'])
+
 
 #########################################
 # Various invalid manifests
