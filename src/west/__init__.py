@@ -1,3 +1,6 @@
-# Copyright (c) 2020, Nordic Semiconductor ASA
+# Copyright (c) 2021 Nordic Semiconductor ASA
 
-# nothing here
+import logging
+
+# https://docs.python.org/3/howto/logging.html#configuring-logging-for-a-library
+logging.getLogger('west').addHandler(logging.NullHandler())
