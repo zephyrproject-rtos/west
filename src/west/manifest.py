@@ -1525,8 +1525,9 @@ class Manifest:
         _logger.debug(f'loading {loading_what}')
 
         # Load "group-filter:", updating self.group_filter, along with
-        # extra state from the configuraiton file.
-        self._load_group_filters(manifest)
+        # extra state from the configuration file. In west 0.9.x,
+        # imported group filter data are ignored and cause a warning.
+        self._load_group_filters(manifest, ctx)
 
         # We want to make an ordered map from project names to
         # corresponding Project instances. Insertion order into this
@@ -1569,7 +1570,8 @@ class Manifest:
 
         _logger.debug(f'loaded {loading_what}')
 
-    def _load_group_filters(self, manifest_data: Dict[str, Any]):
+    def _load_group_filters(self, manifest_data: Dict[str, Any],
+                            ctx: _import_ctx):
         # Update self.group_filter and self._disabled_groups from the
         # manifest data's 'manifest: group-filter:' and the local
         # 'manifest.group-filter' configuration file option.
@@ -1587,7 +1589,18 @@ class Manifest:
                                                              raw_filter)
             _update_disabled_groups(self._disabled_groups, self.group_filter)
 
-            _logger.debug('group-filter: %s', self.group_filter)
+            if ctx.top_level:
+                _logger.debug('group-filter: %s', self.group_filter)
+            else:
+                # Although self.group_filter is set, we're just going
+                # to throw it away unless we're the top level manifest.
+                # This changes in schema version 0.10, so emit a warning
+                # explaining what's going on.
+                _logger.warning(
+                    'ignored group-filter: %s in imported manifest. '
+                    'Combining group-filter with import in west 0.9.x '
+                    'is discouraged; consider upgrading to 0.10.0 or later.',
+                    self.group_filter)
 
         # Adjust for the local configuration file's current
         # manifest.group-filter option value. We only load this once,
