@@ -279,14 +279,17 @@ class _import_ctx(NamedTuple):
     projects: Dict[str, 'Project']
     filter_fn: ImapFilterFnType
     path_prefix: Path
+    top_level: bool             # is this the top level manifest file?
 
 def _new_ctx(ctx: _import_ctx, imap: _import_map) -> _import_ctx:
     # Combine the map data from "some-map" in a manifest's
     # "import: some-map" into an existing import context type,
     # returning the new context.
-    return _import_ctx(ctx.projects,
-                       _and_filters(ctx.filter_fn, _imap_filter(imap)),
-                       ctx.path_prefix / imap.path_prefix)
+    return _import_ctx(projects=ctx.projects,
+                       filter_fn=_and_filters(ctx.filter_fn,
+                                              _imap_filter(imap)),
+                       path_prefix=ctx.path_prefix / imap.path_prefix,
+                       top_level=ctx.top_level)
 
 def _filter_ok(filter_fn: ImapFilterFnType,
                project: 'Project') -> bool:
@@ -1275,16 +1278,23 @@ class Manifest:
         # any internal attributes needed to implement the public API.
         self._importer: ImporterType = importer or _default_importer
         self._import_flags = import_flags
-        ctx = kwargs.get('import-context')
-        if ctx is not None:
-            assert isinstance(ctx, _import_ctx)
+        context = kwargs.get('import-context')
+        if context is not None:
+            assert isinstance(context, _import_ctx)
+            ctx = _import_ctx(projects=context.projects,
+                              filter_fn=context.filter_fn,
+                              path_prefix=context.path_prefix,
+                              top_level=False)
+        else:
+            ctx = _import_ctx(projects={},
+                              filter_fn=None,
+                              path_prefix=Path('.'),
+                              top_level=True)
         if manifest_path:
             mpath: Optional[Path] = Path(manifest_path)
         else:
             mpath = None
-        self._load(source_data['manifest'],
-                   mpath,
-                   ctx or _import_ctx({}, None, Path('.')))
+        self._load(source_data['manifest'], mpath, ctx)
 
     def get_projects(self,
                      # any str name is also a PathType
@@ -1507,8 +1517,6 @@ class Manifest:
         # - path_hint: hint about where the manifest repo lives
         # - ctx: recursive import context
 
-        top_level = not bool(ctx.projects)
-
         if self.path:
             loading_what = self.path
         else:
@@ -1539,7 +1547,7 @@ class Manifest:
         self._load_projects(manifest, url_bases, defaults, ctx)
 
         # The manifest is resolved. Make sure paths are unique.
-        self._check_paths_are_unique(mp, ctx.projects, top_level)
+        self._check_paths_are_unique(mp, ctx)
 
         # Save the results.
         self._projects = list(ctx.projects.values())
@@ -2205,18 +2213,17 @@ class Manifest:
             return False
 
     def _check_paths_are_unique(self, mp: ManifestProject,
-                                projects: Dict[str, Project],
-                                top_level: bool) -> None:
-        # TODO: top_level can probably go away when #327 is done.
+                                ctx: _import_ctx) -> None:
+        # Check that all paths in ctx.projects and mp are unique.
 
         ppaths: Dict[Path, Project] = {}
         if mp.path:
             mppath: Optional[Path] = Path(mp.path)
         else:
             mppath = None
-        for name, project in projects.items():
+        for name, project in ctx.projects.items():
             pp = Path(project.path)
-            if top_level and pp == mppath:
+            if ctx.top_level and pp == mppath:
                 self._malformed(f'project {name} path "{project.path}" '
                                 'is taken by the manifest repository')
             other = ppaths.get(pp)
