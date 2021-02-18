@@ -277,35 +277,36 @@ def _is_imap_ok(imap: _import_map, project: 'Project') -> bool:
 
 class _import_ctx(NamedTuple):
     projects: Dict[str, 'Project']
-    filter_fn: ImapFilterFnType
+    imap_filter: ImapFilterFnType
     path_prefix: Path
 
-def _new_ctx(ctx: _import_ctx, imap: _import_map) -> _import_ctx:
+def _compose_ctx_and_imap(ctx: _import_ctx, imap: _import_map) -> _import_ctx:
     # Combine the map data from "some-map" in a manifest's
     # "import: some-map" into an existing import context type,
     # returning the new context.
     return _import_ctx(ctx.projects,
-                       _and_filters(ctx.filter_fn, _imap_filter(imap)),
+                       _compose_imap_filters(ctx.imap_filter,
+                                             _imap_filter(imap)),
                        ctx.path_prefix / imap.path_prefix)
 
-def _filter_ok(filter_fn: ImapFilterFnType,
-               project: 'Project') -> bool:
-    # filter_fn(project) if filter_fn is not None; True otherwise.
+def _imap_filter_allows(imap_filter: ImapFilterFnType,
+                        project: 'Project') -> bool:
+    # imap_filter(project) if imap_filter is not None; True otherwise.
 
-    return (filter_fn is None) or filter_fn(project)
+    return (imap_filter is None) or imap_filter(project)
 
-def _and_filters(filter_fn1: ImapFilterFnType,
-                 filter_fn2: ImapFilterFnType) -> ImapFilterFnType:
-    # Return a filter_fn which is the logical AND of the two
-    # arguments.
+def _compose_imap_filters(imap_filter1: ImapFilterFnType,
+                          imap_filter2: ImapFilterFnType) -> ImapFilterFnType:
+    # Return an import map filter which gives back the logical AND of
+    # what the two argument filter functions would return.
 
-    if filter_fn1 and filter_fn2:
+    if imap_filter1 and imap_filter2:
         # These type annotated versions silence mypy warnings.
-        fn1: Callable[['Project'], bool] = filter_fn1
-        fn2: Callable[['Project'], bool] = filter_fn2
+        fn1: Callable[['Project'], bool] = imap_filter1
+        fn2: Callable[['Project'], bool] = imap_filter2
         return lambda project: (fn1(project) and fn2(project))
     else:
-        return filter_fn1 or filter_fn2
+        return imap_filter1 or imap_filter2
 
 # A 'raw' element in a project 'groups:' or manifest 'group-filter:' list,
 # as it is parsed from YAML, before conversion to string.
@@ -1744,13 +1745,12 @@ class Manifest:
         elif imptype == dict:
             imap = self._load_imap(imp, f'manifest file {mp.abspath}')
             # imap may introduce additional constraints on the
-            # existing ctx, such as a stricter filter_fn or a longer
+            # existing ctx, such as a stricter imap_filter or a longer
             # path_prefix.
             #
-            # Compose them using _new_ctx() to pass along the updated
-            # context to the recursive import.
-            self._import_path_from_self(mp, imap.file,
-                                        _new_ctx(ctx, imap))
+            # We therefore need to compose them during the recursive import.
+            new_ctx = _compose_ctx_and_imap(ctx, imap)
+            self._import_path_from_self(mp, imap.file, new_ctx)
         else:
             self._malformed(f'{mp.abspath}: "self: import: {imp}" '
                             f'has invalid type {imptype}')
@@ -1849,9 +1849,10 @@ class Manifest:
             project = self._load_project(pd, url_bases, defaults, ctx)
             name = project.name
 
-            if not _filter_ok(ctx.filter_fn, project):
+            if not _imap_filter_allows(ctx.imap_filter, project):
                 _logger.debug(f'project {name} in file {self.path} ' +
-                              'ignored due to filters')
+                              'ignored: an importing manifest blocked or '
+                              'did not allow it')
                 continue
 
             if name in names:
@@ -2063,8 +2064,8 @@ class Manifest:
             imap = self._load_imap(imp, f'project {project.name}')
             # Similar comments about composing ctx and imap apply here as
             # they do in _import_from_self().
-            self._import_path_from_project(project, imap.file,
-                                           _new_ctx(ctx, imap))
+            new_ctx = _compose_ctx_and_imap(ctx, imap)
+            self._import_path_from_project(project, imap.file, new_ctx)
         else:
             self._malformed(f'{project.name_and_path}: invalid import {imp} '
                             f'type: {imptype}')
