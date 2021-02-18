@@ -78,6 +78,12 @@ ImporterType = Callable[['Project', str], ImportedContentType]
 # which always returns True.
 ImapFilterFnType = Optional[Callable[['Project'], bool]]
 
+# A list of group names to enable and disable, like ['+foo', '-bar'].
+GroupFilterType = List[str]
+
+# A list of group names belonging to a project, like ['foo', 'bar']
+GroupsType = List[str]
+
 # The parsed contents of a manifest YAML file as returned by _load(),
 # after sanitychecking with validate().
 ManifestDataType = Union[str, Dict]
@@ -330,16 +336,6 @@ def _compose_imap_filters(imap_filter1: ImapFilterFnType,
     else:
         return imap_filter1 or imap_filter2
 
-# A 'raw' element in a project 'groups:' or manifest 'group-filter:' list,
-# as it is parsed from YAML, before conversion to string.
-RawGroupType = Union[str, int, float]
-
-#: A list of group names belonging to a project, like ['foo', 'bar']
-GroupsType = List[str]
-
-#: A list of group names to enable and disable, like ['+foo', '-bar'].
-GroupFilterType = List[str]
-
 _RESERVED_GROUP_RE = re.compile(r'(^[+-]|[\s,:])')
 
 def _update_disabled_groups(disabled_groups: Set[str],
@@ -463,6 +459,10 @@ def validate(data: Any) -> None:
                             schema_files=[_SCHEMA_PATH]).validate()
     except pykwalify.errors.SchemaError as se:
         raise MalformedManifest(se.msg) from se
+
+# A 'raw' element in a project 'groups:' or manifest 'group-filter:' list,
+# as it is parsed from YAML, before conversion to string.
+RawGroupType = Union[str, int, float]
 
 def is_group(raw_group: RawGroupType) -> bool:
     '''Is a 'raw' project group value 'raw_group' valid?
