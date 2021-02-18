@@ -704,6 +704,8 @@ class Project:
         if self.west_commands:
             ret['west-commands'] = \
                 _west_commands_maybe_delist(self.west_commands)
+        if self.groups:
+            ret['groups'] = self.groups
 
         return ret
 
@@ -1381,6 +1383,8 @@ class Manifest:
         # and Python 3.7+ guarantee.
         r: Dict[str, Any] = {}
         r['manifest'] = {}
+        if self.group_filter:
+            r['manifest']['group-filter'] = self.group_filter
         r['manifest']['projects'] = project_dicts
         r['manifest']['self'] = self.projects[MANIFEST_PROJECT_INDEX].as_dict()
 
