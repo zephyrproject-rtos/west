@@ -16,6 +16,7 @@ from pathlib import PurePath, Path
 import platform
 import subprocess
 from unittest.mock import patch
+import textwrap
 
 import pytest
 import yaml
@@ -1156,7 +1157,7 @@ def test_as_dict_groups():
             - g
     ''').as_dict()['manifest']
 
-    assert actual['group-filter'] == ['+foo', '-bar']
+    assert actual['group-filter'] == ['-bar']
     assert 'groups' not in actual['projects'][0]
     assert actual['projects'][1]['groups'] == ['g']
 
@@ -2460,7 +2461,9 @@ def test_import_loop_detection_self(manifest_repo):
         MF()
 
 #########################################
-# Manifest project groups
+# Manifest project group: basic tests
+#
+# Additional groups of tests follow in later sections.
 
 def test_no_groups_and_import():
     def importer(*args, **kwargs):
@@ -2637,6 +2640,236 @@ def test_is_active():
           extra_filter=['+ga', '-gb'])
     check((False, False, True), 'group-filter: [-ga]',
           extra_filter=['-gb'])
+
+#########################################
+# Manifest group-filter + import tests
+#
+# In schema version 0.9, "manifest: group-filter:" values -- and
+# therefore Manifest.group_filter values -- are *NOT* affected
+# by manifest imports. Only the top level manifest group-filter has
+# any effect.
+#
+# Shortly after the release, we ran into use cases that made it clear
+# this was a mistake.
+#
+# This behavior means that people who import a manifest with projects
+# that are inactive by default need to copy/paste the group-filter
+# value if they want that same default. That kind of leaky filter is
+# of no use to people who want to build on top of the default projects
+# list without knowing the details, especially across multiple
+# versions when the set of defaults may change.
+#
+# Schema version 0.10 will reverse that behavior: manifests which
+# request schema version 0.10 will get Manifest.group_filter
+# values that *ARE* affected by imported manifests, by
+# prepending these values in import order.
+#
+# For compatibility, manifests which explicitly request a 0.9 schema
+# version will get the old behavior. However, we'll also release a
+# west 0.9.1 which will warn about a missing schema-version in the top
+# level manifest if any manifest in the import hierarchy has a
+# 'group-filter:' set, and encourage an upgrade to 0.10.
+#
+# Hopefully those combined will allow us to phase out any use of 0.9.x
+# as soon as we can.
+#
+# Importantly, manifests which do not make an explicit version
+# declaration will get the 0.10 behavior starting in 0.10.
+#
+# ***  This does mean that running 'west update'    ***
+# ***  can produce different results in west 0.9.x  ***
+# ***  and west 0.10.x.                             ***
+#
+# That is unfortunate, but we're going to release 0.10 as quickly as
+# we can after 0.9, so this window will be brief.
+
+def test_group_filter_project_import(manifest_repo):
+    # Test cases for "manifest: group-filter:" across a project import.
+
+    project = manifest_repo.topdir / 'project'
+    create_repo(project)
+    create_branch(project, 'manifest-rev', checkout=True)
+
+    def project_import_helper(manifest_version_line, expected_group_filter):
+        add_commit(project, 'project.yml',
+                   files={
+                       'project.yml':
+                       '''
+                       manifest:
+                          group-filter: [-foo]
+                       '''})
+
+        with open(manifest_repo / 'west.yml', 'w') as f:
+            f.write(f'''
+            manifest:
+              {manifest_version_line}
+              projects:
+                - name: project
+                  url: ignore
+                  revision: {rev_parse(project, "HEAD")}
+                  import: project.yml
+            ''')
+
+        manifest = MF()
+        assert manifest.group_filter == expected_group_filter
+
+    project_import_helper('version: "0.10"', ['-foo'])
+    project_import_helper('', ['-foo'])
+    project_import_helper('version: 0.9', [])
+
+def test_group_filter_self_import(manifest_repo):
+    # Test cases for "manifest: group-filter:" across a self import.
+
+    def self_import_helper(manifest_version_line, expected_group_filter):
+        with open(manifest_repo / 'submanifest.yml', 'w') as f:
+            f.write('''
+            manifest:
+              group-filter: [+foo]
+            ''')
+
+        with open(manifest_repo / 'west.yml', 'w') as f:
+            f.write(f'''
+            manifest:
+              {manifest_version_line}
+              group-filter: [-foo]
+              self:
+                import: submanifest.yml
+            ''')
+
+        manifest = MF()
+        assert manifest.group_filter == expected_group_filter
+
+    self_import_helper('version: "0.10"', [])
+    self_import_helper('', [])
+    self_import_helper('version: 0.9', ['-foo'])
+
+def test_group_filter_imports(manifest_repo):
+    # More complex test that ensures group filters are imported correctly:
+    #
+    #   - imports from self have highest precedence
+    #   - the top level manifest comes next
+    #   - imports from projects have lowest precedence
+    #   - the resulting Manifest.group_filter is simplified appropriately
+    #   - requesting the old 0.9 semantics gives them to you
+    #   - requesting 0.9 raises warnings when group-filter is used
+
+    topdir = manifest_repo.topdir
+    imported_fmt = textwrap.dedent('''\
+    manifest:
+      group-filter: {}
+    ''')
+    main_fmt = textwrap.dedent('''\
+    manifest:
+      {}
+
+      group-filter: [+ga,-gc]
+
+      projects:
+        - name: project1
+          revision: {}
+          import: true
+        - name: project2
+          revision: {}
+          import: true
+
+      self:
+        import: self-import.yml
+
+      defaults:
+        remote: foo
+      remotes:
+        - name: foo
+          url-base: url-base
+    ''')
+
+    def setup_self(file, group_filter):
+        with open(manifest_repo / file, 'w') as f:
+            f.write(imported_fmt.format(group_filter))
+
+    def setup_project(name, group_filter):
+        project = topdir / name
+        create_repo(project)
+        create_branch(project, 'manifest-rev', checkout=True)
+        add_commit(project, 'setup commit',
+                   files={'west.yml': imported_fmt.format(group_filter)})
+        return rev_parse(project, 'HEAD')
+
+    setup_self('self-import.yml', '[-ga,-gb]')
+
+    sha1 = setup_project('project1', '[-gw,-gw,+gx,-gy]')
+    sha2 = setup_project('project2', '[+gy,+gy,-gz]')
+
+    v0_9_expected = ['+ga', '-gc']
+    v0_10_expected = ['-ga', '-gb', '-gc', '-gw', '-gy', '-gz']
+
+    #
+    # Basic tests of the above setup.
+    #
+
+    # No explicitly requested schema version -> v0.10 semantics.
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write(main_fmt.format('', sha1, sha2))
+    m = Manifest.from_file()
+    assert sorted(m.group_filter) == v0_10_expected
+    assert not hasattr(m, '_legacy_group_filter_warned')
+
+    # Schema version 0.10 -> v0.10 semantics.
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write(main_fmt.format('version: "0.10"', sha1, sha2))
+    m = Manifest.from_file()
+    assert sorted(m.group_filter) == v0_10_expected
+    assert not hasattr(m, '_legacy_group_filter_warned')
+
+    # Schema version 0.9 -> v0.9 semantics
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write(main_fmt.format('version: 0.9', sha1, sha2))
+    m = Manifest.from_file()
+    assert m.group_filter == v0_9_expected
+    assert hasattr(m, '_legacy_group_filter_warned')
+
+    #
+    # Additional tests for v0.9 related warnings.
+    #
+
+    # Schema version 0.9 and no group-filter is used: no warning.
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write(textwrap.dedent(
+            '''\
+            manifest:
+              version: 0.9
+            '''))
+    m = Manifest.from_file()
+    assert m.group_filter == []
+    assert not hasattr(m, '_legacy_group_filter_warned')
+
+    # Schema version 0.9, group-filter is used, no imports: still a warning.
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write(textwrap.dedent(
+            '''\
+            manifest:
+              version: 0.9
+              group-filter: [-ga]
+            '''))
+    m = Manifest.from_file()
+    assert m.group_filter == ['-ga']
+    assert hasattr(m, '_legacy_group_filter_warned')
+
+    # Schema version 0.9, group-filter is used by an import: warning.
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write(textwrap.dedent(
+            '''\
+            manifest:
+              version: 0.9
+              projects:
+                - name: project1
+                  revision: {}
+                  url: ignored
+                  import: true
+            '''.format(sha1)))
+    m = Manifest.from_file()
+    assert m.group_filter == []
+    assert hasattr(m, '_legacy_group_filter_warned')
+
 
 #########################################
 # Various invalid manifests
