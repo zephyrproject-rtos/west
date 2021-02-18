@@ -294,6 +294,16 @@ class _import_ctx(NamedTuple):
     # element.
     projects: Dict[str, 'Project']
 
+    # The current shared group filter. This is mutable state in the
+    # same way 'projects' is. Manifests which are imported earlier get
+    # higher precedence here too.
+    #
+    # This is done by prepending (NOT appending) any 'manifest:
+    # group-filter:' lists we encounter during import resolution onto
+    # this list. Since group-filter lists have "last entry wins"
+    # semantics, earlier manifests take precedence.
+    group_filter: GroupFilterType
+
     # The current restrictions on which projects the importing
     # manifest is interested in.
     #
@@ -313,6 +323,7 @@ def _compose_ctx_and_imap(ctx: _import_ctx, imap: _import_map) -> _import_ctx:
     # "import: some-map" into an existing import context type,
     # returning the new context.
     return _import_ctx(projects=ctx.projects,
+                       group_filter=ctx.group_filter,
                        imap_filter=_compose_imap_filters(ctx.imap_filter,
                                                          _imap_filter(imap)),
                        path_prefix=ctx.path_prefix / imap.path_prefix)
@@ -1180,9 +1191,10 @@ class Manifest:
               an "import:" attribute in "self:" or "projects:"; False
               otherwise
 
-            - ``group_filter``: list of strings corresponding to the
-              manifest's parsed "group-filter:" value, or an empty list
-              if there is none
+            - ``group_filter``: a group filter value equivalent to
+              the resolved manifest's "group-filter:", along with any
+              values from imported manifests. This value may be simpler
+              than the actual input data.
 
         Exactly one of *source_file* and *source_data* must be given.
 
@@ -1301,7 +1313,8 @@ class Manifest:
         # This will be overwritten in _load() as needed.
         self.group_filter: GroupFilterType = []
 
-        # Extra private state for checking active projects.
+        # Private state which backs self.group_filter. This also
+        # gets overwritten as needed.
         self._disabled_groups: Set[str] = set()
 
         # Stash the importer and flags in instance attributes. These
@@ -1313,6 +1326,7 @@ class Manifest:
             kwargs.get('import-context')  # type: ignore
         if ctx is None:
             ctx = _import_ctx(projects={},
+                              group_filter=[],
                               imap_filter=None,
                               path_prefix=Path('.'))
         else:
@@ -1515,149 +1529,34 @@ class Manifest:
             # now.
             return True
 
-        if extra_filter is not None:
+        # Load manifest.group-filter from the configuration file if we
+        # haven't already. Only do this once so we don't hit the file
+        # system for every project when looping over the manifest.
+        cfg_gf = self._config_group_filter
+
+        # Figure out what the disabled groups are. Skip reallocation
+        # if possible.
+        if cfg_gf or extra_filter is not None:
             disabled_groups = set(self._disabled_groups)
-            _update_disabled_groups(
-                disabled_groups,
-                self._validated_group_filter(None, list(extra_filter)))
+            if cfg_gf:
+                _update_disabled_groups(disabled_groups, cfg_gf)
+            if extra_filter is not None:
+                extra_filter = self._validated_group_filter(None,
+                                                            list(extra_filter))
+                _update_disabled_groups(disabled_groups, extra_filter)
         else:
             disabled_groups = self._disabled_groups
 
         return any(group not in disabled_groups for group in project.groups)
 
-    def _malformed(self, complaint: str,
-                   parent: Optional[Exception] = None) -> NoReturn:
-        context = (f'file: {self.path} ' if self.path else 'data')
-        args = [f'Malformed manifest {context}',
-                f'Schema file: {_SCHEMA_PATH}']
-        if complaint:
-            args.append('Hint: ' + complaint)
-        exc = MalformedManifest(*args)
-        if parent:
-            raise exc from parent
-        else:
-            raise exc
+    @property
+    def _config_group_filter(self) -> GroupFilterType:
+        # Private property for loading the manifest.group-filter value
+        # in the local configuration file. Used by is_active.
 
-    def _load(self, manifest: Dict[str, Any],
-              path_hint: Optional[Path],  # not PathType!
-              ctx: _import_ctx) -> None:
-        # Initialize this instance.
-        #
-        # - manifest: manifest data, parsed and validated
-        # - path_hint: hint about where the manifest repo lives
-        # - ctx: recursive import context
-
-        top_level = not bool(ctx.projects)
-
-        if self.path:
-            loading_what = self.path
-        else:
-            loading_what = 'data (no file)'
-
-        _logger.debug(f'loading {loading_what}')
-
-        # Load "group-filter:", updating self.group_filter, along with
-        # extra state from the configuraiton file.
-        self._load_group_filters(manifest)
-
-        # We want to make an ordered map from project names to
-        # corresponding Project instances. Insertion order into this
-        # map should reflect the final project order including
-        # manifest import resolution, which is:
-        #
-        # 1. Imported projects from "manifest: self: import:"
-        # 2. "manifest: projects:"
-        # 3. Imported projects from "manifest: projects: ... import:"
-
-        # Create the ManifestProject, and import projects from "self:".
-        mp = self._load_self(manifest, path_hint, ctx)
-
-        # Add this manifest's projects to the map, then project imports.
-        url_bases = {r['name']: r['url-base'] for r in
-                     manifest.get('remotes', [])}
-        defaults = self._load_defaults(manifest.get('defaults', {}), url_bases)
-        self._load_projects(manifest, url_bases, defaults, ctx)
-
-        # The manifest is resolved. Make sure paths are unique.
-        self._check_paths_are_unique(mp, ctx.projects, top_level)
-
-        # Save the results.
-        self._projects = list(ctx.projects.values())
-        self._projects.insert(MANIFEST_PROJECT_INDEX, mp)
-        self._projects_by_name: Dict[str, Project] = {'manifest': mp}
-        self._projects_by_name.update(ctx.projects)
-        self._projects_by_rpath: Dict[Path, Project] = {}  # resolved paths
-        if self.topdir:
-            for i, p in enumerate(self.projects):
-                if i == MANIFEST_PROJECT_INDEX and not p.abspath:
-                    # When from_data() is called without a path hint, mp
-                    # can have a topdir but no path, and thus no abspath.
-                    continue
-                if TYPE_CHECKING:
-                    # The typing module can't tell that self.topdir
-                    # being truthy guarantees p.abspath is a str, not None.
-                    assert p.abspath
-                self._projects_by_rpath[Path(p.abspath).resolve()] = p
-
-        _logger.debug(f'loaded {loading_what}')
-
-    def _load_group_filters(self, manifest_data: Dict[str, Any]):
-        # Update self.group_filter and self._disabled_groups from the
-        # manifest data's 'manifest: group-filter:' and the local
-        # 'manifest.group-filter' configuration file option.
-
-        if 'group-filter' not in manifest_data:
-            _logger.debug('group-filter: unset')
-        else:
-            raw_filter: List[RawGroupType] = manifest_data['group-filter']
-
-            if not raw_filter:
-                self._malformed(f'"manifest: group-filter: {raw_filter}" '
-                                'may not be empty')
-
-            self.group_filter = self._validated_group_filter('manifest',
-                                                             raw_filter)
-            _update_disabled_groups(self._disabled_groups, self.group_filter)
-
-            _logger.debug('group-filter: %s', self.group_filter)
-
-        # Adjust for the local configuration file's current
-        # manifest.group-filter option value. We only load this once,
-        # so if it changes, the user has to reload the configuration
-        # file.
-        _update_disabled_groups(self._disabled_groups,
-                                self._load_config_group_filter())
-
-    def _validated_group_filter(
-            self, source: Optional[str], raw_filter: List[RawGroupType]
-    ) -> GroupFilterType:
-        # Helper function for cleaning up nonempty manifest:
-        # group-filter: and manifest.group-filter values.
-
-        if source is not None:
-            source += ' '
-        else:
-            source = ''
-
-        ret: GroupFilterType = []
-        for item in raw_filter:
-            if not isinstance(item, str):
-                item = str(item)
-
-            if (not item) or (item[0] not in ('+', '-')):
-                self._malformed(
-                    f'{source}group filter contains invalid item "{item}"; '
-                    'this must begin with "+" or "-"')
-
-            group = item[1:]
-            if not is_group(group):
-                self._malformed(
-                    f'{source}group filter contains invalid item "{item}"; '
-                    f'"{group}" is an invalid group name')
-
-            ret.append(item)
-
-        return ret
+        if not hasattr(self, '_cfg_gf'):
+            self._cfg_gf = self._load_config_group_filter()
+        return self._cfg_gf
 
     def _load_config_group_filter(self) -> GroupFilterType:
         # Load and return manifest.group-filter (converted to a list
@@ -1710,6 +1609,148 @@ class Manifest:
                     f'"{stripped[1:]}" is not a group name')
                 continue
             ret.append(stripped)
+
+        return ret
+
+    def _malformed(self, complaint: str,
+                   parent: Optional[Exception] = None) -> NoReturn:
+        context = (f'file: {self.path} ' if self.path else 'data')
+        args = [f'Malformed manifest {context}',
+                f'Schema file: {_SCHEMA_PATH}']
+        if complaint:
+            args.append('Hint: ' + complaint)
+        exc = MalformedManifest(*args)
+        if parent:
+            raise exc from parent
+        else:
+            raise exc
+
+    def _load(self, manifest: Dict[str, Any],
+              path_hint: Optional[Path],  # not PathType!
+              ctx: _import_ctx) -> None:
+        # Initialize this instance.
+        #
+        # - manifest: manifest data, parsed and validated
+        # - path_hint: hint about where the manifest repo lives
+        # - ctx: recursive import context
+
+        top_level = not bool(ctx.projects)
+
+        if self.path:
+            loading_what = self.path
+        else:
+            loading_what = 'data (no file)'
+
+        _logger.debug(f'loading {loading_what}')
+
+        schema_version = str(manifest.get('version', SCHEMA_VERSION))
+
+        # We want to make an ordered map from project names to
+        # corresponding Project instances. Insertion order into this
+        # map should reflect the final project order including
+        # manifest import resolution, which is:
+        #
+        # 1. Imported projects from "manifest: self: import:"
+        # 2. "manifest: projects:"
+        # 3. Imported projects from "manifest: projects: ... import:"
+
+        # Create the ManifestProject, and import projects and
+        # group-filter data from "self:".
+        mp = self._load_self(manifest, path_hint, ctx)
+
+        # Load "group-filter:" from this manifest.
+        self_group_filter = self._load_group_filter(manifest, ctx)
+
+        # Add this manifest's projects to the map, and handle imported
+        # projects and group-filter values.
+        url_bases = {r['name']: r['url-base'] for r in
+                     manifest.get('remotes', [])}
+        defaults = self._load_defaults(manifest.get('defaults', {}), url_bases)
+        self._load_projects(manifest, url_bases, defaults, ctx)
+
+        # The manifest is resolved. Make sure paths are unique.
+        self._check_paths_are_unique(mp, ctx.projects, top_level)
+
+        # Save the resulting projects and initialize lookup tables.
+        self._projects = list(ctx.projects.values())
+        self._projects.insert(MANIFEST_PROJECT_INDEX, mp)
+        self._projects_by_name: Dict[str, Project] = {'manifest': mp}
+        self._projects_by_name.update(ctx.projects)
+        self._projects_by_rpath: Dict[Path, Project] = {}  # resolved paths
+        if self.topdir:
+            for i, p in enumerate(self.projects):
+                if i == MANIFEST_PROJECT_INDEX and not p.abspath:
+                    # When from_data() is called without a path hint, mp
+                    # can have a topdir but no path, and thus no abspath.
+                    continue
+                if TYPE_CHECKING:
+                    # The typing module can't tell that self.topdir
+                    # being truthy guarantees p.abspath is a str, not None.
+                    assert p.abspath
+
+                self._projects_by_rpath[Path(p.abspath).resolve()] = p
+
+        # Update self.group_filter
+        if top_level:
+            # For schema version 0.10 or later, there's no point in
+            # overwriting these attributes for anything except the top
+            # level manifest: all the other ones we've loaded above
+            # during import resolution are already garbage.
+            #
+            # For schema version 0.9, we only want to warn once, at the
+            # top level, if the distinction actually matters.
+            self._finalize_group_filter(self_group_filter, ctx,
+                                        schema_version)
+
+        _logger.debug(f'loaded {loading_what}')
+
+    def _load_group_filter(self, manifest_data: Dict[str, Any],
+                           ctx: _import_ctx) -> GroupFilterType:
+        # Update ctx.group_filter from manifest_data.
+
+        if 'group-filter' not in manifest_data:
+            _logger.debug('group-filter: unset')
+            return []
+
+        raw_filter: List[RawGroupType] = manifest_data['group-filter']
+        if not raw_filter:
+            self._malformed('"manifest: group-filter:" may not be empty')
+
+        group_filter = self._validated_group_filter('manifest', raw_filter)
+        _logger.debug('group-filter: %s', group_filter)
+
+        ctx.group_filter[:0] = group_filter
+
+        return group_filter
+
+    def _validated_group_filter(
+            self, source: Optional[str], raw_filter: List[RawGroupType]
+    ) -> GroupFilterType:
+        # Helper function for cleaning up nonempty manifest:
+        # group-filter: and manifest.group-filter values.
+
+        if source is not None:
+            source += ' '
+        else:
+            source = ''
+
+        ret: GroupFilterType = []
+        for item in raw_filter:
+            if not isinstance(item, str):
+                item = str(item)
+
+            if (not item) or (item[0] not in ('+', '-')):
+                self._malformed(
+                    f'{source}group filter contains invalid item "{item}"; '
+                    'this must begin with "+" or "-"')
+
+            group = item[1:]
+            if not is_group(group):
+                self._malformed(
+                    f'{source}group filter contains invalid item "{item}"; '
+                    f'"{group}" is an invalid group name')
+
+            ret.append(item)
 
         return ret
 
@@ -2267,3 +2308,31 @@ class Manifest:
                 self._malformed(f'project {name} path "{project.path}" '
                                 f'is taken by project {other.name}')
             ppaths[pp] = project
+
+    def _finalize_group_filter(self, self_group_filter: GroupFilterType,
+                               ctx: _import_ctx, schema_version: str):
+        # Update self.group_filter based on the schema version.
+
+        if schema_version == '0.9':
+            # If the user requested v0.9.x group-filter semantics,
+            # provide them, but emit a warning that can't be silenced
+            # if group filters were used anywhere.
+            #
+            # Hopefully no users ever actually see this warning.
+
+            if self_group_filter or ctx.group_filter:
+                _logger.warning(
+                    "providing deprecated group-filter semantics "
+                    "due to explicit 'manifest: version: 0.9'; "
+                    "for the new semantics, use "
+                    "'manifest: version: \"0.10\"' or later")
+
+                # Set attribute for white-box testing the above warning.
+                self._legacy_group_filter_warned = True
+
+            _update_disabled_groups(self._disabled_groups, self_group_filter)
+            self.group_filter = self_group_filter
+
+        else:
+            _update_disabled_groups(self._disabled_groups, ctx.group_filter)
+            self.group_filter = [f'-{g}' for g in self._disabled_groups]
