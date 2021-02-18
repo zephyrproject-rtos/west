@@ -276,18 +276,40 @@ def _is_imap_ok(imap: _import_map, project: 'Project') -> bool:
         return allowed or no_allowlists
 
 class _import_ctx(NamedTuple):
+    # Holds state that changes as we recurse down the manifest import tree.
+
+    # The current map from already-defined project names to Projects.
+    #
+    # This is shared, mutable state between Manifest() constructor
+    # calls that happen during resolution. We mutate this directly
+    # when handling 'manifest: projects:' lists. Manifests which are
+    # imported earlier get higher precedence: if a 'projects:' list
+    # contains a name which is already present here, we ignore that
+    # element.
     projects: Dict[str, 'Project']
+
+    # The current restrictions on which projects the importing
+    # manifest is interested in.
+    #
+    # These accumulate as we pick up additional allowlists and
+    # blocklists in 'import: <map>' values. We handle this composition
+    # using _compose_ctx_and_imap().
     imap_filter: ImapFilterFnType
+
+    # The current prefix which should be added to any project paths
+    # as defined by all the importing manifests up to this point.
+    # These accumulate as we pick up 'import: path-prefix: ...' values,
+    # also using _compose_ctx_and_imap().
     path_prefix: Path
 
 def _compose_ctx_and_imap(ctx: _import_ctx, imap: _import_map) -> _import_ctx:
     # Combine the map data from "some-map" in a manifest's
     # "import: some-map" into an existing import context type,
     # returning the new context.
-    return _import_ctx(ctx.projects,
-                       _compose_imap_filters(ctx.imap_filter,
-                                             _imap_filter(imap)),
-                       ctx.path_prefix / imap.path_prefix)
+    return _import_ctx(projects=ctx.projects,
+                       imap_filter=_compose_imap_filters(ctx.imap_filter,
+                                                         _imap_filter(imap)),
+                       path_prefix=ctx.path_prefix / imap.path_prefix)
 
 def _imap_filter_allows(imap_filter: ImapFilterFnType,
                         project: 'Project') -> bool:
@@ -1274,20 +1296,25 @@ class Manifest:
         # Extra private state for checking active projects.
         self._disabled_groups: Set[str] = set()
 
-        # Set up the public attributes documented above, as well as
-        # any internal attributes needed to implement the public API.
+        # Stash the importer and flags in instance attributes. These
+        # don't change as we recurse, so they don't belong in _import_ctx.
         self._importer: ImporterType = importer or _default_importer
         self._import_flags = import_flags
-        ctx = kwargs.get('import-context')
-        if ctx is not None:
+
+        ctx: Optional[_import_ctx] = \
+            kwargs.get('import-context')  # type: ignore
+        if ctx is None:
+            ctx = _import_ctx(projects={},
+                              imap_filter=None,
+                              path_prefix=Path('.'))
+        else:
             assert isinstance(ctx, _import_ctx)
+
         if manifest_path:
             mpath: Optional[Path] = Path(manifest_path)
         else:
             mpath = None
-        self._load(source_data['manifest'],
-                   mpath,
-                   ctx or _import_ctx({}, None, Path('.')))
+        self._load(source_data['manifest'], mpath, ctx)
 
     def get_projects(self,
                      # any str name is also a PathType
