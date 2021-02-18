@@ -1128,6 +1128,25 @@ def test_as_dict_and_yaml(manifest_repo):
                 manifest.as_frozen_yaml()
             assert 'cannot be resolved to a SHA' in str(e.value)
 
+def test_as_dict_groups():
+    # Make sure groups and group-filter round-trip properly.
+
+    actual = Manifest.from_data('''\
+    manifest:
+      group-filter: [+foo,-bar]
+      projects:
+        - name: p1
+          url: u
+        - name: p2
+          url: u
+          groups:
+            - g
+    ''').as_dict()['manifest']
+
+    assert actual['group-filter'] == ['+foo', '-bar']
+    assert 'groups' not in actual['projects'][0]
+    assert actual['projects'][1]['groups'] == ['g']
+
 def test_version_check_failure():
     # Check that the manifest.version key causes manifest parsing to
     # fail when it should.
