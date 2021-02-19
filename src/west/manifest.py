@@ -113,7 +113,7 @@ _WEST_YML = 'west.yml'
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
 _SCHEMA_VER = parse_version(SCHEMA_VERSION)
 _EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
-_EARLIEST_VER = parse_version(_EARLIEST_VER_STR)
+_VALID_SCHEMA_VERS = [_EARLIEST_VER_STR, '0.7', '0.8', '0.9', SCHEMA_VERSION]
 
 def _is_yml(path: PathType) -> bool:
     return Path(path).suffix in ['.yml', '.yaml']
@@ -440,19 +440,27 @@ def validate(data: Any) -> None:
         # As a convenience for the user, convert floats to strings.
         # This avoids forcing them to write:
         #
-        #  version: "1.0"
+        #  version: "0.8"
         #
         # by explicitly allowing:
         #
-        #  version: 1.0
-        min_version_str = str(data['version'])
+        #  version: 0.8
+        if not isinstance(data['version'], str):
+            min_version_str = str(data['version'])
+            casted_to_str = True
+        else:
+            casted_to_str = False
+
         min_version = parse_version(min_version_str)
         if min_version > _SCHEMA_VER:
             raise ManifestVersionError(min_version_str)
-        elif min_version < _EARLIEST_VER:
-            raise MalformedManifest(
-                f'invalid version {min_version_str}; '
-                f'lowest schema version is {_EARLIEST_VER_STR}')
+        if min_version_str not in _VALID_SCHEMA_VERS:
+            msg = (f'invalid version {min_version_str}; must be one of: ' +
+                   ', '.join(_VALID_SCHEMA_VERS))
+            if casted_to_str:
+                msg += ('. Do you need to quote the value '
+                        '(e.g. "0.10" instead of 0.10)?')
+            raise MalformedManifest(msg)
 
     try:
         pykwalify.core.Core(source_data=data,
