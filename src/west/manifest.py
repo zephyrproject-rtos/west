@@ -460,6 +460,7 @@ def validate(data: Any) -> None:
             min_version_str = str(data['version'])
             casted_to_str = True
         else:
+            min_version_str = data['version']
             casted_to_str = False
 
         min_version = parse_version(min_version_str)
