@@ -124,10 +124,12 @@ With -l, creates a workspace around an existing local repository;
 without -l, creates a workspace by cloning a manifest repository
 by URL.
 
-If cloning a repository:
+With -m, clones the repository at that URL and uses it as the
+manifest repository. If --mr is not given, the remote's default
+branch will be used, if it exists.
 
-- the default REVISION to check out is "{MANIFEST_REV_DEFAULT}"
-- the default URL is "{MANIFEST_URL_DEFAULT}"''',
+With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
+''',
             requires_workspace=False)
 
     def do_add_parser(self, parser_adder):
@@ -231,9 +233,11 @@ If cloning a repository:
         return topdir
 
     def bootstrap(self, args) -> Path:
-        manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
-        manifest_rev = args.manifest_rev or MANIFEST_REV_DEFAULT
         topdir = Path(abspath(args.directory or os.getcwd()))
+        log.banner('Initializing in', topdir)
+
+        manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
+        manifest_rev = args.manifest_rev or self.get_head_branch(manifest_url)
         west_dir = topdir / WEST_DIR
 
         try:
@@ -242,7 +246,6 @@ If cloning a repository:
         except util.WestNotFound:
             pass
 
-        log.banner('Initializing in', topdir)
         if not topdir.is_dir():
             self.create(topdir, exist_ok=False)
 
@@ -314,6 +317,48 @@ If cloning a repository:
         log.dbg(f"running '{cmd_str}' in {cwd or os.getcwd()}",
                 level=log.VERBOSE_VERY)
         subprocess.check_call(args, cwd=cwd)
+
+    def check_output(self, args, cwd=None):
+        cmd_str = util.quote_sh_list(args)
+        log.dbg(f"running '{cmd_str}' in {cwd or os.getcwd()}",
+                level=log.VERBOSE_VERY)
+        return subprocess.check_output(args, cwd=cwd)
+
+    def get_head_branch(self, url: str) -> str:
+        # Get the branch which url's HEAD points to. Requires git 2.8.0
+        # or later. Errors out if it can't, prints a banner if it can.
+        err_msg = (f'failed getting the default branch from {url}; '
+                   'please provide the --manifest-rev option')
+
+        # The '--quiet' option disables printing the URL to stderr.
+        try:
+            output = self.check_output(
+                ('git', 'ls-remote', '--quiet', '--symref', url, 'HEAD')
+            ).decode('utf-8')
+        except subprocess.CalledProcessError:
+            log.die(err_msg)
+
+        for line in output.splitlines():
+            if not line.startswith('ref: '):
+                continue
+            # The output looks like this:
+            #
+            # ref: refs/heads/foo	HEAD
+            # 6145ab537fcb3adc3ee77db5f5f95e661f1e91e6	HEAD
+            #
+            # So this is the 'ref: ...' case.
+            #
+            # Per git-check-ref-format(1), references can't have tabs
+            # in them, so this doesn't have any weird edge cases.
+            without_ref = line[len('ref: '):]
+            if not without_ref:
+                continue
+            ret = without_ref.split('\t')[0]
+            log.small_banner('no --manifest-rev was given; '
+                             f"using remote's default branch: {ret}")
+            return ret
+
+        log.die(err_msg)
 
     def clone_manifest(self, url: str, rev: str, dest: str,
                        exist_ok=False) -> None:
@@ -1465,8 +1510,6 @@ WEST_DIR = '.west'
 
 # Default manifest repository URL.
 MANIFEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/zephyr'
-# Default revision to check out of the manifest repository.
-MANIFEST_REV_DEFAULT = 'master'
 
 #
 # Other shared globals.
