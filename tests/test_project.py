@@ -3,7 +3,6 @@
 import collections
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import textwrap
@@ -965,7 +964,7 @@ def test_init_again(west_init_tmpdir):
 
     manifest = west_init_tmpdir / '..' / 'repos' / 'zephyr'
     popen = subprocess.Popen(
-        shlex.split(f'west -vvv init -m {manifest} workspace'),
+        ['west', '-vvv', 'init', '-m', str(manifest), 'workspace'],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         cwd=west_init_tmpdir.dirname)
