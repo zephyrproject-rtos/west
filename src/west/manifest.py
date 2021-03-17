@@ -643,7 +643,7 @@ class Project:
       If the manifest data contains no groups for the project, this is
       an empty list.
     - ``submodules``: the project's submodules configuration; either
-      a list of `Submodule` objects, or a boolean.
+      a list of Submodule objects, or a boolean.
     '''
 
     def __eq__(self, other):
