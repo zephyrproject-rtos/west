@@ -310,7 +310,18 @@ class WestApp:
         # If we're running an extension, instantiate it from its
         # spec and re-parse arguments before running.
 
-        args, unknown = self.west_parser.parse_known_args(args=argv)
+        try:
+            args, unknown = self.west_parser.parse_known_args(args=argv)
+        except SystemExit as se:
+            log.err('Please check the following:\n'
+                    '- Check you entered the command properly\n'
+                    '- If your command is not recognized, check you are in'
+                    ' a workspace, and that the workspace '
+                    'contains the extension command you want to use\n'
+                    '- If you are running `west` outside of a'
+                    ' workspace, you must set <something else> so that'
+                    ' `west` knows where the workspace is located\n')
+            raise se
 
         # Set up logging verbosity before running the command, so e.g.
         # verbose messages related to argument handling errors work
