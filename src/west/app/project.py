@@ -816,13 +816,13 @@ class Update(_ProjectCommand):
         # We can't blindly call self._projects() here: manifests with
         # imports are limited to plain 'west update', and cannot use
         # 'west update PROJECT [...]'.
-        self.fs = self.fetch_strategy(args)
+        self.fs = self.fetch_strategy()
         if not args.projects:
-            self.update_all(args)
+            self.update_all()
         else:
-            self.update_some(args)
+            self.update_some()
 
-    def update_all(self, args):
+    def update_all(self):
         # Plain 'west update' is the 'easy' case: since the user just
         # wants us to update everything, we don't have to keep track
         # of projects appearing or disappearing as a result of fetching
@@ -833,7 +833,6 @@ class Update(_ProjectCommand):
         # in a project, allowing us to control the recursion so it
         # always uses the latest manifest data.
         self.updated = set()
-        self.args = args
 
         self.manifest = Manifest.from_file(
             importer=self.update_importer,
@@ -852,7 +851,7 @@ class Update(_ProjectCommand):
                 self.updated.add(project.name)
             except subprocess.CalledProcessError:
                 failed.append(project)
-        self._handle_failed(args, failed)
+        self._handle_failed(self.args, failed)
 
     def update_importer(self, project, path):
         if isinstance(project, ManifestProject):
@@ -891,7 +890,7 @@ class Update(_ProjectCommand):
                     f'at URL {project.url}\n'
                     '          - remove the "import:"' + suggest_vvv)
 
-    def update_some(self, args):
+    def update_some(self):
         # The 'west update PROJECT [...]' style invocation is only
         # implemented for projects defined within the manifest
         # repository.
@@ -906,10 +905,10 @@ class Update(_ProjectCommand):
         # this restriction if it proves cumbersome.
 
         if not self.has_manifest or self.manifest.has_imports:
-            projects = self.toplevel_projects(args)
+            projects = self.toplevel_projects()
             assert self.has_manifest  # toplevel_projects() must ensure this.
         else:
-            projects = self._projects(args.projects)
+            projects = self._projects(self.args.projects)
 
         failed = []
         for project in projects:
@@ -919,16 +918,16 @@ class Update(_ProjectCommand):
                 self.update(project)
             except subprocess.CalledProcessError:
                 failed.append(project)
-        self._handle_failed(args, failed)
+        self._handle_failed(self.args, failed)
 
-    def toplevel_projects(self, args):
-        # Return a list of projects from args.projects, or scream and
-        # die if any projects are either unknown or not defined in the
-        # manifest repository.
+    def toplevel_projects(self):
+        # Return a list of projects from self.args.projects, or scream
+        # and die if any projects are either unknown or not defined in
+        # the manifest repository.
         #
         # As a side effect, ensures self.manifest is set.
 
-        ids = args.projects
+        ids = self.args.projects
         assert ids
 
         self.manifest = Manifest.from_file(
@@ -956,14 +955,14 @@ class Update(_ProjectCommand):
                     '  It or they were resolved via project imports.\n'
                     '  Only plain "west update" can currently update them.')
 
-    def fetch_strategy(self, args):
+    def fetch_strategy(self):
         cfg = config.get('update', 'fetch', fallback=None)
         if cfg is not None and cfg not in ('always', 'smart'):
             log.wrn(f'ignoring invalid config update.fetch={cfg}; '
                     'choices: always, smart')
             cfg = None
-        if args.fetch_strategy:
-            return args.fetch_strategy
+        if self.args.fetch_strategy:
+            return self.args.fetch_strategy
         elif cfg:
             return cfg
         else:
