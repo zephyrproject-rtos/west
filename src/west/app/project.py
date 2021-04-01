@@ -170,7 +170,7 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
 
         return parser
 
-    def do_run(self, args, ignored):
+    def do_run(self, args, _):
         if self.topdir:
             zb = os.environ.get('ZEPHYR_BASE')
             if zb:
@@ -786,7 +786,7 @@ class Update(_ProjectCommand):
 
         return parser
 
-    def do_run(self, args, user_args):
+    def do_run(self, args, _):
         self.die_if_no_git()
         self._setup_logging(args)
 
@@ -942,7 +942,7 @@ class Update(_ProjectCommand):
             log.die('one or more projects are unknown or defined via '
                     'imports; please run plain "west update".')
 
-        projects, unknown = projects_unknown(self.manifest, ids)
+        _, unknown = projects_unknown(self.manifest, ids)
         if unknown:
             die_unknown(unknown)
         else:
