@@ -1202,9 +1202,9 @@ class Update(_ProjectCommand):
         else:
             depth = []
         if _maybe_sha(rev):
-            # We can't in general fetch a SHA from a remote, as many hosts
-            # (GitHub included) forbid it for security reasons. Let's hope
-            # it's reachable from some branch.
+            # We can't in general fetch a SHA from a remote, as some hosts
+            # forbid it for security reasons. Let's hope it's reachable
+            # from some branch.
             refspec = f'refs/heads/*:{QUAL_REFS}*'
             next_manifest_rev = project.revision
         else:
