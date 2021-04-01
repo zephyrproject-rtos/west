@@ -753,6 +753,10 @@ class Update(_ProjectCommand):
                            while "smart" (default) skips fetching projects
                            whose revisions are SHAs or tags available
                            locally''')
+        group.add_argument('-o', '--fetch-opt', action='append', default=[],
+                           help='''additional option to pass to 'git fetch'
+                           if fetching is necessary (e.g. 'o=--depth=1');
+                           may be given more than once''')
 
         group = parser.add_argument_group(
             title='checked out branch behavior',
@@ -1171,8 +1175,7 @@ class Update(_ProjectCommand):
             if take_stats:
                 stats['set manifest-rev'] = perf_counter() - start
 
-    @staticmethod
-    def fetch(project, stats, take_stats):
+    def fetch(self, project, stats, take_stats):
         # Fetches rev (or project.revision) from project.url in a way that
         # guarantees any branch, tag, or SHA (that's reachable from a
         # branch or a tag) available on project.url is part of what got
@@ -1194,12 +1197,6 @@ class Update(_ProjectCommand):
         # non-commit object" error when the revision is an annotated
         # tag. ^{commit} type peeling isn't supported for the <src> in a
         # <src>:<dst> refspec, so we have to do it separately.
-        msg = f'{project.name}: fetching, need revision {rev}'
-        if project.clone_depth:
-            msg += f' with --depth {project.clone_depth}'
-            depth = ['--depth', str(project.clone_depth)]
-        else:
-            depth = []
         if _maybe_sha(rev):
             # We can't in general fetch a SHA from a remote, as some hosts
             # forbid it for security reasons. Let's hope it's reachable
@@ -1223,8 +1220,11 @@ class Update(_ProjectCommand):
         #
         # --tags is required to get tags, since the remote is
         # --specified as a URL.
-        log.small_banner(msg)
-        project.git(['fetch', '-f', '--tags'] + depth +
+        log.small_banner(f'{project.name}: fetching, need revision {rev}')
+        clone_depth = (['--depth', str(project.clone_depth)] if
+                       project.clone_depth else [])
+        project.git(['fetch', '-f', '--tags'] +
+                    clone_depth + self.args.fetch_opt +
                     ['--', project.url, refspec])
         _update_manifest_rev(project, next_manifest_rev)
 
