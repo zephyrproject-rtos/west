@@ -1231,10 +1231,19 @@ class Update(_ProjectCommand):
         project.git(['fetch', '-f'] + tags + clone_depth +
                     self.args.fetch_opt +
                     ['--', project.url, refspec])
-        _update_manifest_rev(project, next_manifest_rev)
 
         if take_stats:
-            stats['fetch and set manifest-rev'] = perf_counter() - start
+            stats['fetch'] = perf_counter() - start
+
+        # Update manifest-rev, leaving an entry in the reflog.
+        if take_stats:
+            start = perf_counter()
+
+        new_ref = project.sha(next_manifest_rev)
+        _update_manifest_rev(project, new_ref)
+
+        if take_stats:
+            stats['set manifest-rev'] = perf_counter() - start
 
     @staticmethod
     def clean_refs_west(project, stats, take_stats):
