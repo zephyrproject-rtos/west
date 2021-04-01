@@ -1163,11 +1163,7 @@ class Update(_ProjectCommand):
         # the latest value it should be.
 
         if self.fs == 'always' or _rev_type(project) not in ('tag', 'commit'):
-            if take_stats:
-                start = perf_counter()
-            _fetch(project)
-            if take_stats:
-                stats['fetch and set manifest-rev'] = perf_counter() - start
+            self.fetch(project, stats, take_stats)
         else:
             log.dbg('skipping unnecessary fetch')
             if take_stats:
@@ -1177,6 +1173,66 @@ class Update(_ProjectCommand):
                 stats['set manifest-rev'] = perf_counter() - start
 
     @staticmethod
+    def fetch(project, stats, take_stats):
+        # Fetches rev (or project.revision) from project.url in a way that
+        # guarantees any branch, tag, or SHA (that's reachable from a
+        # branch or a tag) available on project.url is part of what got
+        # fetched.
+        #
+        # Returns a git revision which hopefully can be peeled to the
+        # newly-fetched SHA corresponding to rev. "Hopefully" because
+        # there are many ways to spell a revision, and they haven't all
+        # been extensively tested.
+
+        if take_stats:
+            start = perf_counter()
+
+        rev = project.revision
+
+        # Fetch the revision into the local ref space.
+        #
+        # The following two-step approach avoids a "trying to write
+        # non-commit object" error when the revision is an annotated
+        # tag. ^{commit} type peeling isn't supported for the <src> in a
+        # <src>:<dst> refspec, so we have to do it separately.
+        msg = f'{project.name}: fetching, need revision {rev}'
+        if project.clone_depth:
+            msg += f' with --depth {project.clone_depth}'
+            depth = ['--depth', str(project.clone_depth)]
+        else:
+            depth = []
+        if _maybe_sha(rev):
+            # We can't in general fetch a SHA from a remote, as many hosts
+            # (GitHub included) forbid it for security reasons. Let's hope
+            # it's reachable from some branch.
+            refspec = f'refs/heads/*:{QUAL_REFS}*'
+            next_manifest_rev = project.revision
+        else:
+            # The revision is definitely not a SHA, so it's safe to
+            # fetch directly. This avoids fetching unnecessary refs
+            # from the remote.
+            #
+            # We update manifest-rev to FETCH_HEAD instead of using a
+            # refspec in case the revision is a tag, which we can't use
+            # from a refspec.
+            refspec = project.revision
+            next_manifest_rev = 'FETCH_HEAD^{commit}'
+
+        # -f is needed to avoid errors in case multiple remotes are
+        # present, at least one of which contains refs that can't be
+        # fast-forwarded to our local ref space.
+        #
+        # --tags is required to get tags, since the remote is
+        # --specified as a URL.
+        log.small_banner(msg)
+        project.git(['fetch', '-f', '--tags'] + depth +
+                    ['--', project.url, refspec])
+        _update_manifest_rev(project, next_manifest_rev)
+
+        if take_stats:
+            stats['fetch and set manifest-rev'] = perf_counter() - start
+
+    @staticmethod
     def clean_refs_west(project, stats, take_stats):
         # update() helper. Make sure refs/west/* is empty after
         # setting the new manifest-rev.
@@ -1184,11 +1240,13 @@ class Update(_ProjectCommand):
         # Head of manifest-rev is now pointing to current manifest revision.
         # Thus it is safe to unconditionally clear out the refs/west space.
         #
-        # Doing this here instead of in _fetch() ensures that it gets cleaned
-        # up when users upgrade from older versions of west (like 0.6.x) that
-        # didn't handle this properly.
-        # In future, this can be moved into _fetch() after the install base of
-        # older west versions is expected to be smaller.
+        # Doing this here instead of in Update.fetch() ensures that it
+        # gets cleaned up when users upgrade from older versions of
+        # west (like 0.6.x) that didn't handle this properly.
+        #
+        # In the future, this can be moved into Update.fetch() after
+        # the install base of older west versions is expected to be
+        # smaller.
         if take_stats:
             start = perf_counter()
         _clean_west_refspace(project)
@@ -1428,58 +1486,6 @@ def _rev_type(project, rev=None):
         return 'commit'
     else:
         return 'other'
-
-def _fetch(project, rev=None):
-    # Fetches rev (or project.revision) from project.url in a way that
-    # guarantees any branch, tag, or SHA (that's reachable from a
-    # branch or a tag) available on project.url is part of what got
-    # fetched.
-    #
-    # Returns a git revision which hopefully can be peeled to the
-    # newly-fetched SHA corresponding to rev. "Hopefully" because
-    # there are many ways to spell a revision, and they haven't all
-    # been extensively tested.
-
-    if not rev:
-        rev = project.revision
-
-    # Fetch the revision into the local ref space.
-    #
-    # The following two-step approach avoids a "trying to write
-    # non-commit object" error when the revision is an annotated
-    # tag. ^{commit} type peeling isn't supported for the <src> in a
-    # <src>:<dst> refspec, so we have to do it separately.
-    msg = f'{project.name}: fetching, need revision {rev}'
-    if project.clone_depth:
-        msg += f' with --depth {project.clone_depth}'
-        depth = ['--depth', str(project.clone_depth)]
-    else:
-        depth = []
-    if _maybe_sha(rev):
-        # We can't in general fetch a SHA from a remote, as many hosts
-        # (GitHub included) forbid it for security reasons. Let's hope
-        # it's reachable from some branch.
-        refspec = f'refs/heads/*:{QUAL_REFS}*'
-        next_manifest_rev = project.revision
-    else:
-        # The revision is definitely not a SHA, so it's safe to fetch directly.
-        # This avoids fetching unnecessary refs from the remote.
-        #
-        # We update manifest-rev to FETCH_HEAD instead of using a
-        # refspec in case the revision is a tag, which we can't use
-        # from a refspec.
-        refspec = project.revision
-        next_manifest_rev = 'FETCH_HEAD^{commit}'
-
-    # -f is needed to avoid errors in case multiple remotes are present,
-    # at least one of which contains refs that can't be fast-forwarded to our
-    # local ref space.
-    #
-    # --tags is required to get tags, since the remote is specified as a URL.
-    log.small_banner(msg)
-    project.git(['fetch', '-f', '--tags'] + depth +
-                ['--', project.url, refspec])
-    _update_manifest_rev(project, next_manifest_rev)
 
 def _head_ok(project):
     # Returns True if the reference 'HEAD' exists and is not a tag or remote
