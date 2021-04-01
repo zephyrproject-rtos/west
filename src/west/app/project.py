@@ -757,6 +757,10 @@ class Update(_ProjectCommand):
                            help='''additional option to pass to 'git fetch'
                            if fetching is necessary (e.g. 'o=--depth=1');
                            may be given more than once''')
+        group.add_argument('-n', '--narrow', action='store_true',
+                           help='''fetch just the project revision if fetching
+                           is necessary; skip fetching tags (may not work for
+                           SHA revisions depending on the Git host)''')
 
         group = parser.add_argument_group(
             title='checked out branch behavior',
@@ -1197,16 +1201,17 @@ class Update(_ProjectCommand):
         # non-commit object" error when the revision is an annotated
         # tag. ^{commit} type peeling isn't supported for the <src> in a
         # <src>:<dst> refspec, so we have to do it separately.
-        if _maybe_sha(rev):
+        if _maybe_sha(rev) and not self.args.narrow:
             # We can't in general fetch a SHA from a remote, as some hosts
             # forbid it for security reasons. Let's hope it's reachable
             # from some branch.
             refspec = f'refs/heads/*:{QUAL_REFS}*'
             next_manifest_rev = project.revision
         else:
-            # The revision is definitely not a SHA, so it's safe to
-            # fetch directly. This avoids fetching unnecessary refs
-            # from the remote.
+            # Either the revision is definitely not a SHA and is
+            # therefore safe to fetch directly, or the user said
+            # that's OK. This avoids fetching unnecessary refs from
+            # the remote.
             #
             # We update manifest-rev to FETCH_HEAD instead of using a
             # refspec in case the revision is a tag, which we can't use
@@ -1214,17 +1219,17 @@ class Update(_ProjectCommand):
             refspec = project.revision
             next_manifest_rev = 'FETCH_HEAD^{commit}'
 
+        log.small_banner(f'{project.name}: fetching, need revision {rev}')
+        # --tags is required to get tags if we're not run as 'west
+        # update --narrow', since the remote is specified as a URL.
+        tags = (['--tags'] if not self.args.narrow else [])
+        clone_depth = (['--depth', str(project.clone_depth)] if
+                       project.clone_depth else [])
         # -f is needed to avoid errors in case multiple remotes are
         # present, at least one of which contains refs that can't be
         # fast-forwarded to our local ref space.
-        #
-        # --tags is required to get tags, since the remote is
-        # --specified as a URL.
-        log.small_banner(f'{project.name}: fetching, need revision {rev}')
-        clone_depth = (['--depth', str(project.clone_depth)] if
-                       project.clone_depth else [])
-        project.git(['fetch', '-f', '--tags'] +
-                    clone_depth + self.args.fetch_opt +
+        project.git(['fetch', '-f'] + tags + clone_depth +
+                    self.args.fetch_opt +
                     ['--', project.url, refspec])
         _update_manifest_rev(project, next_manifest_rev)
 
