@@ -9,6 +9,7 @@ import importlib.util
 import itertools
 import os
 from pathlib import Path
+import subprocess
 import sys
 from types import ModuleType
 from typing import Dict
@@ -19,7 +20,7 @@ import yaml
 from west import log
 from west.configuration import config as _config
 from west.manifest import Manifest
-from west.util import escapes_directory
+from west.util import escapes_directory, quote_sh_list
 
 '''\
 This package provides WestCommand, which is the common abstraction all
@@ -202,6 +203,29 @@ class WestCommand(ABC):
     def manifest(self, manifest):
         self._manifest = manifest
 
+    #
+    # Other public methods
+    #
+
+    @staticmethod
+    def check_call(args, cwd=None):
+        '''Runs subprocess.check_call(args, cwd=cwd) after
+        logging the call at VERBOSE_VERY level.'''
+
+        cmd_str = quote_sh_list(args)
+        log.dbg(f"running '{cmd_str}' in {cwd or os.getcwd()}",
+                level=log.VERBOSE_VERY)
+        subprocess.check_call(args, cwd=cwd)
+
+    @staticmethod
+    def check_output(args, cwd=None):
+        '''Runs subprocess.check_output(args, cwd=cwd) after
+        logging the call at VERBOSE_VERY level.'''
+
+        cmd_str = quote_sh_list(args)
+        log.dbg(f"running '{cmd_str}' in {cwd or os.getcwd()}",
+                level=log.VERBOSE_VERY)
+        return subprocess.check_output(args, cwd=cwd)
 #
 # Private extension API
 #

@@ -312,18 +312,6 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
         except Exception as e:
             log.die(f"Can't create {directory}: {e}")
 
-    def check_call(self, args, cwd=None):
-        cmd_str = util.quote_sh_list(args)
-        log.dbg(f"running '{cmd_str}' in {cwd or os.getcwd()}",
-                level=log.VERBOSE_VERY)
-        subprocess.check_call(args, cwd=cwd)
-
-    def check_output(self, args, cwd=None):
-        cmd_str = util.quote_sh_list(args)
-        log.dbg(f"running '{cmd_str}' in {cwd or os.getcwd()}",
-                level=log.VERBOSE_VERY)
-        return subprocess.check_output(args, cwd=cwd)
-
     def get_head_branch(self, url: str) -> str:
         # Get the branch which url's HEAD points to. Requires git 2.8.0
         # or later. Errors out if it can't, prints a banner if it can.
