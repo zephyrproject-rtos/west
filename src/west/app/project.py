@@ -1117,7 +1117,17 @@ class Update(_ProjectCommand):
 
         if cache_dir is None:
             log.small_banner(f'{project.name}: initializing')
-            project.git(['init', project.abspath], cwd=self.topdir)
+
+            init_cmd = ['init', project.abspath]
+            # Silence the very verbose and repetitive init.defaultBranch
+            # warning (10 lines per new git clone). The branch
+            # 'placeholder' will never have any commit so it will never
+            # actually exist.
+            if self.git_version_info >= (2, 28, 0):
+                init_cmd.insert(1, '--initial-branch=init_placeholder')
+
+            project.git(init_cmd, cwd=self.topdir)
+
             # This remote is added as a convenience for the user.
             # However, west always fetches project data by URL, not name.
             # The user is therefore free to change the URL of this remote.
