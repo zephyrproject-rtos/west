@@ -1471,14 +1471,6 @@ def die_unknown(unknown):
             '  Hint: use "west list" to list all projects.')
 
 @lru_cache(maxsize=1)
-def warn_once_if_no_git():
-    # Using an LRU cache means this gets called once. Afterwards, the
-    # memoized return value (None) is simply returned from the cache,
-    # so the warning is emitted only once per process invocation.
-    if shutil.which('git') is None:
-        log.wrn('git is not installed or cannot be found; this may fail')
-
-@lru_cache(maxsize=1)
 def die_if_no_git():
     # Using an LRU cache means this only calls shutil.which() once.
     # This is useful when the function is called multiple times, e.g.
