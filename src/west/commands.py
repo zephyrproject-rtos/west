@@ -9,6 +9,8 @@ import importlib.util
 import itertools
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
 from types import ModuleType
@@ -226,6 +228,31 @@ class WestCommand(ABC):
         log.dbg(f"running '{cmd_str}' in {cwd or os.getcwd()}",
                 level=log.VERBOSE_VERY)
         return subprocess.check_output(args, cwd=cwd)
+
+    @property
+    def git_version_info(self):
+        '''Returns git version info as a tuple of ints in (major,
+        minor, patch) format, like (2, 31, 1) for git version 2.31.1.
+
+        Aborts the program if there is no git installed.
+        '''
+        if not hasattr(self, '_git'):
+            self._git = shutil.which('git')
+            if self._git is None:
+                log.die("can't find git; install it or ensure it's on your PATH")
+        if not hasattr(self, '_git_ver'):
+            # raw_ver usually looks like '2.31.1'
+            raw_ver = self.check_output(
+                [self._git, '--version']).decode().strip().split()[-1]
+            # match just the numeric prefix, in case we get something like
+            # '2.31.1-EXTRAVERSION' in some situations. The major/minor/patch
+            # group names are purely for clarity.
+            match = re.match(
+                r'^(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)', raw_ver)
+            self._git_ver = tuple(int(group) for group in match.groups())
+            log.dbg(f'git version: {self._git_ver}', level=log.VERBOSE_VERY)
+        return self._git_ver
+
 #
 # Private extension API
 #
