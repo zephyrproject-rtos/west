@@ -229,6 +229,14 @@ class WestCommand(ABC):
                 level=log.VERBOSE_VERY)
         return subprocess.check_output(args, cwd=cwd)
 
+    def die_if_no_git(self):
+        '''Abort if git is not installed on PATH.
+        '''
+        if not hasattr(self, '_git'):
+            self._git = shutil.which('git')
+        if self._git is None:
+            log.die("can't find git; install it or ensure it's on your PATH")
+
     @property
     def git_version_info(self):
         '''Returns git version info as a tuple of ints in (major,
@@ -236,11 +244,8 @@ class WestCommand(ABC):
 
         Aborts the program if there is no git installed.
         '''
-        if not hasattr(self, '_git'):
-            self._git = shutil.which('git')
-            if self._git is None:
-                log.die("can't find git; install it or ensure it's on your PATH")
         if not hasattr(self, '_git_ver'):
+            self.die_if_no_git()
             # raw_ver usually looks like '2.31.1'
             raw_ver = self.check_output(
                 [self._git, '--version']).decode().strip().split()[-1]
