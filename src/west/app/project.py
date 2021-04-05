@@ -6,7 +6,7 @@
 '''West project commands'''
 
 import argparse
-from functools import partial, lru_cache
+from functools import partial
 import logging
 import os
 from os.path import abspath, relpath, exists
@@ -188,7 +188,7 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
         if args.local and (args.manifest_url or args.manifest_rev):
             log.die('-l cannot be combined with -m or --mr')
 
-        die_if_no_git()
+        self.die_if_no_git()
 
         self._setup_logging(args)
 
@@ -447,7 +447,7 @@ The following arguments are available:
 
     def do_run(self, args, user_args):
         def sha_thunk(project):
-            die_if_no_git()
+            self.die_if_no_git()
 
             if not project.is_cloned():
                 log.die(f'cannot get sha for uncloned project {project.name}; '
@@ -458,7 +458,7 @@ The following arguments are available:
                 return f'{"N/A":40}'
 
         def cloned_thunk(project):
-            die_if_no_git()
+            self.die_if_no_git()
 
             return "cloned" if project.is_cloned() else "not-cloned"
 
@@ -638,7 +638,7 @@ class Diff(_ProjectCommand):
         return parser
 
     def do_run(self, args, ignored):
-        die_if_no_git()
+        self.die_if_no_git()
         self._setup_logging(args)
 
         failed = []
@@ -684,7 +684,7 @@ class Status(_ProjectCommand):
         return parser
 
     def do_run(self, args, user_args):
-        die_if_no_git()
+        self.die_if_no_git()
         self._setup_logging(args)
 
         failed = []
@@ -769,7 +769,7 @@ class Update(_ProjectCommand):
         return parser
 
     def do_run(self, args, user_args):
-        die_if_no_git()
+        self.die_if_no_git()
         self._setup_logging(args)
 
         self.args = args
@@ -1469,14 +1469,6 @@ def die_unknown(unknown):
     names = ' '.join(unknown)
     log.die(f'unknown project name{s}/path{s}: {names}\n'
             '  Hint: use "west list" to list all projects.')
-
-@lru_cache(maxsize=1)
-def die_if_no_git():
-    # Using an LRU cache means this only calls shutil.which() once.
-    # This is useful when the function is called multiple times, e.g.
-    # from the west list thunk for computing a SHA.
-    if shutil.which('git') is None:
-        log.die("can't find git; install it or ensure it's on your PATH")
 
 #
 # Special files and directories in the west workspace.
