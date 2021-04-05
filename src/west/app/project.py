@@ -313,8 +313,14 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
             log.die(f"Can't create {directory}: {e}")
 
     def get_head_branch(self, url: str) -> str:
-        # Get the branch which url's HEAD points to. Requires git 2.8.0
-        # or later. Errors out if it can't, prints a banner if it can.
+        # Get the branch which url's HEAD points to. Errors out if it
+        # can't, prints a banner if it can.
+
+        if self.git_version_info < (2, 8, 0):
+            # This recipe requires git 2.8.0 or later. Fall back
+            # if we're running on something that's too old.
+            return 'master'
+
         err_msg = (f'failed getting the default branch from {url}; '
                    'please provide the --manifest-rev option')
 
