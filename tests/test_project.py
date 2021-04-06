@@ -14,8 +14,9 @@ from west import configuration as config
 from west.manifest import Manifest, ManifestProject, Project, \
     ManifestImportFailed
 from west.manifest import ImportFlag as MIF
-from conftest import create_workspace, create_repo, add_commit, add_tag, \
-    check_output, cmd, GIT, rev_parse, check_proj_consistency
+from conftest import create_branch, create_workspace, create_repo, \
+    add_commit, add_tag, check_output, cmd, GIT, rev_parse, \
+    check_proj_consistency
 
 assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
 
@@ -1009,6 +1010,63 @@ def test_update_path_cache(tmpdir):
 
     assert rev_parse(workspace / 'subdir' / 'foo', 'HEAD') == foo_head
     assert rev_parse(workspace / 'bar', 'HEAD') == bar_head
+
+
+def setup_narrow(tmpdir):
+    # Helper used by test_update_narrow() and test_update_narrow_depth1().
+
+    remote = tmpdir / 'remote'
+
+    create_repo(remote)
+    add_commit(remote, 'second commit, main')
+    add_tag(remote, 'tag')
+
+    create_branch(remote, 'branch', checkout=True)
+    add_commit(remote, 'second commit, branch', reconfigure=False)
+
+    workspace = tmpdir / 'workspace'
+    create_workspace(workspace)
+
+    with open(workspace / 'mp' / 'west.yml', 'w') as f:
+        f.write(f'''
+        manifest:
+          projects:
+            - name: project
+              revision: branch
+              url: file://{remote}
+        ''')
+
+    return remote, workspace
+
+
+def test_update_narrow(tmpdir):
+    # Test that 'west update --narrow' doesn't fetch tags.
+
+    remote, workspace = setup_narrow(tmpdir)
+
+    cmd('update --narrow', cwd=workspace)
+
+    tags = subprocess.check_output(
+        [GIT, 'tag', '--list'], cwd=workspace / 'project'
+    ).decode().splitlines()
+
+    assert tags == []
+
+
+def test_update_narrow_depth1(tmpdir):
+    # Test that 'west update --narrow -o=--depth=1' fetches exactly
+    # one commit, regardless of how many there are in the remote
+    # repository.
+
+    remote, workspace = setup_narrow(tmpdir)
+
+    cmd('update --narrow --fetch-opt=--depth=1', cwd=workspace)
+
+    refs = subprocess.check_output(
+        [GIT, 'for-each-ref'], cwd=workspace / 'project',
+    ).decode().splitlines()
+
+    assert len(refs) == 1
 
 
 def test_init_again(west_init_tmpdir):
