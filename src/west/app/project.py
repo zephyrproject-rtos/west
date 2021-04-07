@@ -817,6 +817,10 @@ class Update(_ProjectCommand):
 
         self.narrow = args.narrow or config.getboolean('update', 'narrow',
                                                        fallback=False)
+        self.path_cache = args.path_cache or config.get('update', 'path-cache',
+                                                        fallback=None)
+        self.name_cache = args.name_cache or config.get('update', 'name-cache',
+                                                        fallback=None)
 
         self.group_filter: List[str] = []
 
@@ -1151,26 +1155,29 @@ class Update(_ProjectCommand):
     def project_cache(self, project):
         # Find the absolute path to a pre-existing local clone of a project
         # and return it. If the search fails, return None.
-        name_cache, path_cache = self.args.name_cache, self.args.path_cache
 
-        if name_cache is not None:
-            maybe = Path(name_cache) / project.name
+        if self.name_cache is not None:
+            maybe = Path(self.name_cache) / project.name
             if maybe.is_dir():
-                log.dbg(f'found {project.name} in --name-cache {name_cache}',
-                        level=log.VERBOSE_VERY)
+                log.dbg(
+                    f'found {project.name} in --name-cache {self.name_cache}',
+                    level=log.VERBOSE_VERY)
                 return os.fspath(maybe)
             else:
-                log.dbg(f'{project.name} not in --name-cache {name_cache}',
-                        level=log.VERBOSE_VERY)
-        elif self.args.path_cache is not None:
-            maybe = Path(self.args.path_cache) / project.path
+                log.dbg(
+                    f'{project.name} not in --name-cache {self.name_cache}',
+                    level=log.VERBOSE_VERY)
+        elif self.path_cache is not None:
+            maybe = Path(self.path_cache) / project.path
             if maybe.is_dir():
-                log.dbg(f'found {project.path} in --path-cache {path_cache}',
-                        level=log.VERBOSE_VERY)
+                log.dbg(
+                    f'found {project.path} in --path-cache {self.path_cache}',
+                    level=log.VERBOSE_VERY)
                 return os.fspath(maybe)
             else:
-                log.dbg(f'{project.path} not in --path-cache {path_cache}',
-                        level=log.VERBOSE_VERY)
+                log.dbg(
+                    f'{project.path} not in --path-cache {self.path_cache}',
+                    level=log.VERBOSE_VERY)
 
         return None
 
