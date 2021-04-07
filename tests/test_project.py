@@ -969,23 +969,34 @@ def test_update_name_cache(tmpdir):
     # network if it doesn't have to.
 
     name_cache_dir = tmpdir / 'name_cache'
-
     create_repo(name_cache_dir / 'foo')
     create_repo(name_cache_dir / 'bar')
-
     foo_head = rev_parse(name_cache_dir / 'foo', 'HEAD')
     bar_head = rev_parse(name_cache_dir / 'bar', 'HEAD')
 
     workspace = tmpdir / 'workspace'
     setup_cache_workspace(workspace, foo_head, bar_head)
+    workspace.chdir()
+    foo = workspace / 'subdir' / 'foo'
+    bar = workspace / 'bar'
 
-    cmd(f'update --name-cache {name_cache_dir}', cwd=workspace)
+    # Test the command line option.
+    cmd(f'update --name-cache {name_cache_dir}')
+    assert foo.check(dir=1)
+    assert bar.check(dir=1)
+    assert rev_parse(foo, 'HEAD') == foo_head
+    assert rev_parse(bar, 'HEAD') == bar_head
 
-    assert (workspace / 'subdir' / 'foo').check(dir=1)
-    assert (workspace / 'bar').check(dir=1)
-
-    assert rev_parse(workspace / 'subdir' / 'foo', 'HEAD') == foo_head
-    assert rev_parse(workspace / 'bar', 'HEAD') == bar_head
+    # Move the repositories out of the way and test the configuration option.
+    # (We can't use shutil.rmtree here because Windows.)
+    shutil.move(os.fspath(foo), os.fspath(tmpdir))
+    shutil.move(os.fspath(bar), os.fspath(tmpdir))
+    cmd(f'config update.name-cache {name_cache_dir}')
+    cmd('update')
+    assert foo.check(dir=1)
+    assert bar.check(dir=1)
+    assert rev_parse(foo, 'HEAD') == foo_head
+    assert rev_parse(bar, 'HEAD') == bar_head
 
 
 def test_update_path_cache(tmpdir):
@@ -993,23 +1004,34 @@ def test_update_path_cache(tmpdir):
     # network if it doesn't have to.
 
     path_cache_dir = tmpdir / 'path_cache_dir'
-
     create_repo(path_cache_dir / 'subdir' / 'foo')
     create_repo(path_cache_dir / 'bar')
-
     foo_head = rev_parse(path_cache_dir / 'subdir' / 'foo', 'HEAD')
     bar_head = rev_parse(path_cache_dir / 'bar', 'HEAD')
 
     workspace = tmpdir / 'workspace'
     setup_cache_workspace(workspace, foo_head, bar_head)
+    workspace.chdir()
+    foo = workspace / 'subdir' / 'foo'
+    bar = workspace / 'bar'
 
-    cmd(f'update --path-cache {path_cache_dir}', cwd=workspace)
+    # Test the command line option.
+    cmd(f'update --path-cache {path_cache_dir}')
+    assert foo.check(dir=1)
+    assert bar.check(dir=1)
+    assert rev_parse(foo, 'HEAD') == foo_head
+    assert rev_parse(bar, 'HEAD') == bar_head
 
-    assert (workspace / 'subdir' / 'foo').check(dir=1)
-    assert (workspace / 'bar').check(dir=1)
-
-    assert rev_parse(workspace / 'subdir' / 'foo', 'HEAD') == foo_head
-    assert rev_parse(workspace / 'bar', 'HEAD') == bar_head
+    # Move the repositories out of the way and test the configuration option.
+    # (We can't use shutil.rmtree here because Windows.)
+    shutil.move(os.fspath(foo), os.fspath(tmpdir))
+    shutil.move(os.fspath(bar), os.fspath(tmpdir))
+    cmd(f'config update.path-cache {path_cache_dir}')
+    cmd('update')
+    assert foo.check(dir=1)
+    assert bar.check(dir=1)
+    assert rev_parse(foo, 'HEAD') == foo_head
+    assert rev_parse(bar, 'HEAD') == bar_head
 
 
 def setup_narrow(tmpdir):
