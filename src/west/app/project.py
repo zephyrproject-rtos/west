@@ -797,17 +797,28 @@ class Update(_ProjectCommand):
     def do_run(self, args, _):
         self.die_if_no_git()
         self._setup_logging(args)
+        self.init_state(args)
+
+        # We can't blindly call self._projects() here: manifests with
+        # imports are limited to plain 'west update', and cannot use
+        # 'west update PROJECT [...]'.
+        if not self.args.projects:
+            self.update_all()
+        else:
+            self.update_some()
+
+    def init_state(self, args):
+        # Helper for initializing instance state in response to
+        # command line args and configuration files.
 
         self.args = args
         if args.exclude_west:
             log.wrn('ignoring --exclude-west')
 
-        self.group_filter: List[str] = []
+        self.narrow = args.narrow or config.getboolean('update', 'narrow',
+                                                       fallback=False)
 
-        if args.narrow:
-            self.narrow = True
-        else:
-            self.narrow = config.getboolean('update', 'narrow', fallback=False)
+        self.group_filter: List[str] = []
 
         def handle(group_filter_item):
             item = group_filter_item.strip()
@@ -826,14 +837,7 @@ class Update(_ProjectCommand):
             else:
                 handle(item)
 
-        # We can't blindly call self._projects() here: manifests with
-        # imports are limited to plain 'west update', and cannot use
-        # 'west update PROJECT [...]'.
         self.fs = self.fetch_strategy()
-        if not args.projects:
-            self.update_all()
-        else:
-            self.update_some()
 
     def update_all(self):
         # Plain 'west update' is the 'easy' case: since the user just
