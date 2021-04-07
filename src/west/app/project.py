@@ -804,6 +804,11 @@ class Update(_ProjectCommand):
 
         self.group_filter: List[str] = []
 
+        if args.narrow:
+            self.narrow = True
+        else:
+            self.narrow = config.getboolean('update', 'narrow', fallback=False)
+
         def handle(group_filter_item):
             item = group_filter_item.strip()
             if not item.startswith(('-', '+')):
@@ -1201,7 +1206,7 @@ class Update(_ProjectCommand):
         # non-commit object" error when the revision is an annotated
         # tag. ^{commit} type peeling isn't supported for the <src> in a
         # <src>:<dst> refspec, so we have to do it separately.
-        if _maybe_sha(rev) and not self.args.narrow:
+        if _maybe_sha(rev) and not self.narrow:
             # We can't in general fetch a SHA from a remote, as some hosts
             # forbid it for security reasons. Let's hope it's reachable
             # from some branch.
@@ -1222,7 +1227,7 @@ class Update(_ProjectCommand):
         log.small_banner(f'{project.name}: fetching, need revision {rev}')
         # --tags is required to get tags if we're not run as 'west
         # update --narrow', since the remote is specified as a URL.
-        tags = (['--tags'] if not self.args.narrow else [])
+        tags = (['--tags'] if not self.narrow else [])
         clone_depth = (['--depth', str(project.clone_depth)] if
                        project.clone_depth else [])
         # -f is needed to avoid errors in case multiple remotes are

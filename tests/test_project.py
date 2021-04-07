@@ -1040,17 +1040,27 @@ def setup_narrow(tmpdir):
 
 
 def test_update_narrow(tmpdir):
-    # Test that 'west update --narrow' doesn't fetch tags.
+    # Test that 'west update --narrow' doesn't fetch tags, and that
+    # 'west update' respects the 'update.narrow' config option.
 
     remote, workspace = setup_narrow(tmpdir)
+    workspace.chdir()
 
-    cmd('update --narrow', cwd=workspace)
+    def project_tags():
+        return subprocess.check_output(
+            [GIT, 'tag', '--list'], cwd=workspace / 'project'
+        ).decode().splitlines()
 
-    tags = subprocess.check_output(
-        [GIT, 'tag', '--list'], cwd=workspace / 'project'
-    ).decode().splitlines()
+    cmd('update --narrow')
+    assert project_tags() == []
 
-    assert tags == []
+    cmd('config update.narrow true')
+    cmd('update')
+    assert project_tags() == []
+
+    cmd('config update.narrow false')
+    cmd('update')
+    assert project_tags() != []
 
 
 def test_update_narrow_depth1(tmpdir):
