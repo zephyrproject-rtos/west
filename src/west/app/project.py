@@ -821,6 +821,8 @@ class Update(_ProjectCommand):
                                                         fallback=None)
         self.name_cache = args.name_cache or config.get('update', 'name-cache',
                                                         fallback=None)
+        self.sync_submodules = config.getboolean('update', 'sync-submodules',
+                                                 fallback=True)
 
         self.group_filter: List[str] = []
 
@@ -1002,11 +1004,16 @@ class Update(_ProjectCommand):
         # For the list type, update given list of submodules.
         if isinstance(submodules, list):
             for submodule in submodules:
+                if self.sync_submodules:
+                    project.git(['submodule', 'sync', '--recursive',
+                                 '--', submodule.path])
                 project.git(['submodule', 'update',
                              '--init', submodules_update_strategy,
                              '--recursive', submodule.path])
         # For the bool type, update all project submodules
         elif isinstance(submodules, bool):
+            if self.sync_submodules:
+                project.git(['submodule', 'sync', '--recursive'])
             project.git(['submodule', 'update', '--init',
                          submodules_update_strategy, '--recursive'])
 
