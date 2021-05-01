@@ -239,24 +239,70 @@ class WestCommand(ABC):
 
     @property
     def git_version_info(self):
-        '''Returns git version info as a tuple of ints in (major,
-        minor, patch) format, like (2, 31, 1) for git version 2.31.1.
+        '''Returns git version info as a tuple of ints, usually in
+        (major, minor, patch) format, like (2, 29, 1) for git version
+        2.29.1.
 
         Aborts the program if there is no git installed.
+
+        In rare circumstances, you may get a (major, minor) tuple,
+        like (2, 29).
         '''
+        # It's perfectly safe to compare 2-tuples against 3-tuples.
+        # For example, '(2, 29) > (2, 28, 0)' is True.
+        # https://docs.python.org/3/reference/expressions.html#comparisons
+
         if not hasattr(self, '_git_ver'):
             self.die_if_no_git()
-            # raw_ver usually looks like '2.31.1'
-            raw_ver = self.check_output(
-                [self._git, '--version']).decode().strip().split()[-1]
-            # match just the numeric prefix, in case we get something like
-            # '2.31.1-EXTRAVERSION' in some situations. The major/minor/patch
-            # group names are purely for clarity.
-            match = re.match(
-                r'^(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)', raw_ver)
-            self._git_ver = tuple(int(group) for group in match.groups())
+            self._git_ver = self._parse_git_version(
+                self.check_output([self._git, '--version']))
             log.dbg(f'git version: {self._git_ver}', level=log.VERBOSE_VERY)
         return self._git_ver
+
+    @staticmethod
+    def _parse_git_version(raw_version):
+        # Convert the raw 'git --version' output to a tuple.
+        #
+        # This is a @staticmethod so it can be white box tested.
+        #
+        # Usually the resulting tuple looks like (major, minor,
+        # patch).
+        #
+        # We get a length 2 tuple in obscure situations like git
+        # built from a development source tree created using 'git
+        # archive'. (See GIT-VERSION-GEN in the git sources if you're
+        # curious about details.)
+        #
+        # Downstream distributors sometimes tweak the results by
+        # adding to the end of 'x.y.z' in the 'git version x.y.z'
+        # string, but git itself always prints "git version %s", where
+        # the %s is the version.
+        #
+        # https://github.com/git/git/blob/7e391989789db82983665667013a46eabc6fc570/help.c#L646
+        #
+        # Some example possibilities:
+        #
+        # git version 2.25.1
+        # git version 2.28.0.windows.1
+        # git version 2.24.3 (Apple Git-128)
+        # git version 2.29.GIT
+        #
+        # We handle this by matching the first bit in the
+        # whitespace-separated output that has a prefix that looks
+        # like a semver.
+
+        match = re.search(
+            r'\s(?P<major>\d+)\.(?P<minor>\d+)(\.(?P<patch>\d+))?',
+            raw_version.decode(), flags=re.ASCII)
+        if not match:
+            log.die(f"can't get git version from {raw_version!r}")
+
+        major, minor, patch = (match.group('major'), match.group('minor'),
+                               match.group('patch'))
+        version = int(major), int(minor)
+        if patch is None:
+            return version
+        return version + (int(patch),)
 
 #
 # Private extension API
