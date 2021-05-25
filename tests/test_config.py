@@ -45,25 +45,42 @@ def config_tmpdir(tmpdir):
     os.environ['WEST_CONFIG_LOCAL'] = str(local)
 
     # Make sure our environment variables (as well as other topdirs)
-    # are being respected, and we aren't going to touch the user's real
-    # files.
-    td = tmpdir / 'another-topdir'
-    assert config._location(SYSTEM) == str(system)
-    assert config._location(GLOBAL) == str(glbl)
-    assert config._location(LOCAL) == str(local)
-    assert (config._location(LOCAL, topdir=str(td)) ==
-            str(td / '.west' / 'config'))
-
-    # All clear: switch to the temporary directory and run the test.
+    # are respected from tmpdir, and we aren't going to touch the
+    # user's real files.
+    start_dir = os.getcwd()
     tmpdir.chdir()
-    yield tmpdir
 
-    # Clean up after ourselves so other test cases don't know about
-    # this tmpdir.
-    del os.environ['ZEPHYR_BASE']
-    del os.environ['WEST_CONFIG_SYSTEM']
-    del os.environ['WEST_CONFIG_GLOBAL']
-    del os.environ['WEST_CONFIG_LOCAL']
+    try:
+        assert config._location(SYSTEM) == str(system)
+        assert config._location(GLOBAL) == str(glbl)
+        td = tmpdir / 'test-topdir'
+        td.ensure(dir=True)
+        (td / '.west').ensure(dir=True)
+        (td / '.west' / 'config').ensure(file=True)
+        assert config._location(LOCAL) == str(local)
+        assert config._location(LOCAL, topdir=str(td)) == str(local)
+        td.remove(rec=1)
+        assert not td.exists()
+
+        assert not local.exists()
+
+        # All clear: switch to the temporary directory and run the test.
+        yield tmpdir
+    finally:
+        # Go back to where we started, for repeatability of results.
+        os.chdir(start_dir)
+
+        # Clean up after ourselves so other test cases don't know
+        # about this tmpdir. It's OK if test cases deleted these
+        # settings already.
+        if 'ZEPHYR_BASE' in os.environ:
+            del os.environ['ZEPHYR_BASE']
+        if 'WEST_CONFIG_SYSTEM' in os.environ:
+            del os.environ['WEST_CONFIG_SYSTEM']
+        if 'WEST_CONFIG_GLOBAL' in os.environ:
+            del os.environ['WEST_CONFIG_GLOBAL']
+        if 'WEST_CONFIG_LOCAL' in os.environ:
+            del os.environ['WEST_CONFIG_LOCAL']
 
 def cfg(f=ALL, topdir=None):
     # Load a fresh configuration object at the given level, and return it.
@@ -235,9 +252,14 @@ def test_local_creation_with_topdir():
     assert not local.exists()
     assert not topdir_config.exists()
 
+    # The autouse fixture at the top of this file has set up an
+    # environment variable for our local config file. Disable it
+    # to make sure the API works with a 'real' topdir.
+    del os.environ['WEST_CONFIG_LOCAL']
+
+    # We should be able to write into our topdir's config file now.
     config.update_config('pytest', 'key', 'val', configfile=LOCAL,
                          topdir=str(topdir))
-
     assert not system.exists()
     assert not glbl.exists()
     assert not local.exists()
