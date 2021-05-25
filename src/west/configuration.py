@@ -220,15 +220,20 @@ def _location(cfg: ConfigFile, topdir: Optional[PathType] = None) -> str:
             return env['WEST_CONFIG_SYSTEM']
 
         plat = platform.system()
+
         if plat == 'Linux':
             return '/etc/westconfig'
-        elif plat == 'Darwin':
+
+        if plat == 'Darwin':
             return '/usr/local/etc/westconfig'
-        elif plat == 'Windows':
+
+        if plat == 'Windows':
             return os.path.expandvars('%PROGRAMDATA%\\west\\config')
-        elif 'BSD' in plat:
+
+        if 'BSD' in plat:
             return '/etc/westconfig'
-        elif 'CYGWIN' in plat:
+
+        if 'CYGWIN' in plat:
             # Cygwin can handle windows style paths, so make sure we
             # return one. We don't want to use os.path.join because
             # that uses '/' as separator character, and the ProgramData
@@ -238,23 +243,25 @@ def _location(cfg: ConfigFile, topdir: Optional[PathType] = None) -> str:
             # for details.
             pd = PureWindowsPath(os.environ['ProgramData'])
             return os.fspath(pd / 'west' / 'config')
-        else:
-            raise ValueError('unsupported platform ' + plat)
+
+        raise ValueError('unsupported platform ' + plat)
     elif cfg == ConfigFile.GLOBAL:
         if 'WEST_CONFIG_GLOBAL' in env:
             return env['WEST_CONFIG_GLOBAL']
-        elif platform.system() == 'Linux' and 'XDG_CONFIG_HOME' in env:
+
+        if platform.system() == 'Linux' and 'XDG_CONFIG_HOME' in env:
             return os.path.join(env['XDG_CONFIG_HOME'], 'west', 'config')
-        else:
-            return os.fspath(Path.home() / '.westconfig')
+
+        return os.fspath(Path.home() / '.westconfig')
     elif cfg == ConfigFile.LOCAL:
         if topdir:
             return os.fspath(Path(topdir) / '.west' / 'config')
-        elif 'WEST_CONFIG_LOCAL' in env:
+
+        if 'WEST_CONFIG_LOCAL' in env:
             return env['WEST_CONFIG_LOCAL']
-        else:
-            # Might raise WestNotFound!
-            return os.fspath(Path(west_dir()) / 'config')
+
+        # Might raise WestNotFound!
+        return os.fspath(Path(west_dir()) / 'config')
     else:
         raise ValueError(f'invalid configuration file {cfg}')
 
