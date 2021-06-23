@@ -1512,7 +1512,7 @@ def _rev_type(project, rev=None):
     elif stdout != 'commit':    # just future-proofing
         return 'other'
 
-    # to tell branches apart from commits, we need rev-parse.
+    # to tell branches, lightweight tags, and commits apart, we need rev-parse.
     cp = project.git(['rev-parse', '--verify', '--symbolic-full-name', rev],
                      check=False, capture_stdout=True, capture_stderr=True)
     if cp.returncode:
@@ -1528,6 +1528,10 @@ def _rev_type(project, rev=None):
     stdout = cp.stdout.decode('utf-8').strip()
     if stdout.startswith('refs/heads'):
         return 'branch'
+    elif stdout.startswith('refs/tags'):
+        # Annotated tags are handled above. Lightweight tags are
+        # handled here.
+        return 'tag'
     elif not stdout:
         return 'commit'
     else:
