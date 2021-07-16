@@ -11,10 +11,12 @@ import logging
 import os
 from os.path import abspath, relpath, exists
 from pathlib import PurePath, Path
+import multiprocessing
 import shutil
 import shlex
 import subprocess
 import sys
+import tempfile
 import textwrap
 from time import perf_counter
 from urllib.parse import urlparse
@@ -731,6 +733,17 @@ class Update(_ProjectCommand):
                             help='''print performance statistics for
                             update operations''')
 
+        parser.add_argument('-j', '--jobs', type=int, default=1,
+                            help='''number of threads to use for update.
+                            1 disables the usage of threads. If the logs are
+                            buffered they will differ from what you usually see
+                            because git detects that it's not printing to a
+                            terminal.''')
+        parser.add_argument('--unbuffered', action='store_true',
+                            help='''prints job output directly without holding
+                            them back until they're finished. This causes them
+                            to be interleaved.''')
+
         group = parser.add_argument_group(
             title='local project clone caches',
             description=textwrap.dedent('''\
@@ -845,6 +858,99 @@ class Update(_ProjectCommand):
 
         self.fs = self.fetch_strategy()
 
+    @staticmethod
+    def _update_concurrent_thread(args):
+        project, self, logdir = args
+        if logdir:
+            saved_stdout = os.dup(sys.stdout.fileno())
+            saved_stderr = os.dup(sys.stderr.fileno())
+
+            # the dup2s replace stderr and stdout to a file.
+            # unlike just replacing the stream objects this also affects writes
+            # by child processes.
+            logfile = open(os.path.join(logdir, project.name), "wb")
+            os.dup2(logfile.fileno(), sys.stdout.fileno())
+            os.dup2(logfile.fileno(), sys.stderr.fileno())
+
+        try:
+            self.update(project)
+            return True
+        except subprocess.CalledProcessError:
+            return False
+        finally:
+            if logdir:
+                sys.stdout.flush()
+                sys.stderr.flush()
+
+                # the current thread might be reused by the pool for another
+                # task. Not restoring the streams could lead to unwanted side
+                # effects.
+                os.dup2(saved_stdout, sys.stdout.fileno())
+                os.dup2(saved_stderr, sys.stderr.fileno())
+
+    def update_project_list_parallel(self, projects):
+        failed = []
+        updated = []
+
+        # XXX: this is not picklable
+        self.parser = None
+
+        if self.args.unbuffered:
+            logdir = None
+            logdir_name = None
+        else:
+            logdir = tempfile.TemporaryDirectory()
+            logdir_name = logdir.name
+            log.dbg(f"log directory: {logdir_name}")
+
+        args = []
+        for project in projects:
+            args.append((project, self, logdir_name))
+
+        with multiprocessing.Pool(self.args.jobs) as p:
+            for index, successful in enumerate(
+                    p.imap_unordered(self._update_concurrent_thread,
+                                     args)):
+                project = projects[index]
+
+                if logdir:
+                    logfile = open(os.path.join(logdir_name,
+                                   project.name), "rb")
+
+                    # we redirected both stdout and stderr to the same file so
+                    # we can print it in (roughly) the same order as it was
+                    # written.
+                    # That means we loose the information of which byte came
+                    # from which stream though. Given that most (if not all) of
+                    # gits logs go to stderr we just print all of them to
+                    # stderr under the assumption that the user doesn't want to
+                    # use them separately in stdout.
+                    sys.stderr.buffer.write(logfile.read())
+                    sys.stderr.flush()
+
+                if successful:
+                    updated.append(project)
+                else:
+                    failed.append(project)
+
+        return failed, updated
+
+    def update_project_list(self, projects):
+        if self.args.jobs > 1:
+            failed, updated = self.update_project_list_parallel(projects)
+        else:
+            failed = []
+            updated = []
+
+            for project in projects:
+                try:
+                    self.update(project)
+                    updated.append(project)
+                except subprocess.CalledProcessError:
+                    failed.append(project)
+
+        return (failed, updated)
+
     def update_all(self):
         # Plain 'west update' is the 'easy' case: since the user just
         # wants us to update everything, we don't have to keep track
@@ -861,19 +967,21 @@ class Update(_ProjectCommand):
             importer=self.update_importer,
             import_flags=ImportFlag.FORCE_PROJECTS)
 
-        failed = []
+        projects = []
         for project in self.manifest.projects:
             if (isinstance(project, ManifestProject) or
                     project.name in self.updated):
                 continue
-            try:
-                if not self.project_is_active(project):
-                    log.dbg(f'{project.name}: skipping inactive project')
-                    continue
-                self.update(project)
-                self.updated.add(project.name)
-            except subprocess.CalledProcessError:
-                failed.append(project)
+
+            if not self.project_is_active(project):
+                log.dbg(f'{project.name}: skipping inactive project')
+                continue
+
+            projects.append(project)
+
+        (failed, updated) = self.update_project_list(projects)
+        for project in updated:
+            self.updated.add(project.name)
         self._handle_failed(self.args, failed)
 
     def update_importer(self, project, path):
@@ -933,14 +1041,12 @@ class Update(_ProjectCommand):
         else:
             projects = self._projects(self.args.projects)
 
-        failed = []
-        for project in projects:
-            if isinstance(project, ManifestProject):
-                continue
-            try:
-                self.update(project)
-            except subprocess.CalledProcessError:
-                failed.append(project)
+        projects = filter(
+            lambda p: not isinstance(
+                p, ManifestProject), projects)
+
+        (failed, updated) = self.update_project_list(projects)
+
         self._handle_failed(self.args, failed)
 
     def toplevel_projects(self):
