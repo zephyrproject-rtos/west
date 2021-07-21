@@ -21,7 +21,7 @@ You use ``west init`` to set up this directory, then ``west update`` to fetch
 and/or update the repositories named in the manifest.
 
 By default, west uses `upstream Zephyr's manifest file
-<https://github.com/zephyrproject-rtos/zephyr/blob/master/west.yml>`_, but west
+<https://github.com/zephyrproject-rtos/zephyr/blob/main/west.yml>`_, but west
 doesn't care if the manifest repository is a Zephyr tree or not.
 
 For more details, see `Multiple Repository Management
@@ -45,8 +45,8 @@ What just happened:
   creating working trees in the installation directory ``zephyrproject``.
 
 Use ``west init -m`` to specify another manifest repository. Use ``--mr`` to
-use a revision other than ``master``. Use ``--mf`` to use a manifest file other
-than ``west.yml``.
+use a revision to inialize from; if not given, the remote's default branch is used.
+Use ``--mf`` to use a manifest file other than ``west.yml``.
 
 Additional Commands
 -------------------
