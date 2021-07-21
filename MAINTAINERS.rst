@@ -4,7 +4,7 @@ Pre-release test plan
 ---------------------
 
 0. If no release branch exists, fork the version numbers in the release branch
-   (vX.Y-branch) and the master branch. See "Cutting a release branch", below,
+   (vX.Y-branch) and the main branch. See "Cutting a release branch", below,
    for details.
 
    The rest of these steps should be done in the release branch::
@@ -102,16 +102,16 @@ maintainers that it's time and push it manually to GitHub.
 The release branch for minor version vX.Y.0 should be named "vX.Y-branch".
 
 Subsequent fixes for patch versions vX.Y.Z should go to vX.Y-branch after
-being backported from master (or the other way around in case of an urgent
+being backported from main (or the other way around in case of an urgent
 hotfix).
 
 In vX.Y-branch, in src/west/version.py, set __version__ to X.Y.0a1.
-Don't include this commit in the master branch.
+Don't include this commit in the main branch.
 
 Summary of the outcome:
 
-- precondition: vX.Y-branch does not exist, master is at version X.(Y-1).99
-- postcondition: v.X.Y-branch exists and is at version vX.Y.0a1, master is at
+- precondition: vX.Y-branch does not exist, main is at version X.(Y-1).99
+- postcondition: v.X.Y-branch exists and is at version vX.Y.0a1, main is at
   version vX.Y.99
 
 Check if west.manifest.SCHEMA_VERSION also needs an update. The rule is that
@@ -129,9 +129,9 @@ Send this as a pull request to the newly created release branch. (This
 requires a PR and review because getting the release number wrong would
 upload potentially buggy software to anyone who runs 'pip install west'.)
 
-In master (but not the release branch), set __version__ to X.Y.99. Send this
-commit as a PR to master. Make sure any SCHEMA_VERSION updates are reflected in
-master too.
+In main (but not the release branch), set __version__ to X.Y.99. Send this
+commit as a PR to main. Make sure any SCHEMA_VERSION updates are reflected in
+main too.
 
-From this point forward, the master branch is moving independently from the
+From this point forward, the main branch is moving independently from the
 release branch.
