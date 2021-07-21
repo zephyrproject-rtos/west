@@ -5,7 +5,7 @@
 ##
 ## This schema has similar semantics to the repo XML format:
 ##
-## https://gerrit.googlesource.com/git-repo/+/master/docs/manifest-format.txt
+## https://gerrit.googlesource.com/git-repo/+/master/docs/manifest-format.md
 ##
 ## However, the features don't map 1:1.
 
