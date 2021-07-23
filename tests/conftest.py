@@ -16,6 +16,18 @@ import pytest
 
 GIT = shutil.which('git')
 
+# Git capabilities are discovered at runtime in
+# _check_git_capabilities().
+
+# This will be set to True if 'git init --branch' is available.
+#
+# This feature was available from git release v2.28 and was added in
+# commit 32ba12dab2acf1ad11836a627956d1473f6b851a ("init: allow
+# specifying the initial branch name for the new repository") as part
+# of the git community's choice to avoid a default initial branch
+# name.
+GIT_INIT_HAS_BRANCH = False
+
 # If you change this, keep the docstring in repos_tmpdir() updated also.
 MANIFEST_TEMPLATE = '''\
 manifest:
@@ -44,6 +56,27 @@ WINDOWS = (platform.system() == 'Windows')
 #
 # Test fixtures
 #
+
+@pytest.fixture(scope='session', autouse=True)
+def _check_git_capabilities(tmpdir_factory):
+    # Do checks for git behaviors. Right now this is limited to
+    # deciding whether or not 'git init --branch' is supported.
+    #
+    # We aren't using WestCommand._parse_git_version() here just to
+    # try to keep the conftest behavior independent of the code being
+    # tested.
+    global GIT_INIT_HAS_BRANCH
+
+    tmpdir = tmpdir_factory.mktemp("west-check-git-caps-tmpdir")
+
+    try:
+        subprocess.run([GIT, 'init', '--initial-branch', 'foo',
+                        os.fspath(tmpdir)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       check=True)
+        GIT_INIT_HAS_BRANCH = True
+    except subprocess.CalledProcessError:
+        pass
 
 @pytest.fixture(scope='session')
 def _session_repos():
