@@ -375,7 +375,7 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
         else:
             # Fetch the ref-space similar to git clone plus the ref
             # given by user.  Redundancy is ok, for example if the user
-            # specifies 'heads/master'. This allows users to specify:
+            # specifies 'heads/my-branch'. This allows users to specify:
             # pull/<no>/head for pull requests
             self.check_call(('git', 'fetch', 'origin', '--tags', '--',
                              rev, 'refs/heads/*:refs/remotes/origin/*'),
@@ -1486,15 +1486,13 @@ class Update(_ProjectCommand):
             # we called Update.init_project() above), check out
             # 'manifest-rev' in a detached HEAD state.
             #
-            # Otherwise, the initial state would have nothing checked
-            # out, and HEAD would point to a non-existent
-            # refs/heads/master branch (that would get created if the
-            # user makes an initial commit). Among other things, this
-            # ensures the rev-parse --abbrev-ref HEAD which happens
-            # later in the update() will always succeed.
+            # Otherwise, it's possible for the initial state to have
+            # nothing checked out and HEAD pointing to a non-existent
+            # branch. This causes the 'git rev-parse --abbrev-ref HEAD'
+            # which happens later in the update to fail.
             #
             # The --detach flag is strictly redundant here, because
-            # the refs/heads/<branch> form already detaches HEAD, but
+            # the qualified manifest-rev form detaches HEAD, but
             # it avoids a spammy detached HEAD warning from Git.
             if take_stats:
                 start = perf_counter()
