@@ -295,11 +295,20 @@ def create_workspace(workspace_dir, and_git=True):
     if and_git:
         create_repo(mp)
 
-def create_repo(path):
-    # Initializes a Git repository in 'path', and adds an initial commit to it
+def create_repo(path, initial_branch='master'):
+    # Initializes a Git repository in 'path', and adds an initial
+    # commit to it in a new branch 'initial_branch'. We're currently
+    # keeping the old default initial branch to keep assumptions made
+    # elsewhere in the test code working with newer versions of git.
     path = os.fspath(path)
 
-    subprocess.check_call([GIT, 'init', path])
+    if GIT_INIT_HAS_BRANCH:
+        subprocess.check_call([GIT, 'init', '--initial-branch', initial_branch,
+                               path])
+    else:
+        subprocess.check_call([GIT, 'init', path])
+        subprocess.check_call([GIT, 'checkout', '-b', initial_branch],
+                              cwd=path)
 
     config_repo(path)
     add_commit(path, 'initial')
