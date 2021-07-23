@@ -9,7 +9,7 @@ import argparse
 from functools import partial
 import logging
 import os
-from os.path import abspath, relpath, exists
+from os.path import abspath, relpath
 from pathlib import PurePath, Path
 import multiprocessing
 import shutil
@@ -239,7 +239,11 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
         log.banner('Initializing in', topdir)
 
         manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
-        manifest_rev = args.manifest_rev or self.get_head_branch(manifest_url)
+        if args.manifest_rev:
+            # This works with tags, too.
+            branch_opt = ['--branch', args.manifest_rev]
+        else:
+            branch_opt = []
         west_dir = topdir / WEST_DIR
 
         try:
@@ -257,7 +261,12 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
             log.dbg('removing existing temporary manifest directory', tempdir)
             shutil.rmtree(tempdir)
         try:
-            self.clone_manifest(manifest_url, manifest_rev, os.fspath(tempdir))
+            log.small_banner(
+                f'Cloning manifest repository from {manifest_url}' +
+                (f', rev. {args.manifest_rev}' if args.manifest_rev else ''))
+
+            self.check_call(['git', 'clone'] + branch_opt +
+                            [manifest_url, os.fspath(tempdir)])
         except subprocess.CalledProcessError:
             shutil.rmtree(tempdir, ignore_errors=True)
             raise
@@ -268,8 +277,9 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
         if not temp_manifest.is_file():
             log.die(f'can\'t init: no {temp_manifest_filename} found in '
                     f'{tempdir}\n'
-                    f'  Hint: check --manifest-url={manifest_url} and '
-                    f'--manifest-rev={manifest_rev}\n'
+                    f'  Hint: check --manifest-url={manifest_url}' +
+                    (f' and --manifest-rev={args.manifest_rev}'
+                     if args.manifest_rev else '') +
                     f'  You may need to remove {west_dir} before retrying.')
 
         # Parse the manifest to get the manifest path, if it declares one.
@@ -313,85 +323,6 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
             log.die(f'Cannot initialize in {directory}: it already exists')
         except Exception as e:
             log.die(f"Can't create {directory}: {e}")
-
-    def get_head_branch(self, url: str) -> str:
-        # Get the branch which url's HEAD points to. Errors out if it
-        # can't, prints a banner if it can.
-
-        if self.git_version_info < (2, 8, 0):
-            # This recipe requires git 2.8.0 or later. Fall back
-            # if we're running on something that's too old.
-            return 'master'
-
-        err_msg = (f'failed getting the default branch from {url}; '
-                   'please provide the --manifest-rev option')
-
-        # The '--quiet' option disables printing the URL to stderr.
-        try:
-            output = self.check_output(
-                ('git', 'ls-remote', '--quiet', '--symref', url, 'HEAD')
-            ).decode('utf-8')
-        except subprocess.CalledProcessError:
-            log.die(err_msg)
-
-        for line in output.splitlines():
-            if not line.startswith('ref: '):
-                continue
-            # The output looks like this:
-            #
-            # ref: refs/heads/foo	HEAD
-            # 6145ab537fcb3adc3ee77db5f5f95e661f1e91e6	HEAD
-            #
-            # So this is the 'ref: ...' case.
-            #
-            # Per git-check-ref-format(1), references can't have tabs
-            # in them, so this doesn't have any weird edge cases.
-            without_ref = line[len('ref: '):]
-            if not without_ref:
-                continue
-            ret = without_ref.split('\t')[0]
-            log.small_banner('no --manifest-rev was given; '
-                             f"using remote's default branch: {ret}")
-            return ret
-
-        log.die(err_msg)
-
-    def clone_manifest(self, url: str, rev: str, dest: str,
-                       exist_ok=False) -> None:
-        log.small_banner(f'Cloning manifest repository from {url}, rev. {rev}')
-        if not exist_ok and exists(dest):
-            log.die(f'refusing to clone into existing location {dest}')
-
-        self.check_call(('git', 'init', dest))
-        self.check_call(('git', 'remote', 'add', 'origin', '--', url),
-                        cwd=dest)
-        maybe_sha = _maybe_sha(rev)
-        if maybe_sha:
-            # Fetch the ref-space and hope the SHA is contained in
-            # that ref-space
-            self.check_call(('git', 'fetch', 'origin', '--tags',
-                             '--', 'refs/heads/*:refs/remotes/origin/*'),
-                            cwd=dest)
-        else:
-            # Fetch the ref-space similar to git clone plus the ref
-            # given by user.  Redundancy is ok, for example if the user
-            # specifies 'heads/my-branch'. This allows users to specify:
-            # pull/<no>/head for pull requests
-            self.check_call(('git', 'fetch', 'origin', '--tags', '--',
-                             rev, 'refs/heads/*:refs/remotes/origin/*'),
-                            cwd=dest)
-
-        try:
-            # Using show-ref to determine if rev is available in local repo.
-            self.check_call(('git', 'show-ref', '--', rev), cwd=dest)
-            local_rev = True
-        except subprocess.CalledProcessError:
-            local_rev = False
-
-        if local_rev or maybe_sha:
-            self.check_call(('git', 'checkout', rev), cwd=dest)
-        else:
-            self.check_call(('git', 'checkout', 'FETCH_HEAD'), cwd=dest)
 
 class List(_ProjectCommand):
     def __init__(self):
