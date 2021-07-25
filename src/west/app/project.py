@@ -865,10 +865,15 @@ class Update(_ProjectCommand):
             saved_stdout = os.dup(sys.stdout.fileno())
             saved_stderr = os.dup(sys.stderr.fileno())
 
+            logfile = os.path.join(logdir, project.name)
+
+            # the name might contain `/`
+            os.makedirs(os.path.dirname(logfile), exist_ok=True)
+
             # the dup2s replace stderr and stdout to a file.
             # unlike just replacing the stream objects this also affects writes
             # by child processes.
-            logfile = open(os.path.join(logdir, project.name), "wb")
+            logfile = open(logfile, "wb")
             os.dup2(logfile.fileno(), sys.stdout.fileno())
             os.dup2(logfile.fileno(), sys.stderr.fileno())
 
