@@ -697,12 +697,76 @@ class Status(_ProjectCommand):
 
         failed = []
         for project in self._cloned_projects(args, only_active=not args.all):
-            log.banner(f'status of {project.name_and_path}:')
+            # 'git status' output for all projects is noisy when there
+            # are lots of projects.
+            #
+            # We avoid this problem in 2 steps:
+            #
+            #   1. Check if we need to print any output for the
+            #      project.
+            #
+            #   2. If so, run 'git status' on the project. Otherwise,
+            #      skip output for the project entirely.
+            #
+            # In verbose mode, we always print output.
+
             try:
+                if not (log.VERBOSE or self.should_print_for(project)):
+                    continue
+
+                log.banner(f'status of {project.name_and_path}:')
                 project.git('status', extra_args=user_args)
             except subprocess.CalledProcessError:
                 failed.append(project)
         self._handle_failed(args, failed)
+
+    def should_print_for(self, project):
+        # do_run() helper; check if the project has any status output
+        # to print. We manually use Popen in order to try to exit as
+        # quickly as possible if 'git status' prints anything.
+
+        # This technique fails when tested on Python 3.6, which west
+        # still supports at time of writing. This seems likely to be
+        # due to https://bugs.python.org/issue35182.
+        #
+        # Users of old python versions will have to deal with the
+        # verbose output.
+        if sys.version_info < (3, 7):
+            return True
+
+        popen = subprocess.Popen(['git', 'status', '--porcelain'],
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE,
+                                 cwd=project.abspath)
+
+        def has_output():
+            # 'git status --porcelain' prints nothing if there
+            # are no notable changes, so any output at all
+            # means we should run 'git status' on the project.
+            stdout, stderr = None, None
+            try:
+                stdout, stderr = popen.communicate(timeout=0.1)
+            except subprocess.TimeoutExpired:
+                pass
+            except ValueError:
+                # In case this isn't issue35182, handle the exception
+                # anyway.
+                log.wrn(
+                    f'{project.name}: internal error; got ValueError '
+                    'from Popen.communicate() when checking status. '
+                    'Ignoring it, but please report this to the west '
+                    'developers.')
+                return True
+            return stdout or stderr
+
+        while True:
+            if has_output():
+                popen.kill()
+                return True
+            if popen.poll() is not None:
+                break
+
+        return has_output()
 
 class Update(_ProjectCommand):
 
