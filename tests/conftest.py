@@ -331,6 +331,8 @@ def add_commit(repo, msg, files=None, reconfigure=True):
          '--no-gpg-sign', '--no-post-rewrite'], cwd=repo)
 
 def add_tag(repo, tag, commit='HEAD', msg=None):
+    repo = os.fspath(repo)
+
     if msg is None:
         msg = 'tag ' + tag
 
@@ -340,6 +342,7 @@ def add_tag(repo, tag, commit='HEAD', msg=None):
                           cwd=repo)
 
 def rev_parse(repo, revision):
+    repo = os.fspath(repo)
     out = subprocess.check_output([GIT, 'rev-parse', revision], cwd=repo)
     return out.decode(sys.getdefaultencoding()).strip()
 
