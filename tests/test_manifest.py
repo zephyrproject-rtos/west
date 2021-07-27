@@ -27,7 +27,7 @@ from west.manifest import Manifest, Project, ManifestProject, \
     _ManifestImportDepth, is_group
 
 from conftest import create_workspace, create_repo, checkout_branch, \
-    create_branch, add_commit, rev_parse, GIT, check_proj_consistency
+    create_branch, add_commit, add_tag, rev_parse, GIT, check_proj_consistency
 
 assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
 
@@ -535,6 +535,18 @@ def test_project_repr():
     ''')
     assert repr(m.projects[1]) == \
         'Project("zephyr", "https://foo.com", revision="r", path=\'zephyr\', clone_depth=None, west_commands=[\'some-path/west-commands.yml\'], topdir=None, groups=[])'  # noqa: E501
+
+def test_project_sha(tmpdir):
+    tmpdir = Path(os.fspath(tmpdir))
+    create_repo(tmpdir)
+    add_tag(tmpdir, 'test-tag')
+    expected_sha = rev_parse(tmpdir, 'HEAD^{commit}')
+    project = Project('name',
+                      'url-do-not-fetch',
+                      revision='test-tag',
+                      path=tmpdir.name,
+                      topdir=tmpdir.parent)
+    assert project.sha(project.revision) == expected_sha
 
 def test_no_projects():
     # An empty projects list is allowed.
