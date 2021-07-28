@@ -348,6 +348,7 @@ def _compose_imap_filters(imap_filter1: ImapFilterFnType,
         return imap_filter1 or imap_filter2
 
 _RESERVED_GROUP_RE = re.compile(r'(^[+-]|[\s,:])')
+_INVALID_PROJECT_NAME_RE = re.compile(r'([/\\])')
 
 def _update_disabled_groups(disabled_groups: Set[str],
                             group_filter: GroupFilterType):
@@ -1672,6 +1673,9 @@ class Manifest:
         # The manifest is resolved. Make sure paths are unique.
         self._check_paths_are_unique(mp, ctx.projects, top_level)
 
+        # Make sure that project names don't contain unsupported characters.
+        self._check_names(mp, ctx.projects)
+
         # Save the resulting projects and initialize lookup tables.
         self._projects = list(ctx.projects.values())
         self._projects.insert(MANIFEST_PROJECT_INDEX, mp)
@@ -2309,6 +2313,12 @@ class Manifest:
                 self._malformed(f'project {name} path "{project.path}" '
                                 f'is taken by project {other.name}')
             ppaths[pp] = project
+
+    def _check_names(self, mp: ManifestProject,
+                     projects: Dict[str, Project]) -> None:
+        for name, project in projects.items():
+            if _INVALID_PROJECT_NAME_RE.search(name):
+                self._malformed(f'Invalid project name: {name}')
 
     def _finalize_group_filter(self, self_group_filter: GroupFilterType,
                                ctx: _import_ctx, schema_version: str):
