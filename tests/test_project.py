@@ -1910,16 +1910,16 @@ def test_import_project_release_dir(tmpdir):
                       f'''\
                       manifest:
                         projects:
-                        - name: west.d/1.yml-p1
+                        - name: west.d_1.yml-p1
                           url: {empty_project}
-                        - name: west.d/1.yml-p2
+                        - name: west.d_1.yml-p2
                           url: {empty_project}
                       ''',
                       'test.d/2.yml':
                       f'''\
                       manifest:
                         projects:
-                        - name: west.d/2.yml-p1
+                        - name: west.d_2.yml-p1
                           url: {empty_project}
                       '''})
     add_tag(imported, 'import-tag')
@@ -1947,9 +1947,9 @@ def test_import_project_release_dir(tmpdir):
     expected = [ManifestProject(path='mp', topdir=ws),
                 Project('imported', imported,
                         revision='import-tag', topdir=ws),
-                Project('west.d/1.yml-p1', empty_project, topdir=ws),
-                Project('west.d/1.yml-p2', empty_project, topdir=ws),
-                Project('west.d/2.yml-p1', empty_project, topdir=ws)]
+                Project('west.d_1.yml-p1', empty_project, topdir=ws),
+                Project('west.d_1.yml-p2', empty_project, topdir=ws),
+                Project('west.d_2.yml-p1', empty_project, topdir=ws)]
     for a, e in zip(actual, expected):
         check_proj_consistency(a, e)
 
