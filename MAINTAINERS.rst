@@ -41,6 +41,9 @@ Pre-release test plan
      cd zephyrproject
      west update
 
+   Make sure zephyrproject/zephyr has a branch checked out that matches the
+   default branch used by zephyr itself.
+
 6. Do the following Zephyr specific testing in the Zephyr workspace on all of
    the platforms from 1. Skip QEMU tests on non-Linux platforms, and make sure
    ZEPHYR_BASE is unset in the calling environment. ::
