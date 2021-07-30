@@ -1384,35 +1384,23 @@ class Manifest:
 
         # Otherwise, resolve each of the project_ids to a project,
         # returning the result or raising ValueError.
-        mp = self.projects[MANIFEST_PROJECT_INDEX]
-        if mp.path is not None:
-            mpath: Optional[Path] = Path(mp.path).resolve()
-        else:
-            mpath = None
         for pid in project_ids:
+            project: Optional[Project] = None
+
             if isinstance(pid, str):
-                if pid == 'manifest':
-                    project: Optional[Project] = mp
-                else:
-                    project = self._projects_by_name.get(pid)
-            else:
-                project = None
+                project = self._projects_by_name.get(pid)
 
             if project is None and allow_paths:
-                rpath = Path(pid).resolve()
-
-                if mpath is not None and rpath == mpath:
-                    project = mp
-                else:
-                    project = self._projects_by_rpath.get(rpath)
+                project = self._projects_by_rpath.get(Path(pid).resolve())
 
             if project is None:
                 unknown.append(pid)
-            else:
-                ret.append(project)
+                continue
 
-                if only_cloned and not project.is_cloned():
-                    uncloned.append(project)
+            ret.append(project)
+
+            if only_cloned and not project.is_cloned():
+                uncloned.append(project)
 
         if unknown or (only_cloned and uncloned):
             raise ValueError(unknown, uncloned)
