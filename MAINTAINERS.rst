@@ -99,42 +99,63 @@ Create and push a GPG signed tag. ::
 Cutting a release branch
 ------------------------
 
-To cut a new release branch, just get confirmation from the other
-maintainers that it's time and push it manually to GitHub.
+This is how to cut a new release branch for minor version vX.Y.
 
-The release branch for minor version vX.Y.0 should be named "vX.Y-branch".
+Summary of what happens:
 
-Subsequent fixes for patch versions vX.Y.Z should go to vX.Y-branch after
-being backported from main (or the other way around in case of an urgent
-hotfix).
+- before:
 
-In vX.Y-branch, in src/west/version.py, set __version__ to X.Y.0a1.
-Don't include this commit in the main branch.
+  - vX.Y-branch does not exist
+  - main branch is at version X.(Y-1).99
 
-Summary of the outcome:
+- after:
 
-- precondition: vX.Y-branch does not exist, main is at version X.(Y-1).99
-- postcondition: v.X.Y-branch exists and is at version vX.Y.0a1, main is at
-  version vX.Y.99
+  - vX.Y-branch exists and is at version X.Y.0a1
+  - main is at version X.Y.99
+  - west.manifest.SCHEMA_VERSION may be updated
 
-Check if west.manifest.SCHEMA_VERSION also needs an update. The rule is that
-SCHEMA_VERSION should be updated to X.Y if this release is introducing
-manifest schema changes that earlier versions of west cannot parse.
+1. Check the git logs since the last release::
 
-Don't change SCHEMA_VERSION from its current value if the manifest syntax is
-fully compatible with what west X.(Y-1) can handle.
+     git log vX.(Y-1).99..origin/main
 
-Don't introduce incompatible manifest changes in patch versions. That violates
-semantic versioning. If v0.7.3 can parse it, v0.7.2 should be able to parse it,
-too.
+   Decide if west.manifest.SCHEMA_VERSION needs an update:
 
-Send this as a pull request to the newly created release branch. (This
-requires a PR and review because getting the release number wrong would
-upload potentially buggy software to anyone who runs 'pip install west'.)
+   - SCHEMA_VERSION should be updated to X.Y if release vX.Y will have manifest
+     syntax changes that earlier versions of west cannot parse.
 
-In main (but not the release branch), set __version__ to X.Y.99. Send this
-commit as a PR to main. Make sure any SCHEMA_VERSION updates are reflected in
-main too.
+   - SCHEMA_VERSION should *not* be changed for west vX.Y if the manifest
+     syntax is fully compatible with what west vX.(Y-1) can handle.
+
+   If you want to change SCHEMA_VERSION, send this as a pull request to the
+   main branch and get it reviewed and merged. (This requires a PR and review
+   even though the rest of the steps don't.)
+
+   **Don't** introduce incompatible manifest changes in patch versions.
+   That violates semantic versioning. Example: if v0.7.3 can parse a manifest,
+   v0.7.2 should be able to parse it, too, and with the same results.
+
+2. Create and push the release branch for minor version vX.Y.0, which is named
+   "vX.Y-branch"::
+
+      git checkout -b vX.Y-branch origin/main
+      git push origin vX.Y-branch
+
+   This should already contain the SCHEMA_VERSION change if one is needed.
+
+   Subsequent fixes for patch versions vX.Y.Z should go to vX.Y-branch after
+   being backported from main (or the other way around in case of an urgent
+   hotfix).
+
+3. In vX.Y-branch, in src/west/version.py, set __version__ to X.Y.0a1.
+   Push this to origin/vX.Y-branch. You don't need a PR for this.
+
+4. In the main branch, set __version__ to X.Y.99.
+   Push this to origin/main. You don't need a PR for this.
+
+5. Create an annotated tag vX.Y.99 which points to the main branch commit you
+   just created in the previous step. Push it to origin/main. You don't need a
+   PR for this. See refs/tags/v0.12.99 for an example. (This makes 'git
+   describe' output easy to read during development.)
 
 From this point forward, the main branch is moving independently from the
-release branch.
+release branch. Do the release prep work in the release branch.
