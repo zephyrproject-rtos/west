@@ -307,7 +307,11 @@ def create_repo(path, initial_branch='master'):
                                path])
     else:
         subprocess.check_call([GIT, 'init', path])
-        subprocess.check_call([GIT, 'checkout', '-b', initial_branch],
+        # -B instead of -b because on some versions of git (at
+        # least 2.25.1 as shipped by Ubuntu 20.04), if 'git init path'
+        # created an 'initial_branch' already, we get errors that it
+        # already exists with plain '-b'.
+        subprocess.check_call([GIT, 'checkout', '-B', initial_branch],
                               cwd=path)
 
     config_repo(path)
