@@ -858,7 +858,7 @@ class Update(_ProjectCommand):
 
     @staticmethod
     def _update_concurrent_thread(args):
-        project, self, logdir = args
+        index, project, self, logdir = args
         if logdir:
             saved_stdout = os.dup(sys.stdout.fileno())
             saved_stderr = os.dup(sys.stderr.fileno())
@@ -872,9 +872,9 @@ class Update(_ProjectCommand):
 
         try:
             self.update(project)
-            return True
+            return (index, True)
         except subprocess.CalledProcessError:
-            return False
+            return (index, False)
         finally:
             if logdir:
                 sys.stdout.flush()
@@ -902,13 +902,12 @@ class Update(_ProjectCommand):
             log.dbg(f"log directory: {logdir_name}")
 
         args = []
-        for project in projects:
-            args.append((project, self, logdir_name))
+        for index, project in enumerate(projects):
+            args.append((index, project, self, logdir_name))
 
         with multiprocessing.Pool(self.args.jobs) as p:
-            for index, successful in enumerate(
-                    p.imap_unordered(self._update_concurrent_thread,
-                                     args)):
+            for index, successful in p.imap_unordered(
+                                     self._update_concurrent_thread, args):
                 project = projects[index]
 
                 if logdir:
