@@ -1038,9 +1038,9 @@ class Update(_ProjectCommand):
         else:
             projects = self._projects(self.args.projects)
 
-        projects = filter(
+        projects = list(filter(
             lambda p: not isinstance(
-                p, ManifestProject), projects)
+                p, ManifestProject), projects))
 
         (failed, updated) = self.update_project_list(projects)
 
