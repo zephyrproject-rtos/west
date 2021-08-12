@@ -861,15 +861,21 @@ class Update(_ProjectCommand):
     def _update_concurrent_thread(args):
         index, project, self, logdir = args
         if logdir:
-            saved_stdout = os.dup(sys.stdout.fileno())
-            saved_stderr = os.dup(sys.stderr.fileno())
+            saved_stdout = sys.stdout
+            saved_stderr = sys.stderr
+            saved_stdout_fd = os.dup(sys.stdout.fileno())
+            saved_stderr_fd = os.dup(sys.stderr.fileno())
 
             # the dup2s replace stderr and stdout to a file.
             # unlike just replacing the stream objects this also affects writes
             # by child processes.
-            logfile = open(os.path.join(logdir, project.name), "wb")
+            logfile = open(os.path.join(logdir, project.name), "w")
             os.dup2(logfile.fileno(), sys.stdout.fileno())
             os.dup2(logfile.fileno(), sys.stderr.fileno())
+
+            # our new fd might be incompatible with what the python objects
+            # expect
+            sys.stdout = sys.stderr = logfile
 
         try:
             self.update(project)
@@ -878,14 +884,16 @@ class Update(_ProjectCommand):
             return (index, False)
         finally:
             if logdir:
-                sys.stdout.flush()
-                sys.stderr.flush()
+                logfile.flush()
 
                 # the current thread might be reused by the pool for another
                 # task. Not restoring the streams could lead to unwanted side
                 # effects.
-                os.dup2(saved_stdout, sys.stdout.fileno())
-                os.dup2(saved_stderr, sys.stderr.fileno())
+                os.dup2(saved_stdout_fd, sys.stdout.fileno())
+                os.dup2(saved_stderr_fd, sys.stderr.fileno())
+
+                sys.stdout = saved_stdout
+                sys.stderr = saved_stderr
 
     def update_project_list_parallel(self, projects):
         failed = []
