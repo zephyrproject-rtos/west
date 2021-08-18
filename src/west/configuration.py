@@ -233,7 +233,7 @@ def _location(cfg: ConfigFile, topdir: Optional[PathType] = None) -> str:
         if 'BSD' in plat:
             return '/etc/westconfig'
 
-        if 'CYGWIN' in plat:
+        if 'CYGWIN' in plat or 'MSYS_NT' in plat:
             # Cygwin can handle windows style paths, so make sure we
             # return one. We don't want to use os.path.join because
             # that uses '/' as separator character, and the ProgramData
