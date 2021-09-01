@@ -126,6 +126,10 @@ mapping:
           groups:
             required: false
             include: groups-schema
+          # Arbitrary project user data.
+          userdata:
+            required: false
+            type: any
 
   # If present, a list of project groups to enable and disable. Prefix
   # a group name with "-" to disable it; prefix with "+" to enable it.
