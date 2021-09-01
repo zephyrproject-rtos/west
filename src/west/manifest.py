@@ -645,6 +645,7 @@ class Project:
       an empty list.
     - ``submodules``: the project's submodules configuration; either
       a list of Submodule objects, or a boolean.
+    - ``userdata``: the parsed 'userdata' field in the manifest, or None
     '''
 
     def __eq__(self, other):
@@ -656,7 +657,8 @@ class Project:
                 f'clone_depth={self.clone_depth}, '
                 f'west_commands={self.west_commands}, '
                 f'topdir={repr(self.topdir)}, '
-                f'groups={self.groups})')
+                f'groups={repr(self.groups)}, '
+                f'userdata={self.userdata})')
 
     def __str__(self):
         path_repr = repr(self.abspath or self.path)
@@ -670,7 +672,8 @@ class Project:
                  west_commands: Optional[WestCommandsType] = None,
                  topdir: Optional[PathType] = None,
                  remote_name: Optional[str] = None,
-                 groups: Optional[GroupsType] = None):
+                 groups: Optional[GroupsType] = None,
+                 userdata: Optional[Any] = None):
         '''Project constructor.
 
         If *topdir* is ``None``, then absolute path attributes
@@ -702,6 +705,7 @@ class Project:
         self.topdir = os.fspath(topdir) if topdir else None
         self.remote_name = remote_name or 'origin'
         self.groups: GroupsType = groups or []
+        self.userdata: Any = userdata
 
     @property
     def path(self) -> str:
@@ -2026,13 +2030,16 @@ class Manifest:
             self._malformed(
                 f'project {name}: "groups" cannot be combined with "import"')
 
+        userdata = pd.get('userdata')
+
         ret = Project(name, url, pd.get('revision', defaults.revision), path,
                       submodules=self._load_submodules(pd.get('submodules'),
                                                        f'project {name}'),
                       clone_depth=pd.get('clone-depth'),
                       west_commands=pd.get('west-commands'),
                       topdir=self.topdir, remote_name=remote,
-                      groups=groups)
+                      groups=groups,
+                      userdata=userdata)
 
         # Make sure the return Project's path does not escape the
         # workspace. We can't use escapes_directory() as that
