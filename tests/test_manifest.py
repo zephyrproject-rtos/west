@@ -534,7 +534,7 @@ def test_project_repr():
       west-commands: some-path/west-commands.yml
     ''')
     assert repr(m.projects[1]) == \
-        'Project("zephyr", "https://foo.com", revision="r", path=\'zephyr\', clone_depth=None, west_commands=[\'some-path/west-commands.yml\'], topdir=None, groups=[])'  # noqa: E501
+        'Project("zephyr", "https://foo.com", revision="r", path=\'zephyr\', clone_depth=None, west_commands=[\'some-path/west-commands.yml\'], topdir=None, groups=[], userdata=None)'  # noqa: E501
 
 def test_project_sha(tmpdir):
     tmpdir = Path(os.fspath(tmpdir))
@@ -547,6 +547,26 @@ def test_project_sha(tmpdir):
                       path=tmpdir.name,
                       topdir=tmpdir.parent)
     assert project.sha(project.revision) == expected_sha
+
+def test_project_userdata(tmpdir):
+    m = M('''\
+    defaults:
+      remote: r
+    remotes:
+      - name: r
+        url-base: base
+    projects:
+    - name: foo
+    - name: bar
+      userdata: a-string
+    - name: baz
+      userdata:
+        key: value
+    ''')
+    foo, bar, baz = m.get_projects(['foo', 'bar', 'baz'])
+    assert foo.userdata is None
+    assert bar.userdata == 'a-string'
+    assert baz.userdata == {'key': 'value'}
 
 def test_no_projects():
     # An empty projects list is allowed.
