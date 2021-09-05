@@ -6,6 +6,7 @@
 '''West project commands'''
 
 import argparse
+import colorama
 from functools import partial
 import logging
 import os
@@ -877,6 +878,11 @@ class Update(_ProjectCommand):
             sys.stdout = sys.stderr = logfile
 
         try:
+            # we need to initialize colorama because:
+            # - this is a new process (for the first job)
+            # - we just replaced the output stream
+            colorama.init()
+
             self.update(project)
             return (index, True)
         except subprocess.CalledProcessError:
