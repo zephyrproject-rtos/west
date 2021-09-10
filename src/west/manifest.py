@@ -658,7 +658,7 @@ class Project:
                 f'west_commands={self.west_commands}, '
                 f'topdir={repr(self.topdir)}, '
                 f'groups={repr(self.groups)}, '
-                f'userdata={self.userdata})')
+                f'userdata={repr(self.userdata)})')
 
     def __str__(self):
         path_repr = repr(self.abspath or self.path)
@@ -754,6 +754,8 @@ class Project:
                 _west_commands_maybe_delist(self.west_commands)
         if self.groups:
             ret['groups'] = self.groups
+        if self.userdata:
+            ret['userdata'] = self.userdata
 
         return ret
 
