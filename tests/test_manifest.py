@@ -564,9 +564,13 @@ def test_project_userdata(tmpdir):
         key: value
     ''')
     foo, bar, baz = m.get_projects(['foo', 'bar', 'baz'])
+
     assert foo.userdata is None
     assert bar.userdata == 'a-string'
     assert baz.userdata == {'key': 'value'}
+
+    assert 'userdata' not in foo.as_dict()
+    assert 'a-string' == bar.as_dict()['userdata']
 
 def test_no_projects():
     # An empty projects list is allowed.
