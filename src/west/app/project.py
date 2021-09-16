@@ -767,8 +767,9 @@ class Update(_ProjectCommand):
                            may be given more than once''')
         group.add_argument('-n', '--narrow', action='store_true',
                            help='''fetch just the project revision if fetching
-                           is necessary; skip fetching tags (may not work for
-                           SHA revisions depending on the Git host)''')
+                           is necessary; do not pass --tags to git fetch
+                           (may not work for SHA revisions depending on the Git
+                           host)''')
 
         group = parser.add_argument_group(
             title='checked out branch behavior',
