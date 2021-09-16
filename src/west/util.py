@@ -79,6 +79,6 @@ def west_topdir(start: Optional[PathType] = None,
                 return west_topdir(os.environ['ZEPHYR_BASE'],
                                    fall_back=False)
             else:
-                raise WestNotFound('Could not find a West workspace '
+                raise WestNotFound('Could not find a west workspace '
                                    'in this or any parent directory')
         cur_dir = parent_dir
