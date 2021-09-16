@@ -701,6 +701,8 @@ class Status(_ProjectCommand):
 
 class Update(_ProjectCommand):
 
+    FETCH_STRATEGIES = ['always', 'smart', 'tags']
+
     def __init__(self):
         super().__init__(
             'update',
@@ -753,14 +755,16 @@ class Update(_ProjectCommand):
 
         group = parser.add_argument_group(
             title='fetching behavior',
-            description='By default, west update tries to avoid fetching.')
+            description="""\
+These options control how west fetches remote revisions for projects
+it updates.
+""")
         group.add_argument('-f', '--fetch', dest='fetch_strategy',
-                           choices=['always', 'smart'],
-                           help='''how to fetch projects when updating:
-                           "always" fetches every project before update,
-                           while "smart" (default) skips fetching projects
-                           whose revisions are SHAs or tags available
-                           locally''')
+                           choices=self.FETCH_STRATEGIES,
+                           help='''"always" fetches every updated project,
+                           "smart" (default) skips fetching SHAs and tags
+                           that are available locally; "tags" is like "smart"
+                           except tags are always fetched''')
         group.add_argument('-o', '--fetch-opt', action='append', default=[],
                            help='''additional option to pass to 'git fetch'
                            if fetching is necessary (e.g. 'o=--depth=1');
@@ -1083,9 +1087,9 @@ class Update(_ProjectCommand):
 
     def fetch_strategy(self):
         cfg = config.get('update', 'fetch', fallback=None)
-        if cfg is not None and cfg not in ('always', 'smart'):
+        if cfg is not None and cfg not in self.FETCH_STRATEGIES:
             log.wrn(f'ignoring invalid config update.fetch={cfg}; '
-                    'choices: always, smart')
+                    'choices: ' + ' '.join(self.FETCH_STRATEGIES))
             cfg = None
         if self.args.fetch_strategy:
             return self.args.fetch_strategy
@@ -1305,7 +1309,21 @@ class Update(_ProjectCommand):
         # update() helper. Make sure project's manifest-rev is set to
         # the latest value it should be.
 
-        if self.fs == 'always' or _rev_type(project) not in ('tag', 'commit'):
+        def project_needs_fetch():
+            # Helper procedure which returns True if the project needs
+            # to be fetched, taking into account the current fetch
+            # strategy and project revision type.
+
+            if self.fs == 'always':
+                return True
+            rev_type = _rev_type(project)
+            if rev_type == 'commit':
+                return False
+            if rev_type == 'tag':
+                return self.fs == 'tags'
+            return True
+
+        if project_needs_fetch():
             self.fetch(project, stats, take_stats)
         else:
             log.dbg('skipping unnecessary fetch')
