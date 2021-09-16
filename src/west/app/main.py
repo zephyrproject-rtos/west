@@ -372,6 +372,8 @@ class WestApp:
             # branches pointing at revisions with invalid manifest
             # data in projects that get imported.
             log.die('\n  '.join(str(arg) for arg in mm.args))
+        except WestNotFound as wnf:
+            log.die(str(wnf))
 
     def run_extension(self, name, argv):
         # Check a program invariant. We should never get here
