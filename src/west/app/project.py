@@ -1243,6 +1243,14 @@ class Update(_ProjectCommand):
             # However, west always fetches project data by URL, not name.
             # The user is therefore free to change the URL of this remote.
             project.git(f'remote add -- {project.remote_name} {project.url}')
+
+            # Git submodules that use relative paths resolve them based
+            # on `origin` remote, make sure we have it
+            try:
+                project.git(f'remote get-url -- origin')
+            except subprocess.CalledProcessError:
+                project.git(f'remote add -- origin {project.url}')
+
         else:
             log.small_banner(f'{project.name}: cloning from {cache_dir}')
             # Clone the project from a local cache repository. Set the
@@ -1253,6 +1261,14 @@ class Update(_ProjectCommand):
             # Reset the remote's URL to the project's fetch URL.
             project.git(['remote', 'set-url', project.remote_name,
                          project.url])
+
+            # Git submodules that use relative paths resolve them based
+            # on `origin` remote, make sure we have it
+            try:
+                project.git(f'remote get-url -- origin')
+            except subprocess.CalledProcessError:
+                project.git(f'remote add -- origin {project.url}')
+
             # Make sure we have a detached HEAD so we can delete the
             # local branch created by git clone.
             project.git('checkout --quiet --detach HEAD')
