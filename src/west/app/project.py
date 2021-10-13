@@ -831,9 +831,6 @@ class Update(_ProjectCommand):
                                                         fallback=None)
         self.sync_submodules = config.getboolean('update', 'sync-submodules',
                                                  fallback=True)
-        self.unbuffered = args.unbuffered or config.getboolean('update',
-                                                               'unbuffered',
-                                                               fallback=False)
 
         self.group_filter: List[str] = []
 
@@ -893,7 +890,7 @@ class Update(_ProjectCommand):
         # XXX: this is not picklable
         self.parser = None
 
-        if self.unbuffered:
+        if self.args.unbuffered:
             logdir = None
             logdir_name = None
         else:
