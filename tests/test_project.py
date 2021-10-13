@@ -307,56 +307,6 @@ def test_update_projects(west_init_tmpdir):
     assert ur.kl_head_0 != ur.kl_head_1, 'failed updating kconfiglib HEAD'
     assert ur.tr_head_0 == ur.tr_head_1, 'tagged_repo HEAD changed'
 
-def test_update_projects_threaded(west_init_tmpdir):
-    # Test the 'west update' command. It calls through to the same backend
-    # functions that are used for automatic updates and 'west init'
-    # reinitialization.
-
-    # create local repositories
-    cmd('update -j8')
-
-    # Add commits to the local repos.
-    ur = update_helper(west_init_tmpdir)
-
-    # We updated all the repositories, so all paths and commits should
-    # be valid refs (i.e. there shouldn't be a None or empty string
-    # value in a ur attribute).
-    assert all(ur)
-
-    # Make sure we see different manifest-rev commits and HEAD revisions,
-    # except for the repository whose version was locked at a tag.
-    assert ur.nt_mr_0 != ur.nt_mr_1, 'failed updating net-tools manifest-rev'
-    assert ur.kl_mr_0 != ur.kl_mr_1, 'failed updating kconfiglib manifest-rev'
-    assert ur.tr_mr_0 == ur.tr_mr_1, 'tagged_repo manifest-rev changed'
-    assert ur.nt_head_0 != ur.nt_head_1, 'failed updating net-tools HEAD'
-    assert ur.kl_head_0 != ur.kl_head_1, 'failed updating kconfiglib HEAD'
-    assert ur.tr_head_0 == ur.tr_head_1, 'tagged_repo HEAD changed'
-
-def test_update_projects_threaded_unbuffered(west_init_tmpdir):
-    # Test the 'west update' command. It calls through to the same backend
-    # functions that are used for automatic updates and 'west init'
-    # reinitialization.
-
-    # create local repositories
-    cmd('update -j8 --unbuffered')
-
-    # Add commits to the local repos.
-    ur = update_helper(west_init_tmpdir)
-
-    # We updated all the repositories, so all paths and commits should
-    # be valid refs (i.e. there shouldn't be a None or empty string
-    # value in a ur attribute).
-    assert all(ur)
-
-    # Make sure we see different manifest-rev commits and HEAD revisions,
-    # except for the repository whose version was locked at a tag.
-    assert ur.nt_mr_0 != ur.nt_mr_1, 'failed updating net-tools manifest-rev'
-    assert ur.kl_mr_0 != ur.kl_mr_1, 'failed updating kconfiglib manifest-rev'
-    assert ur.tr_mr_0 == ur.tr_mr_1, 'tagged_repo manifest-rev changed'
-    assert ur.nt_head_0 != ur.nt_head_1, 'failed updating net-tools HEAD'
-    assert ur.kl_head_0 != ur.kl_head_1, 'failed updating kconfiglib HEAD'
-    assert ur.tr_head_0 == ur.tr_head_1, 'tagged_repo HEAD changed'
-
 def test_update_projects_local_branch_commits(west_init_tmpdir):
     # Test the 'west update' command when working on local branch with local
     # commits and then updating project to upstream commit.
