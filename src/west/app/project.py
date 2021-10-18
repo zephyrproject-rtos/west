@@ -389,10 +389,10 @@ The following arguments are available:
             if not project.is_cloned():
                 log.die(f'cannot get sha for uncloned project {project.name}; '
                         f'run "west update {project.name}" and retry')
-            elif project.revision:
-                return project.sha(MANIFEST_REV)
-            else:
+            elif isinstance(project, ManifestProject):
                 return f'{"N/A":40}'
+            else:
+                return project.sha(MANIFEST_REV)
 
         def cloned_thunk(project):
             self.die_if_no_git()
