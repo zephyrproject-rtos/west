@@ -200,6 +200,14 @@ def test_list_groups(west_init_tmpdir):
            'foo .foo-group-1,foo-group-2. foo',
            'bar .. path-for-bar'])
 
+
+def test_list_sha(west_update_tmpdir):
+    # Regression test for listing with {sha}. This should print N/A
+    # for the first project, which is the ManifestProject.
+
+    assert cmd('list -f "{sha}"').startswith("N/A")
+
+
 def test_manifest_freeze(west_update_tmpdir):
     # We should be able to freeze manifests.
     actual = cmd('manifest --freeze').splitlines()
