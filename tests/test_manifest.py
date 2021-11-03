@@ -24,7 +24,10 @@ import yaml
 from west.manifest import Manifest, Project, ManifestProject, \
     MalformedManifest, ManifestVersionError, ManifestImportFailed, \
     manifest_path, ImportFlag, validate, MANIFEST_PROJECT_INDEX, \
-    _ManifestImportDepth, is_group
+    _ManifestImportDepth, is_group, SCHEMA_VERSION
+
+# White box checks for the schema version.
+from west.manifest import _VALID_SCHEMA_VERS
 
 from conftest import create_workspace, create_repo, checkout_branch, \
     create_branch, add_commit, add_tag, rev_parse, GIT, check_proj_consistency
@@ -1248,20 +1251,20 @@ def test_version_check_failure():
     with pytest.raises(MalformedManifest):
         Manifest.from_data(invalid_fmt.format('0.6.98'))
 
-@pytest.mark.parametrize('ver', ['0.6.99'])
+@pytest.mark.parametrize('ver', sorted(set(['0.6.99', SCHEMA_VERSION] +
+                                           _VALID_SCHEMA_VERS)))
 def test_version_check_success(ver):
     # Test that version checking succeeds when it should.
+    # Always quote the version to avoid issues with floating point,
+    # e.g if 'ver' is "0.10", it gets treated like 0.1 in YAML.
 
-    fmt = '''\
+    manifest = Manifest.from_data(f'''\
     manifest:
-      version: {}
+      version: "{ver}"
       projects:
       - name: foo
         url: https://foo.com
-    '''
-    manifest = Manifest.from_data(fmt.format(ver))
-    assert manifest.projects[-1].name == 'foo'
-    manifest = Manifest.from_data(fmt.format('"' + ver + '"'))
+    ''')
     assert manifest.projects[-1].name == 'foo'
 
 #########################################
