@@ -49,12 +49,13 @@ QUAL_REFS_WEST = 'refs/west/'
 #:
 #: This value changes when a new version of west includes new manifest
 #: file features not supported by earlier versions of west.
-SCHEMA_VERSION = '0.10'
+SCHEMA_VERSION = '0.12'
 # MAINTAINERS:
 #
-# If you want to update the schema version, you need to make sure that
-# it has the exact same value as west.version.__version__ when the
-# next release is cut.
+# - Make sure to update _VALID_SCHEMA_VERS if you change this.
+#
+# - When changing this, make sure that it has the exact same value as
+#   west.version.__version__ when the next release is cut.
 
 #
 # Internal helpers
@@ -113,7 +114,11 @@ _WEST_YML = 'west.yml'
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
 _SCHEMA_VER = parse_version(SCHEMA_VERSION)
 _EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
-_VALID_SCHEMA_VERS = [_EARLIEST_VER_STR, '0.7', '0.8', '0.9', SCHEMA_VERSION]
+_VALID_SCHEMA_VERS = [
+    _EARLIEST_VER_STR,
+    '0.7', '0.8', '0.9', '0.10',
+    SCHEMA_VERSION
+]
 
 def _is_yml(path: PathType) -> bool:
     return Path(path).suffix in ['.yml', '.yaml']
