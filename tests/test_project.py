@@ -871,6 +871,110 @@ def test_update_submodules_strategy(repos_tmpdir):
     assert net_tools_project.sha('HEAD', cwd=kconfiglib_dst_dir) \
            == kconfiglib_new_sha
 
+@pytest.mark.xfail
+def test_update_submodules_relpath(tmpdir):
+    # Regression test for
+    # https://github.com/zephyrproject-rtos/west/issues/545.
+    #
+    # We need to make sure that submodules with relative paths are
+    # initialized correctly even when ther is no "origin" remote.
+    #
+    # Background: unless the config variable git.$SUBMODULENAME.url is
+    # set, "git submodule init" relies on the "default remote" for
+    # figuring out how to turn that relative path into something
+    # useful. The "default remote" ends up being "origin" in the
+    # situation where we are initializing a submodule from a
+    # superproject which is a west project.
+    #
+    # However, west neither makes nor expects any guarantees
+    # about any particular git remotes being present in a project, so
+    # that only works if we set the config variable before
+    # initializing the module.
+
+    # The following paths begin with 'project' if they are west projects,
+    # and 'submodule' if they are direct or transitive submodules of a
+    # west project. Numeric suffixes reflect the tree structure of the
+    # workspace:
+    #
+    # workspace
+    # ├── manifest
+    # ├── project-1
+    # │   └── submodule-1-1
+    # └── project-2
+    #     ├── submodule-2-1
+    #     └── submodule-2-2
+    #         └── submodule-2-2-1
+    #
+    # Some of them are declared to west directly, some implicitly.
+    pseudo_remotes = tmpdir / 'remotes'  # parent directory for 'remote' repos
+    remote_repositories = [
+        pseudo_remotes / path for path in
+        ['manifest',
+         'project-1',
+         'submodule-1-1',
+         'project-2',
+         'submodule-2-1',
+         'submodule-2-2',
+         'submodule-2-2-1',
+         ]
+    ]
+    for remote_repo in remote_repositories:
+        create_repo(remote_repo)
+
+    add_commit(pseudo_remotes / 'manifest', 'manifest west.yml',
+               files={'west.yml': f'''
+manifest:
+  remotes:
+    - name: not-origin
+      url-base: file://{pseudo_remotes}
+  defaults:
+    remote: not-origin
+  projects:
+    - name: project-1
+      submodules: true
+    - name: project-2
+      submodules:
+        - path: submodule-2-1
+        - name: sub-2-2
+          path: submodule-2-2
+'''})
+
+    def add_submodule(superproject, submodule_name,
+                      submodule_url, submodule_path):
+        subprocess.check_call([GIT, '-C', os.fspath(superproject),
+                               'submodule', 'add',
+                               '--name', submodule_name,
+                               submodule_url, submodule_path])
+        add_commit(superproject, f'add submodule {submodule_name}')
+
+    add_submodule(pseudo_remotes / 'project-1', 'sub-1-1',
+                  '../submodule-1-1', 'submodule-1-1')
+    add_submodule(pseudo_remotes / 'project-2', 'sub-2-1',
+                  '../submodule-2-1', 'submodule-2-1')
+    add_submodule(pseudo_remotes / 'project-2', 'sub-2-2',
+                  '../submodule-2-2', 'submodule-2-2')
+    add_submodule(pseudo_remotes / 'project-2' / 'submodule-2-2', 'sub-2-2-1',
+                  '../submodule-2-2-1', 'submodule-2-2-1')
+
+    workspace = tmpdir / 'workspace'
+    remote_manifest = pseudo_remotes / 'manifest'
+    cmd(f'init -m "{remote_manifest}" "{workspace}"')
+
+    workspace.chdir()
+    cmd('update')
+    expected_dirs = [
+        workspace / expected for expected in
+        ['project-1',
+         'project-1' / 'submodule-1-1',
+         'project-2',
+         'project-2' / 'submodule-2-1',
+         'project-2' / 'submodule-2-2',
+         'project-2' / 'submodule-2-2' / 'submodule-2-2-1',
+         ]
+    ]
+    for expected_dir in expected_dirs:
+        expected_dir.check(dir=1)
+
 def test_update_recovery(tmpdir):
     # Make sure that the final 'west update' can recover from the
     # following turn of events:
