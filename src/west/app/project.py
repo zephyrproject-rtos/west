@@ -1349,6 +1349,11 @@ class Update(_ProjectCommand):
         if take_stats:
             stats['get current branch HEAD'] = perf_counter() - start
         current_branch = cp.stdout.decode('utf-8').strip()
+        if not current_branch:
+            log.die(
+                f"Unable to retrieve ref for 'HEAD' in project "
+                f"{project.name!r}. It is possible the project has a tag or "
+                f"branch with the name 'HEAD'. If so, please delete it.")
         if current_branch != 'HEAD':
             if take_stats:
                 start = perf_counter()
