@@ -128,7 +128,8 @@ With -m, clones the repository at that URL and uses it as the
 manifest repository. If --mr is not given, the remote's default
 branch will be used, if it exists.
 
-With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
+With neither, -m {MANIFEST_URL_DEFAULT} is assumed unless
+MANIFEST_URL is set in your environment then it will be used.
 ''',
             requires_workspace=False)
 
@@ -236,7 +237,8 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
         topdir = Path(abspath(args.directory or os.getcwd()))
         log.banner('Initializing in', topdir)
 
-        manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
+        mu = os.environ.get('MANIFEST_URL')
+        manifest_url = args.manifest_url or mu or MANIFEST_URL_DEFAULT
         if args.manifest_rev:
             # This works with tags, too.
             branch_opt = ['--branch', args.manifest_rev]
