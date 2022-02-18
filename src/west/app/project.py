@@ -128,8 +128,8 @@ With -m, clones the repository at that URL and uses it as the
 manifest repository. If --mr is not given, the remote's default
 branch will be used, if it exists.
 
-With neither, -m {MANIFEST_URL_DEFAULT} is assumed unless
-MANIFEST_URL is set in your environment then it will be used.
+With neither, the WEST_MANIFEST_URL environment variable will be used
+if it is set. If it is unset, the default value is {MANIFEST_URL_DEFAULT}.
 ''',
             requires_workspace=False)
 
@@ -237,7 +237,7 @@ MANIFEST_URL is set in your environment then it will be used.
         topdir = Path(abspath(args.directory or os.getcwd()))
         log.banner('Initializing in', topdir)
 
-        mu = os.environ.get('MANIFEST_URL')
+        mu = os.environ.get('WEST_MANIFEST_URL')
         manifest_url = args.manifest_url or mu or MANIFEST_URL_DEFAULT
         if args.manifest_rev:
             # This works with tags, too.
