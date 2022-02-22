@@ -59,6 +59,17 @@ def west_update_tmpdir(west_init_tmpdir):
     cmd('update', cwd=str(west_init_tmpdir))
     return west_init_tmpdir
 
+
+@pytest.fixture
+def west_empty_tmpdir(repos_tmpdir):
+    '''A test directory with optional repos subfolder to run west init commands from.'''
+
+    # Create a workspace to run west init from
+    repos_tmpdir.mkdir('workspace')
+    west_tmpdir = repos_tmpdir.join('workspace')
+    return west_tmpdir
+
+
 #
 # Test cases
 #
@@ -1107,6 +1118,30 @@ def test_update_narrow_depth1(tmpdir):
     ).decode().splitlines()
 
     assert len(refs) == 1
+
+
+def test_init_with_env_provided_bad_url(west_empty_tmpdir):
+    env = os.environ.copy()
+    env["WEST_MANIFEST_URL"] = "http://www.example.com"
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd(f'init', cwd=str(west_empty_tmpdir), env=env)
+
+
+def test_init_with_env_provided_good_url(west_empty_tmpdir):
+    env = os.environ.copy()
+    env["WEST_MANIFEST_URL"] = "../repos/zephyr"
+    cmd(f'init', cwd=str(west_empty_tmpdir), env=env)
+
+    # Verify Zephyr has been installed during init, but not projects.
+    assert west_empty_tmpdir.check(dir=1)
+    assert west_empty_tmpdir.join('subdir', 'Kconfiglib').check(dir=0)
+    assert west_empty_tmpdir.join('net-tools').check(dir=0)
+    assert west_empty_tmpdir.join('tagged_repo').check(dir=0)
+    assert west_empty_tmpdir.join('zephyr').check(dir=1)
+    assert west_empty_tmpdir.join('zephyr', '.git').check(dir=1)
+    assert west_empty_tmpdir.join('zephyr', 'CODEOWNERS').check(file=1)
+    assert west_empty_tmpdir.join('zephyr', 'include', 'header.h').check(file=1)
+    assert west_empty_tmpdir.join('zephyr', 'subsys', 'bluetooth', 'code.c').check(file=1)
 
 
 def test_init_again(west_init_tmpdir):
