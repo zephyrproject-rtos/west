@@ -572,6 +572,29 @@ def test_project_userdata(tmpdir):
     assert 'userdata' not in foo.as_dict()
     assert 'a-string' == bar.as_dict()['userdata']
 
+
+def test_self_userdata(tmpdir):
+    m = M('''
+    defaults:
+      remote: r
+    remotes:
+      - name: r
+        url-base: base
+    projects:
+    - name: bar
+    self:
+      path: foo
+      userdata:
+        key: value
+    ''')
+    foo, bar = m.get_projects(['manifest', 'bar'])
+
+    assert foo.userdata == {'key': 'value'}
+    assert bar.userdata is None
+    assert 'userdata' in foo.as_dict()
+    assert 'userdata' not in bar.as_dict()
+
+
 def test_no_projects():
     # An empty projects list is allowed.
 

@@ -1001,6 +1001,7 @@ class ManifestProject(Project):
     - ``west_commands``:``west_commands:`` key in the manifest's
       ``self:`` map. This may be a list of such if the self
       section imports multiple additional files with west commands.
+    - ``userdata``: the parsed 'userdata' field under self in the manifest file
 
     Other readable attributes included for Project compatibility:
 
@@ -1015,11 +1016,13 @@ class ManifestProject(Project):
     def __repr__(self):
         return (f'ManifestProject(path={repr(self.path)}, '
                 f'west_commands={self.west_commands}, '
-                f'topdir={repr(self.topdir)})')
+                f'topdir={repr(self.topdir)}, '
+                f'userdata={repr(self.userdata)})')
 
     def __init__(self, path: Optional[PathType] = None,
                  west_commands: Optional[WestCommandsType] = None,
-                 topdir: Optional[PathType] = None):
+                 topdir: Optional[PathType] = None,
+                 userdata: Optional[Any] = None):
         '''
         :param path: Relative path to the manifest repository in the
             west workspace, if known.
@@ -1029,6 +1032,7 @@ class ManifestProject(Project):
         :param topdir: Root of the west workspace the manifest
             project is inside. If not given, all absolute path
             attributes (abspath and posixpath) will be None.
+        :param userdata: User data specified under self in manifest file
         '''
         self.name: str = 'manifest'
 
@@ -1038,6 +1042,8 @@ class ManifestProject(Project):
         self.revision: str = 'HEAD'
         self.clone_depth: Optional[int] = None
         self.groups = []
+        self.userdata: Optional[Any] = userdata
+
         # The following type: ignore is necessary since every Project
         # actually has a non-None _path attribute, so the parent class
         # defines its type as 'str', where here we need it to be
@@ -1068,6 +1074,8 @@ class ManifestProject(Project):
         if self.west_commands:
             ret['west-commands'] = \
                 _west_commands_maybe_delist(self.west_commands)
+        if self.userdata:
+            ret['userdata'] = self.userdata
         return ret
 
 class Manifest:
@@ -1352,6 +1360,8 @@ class Manifest:
         # These back the relevant properties.
         self._posixpath: Optional[str] = None
         self._repo_posixpath: Optional[str] = None
+        # This backs the userdata property
+        self._userdata: Optional[Any] = None
         # Load context needed for import resolution. Do top-level
         # argument validation and storage if self._top_level is True,
         # but otherwise just get self._ctx from the caller.
@@ -1793,7 +1803,7 @@ class Manifest:
             mp = ManifestProject(
                 path=self._config_path if self.topdir else self.yaml_path,
                 west_commands=self._ctx.manifest_west_commands,
-                topdir=self.topdir)
+                topdir=self.topdir, userdata=self._userdata)
 
             # Save the resulting projects and initialize lookup tables
             # that rely on the ManifestProject existing.
@@ -1894,6 +1904,9 @@ class Manifest:
             _logger.debug(f'resolving self import {imp}')
             self._import_from_self(imp)
             _logger.debug('resolved self import')
+
+        userdata = slf.get('userdata')
+        self._userdata = userdata
 
         # The current manifest data's west-comands comes first because
         # we treat imports from self as if they are defined "before"
