@@ -156,3 +156,7 @@ mapping:
       import:
         required: false
         type: any
+      # Arbitrary user data for manifest repository
+      userdata:
+        required: false
+        type: any
