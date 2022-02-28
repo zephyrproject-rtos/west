@@ -112,8 +112,10 @@ def test_project_init():
     assert p.abspath == os.path.join(TOPDIR, 'p')
     assert p.posixpath == TOPDIR_POSIX + '/p'
 
-def test_manifest_from_data():
+def test_manifest_from_data_without_topdir():
     # We can load manifest data as a dict or a string.
+    # If no *topdir* argument is given, as is done here,
+    # absolute path attributes should be None.
 
     manifest = Manifest.from_data('''\
     manifest:
@@ -122,12 +124,14 @@ def test_manifest_from_data():
           url: https://foo.com
     ''')
     assert manifest.projects[-1].name == 'foo'
+    assert manifest.projects[-1].abspath is None
 
     manifest = Manifest.from_data({'manifest':
                                    {'projects':
                                     [{'name': 'foo',
                                       'url': 'https:foo.com'}]}})
     assert manifest.projects[-1].name == 'foo'
+    assert manifest.projects[-1].abspath is None
 
 def test_validate():
     # Get some coverage for west.manifest.validate.
