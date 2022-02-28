@@ -1182,7 +1182,7 @@ class Manifest:
             string with unparsed YAML data
         :param kwargs: Manifest.__init__ keyword arguments
         '''
-        kwargs.update({'source_data': source_data})
+        kwargs.update({'source_data': source_data, '_read_configs': False})
         return Manifest(**kwargs)
 
     def __init__(self, source_file: Optional[PathType] = None,
@@ -1354,6 +1354,8 @@ class Manifest:
             mpath: Optional[Path] = Path(manifest_path)
         else:
             mpath = None
+
+        self._read_configs = kwargs.get('_read_configs', True)
         self._load(source_data['manifest'], mpath, ctx)
 
     def get_projects(self,
@@ -1767,17 +1769,29 @@ class Manifest:
                    path_hint: Optional[Path],
                    ctx: _import_ctx) -> ManifestProject:
         # Handle the "self:" section in the manifest data.
+        manifest_path = None
+
+        if self._read_configs:
+            cp = cfg._configparser()
+            cfg.read_config(configfile=cfg.ConfigFile.LOCAL, config=cp,
+                            topdir=self.topdir)
+
+            if 'manifest' in cp:
+                # We may have been created from a partially set up
+                # workspace with an explicit source_file and topdir,
+                # but no manifest.path config option set.
+                manifest_path = cp['manifest'].get('path')
 
         slf = manifest.get('self', {})
-        if 'path' in slf:
-            path = slf['path']
-            if path is None:
-                self._malformed(f'self: path: is {path}; this value '
+        if manifest_path is None and 'path' in slf:
+            manifest_path = slf['path']
+            if manifest_path is None:
+                self._malformed(f'self: path: is {manifest_path}; this value '
                                 'must be nonempty if present')
         else:
-            path = path_hint
+            manifest_path = path_hint
 
-        mp = ManifestProject(path=path, topdir=self.topdir,
+        mp = ManifestProject(path=manifest_path, topdir=self.topdir,
                              west_commands=slf.get('west-commands'))
 
         imp = slf.get('import')

@@ -792,6 +792,38 @@ def test_from_data_with_topdir(tmpdir):
     assert p1.path == 'project-path'
     assert PurePath(p1.abspath) == PurePath(str(tmpdir / 'project-path'))
 
+def test_manifest_from_file_with_different_path(tmp_workspace):
+    # Test that if we have "manifest: self: path: foo" in the manifest
+    # file in mp/west.yml, but we are reading from bar/west.yml
+    # because .west/config says manifest.path is bar, the manifest
+    # repository's path is still "bar", not "foo".
+
+    with open(".west/config", "w") as f:
+        f.write("""
+[manifest]
+path = bar
+""")
+
+    (tmp_workspace / "bar").mkdir()
+
+    with open(str(tmp_workspace / "bar" / "west.yml"), "w") as f:
+        f.write("""
+manifest:
+  projects: []
+""")
+
+    assert MF().projects[MANIFEST_PROJECT_INDEX].path == "bar"
+
+    with open(str(tmp_workspace / "bar" / "west.yml"), "w") as f:
+        f.write("""
+manifest:
+  projects: []
+  self:
+    path: blub
+""")
+
+    assert MF().projects[MANIFEST_PROJECT_INDEX].path == "bar"
+
 def test_manifest_path_not_found(tmp_workspace):
     # Make sure manifest_path() raises FileNotFoundError if the
     # manifest file specified in .west/config doesn't exist.
