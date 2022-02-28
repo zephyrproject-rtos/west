@@ -1158,18 +1158,23 @@ class Manifest:
 
         This factory does not read any configuration files.
 
-        Letting the return value be ``m``. Results then depend on
-        keyword arguments in *kwargs*:
+        Let the return value be ``m``.
 
-            - Unless *topdir* is given, all absolute paths in ``m``,
-              like ``m.projects[1].abspath``, are ``None``.
+        Relative project paths in ``m`` (like ``m.projects[1].path``)
+        are taken from *source_data*.
 
-            - Relative paths, like ``m.projects[1].path``, are taken
-              from *source_data*.
+        You can pass this factory any of the *kwargs* documented for
+        `west.Manifest.__init__`. Some results in ``m`` depend on *kwargs*:
 
-            - If ``source_data['manifest']['self']['path']`` is not
-              set, then ``m.projects[MANIFEST_PROJECT_INDEX].abspath``
-              will be set to *manifest_path* if given.
+            - If *topdir* is unset in *kwargs*, then all absolute paths
+              in ``m`` (like ``m.projects[1].abspath``) are ``None``.
+
+            - Otherwise, absolute paths in ``m`` are rooted at *topdir*.
+
+            - If ``source_data['manifest']['self']['path']`` is unset,
+              ``m.projects[MANIFEST_PROJECT_INDEX].path``
+              will fall back to the *manifest_path* value in *kwargs*.
+              If both of these are unset, this value is ``None``.
 
         Returns the same exceptions as the Manifest constructor.
 
