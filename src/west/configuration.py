@@ -197,7 +197,8 @@ def delete_config(section: str, key: str,
     if not found:
         raise KeyError(f'{section}.{key}')
 
-def _location(cfg: ConfigFile, topdir: Optional[PathType] = None) -> str:
+def _location(cfg: ConfigFile, topdir: Optional[PathType] = None,
+              search_for_local: bool = True) -> str:
     # Making this a function that gets called each time you ask for a
     # configuration file makes it respect updated environment
     # variables (such as XDG_CONFIG_HOME, PROGRAMDATA) if they're set
@@ -260,8 +261,11 @@ def _location(cfg: ConfigFile, topdir: Optional[PathType] = None) -> str:
         if topdir:
             return os.fspath(Path(topdir) / '.west' / 'config')
 
-        # Might raise WestNotFound!
-        return os.fspath(Path(west_dir()) / 'config')
+        if search_for_local:
+            # Might raise WestNotFound!
+            return os.fspath(Path(west_dir()) / 'config')
+        else:
+            return ''
     else:
         raise ValueError(f'invalid configuration file {cfg}')
 
