@@ -26,7 +26,7 @@ import textwrap
 import traceback
 
 from west import log
-from west import configuration as config
+import west.configuration
 from west.commands import WestCommand, extension_commands, \
     CommandError, ExtensionCommandError
 from west.app.project import List, ManifestCommand, Diff, Status, \
@@ -51,6 +51,7 @@ class WestApp:
 
     def __init__(self):
         self.topdir = None          # west_topdir()
+        self.config = None          # west.configuration.Configuration
         self.manifest = None        # west.manifest.Manifest
         self.mle = None             # saved exception if load_manifest() fails
         self.builtins = {}          # command name -> WestCommand instance
@@ -90,9 +91,11 @@ class WestApp:
 
         # Read the configuration files. We need this to get
         # manifest.path to parse the manifest, etc.
-        #
-        # TODO: re-work to avoid global state (#149).
-        config.read_config(topdir=self.topdir)
+        self.config = west.configuration.Configuration(topdir=self.topdir)
+
+        # Also set up the global configuration object to match, for
+        # backwards compatibility.
+        self.config._copy_to_configparser(west.configuration.config)
 
         # Set self.manifest and self.extensions.
         self.load_manifest()
@@ -405,7 +408,7 @@ class WestApp:
         #   (controversial)
         # - make zephyr extensions that need ZEPHYR_BASE just set it
         #   themselves (easy if above is OK, unnecessary if it isn't)
-        set_zephyr_base(args, self.manifest, self.topdir)
+        set_zephyr_base(args, self.manifest, self.topdir, self.config)
 
         command.run(args, unknown, self.topdir, manifest=self.manifest)
 
@@ -659,7 +662,7 @@ def mve_msg(mve, suggest_upgrade=True):
         ([f'Manifest file: {mve.file}'] if mve.file else []) +
         (['Please upgrade west and retry.'] if suggest_upgrade else []))
 
-def set_zephyr_base(args, manifest, topdir):
+def set_zephyr_base(args, manifest, topdir, config):
     '''Ensure ZEPHYR_BASE is set
     Order of precedence:
     1) Value given as command line argument
@@ -691,9 +694,8 @@ def set_zephyr_base(args, manifest, topdir):
         # variables based on manifest contents, but this is good enough
         # to get started with and to ask for wider testing.
         zb_env = os.environ.get('ZEPHYR_BASE')
-        zb_prefer = config.config.get('zephyr', 'base-prefer',
-                                      fallback=None)
-        rel_zb_config = config.config.get('zephyr', 'base', fallback=None)
+        zb_prefer = config.get('zephyr.base-prefer')
+        rel_zb_config = config.get('zephyr.base')
         if rel_zb_config is None:
             projects = None
             try:
@@ -702,7 +704,7 @@ def set_zephyr_base(args, manifest, topdir):
                 pass
             if projects:
                 zephyr = projects[0]
-                config.update_config('zephyr', 'base', zephyr.path)
+                config.set('zephyr.base', zephyr.path)
                 rel_zb_config = zephyr.path
         if rel_zb_config is not None:
             zb_config = Path(topdir) / rel_zb_config
