@@ -76,8 +76,7 @@ class WestCommand(ABC):
 
     def __init__(self, name: str, help: str, description: str,
                  accepts_unknown_args: bool = False,
-                 requires_workspace: bool = True,
-                 requires_installation: bool = None):
+                 requires_workspace: bool = True):
         '''Abstract superclass for a west command.
 
         Some fields, such as *name*, *help*, and *description*,
@@ -96,24 +95,14 @@ class WestCommand(ABC):
         :param requires_workspace: if true, the command requires a
             west workspace to run, and running it outside of one is
             a fatal error.
-        :param requires_installation: deprecated equivalent for
-            "requires_workspace"; this may go away eventually.
         '''
         self.name: str = name
         self.help: str = help
         self.description: str = description
         self.accepts_unknown_args: bool = accepts_unknown_args
-        if requires_installation is not None:
-            self.requires_workspace: bool = requires_installation
-        else:
-            self.requires_workspace = requires_workspace
+        self.requires_workspace = requires_workspace
         self.topdir: Optional[str] = None
         self.manifest = None
-
-    @property
-    def requires_installation(self) -> bool:
-        '''Deprecated property alias for self.requires_workspace.'''
-        return self.requires_workspace
 
     def run(self, args: argparse.Namespace, unknown: List[str],
             topdir: PathType, manifest: Optional[Manifest] = None) -> None:
