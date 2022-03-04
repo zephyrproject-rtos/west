@@ -19,7 +19,7 @@ import textwrap
 from time import perf_counter
 from urllib.parse import urlparse
 
-from west.configuration import config, update_config
+from west.configuration import Configuration
 from west import log
 from west import util
 from west.commands import WestCommand, CommandError
@@ -227,8 +227,9 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
         log.small_banner(f'Creating {west_dir} and local configuration file')
         self.create(west_dir)
         os.chdir(topdir)
-        update_config('manifest', 'path', os.fspath(rel_manifest))
-        update_config('manifest', 'file', manifest_filename, topdir=topdir)
+        self.config = Configuration(topdir=topdir)
+        self.config.set('manifest.path', os.fspath(rel_manifest))
+        self.config.set('manifest.file', manifest_filename)
 
         return topdir
 
@@ -306,9 +307,9 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
         except shutil.Error as e:
             log.die(e)
         log.small_banner('setting manifest.path to', manifest_path)
-        update_config('manifest', 'path', manifest_path, topdir=topdir)
-        update_config('manifest', 'file', temp_manifest_filename,
-                      topdir=topdir)
+        self.config = Configuration(topdir=topdir)
+        self.config.set('manifest.path', manifest_path)
+        self.config.set('manifest.file', temp_manifest_filename)
 
         return topdir
 
@@ -425,7 +426,7 @@ The following arguments are available:
                     # Special-case the manifest repository while it's
                     # still showing up in the 'projects' list. Yet
                     # more evidence we should tackle #327.
-                    path = config.get('manifest', 'path')
+                    path = self.config.get('manifest.path')
                     apath = abspath(os.path.join(self.topdir, path))
                     ppath = Path(apath).as_posix()
                 else:
@@ -811,14 +812,12 @@ class Update(_ProjectCommand):
         if args.exclude_west:
             log.wrn('ignoring --exclude-west')
 
-        self.narrow = args.narrow or config.getboolean('update', 'narrow',
-                                                       fallback=False)
-        self.path_cache = args.path_cache or config.get('update', 'path-cache',
-                                                        fallback=None)
-        self.name_cache = args.name_cache or config.get('update', 'name-cache',
-                                                        fallback=None)
-        self.sync_submodules = config.getboolean('update', 'sync-submodules',
-                                                 fallback=True)
+        config = self.config
+        self.narrow = args.narrow or config.getboolean('update.narrow')
+        self.path_cache = args.path_cache or config.get('update.path-cache')
+        self.name_cache = args.name_cache or config.get('update.name-cache')
+        self.sync_submodules = config.getboolean('update.sync-submodules',
+                                                 default=True)
 
         self.group_filter: List[str] = []
 
@@ -975,7 +974,7 @@ class Update(_ProjectCommand):
                     '  Only plain "west update" can currently update them.')
 
     def fetch_strategy(self):
-        cfg = config.get('update', 'fetch', fallback=None)
+        cfg = self.config.get('update.fetch')
         if cfg is not None and cfg not in ('always', 'smart'):
             log.wrn(f'ignoring invalid config update.fetch={cfg}; '
                     'choices: always, smart')

@@ -5,11 +5,9 @@
 '''West config commands'''
 
 import argparse
-import configparser
 
 from west import log
-from west.configuration import read_config, update_config, delete_config, \
-    ConfigFile
+from west.configuration import ConfigFile
 from west.commands import WestCommand, CommandError
 
 CONFIG_DESCRIPTION = '''\
@@ -154,35 +152,33 @@ class Config(WestCommand):
             self.write(args)
 
     def list(self, args):
-        cfg = configparser.ConfigParser()
         what = args.configfile or ALL
-        read_config(configfile=what, config=cfg)
-        for s in cfg.sections():
-            for k, v in cfg[s].items():
-                log.inf(f'{s}.{k}={v}')
+        for option, value in self.config.items(configfile=what):
+            log.inf(f'{option}={value}')
 
     def delete(self, args):
-        section, key = self._sk(args)
         if args.delete_all:
-            what = ALL
+            configfiles = [ALL]
         elif args.configfile:
-            what = args.configfile
+            configfiles = [args.configfile]
         else:
-            what = None   # local or global, whichever comes first
+            # local or global, whichever comes first
+            configfiles = [LOCAL, GLOBAL]
 
-        try:
-            delete_config(section, key, configfile=what)
-        except KeyError:
-            log.dbg(f'{args.name} was not set in requested location(s)')
-            raise CommandError(returncode=1)
-        except PermissionError as pe:
-            self._perm_error(pe, what, section, key)
+        for i, configfile in enumerate(configfiles):
+            try:
+                self.config.delete(args.name, configfile=configfile)
+                return
+            except KeyError:
+                if i == len(configfiles) - 1:
+                    log.dbg(
+                        f'{args.name} was not set in requested location(s)')
+                    raise CommandError(returncode=1)
+            except PermissionError as pe:
+                self._perm_error(pe, configfile, args.name)
 
     def read(self, args):
-        section, key = self._sk(args)
-        cfg = configparser.ConfigParser()
-        read_config(configfile=args.configfile or ALL, config=cfg)
-        value = cfg.get(section, key, fallback=None)
+        value = self.config.get(args.name, configfile=args.configfile or ALL)
         if value is not None:
             log.inf(value)
         else:
@@ -190,22 +186,14 @@ class Config(WestCommand):
             raise CommandError(returncode=1)
 
     def write(self, args):
-        section, key = self._sk(args)
         what = args.configfile or LOCAL
         try:
-            update_config(section, key, args.value, configfile=what)
+            self.config.set(args.name, args.value, configfile=what)
         except PermissionError as pe:
-            self._perm_error(pe, what, section, key)
+            self._perm_error(pe, what, args.name)
 
-    def _sk(self, args):
-        name_list = args.name.split(".", 1)
-        if len(name_list) != 2:
-            self.parser.error(f"name '{args.name}' should be in the form "
-                              "<section>.<key>")
-        return name_list[0], name_list[1]
-
-    def _perm_error(self, pe, what, section, key):
+    def _perm_error(self, pe, what, name):
         rootp = ('; are you root/administrator?' if what in [SYSTEM, ALL]
                  else '')
-        log.die(f"can't update {section}.{key}: "
+        log.die(f"can't update {name}: "
                 f"permission denied when writing {pe.filename}{rootp}")
