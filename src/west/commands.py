@@ -21,7 +21,7 @@ import pykwalify
 import yaml
 
 from west import log
-from west.configuration import config as _config
+from west.configuration import Configuration
 from west.manifest import Manifest
 from west.util import escapes_directory, quote_sh_list, PathType
 
@@ -103,9 +103,12 @@ class WestCommand(ABC):
         self.requires_workspace = requires_workspace
         self.topdir: Optional[str] = None
         self.manifest = None
+        self.config = None
 
     def run(self, args: argparse.Namespace, unknown: List[str],
-            topdir: PathType, manifest: Optional[Manifest] = None) -> None:
+            topdir: PathType,
+            manifest: Optional[Manifest] = None,
+            config: Optional[Configuration] = None) -> None:
         '''Run the command.
 
         This raises `west.commands.CommandContextError` if the command
@@ -119,6 +122,8 @@ class WestCommand(ABC):
             ``self.topdir`` from `WestCommand.do_run`
         :param manifest: `west.manifest.Manifest` or ``None``,
             accessible as ``self.manifest`` from `WestCommand.do_run`
+        :param config: `west.configuration.Configuration` or ``None``,
+            accessible as ``self.config`` from `WestCommand.do_run`
         '''
         if unknown and not self.accepts_unknown_args:
             self.parser.error(f'unexpected arguments: {unknown}')
@@ -126,6 +131,7 @@ class WestCommand(ABC):
             log.die(_no_topdir_msg(os.getcwd(), self.name))
         self.topdir = os.fspath(topdir) if topdir else None
         self.manifest = manifest
+        self.config = config
         self.do_run(args, unknown)
 
     def add_parser(self, parser_adder) -> argparse.ArgumentParser:
@@ -205,6 +211,28 @@ class WestCommand(ABC):
     # error from mypy by using this workaround:
     # https://github.com/python/mypy/issues/3004#issuecomment-726022329
     manifest = property(_get_manifest, _set_manifest)
+
+    @property
+    def has_config(self) -> bool:
+        '''Property which is True if self.config is safe to access.
+        '''
+        return self._config is not None
+
+    def _get_config(self) -> Configuration:
+        '''Property for the config which was passed to run().
+
+        If `do_run` was given a *config* kwarg, it is returned.
+        Otherwise, a fatal error occurs.
+        '''
+        if self._config is None:
+            log.die(f"can't run west {self.name}; it requires config "
+                    "variables, which were not available.")
+        return self._config
+
+    def _set_config(self, config: Optional[Configuration]):
+        self._config = config
+
+    config = property(_get_config, _set_config)
 
     #
     # Other public methods
@@ -338,7 +366,7 @@ class WestExtCommandSpec:
                 f' help={repr(self.help)}'
                 f' factory={self.factory}>')
 
-def extension_commands(manifest=None):
+def extension_commands(config: Configuration, manifest: Manifest = None):
     # Get descriptions of available extension commands.
     #
     # The return value is an ordered map from project paths to lists of
@@ -352,8 +380,8 @@ def extension_commands(manifest=None):
     # :param manifest: a parsed ``west.manifest.Manifest`` object, or None
     #                  to reload a new one.
 
-    allow_extensions = _config.getboolean('commands', 'allow_extensions',
-                                          fallback=True)
+    allow_extensions = config.getboolean('commands.allow_extensions',
+                                         default=True)
     if not allow_extensions:
         return {}
 

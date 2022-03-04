@@ -221,7 +221,7 @@ class WestApp:
             self.extensions = None
             return
 
-        path_specs = extension_commands(manifest=self.manifest)
+        path_specs = extension_commands(self.config, manifest=self.manifest)
         extension_names = set()
 
         for path, specs in path_specs.items():
@@ -336,7 +336,8 @@ class WestApp:
                     self.handle_builtin_manifest_load_err(args)
 
                 cmd = self.builtins.get(args.command, self.builtins['help'])
-                cmd.run(args, unknown, self.topdir, manifest=self.manifest)
+                cmd.run(args, unknown, self.topdir, manifest=self.manifest,
+                        config=self.config)
             else:
                 self.run_extension(args.command, argv)
         except KeyboardInterrupt:
@@ -410,7 +411,8 @@ class WestApp:
         #   themselves (easy if above is OK, unnecessary if it isn't)
         set_zephyr_base(args, self.manifest, self.topdir, self.config)
 
-        command.run(args, unknown, self.topdir, manifest=self.manifest)
+        command.run(args, unknown, self.topdir, manifest=self.manifest,
+                    config=self.config)
 
 class Help(WestCommand):
     # west help <command> implementation.
