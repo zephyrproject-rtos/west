@@ -41,6 +41,7 @@ from pathlib import PureWindowsPath, Path
 import platform
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
+import warnings
 
 from west.util import west_dir, WestNotFound, PathType
 
@@ -391,13 +392,15 @@ class Configuration:
         return ret
 
 
-# Configuration values.
-#
-# Initially empty, populated in read_config(). Always having this available is
-# nice in case something checks configuration values before the configuration
-# file has been read (e.g. the log.py functions, to check color settings, and
-# tests).
+# Global parser containing configuration values, for backwards
+# compatibility. Populated in main.py to keep legacy extensions
+# working following the deprecation of this API.
 config = _configparser()
+
+def _deprecated(old_function):
+    warnings.warn(f'{old_function} is deprecated; '
+                  'use a west.configuration.Configuration object',
+                  DeprecationWarning, stacklevel=2)
 
 def read_config(configfile: Optional[ConfigFile] = None,
                 config: configparser.ConfigParser = config,
@@ -426,6 +429,8 @@ def read_config(configfile: Optional[ConfigFile] = None,
     :param config: configuration object to read into
     :param topdir: west workspace root to read local options from
     '''
+    _deprecated('read_config')
+
     if configfile is None:
         configfile = ConfigFile.ALL
     config.read(_gather_configs(configfile, topdir), encoding='utf-8')
@@ -451,6 +456,8 @@ def update_config(section: str, key: str, value: Any,
       found by searching the file system (raising WestNotFound if
       one is not found).
     '''
+    _deprecated('update_config')
+
     if configfile == ConfigFile.ALL:
         # Not possible to update ConfigFile.ALL, needs specific conf file here.
         raise ValueError(f'invalid configfile: {configfile}')
@@ -494,6 +501,8 @@ def delete_config(section: str, key: str,
       found by searching the file system (raising WestNotFound if
       one is not found).
     '''
+    _deprecated('delete_config')
+
     stop = False
     if configfile is None:
         to_check = [_location(x, topdir=topdir) for x in
