@@ -994,7 +994,7 @@ class ManifestProject(Project):
     '''
 
     def __repr__(self):
-        return (f'ManifestProject({self.name}, path={repr(self.path)}, '
+        return (f'ManifestProject(path={repr(self.path)}, '
                 f'west_commands={self.west_commands}, '
                 f'topdir={repr(self.topdir)})')
 
