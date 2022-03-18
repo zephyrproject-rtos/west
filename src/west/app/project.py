@@ -23,7 +23,7 @@ from west.configuration import Configuration
 from west import log
 from west import util
 from west.commands import WestCommand, CommandError
-from west.manifest import ImportFlag, Manifest, MANIFEST_PROJECT_INDEX, \
+from west.manifest import ImportFlag, Manifest, \
     ManifestProject, _manifest_content_at, ManifestImportFailed, \
     _ManifestImportDepth, ManifestVersionError, MalformedManifest
 from west.manifest import is_group as is_project_group
@@ -281,15 +281,13 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
                      if args.manifest_rev else '') +
                     f'  You may need to remove {west_dir} before retrying.')
 
-        # Parse the manifest to get the manifest path, if it declares one.
+        # Parse the manifest to get "self: path:", if it declares one.
         # Otherwise, use the URL. Ignore imports -- all we really
         # want to know is if there's a "self: path:" or not.
-        projects = Manifest.from_file(temp_manifest,
-                                      import_flags=ImportFlag.IGNORE,
-                                      topdir=topdir).projects
-        manifest_project = projects[MANIFEST_PROJECT_INDEX]
-        if manifest_project.path:
-            manifest_path = manifest_project.path
+        manifest = Manifest.from_data(temp_manifest.read_text(),
+                                      import_flags=ImportFlag.IGNORE)
+        if manifest.yaml_path:
+            manifest_path = manifest.yaml_path
         else:
             # We use PurePath() here in case manifest_url is a
             # windows-style path. That does the right thing in that
@@ -421,14 +419,19 @@ The following arguments are available:
             # as SHAs, unless they are specifically requested, and then
             # ensures they are only computed once.
             try:
-                if (isinstance(project, ManifestProject) and not
-                        args.manifest_path_from_yaml):
+                if isinstance(project, ManifestProject):
                     # Special-case the manifest repository while it's
                     # still showing up in the 'projects' list. Yet
                     # more evidence we should tackle #327.
-                    path = self.config.get('manifest.path')
-                    apath = abspath(os.path.join(self.topdir, path))
-                    ppath = Path(apath).as_posix()
+                    if args.manifest_path_from_yaml:
+                        path = self.manifest.yaml_path
+                        apath = (abspath(os.path.join(self.topdir, path))
+                                 if path else None)
+                        ppath = Path(apath).as_posix() if apath else None
+                    else:
+                        path = self.manifest.repo_path
+                        apath = self.manifest.repo_abspath
+                        ppath = self.manifest.repo_posixpath
                 else:
                     path = project.path
                     apath = project.abspath
@@ -528,7 +531,7 @@ class ManifestCommand(_ProjectCommand):
         # errors and printing useful messages. We re-do error checking
         # for manifest-related errors that it won't handle.
         try:
-            manifest = Manifest.from_file(topdir=self.topdir)
+            manifest = Manifest.from_topdir(topdir=self.topdir)
         except _ManifestImportDepth:
             log.die("cannot resolve manifest -- is there a loop?")
         except ManifestImportFailed as mif:

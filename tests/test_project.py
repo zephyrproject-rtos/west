@@ -382,7 +382,7 @@ def test_update_tag_to_tag(west_init_tmpdir):
 
         # Update the manifest file to point the project's revision at
         # the new tag.
-        manifest = Manifest.from_file(topdir=west_init_tmpdir)
+        manifest = Manifest.from_topdir(topdir=west_init_tmpdir)
         for p in manifest.projects:
             if p.name == 'tagged_repo':
                 p.revision = 'v2.0'
@@ -472,8 +472,9 @@ def test_update_some_with_imports(repos_tmpdir):
 
     cmd('update net-tools', cwd=ws)
     with pytest.raises(ManifestImportFailed):
-        Manifest.from_file(topdir=ws)
-    manifest = Manifest.from_file(topdir=ws, import_flags=MIF.IGNORE_PROJECTS)
+        Manifest.from_topdir(topdir=ws)
+    manifest = Manifest.from_topdir(topdir=ws,
+                                    import_flags=MIF.IGNORE_PROJECTS)
     projects = manifest.get_projects(['net-tools', 'zephyr'])
     net_tools_project = projects[0]
     zephyr_project = projects[1]
@@ -484,7 +485,7 @@ def test_update_some_with_imports(repos_tmpdir):
     assert zephyr_project.is_cloned()
 
     cmd('update', cwd=ws)
-    manifest = Manifest.from_file(topdir=ws)
+    manifest = Manifest.from_topdir(topdir=ws)
     assert manifest.get_projects(['Kconfiglib'])[0].is_cloned()
 
 def test_update_submodules_list(repos_tmpdir):
@@ -543,7 +544,8 @@ def test_update_submodules_list(repos_tmpdir):
     add_commit(net_tools, 'net-tools submodule change commit')
 
     # Get parsed data from the manifest.
-    manifest = Manifest.from_file(topdir=ws, import_flags=MIF.IGNORE_PROJECTS)
+    manifest = Manifest.from_topdir(topdir=ws,
+                                    import_flags=MIF.IGNORE_PROJECTS)
     projects = manifest.get_projects(['zephyr', 'net-tools'])
     zephyr_project = projects[0]
     net_tools_project = projects[1]
@@ -642,7 +644,8 @@ def test_update_all_submodules(repos_tmpdir):
     add_commit(zephyr, 'zephyr submodule net-tools commit')
 
     # Get parsed data from the manifest.
-    manifest = Manifest.from_file(topdir=ws, import_flags=MIF.IGNORE_PROJECTS)
+    manifest = Manifest.from_topdir(topdir=ws,
+                                    import_flags=MIF.IGNORE_PROJECTS)
     projects = manifest.get_projects(['zephyr'])
     zephyr_project = projects[0]
 
@@ -720,7 +723,8 @@ def test_update_no_submodules(repos_tmpdir):
     add_commit(zephyr, 'zephyr submodule net-tools commit')
 
     # Get parsed data from the manifest.
-    manifest = Manifest.from_file(topdir=ws, import_flags=MIF.IGNORE_PROJECTS)
+    manifest = Manifest.from_topdir(topdir=ws,
+                                    import_flags=MIF.IGNORE_PROJECTS)
     projects = manifest.get_projects(['zephyr'])
     zephyr_project = projects[0]
 
@@ -802,7 +806,8 @@ def test_update_submodules_strategy(repos_tmpdir):
     add_commit(net_tools, 'net-tools submodule change commit')
 
     # Get parsed data from the manifest.
-    manifest = Manifest.from_file(topdir=ws, import_flags=MIF.IGNORE_PROJECTS)
+    manifest = Manifest.from_topdir(topdir=ws,
+                                    import_flags=MIF.IGNORE_PROJECTS)
     projects = manifest.get_projects(['zephyr', 'net-tools'])
     zephyr_project = projects[0]
     net_tools_project = projects[1]
@@ -1801,12 +1806,12 @@ def test_import_project_release(repos_tmpdir):
     cmd(f'init -m {manifest_remote} {ws}')
     with pytest.raises(ManifestImportFailed):
         # We can't load this yet, because we haven't cloned zephyr.
-        Manifest.from_file(topdir=ws)
+        Manifest.from_topdir(topdir=ws)
 
     # Run west update and make sure we can load the manifest now.
     cmd('update', cwd=ws)
 
-    actual = Manifest.from_file(topdir=ws).projects
+    actual = Manifest.from_topdir(topdir=ws).projects
     expected = [ManifestProject(path='mp', topdir=ws),
                 Project('zephyr', zephyr,
                         revision='test-tag', topdir=ws),
@@ -1832,7 +1837,7 @@ def test_import_project_release(repos_tmpdir):
     cmd('update', cwd=ws)
 
     assert head_before == rev_parse(zephyr_ws, 'HEAD')
-    actual = Manifest.from_file(topdir=ws).projects
+    actual = Manifest.from_topdir(topdir=ws).projects
     for a, e in zip(actual, expected):
         check_proj_consistency(a, e)
     assert (zephyr_ws / 'should-not-clone').check(file=0)
@@ -1871,11 +1876,11 @@ def test_import_project_release_fork(repos_tmpdir):
 
     cmd(f'init -l {manifest_repo}')
     with pytest.raises(ManifestImportFailed):
-        Manifest.from_file(topdir=ws)
+        Manifest.from_topdir(topdir=ws)
 
     cmd('update', cwd=ws)
 
-    actual = Manifest.from_file(topdir=ws).projects
+    actual = Manifest.from_topdir(topdir=ws).projects
     expected = [ManifestProject(path='mp', topdir=ws),
                 Project('zephyr', zephyr,
                         revision='zephyr-tag', topdir=ws),
@@ -1898,7 +1903,7 @@ def test_import_project_release_fork(repos_tmpdir):
     cmd('update', cwd=ws)
 
     assert head_before == rev_parse(zephyr_ws, 'HEAD')
-    actual = Manifest.from_file(topdir=ws).projects
+    actual = Manifest.from_topdir(topdir=ws).projects
     for a, e in zip(actual, expected):
         check_proj_consistency(a, e)
     assert (zephyr_ws / 'should-not-clone').check(file=0)
@@ -1948,10 +1953,10 @@ def test_import_project_release_dir(tmpdir):
 
     cmd(f'init -l {manifest_repo}')
     with pytest.raises(ManifestImportFailed):
-        Manifest.from_file(topdir=ws)
+        Manifest.from_topdir(topdir=ws)
 
     cmd('update', cwd=ws)
-    actual = Manifest.from_file(topdir=ws).projects
+    actual = Manifest.from_topdir(topdir=ws).projects
     expected = [ManifestProject(path='mp', topdir=ws),
                 Project('imported', imported,
                         revision='import-tag', topdir=ws),
@@ -1985,11 +1990,11 @@ def test_import_project_rolling(repos_tmpdir):
 
     cmd(f'init -l {manifest_repo}')
     with pytest.raises(ManifestImportFailed):
-        Manifest.from_file(topdir=ws)
+        Manifest.from_topdir(topdir=ws)
 
     cmd('update', cwd=ws)
 
-    actual = Manifest.from_file(topdir=ws).projects
+    actual = Manifest.from_topdir(topdir=ws).projects
     expected = [ManifestProject(path='mp', topdir=ws),
                 Project('zephyr', zephyr,
                         revision='master', topdir=ws),
