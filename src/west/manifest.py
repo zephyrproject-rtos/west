@@ -547,18 +547,24 @@ class ManifestImportFailed(Exception):
 
     Attributes:
 
-    - ``project``: the Project instance with the missing manifest data
-    - ``filename``: the missing file, as a str
+    - ``project``: the Project instance with the missing manifest data;
+      None if it's from the manifest via "manifest: self: import:"
+    - ``imp``: the parsed YAML data whose import was requested
     '''
 
-    def __init__(self, project: 'Project', filename: PathType):
-        super().__init__(project, filename)
+    def __init__(self, project: Optional['Project'], imp: Any):
+        super().__init__()
         self.project = project
-        self.filename = os.fspath(filename)
+        self.imp = imp
 
     def __str__(self):
-        return (f'ManifestImportFailed: project {self.project} '
-                f'file {self.filename}')
+        if self.project is not None:
+            return (f'ManifestImportFailed: project {self.project} '
+                    f'value {self.imp}')
+        else:
+            return (f'ManifestImportFailed: manifest repository '
+                    f'value {self.imp}')
+
 
 class ManifestVersionError(Exception):
     '''The manifest required a version of west more recent than the
