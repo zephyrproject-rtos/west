@@ -7,7 +7,6 @@
 Parser and abstract data types for west manifests.
 '''
 
-import configparser
 import enum
 import errno
 import logging
@@ -18,7 +17,7 @@ import shlex
 import subprocess
 import sys
 from typing import Any, Callable, Dict, Iterable, List, NoReturn, \
-    NamedTuple, Optional, Set, Tuple, TYPE_CHECKING, Union
+    NamedTuple, Optional, Set, TYPE_CHECKING, Union
 
 from packaging.version import parse as parse_version
 import pykwalify.core
@@ -26,7 +25,7 @@ import yaml
 
 from west import util
 from west.util import PathType
-import west.configuration as cfg
+from west.configuration import Configuration, ConfigFile
 
 #
 # Public constants
@@ -159,28 +158,6 @@ def _west_commands_merge(wc1: List[str], wc2: List[str]) -> List[str]:
     else:
         return wc1 or wc2
 
-def _mpath(cp: Optional[configparser.ConfigParser] = None,
-           topdir: Optional[PathType] = None) -> Tuple[str, str]:
-    # Return the value of the manifest.path configuration option
-    # in *cp*, a ConfigParser. If not given, create a new one and
-    # load configuration options with the given *topdir* as west
-    # workspace root.
-    #
-    # TODO: write a cfg.get(section, key)
-    # wrapper, with friends for update and delete, to avoid
-    # requiring this boilerplate.
-    if cp is None:
-        cp = cfg._configparser()
-    cfg.read_config(configfile=cfg.ConfigFile.LOCAL, config=cp, topdir=topdir)
-
-    try:
-        path = cp.get('manifest', 'path')
-        filename = cp.get('manifest', 'file', fallback=_WEST_YML)
-
-        return (path, filename)
-    except (configparser.NoOptionError, configparser.NoSectionError) as e:
-        raise MalformedConfig('no "manifest.path" config option is set') from e
-
 # Manifest import handling
 
 def _default_importer(project: 'Project', file: str) -> NoReturn:
@@ -309,29 +286,52 @@ class _import_ctx(NamedTuple):
     # semantics, earlier manifests take precedence.
     group_filter: GroupFilterType
 
+    # The list of west command names provided by the manifest
+    # repository itself. This is mutable state in the same way
+    # 'projects' is. Manifests which are imported earlier get
+    # higher precedence here as usual.
+    manifest_west_commands: List[str]
+
     # The current restrictions on which projects the importing
     # manifest is interested in.
     #
     # These accumulate as we pick up additional allowlists and
-    # blocklists in 'import: <map>' values. We handle this composition
-    # using _compose_ctx_and_imap().
+    # blocklists in 'import: <map>' values.
     imap_filter: ImapFilterFnType
 
     # The current prefix which should be added to any project paths
     # as defined by all the importing manifests up to this point.
-    # These accumulate as we pick up 'import: path-prefix: ...' values,
-    # also using _compose_ctx_and_imap().
+    # These accumulate as we pick up 'import: path-prefix: ...' values.
     path_prefix: Path
 
-def _compose_ctx_and_imap(ctx: _import_ctx, imap: _import_map) -> _import_ctx:
-    # Combine the map data from "some-map" in a manifest's
-    # "import: some-map" into an existing import context type,
-    # returning the new context.
-    return _import_ctx(projects=ctx.projects,
-                       group_filter=ctx.group_filter,
-                       imap_filter=_compose_imap_filters(ctx.imap_filter,
-                                                         _imap_filter(imap)),
-                       path_prefix=ctx.path_prefix / imap.path_prefix)
+    # The absolute path to the manifest file we are currently loading.
+    # One of the following things:
+    #
+    # - the top-level manifest
+    # - a submanifest file, if loading via "self: import:"
+    # - None, if loading from data (either explicitly or recursively
+    #   via an import from a "projects:" element)
+    current_abspath: Optional[Path]
+
+    # The relative path to the manifest file we are currently loading.
+    # This is relative to the topdir in the absence of symlinks, but
+    # symlinks are a pain, so we stash the actual values we read from
+    # configuration values like manifest.path/manifest.file
+    # to make things simpler.
+    current_relpath: Optional[Path]
+
+    # The actual manifest data we are currently loading
+    current_data: Any
+
+    # The absolute path to the git repository we are currently loading
+    # current_abspath from, or None.
+    current_repo_abspath: Optional[Path]
+
+    # Callable to use when importing from "manifest: projects:".
+    project_importer: ImporterType
+
+    # Bit vector of flags that modify import behavior.
+    import_flags: 'ImportFlag'
 
 def _imap_filter_allows(imap_filter: ImapFilterFnType,
                         project: 'Project') -> bool:
@@ -419,13 +419,19 @@ def manifest_path() -> str:
         - ``FileNotFoundError`` if no manifest file exists as determined by
           ``manifest.path`` and ``manifest.file``
     '''
-    (mpath, mname) = _mpath()
-    ret = os.path.join(util.west_topdir(), mpath, mname)
+    topdir = Path(util.west_topdir(start=Path.cwd(), fall_back=True))
+    config = Configuration(topdir=topdir)
+    manifest_path = config.get('manifest.path', configfile=ConfigFile.LOCAL)
+    if manifest_path is None:
+        raise MalformedConfig('no local manifest.path option')
+    manifest_file: str = config.get('manifest.file', _WEST_YML)  # type: ignore
+    ret_path = topdir / manifest_path / manifest_file
     # It's kind of annoying to manually instantiate a FileNotFoundError.
     # This seems to be the best way.
-    if not os.path.isfile(ret):
-        raise OSError(errno.ENOENT, os.strerror(errno.ENOENT), ret)
-    return ret
+    if not ret_path.is_file():
+        raise OSError(errno.ENOENT, os.strerror(errno.ENOENT),
+                      os.fspath(ret_path))
+    return os.fspath(ret_path)
 
 def validate(data: Any) -> Dict[str, Any]:
     '''Validate manifest data
@@ -1069,305 +1075,317 @@ class Manifest:
     '''
 
     @staticmethod
+    def from_topdir(topdir: Optional[PathType] = None,
+                    config: Optional[Configuration] = None,
+                    importer: Optional[ImporterType] = None,
+                    import_flags: ImportFlag = ImportFlag.DEFAULT
+                    ) -> 'Manifest':
+        '''Manifest object factory given a workspace topdir.
+
+        The default behavior if *topdir* is not given is to find the
+        current west workspace's manifest file starting from the
+        current working directory.
+
+        :param topdir: workspace top-level directory
+        :param config: passed to Manifest()
+        :param importer: passed to Manifest()
+        :param import_flags: passed to Manifest()
+        '''
+        if topdir is None:
+            topdir = Path(util.west_topdir(start=Path.cwd(),
+                                           fall_back=False)).resolve()
+        return Manifest(topdir=topdir, config=config,
+                        importer=importer, import_flags=import_flags)
+
+    @staticmethod
     def from_file(source_file: Optional[PathType] = None,
-                  **kwargs) -> 'Manifest':
+                  importer: Optional[ImporterType] = None,
+                  import_flags: ImportFlag = ImportFlag.DEFAULT
+                  ) -> 'Manifest':
         '''Manifest object factory given a source YAML file.
 
-        The default behavior is to find the current west workspace's
-        manifest file and resolve it.
+        The default behavior if *source_file* is not given is to find
+        the current west workspace's manifest file and resolve it
+        starting from the current working directory. This matches the
+        from_topdir() behavior.
 
-        Results depend on the keyword arguments given in *kwargs*:
+        With *source_file*, the *topdir* is found starting there. As a
+        special case, this factory allows you to load a Manifest
+        from an arbitrary file in an arbitrary git repository in the
+        workspace. The ``manifest.path`` and ``manifest.file`` configuration
+        values do not have to refer to *source_file* in this case.
 
-            - If both *source_file* and *topdir* are given, the
-              returned Manifest object is based on the data in
-              *source_file*, rooted at *topdir*. The configuration
-              variable ``manifest.path`` is ignored in this case, though
-              ``manifest.group-filter`` will still be read if it exists.
-
-              This allows parsing a manifest file "as if" its project
-              hierarchy were rooted at another location in the system.
-
-            - If neither *source_file* nor *topdir* is given, the file
-              system is searched for *topdir*. That workspace's
-              ``manifest.path`` configuration option is used to find
-              *source_file*, ``topdir/<manifest.path>/<manifest.file>``.
-
-            - If only *source_file* is given, *topdir* is found
-              starting there. The directory containing *source_file*
-              doesn't have to be ``manifest.path`` in this case.
-
-            - If only *topdir* is given, that workspace's
-              ``manifest.path`` is used to find *source_file*.
+        This can be useful to load an alternative manifest file within
+        an existing workspace for purposes of comparing two manifests,
+        for example.
 
         Exceptions raised:
 
             - `west.util.WestNotFound` if no *topdir* can be found
+              starting from *source_file* or the current working directory
 
-            - `MalformedManifest` if *source_file* contains invalid
-              data
+            - CalledProcessError if the git repository containing
+              *source_file* cannot be found
 
-            - `ManifestVersionError` if this version of west is too
-              old to parse the manifest.
-
-            - `MalformedConfig` if ``manifest.path`` is needed and
-              can't be read
-
-            - ``ValueError`` if *topdir* is given but is not a west
-              workspace root
+            - Other exceptions from the Manifest constructor
 
         :param source_file: source file to load
-        :param kwargs: Manifest.__init__ keyword arguments
+        :param importer: passed to Manifest()
+        :param import_flags: passed to Manifest()
         '''
-        topdir = kwargs.get('topdir')
-
-        if topdir is None:
-            if source_file is None:
-                # neither source_file nor topdir: search the filesystem
-                # for the workspace and use its manifest.path.
-                topdir = util.west_topdir()
-                (mpath, mname) = _mpath(topdir=topdir)
-                kwargs.update({
-                    'topdir': topdir,
-                    'source_file': os.path.join(topdir, mpath, mname),
-                    'manifest_path': mpath
-                })
-            else:
-                # Just source_file: find topdir starting there.
-                # We need source_file in kwargs as that's what gets used below.
-                kwargs.update({
-                    'source_file': source_file,
-                    'topdir':
-                    util.west_topdir(start=os.path.dirname(source_file))
-                })
-        elif source_file is None:
-            # Just topdir.
-
-            # Verify topdir is a real west workspace root.
-            msg = f'topdir {topdir} is not a west workspace root'
-            try:
-                real_topdir = util.west_topdir(start=topdir, fall_back=False)
-            except util.WestNotFound:
-                raise ValueError(msg)
-            if Path(topdir) != Path(real_topdir):
-                raise ValueError(f'{msg}; but {real_topdir} is')
-
-            # Read manifest.path from topdir/.west/config, and use it
-            # to locate source_file.
-            (mpath, mname) = _mpath(topdir=topdir)
-            source_file = os.path.join(topdir, mpath, mname)
-            kwargs.update({
-                'source_file': source_file,
-                'manifest_path': mpath,
-            })
+        if source_file is None:
+            start = Path.cwd()
         else:
-            # Both source_file and topdir.
-            kwargs['source_file'] = source_file
+            source_file = Path(source_file).resolve()
+            start = source_file.parent
 
-        return Manifest(**kwargs)
+        # Find the workspace topdir.
+        topdir = Path(util.west_topdir(start=start, fall_back=False)).resolve()
+
+        # Load a Configuration.
+        if source_file is None:
+            config = Configuration(topdir=topdir)
+        else:
+            # Find the git repository we will treat as the
+            # manifest.path, chopping off the newline, performing a
+            # hopefully-safe decode, and resolving symlinks.
+            manifest_abspath = Path(subprocess.check_output(
+                ['git', 'rev-parse', '--show-toplevel'],
+                cwd=start)[:-1].decode('utf-8')).resolve()
+            manifest_path = manifest_abspath.relative_to(topdir)
+            patch_dict = {
+                'manifest.path': manifest_path,
+                'manifest.file': source_file.relative_to(manifest_abspath)
+            }
+            # Patch the Configuration object to behave as though
+            # source_file was the manifest file, as a special case.
+            config = _PatchedConfiguration(patch_dict, topdir=topdir)
+
+        return Manifest(topdir=topdir, config=config,
+                        importer=importer, import_flags=import_flags)
 
     @staticmethod
-    def from_data(source_data: ManifestDataType, **kwargs) -> 'Manifest':
+    def from_data(source_data: ManifestDataType,
+                  importer: Optional[ImporterType] = None,
+                  import_flags: ImportFlag = ImportFlag.DEFAULT
+                  ) -> 'Manifest':
         '''Manifest object factory given parsed YAML data.
 
         This factory does not read any configuration files.
 
-        Let the return value be ``m``.
+        Let the return value be ``m``. Relative project paths in ``m``
+        (like ``m.projects[1].path``) are taken from *source_data*.
+        Absolute project paths are all None.
 
-        Relative project paths in ``m`` (like ``m.projects[1].path``)
-        are taken from *source_data*.
-
-        You can pass this factory any of the *kwargs* documented for
-        `west.Manifest.__init__`. Some results in ``m`` depend on *kwargs*:
-
-            - If *topdir* is unset in *kwargs*, then all absolute paths
-              in ``m`` (like ``m.projects[1].abspath``) are ``None``.
-
-            - Otherwise, absolute paths in ``m`` are rooted at *topdir*.
-
-            - If ``source_data['manifest']['self']['path']`` is unset,
-              ``m.projects[MANIFEST_PROJECT_INDEX].path``
-              will fall back to the *manifest_path* value in *kwargs*.
-              If both of these are unset, this value is ``None``.
-
-        Returns the same exceptions as the Manifest constructor.
+        May raise the same exceptions as the Manifest constructor.
 
         :param source_data: parsed YAML data as a Python object, or a
             string with unparsed YAML data
-        :param kwargs: Manifest.__init__ keyword arguments
+        :param importer: passed to Manifest
+        :param importer: passed to Manifest
         '''
-        kwargs.update({'source_data': source_data})
-        return Manifest(**kwargs)
+        if not source_data:
+            raise MalformedManifest('manifest contains no data')
+        return Manifest(source_data=source_data, importer=importer,
+                        import_flags=import_flags)
 
-    def __init__(self, source_file: Optional[PathType] = None,
+    def __init__(self, *,  # All arguments are keyword-only.
                  source_data: Optional[ManifestDataType] = None,
-                 manifest_path: Optional[PathType] = None,
                  topdir: Optional[PathType] = None,
+                 config: Optional[Configuration] = None,
                  importer: Optional[ImporterType] = None,
                  import_flags: ImportFlag = ImportFlag.DEFAULT,
-                 **kwargs: Dict[str, Any]):
-        '''
-        Using `from_file` or `from_data` is usually easier than direct
+                 internal_import_ctx: Optional[_import_ctx] = None):
+        '''Using one of the factory methods may be easier than direct
         instantiation.
 
         Instance attributes:
 
-            - ``projects``: sequence of `Project`
+            - ``abspath``: absolute path to the manifest file, or None
 
-            - ``topdir``: west workspace top level directory, or
-              None
+            - ``posixpath``: like ``abspath``, but with slashes (``/``)
+              as separators
 
-            - ``path``: path to the manifest file itself, or None
+            - ``relative_path``: path to the manifest file relative to
+              the workspace topdir (i.e. the combined manifest.path
+              and manifest.file configuration options), or None
+
+            - ``yaml_path``: the value of the "self: path:" field in
+              the manifest YAML, or None
+
+            - ``repo_path``: relative filesystem path to the manifest
+              repository from the workspace topdir as a string, or None
+
+            - ``repo_abspath``: the absolute filesystem path to the manifest
+              repository as a string with symlinks resolved, or None
+
+            - ``repo_posixpath``: like ``repo_abspath``, but with slashes
+              as separators
+
+            - ``topdir``: the workspace top level directory as a string
+               with symlinks resolved, or None
+
+            - ``projects``: sequence of `Project` instances
 
             - ``has_imports``: bool, True if the manifest contains
-              an "import:" attribute in "self:" or "projects:"; False
-              otherwise
+              an "import:" attribute in "self:" or "projects:" that were
+              not ignored due to *import_flags*; False otherwise
 
             - ``group_filter``: a group filter value equivalent to
               the resolved manifest's "group-filter:", along with any
               values from imported manifests. This value may be simpler
               than the actual input data.
 
-        Exactly one of *source_file* and *source_data* must be given.
+        You must give exactly one of the *topdir* and *source_data* kwargs:
 
-        If *source_file* is given:
+            - Use *topdir* to load a manifest from a workspace
 
-            - If *topdir* is too, ``projects`` is rooted there.
+            - Use *source_data* to load data without any workspace
 
-            - Otherwise, *topdir* is found starting at *source_file*.
+        If *topdir* is given:
+
+            - You may pass *config* if you already have the desired
+              workspace configuration loaded. This is used to
+              find the manifest file's location from the manifest.path
+              and manifest.file options. It's your responsibility
+              to make sure *config* is properly loaded from *topdir*
+              in this case.
+
+              If you don't pass *config*, the constructor will
+              instantiate the correct Configuration object itself.
+
+            - The return value's absolute paths will be relative to
+              *topdir*. If *topdir* is not an absolute path, it will be
+              resolved first (this resolves symlinks too).
+              If it is absolute, it will not be resolved.
 
         If *source_data* is given:
 
-            - If *topdir* is too, ``projects`` is rooted there.
+            - You cannot pass *config*.
 
-            - Otherwise, there is no root: ``projects[i].abspath`` and
-              other absolute path attributes are ``None``.
+            - Manifest imports will fail unless you pass *importer*
+              or ignore them with *import_flags*.
 
-            - If ``source_data['manifest']['self']['path']`` is unset,
-              *manifest_path* is used as a fallback.
+            - All absolute paths (like ``projects[i].abspath``)
+              in the results will be ``None``.
 
-        The *importer* kwarg, if given, is a callable. It is called
-        when *source_file* requires importing manifest data that
-        aren't found locally. It will be called as:
+        The *importer* kwarg, if given, is a callable. It is used
+        as a callback by the constructor when it must import manifest
+        data that aren't found locally on the file system.
 
-        ``importer(project, file)``
+        The *importer* callback will be called as:
 
-        where ``project`` is a `Project` and ``file`` is the missing
-        file. The file's contents at refs/heads/manifest-rev should
-        usually be returned, potentially after fetching the project's
-        revision from its remote URL and updating that ref.
+            ``importer(project, file)``
 
-        The return value should be a string containing manifest data,
-        or a list of strings if ``file`` is a directory containing
-        YAML files. A return value of None will cause the import to be
-        ignored.
+        where ``project`` is a `west.manifest.Project` and ``file``
+        is the missing manifest file. The file's contents at
+        refs/heads/manifest-rev should usually be returned by the callback,
+        potentially after fetching the project's revision from its remote URL
+        and updating that ref.
+
+        The *importer* callback's return value should be a string containing
+        manifest data, or a list of strings if ``file`` is a directory
+        containing YAML files. A return value of None will cause the import
+        to be ignored.
 
         Exceptions raised:
 
             - `MalformedManifest`: if the manifest data is invalid
 
-            - `ManifestImportFailed`: if the manifest could not be
-              resolved due to import errors
+            - `ManifestImportFailed`: if an import failed
 
             - `ManifestVersionError`: if this version of west is too
-              old to parse the manifest
+              old to parse the manifest (based on its schema version)
 
-            - `WestNotFound`: if *topdir* was needed and not found
+            - ``OSError``: or subclasses, when files cannot be opened
 
             - ``ValueError``: for other invalid arguments
 
-        :param source_file: YAML file containing manifest data
         :param source_data: parsed YAML data as a Python object, or a
             string containing unparsed YAML data
-        :param manifest_path: fallback `ManifestProject` ``path``
-            attribute
-        :param topdir: used as the west workspace top level
-            directory
-        :param importer: callback to resolve missing manifest import
-            data
+        :param topdir: west workspace top level directory
+        :param config: optional pre-loaded configuration from topdir
+        :param importer: provides missing manifest import data
         :param import_flags: bit mask, controls import resolution
-        '''
-        if source_file and source_data:
-            raise ValueError('both source_file and source_data were given')
-        if not _flags_ok(import_flags):
-            raise ValueError(f'bad import_flags {import_flags:x}')
-
-        self.path: Optional[str] = None
-        '''Path to the file containing the manifest, or None if
-        created from data rather than the file system.
+        :param internal_import_ctx: for internal use only; do not use
         '''
 
-        if source_file:
-            source_file = Path(source_file)
-            source_data = source_file.read_text()
-            self.path = os.path.abspath(source_file)
+        # Initialize public state; these are overwritten later as
+        # needed.
 
-        if not source_data:
-            self._malformed('manifest contains no data')
+        self.abspath: Optional[str] = None
+        self.relative_path: Optional[str] = None
+        self.yaml_path: Optional[str] = None
+        self.repo_path: Optional[str] = None
+        self.repo_abspath: Optional[str] = None
+        self.topdir: Optional[str] = None
+        if topdir:
+            topdir = Path(topdir)
+            if topdir.is_absolute():
+                topdir_abspath: Optional[Path] = topdir
+            else:
+                topdir_abspath = Path(topdir).resolve()
+            if TYPE_CHECKING:
+                assert topdir_abspath is not None
+            self.topdir = os.fspath(topdir_abspath)
+        else:
+            topdir_abspath = None
+        self.has_imports: bool = False
+        self.group_filter: GroupFilterType = []
 
-        if isinstance(source_data, str):
-            source_data = _load(source_data)
+        # Initialize private state, some of which is also overwritten
+        # later as needed.
 
-        # Validate the manifest. Wrap a couple of the exceptions with
-        # extra context about the problematic file in case of errors,
-        # to help debugging.
+        # This backs group_filter.
+        self._disabled_groups: Set[str] = set()
+        # This backs the projects() property.
+        self._projects: List[Project] = []
+        # The "raw" (unparsed) manifest.group-filter configuration
+        # option in the local configuration file. See
+        # _config_group_filter().
+        self._raw_config_group_filter: Optional[str] = None
+        # A helper attribute we use for schema version v0.9 compatibility.
+        self._top_level_group_filter: GroupFilterType = []
+        # The manifest.path configuration option in the local
+        # configuration file, as a Path.
+        self._config_path: Optional[Path] = None
+        # These back the relevant properties.
+        self._posixpath: Optional[str] = None
+        self._repo_posixpath: Optional[str] = None
+        # Load context needed for import resolution. Do top-level
+        # argument validation and storage if self._top_level is True,
+        # but otherwise just get self._ctx from the caller.
+        if internal_import_ctx is None:
+            self._top_level: bool = True
+            self._ctx = self._top_level_init(source_data,
+                                             topdir,
+                                             topdir_abspath,
+                                             config,
+                                             importer or _default_importer,
+                                             import_flags)
+        else:
+            self._top_level = False
+            self._recursive_init(internal_import_ctx)
+            self._ctx = internal_import_ctx
+
+        # Validate the current data against the schema. Wrap a couple
+        # of the exceptions with extra context about the problematic
+        # file in case of errors, to help debugging.
+
         try:
-            validate(source_data)
+            self._ctx = self._ctx._replace(
+                current_data=validate(self._ctx.current_data))
         except ManifestVersionError as mv:
-            raise ManifestVersionError(mv.version, file=source_file) from mv
+            raise ManifestVersionError(mv.version,
+                                       file=self._ctx.current_abspath) from mv
         except MalformedManifest as mm:
             self._malformed(mm.args[0], parent=mm)
         except TypeError as te:
             self._malformed(te.args[0], parent=te)
 
-        # The above validate() and exception handling block's job is
-        # to ensure this, but pacify the type checker in a way that
-        # crashes if something goes wrong with that.
-        assert isinstance(source_data, dict)
+        # Finish loading the validated data.
 
-        self._projects: List[Project] = []
-        '''Sequence of `Project` objects representing manifest
-        projects.
-
-        Index 0 (`MANIFEST_PROJECT_INDEX`) contains a
-        `ManifestProject` representing the manifest repository. The
-        rest of the sequence contains projects in manifest file order
-        (or resolution order if the manifest contains imports).
-        '''
-
-        self.topdir: Optional[str] = None
-        '''The west workspace's top level directory, or None.'''
-        if topdir:
-            self.topdir = os.fspath(topdir)
-
-        self.has_imports: bool = False
-
-        # This will be overwritten in _load() as needed.
-        self.group_filter: GroupFilterType = []
-
-        # Private state which backs self.group_filter. This also
-        # gets overwritten as needed.
-        self._disabled_groups: Set[str] = set()
-
-        # Stash the importer and flags in instance attributes. These
-        # don't change as we recurse, so they don't belong in _import_ctx.
-        self._importer: ImporterType = importer or _default_importer
-        self._import_flags = import_flags
-
-        ctx: Optional[_import_ctx] = \
-            kwargs.get('import-context')  # type: ignore
-        if ctx is None:
-            ctx = _import_ctx(projects={},
-                              group_filter=[],
-                              imap_filter=None,
-                              path_prefix=Path('.'))
-        else:
-            assert isinstance(ctx, _import_ctx)
-
-        if manifest_path:
-            mpath: Optional[Path] = Path(manifest_path)
-        else:
-            mpath = None
-        self._load_validated(source_data['manifest'], mpath, ctx)
+        self._load_validated()
 
     def get_projects(self,
                      # any str name is also a PathType
@@ -1576,6 +1594,23 @@ class Manifest:
         return any(group not in disabled_groups for group in project.groups)
 
     @property
+    def path(self) -> Optional[str]:  # for compatibility
+        '''Deprecated. Use abspath instead.'''
+        return self.abspath
+
+    @property
+    def posixpath(self):
+        if self._posixpath is None and self.abspath is not None:
+            self._posixpath = Path(self.abspath).as_posix()
+        return self._posixpath
+
+    @property
+    def repo_posixpath(self):
+        if self._repo_posixpath is None and self.repo_abspath is not None:
+            self._repo_posixpath = Path(self.repo_abspath).as_posix()
+        return self._repo_posixpath
+
+    @property
     def _config_group_filter(self) -> GroupFilterType:
         # Private property for loading the manifest.group-filter value
         # in the local configuration file. Used by is_active.
@@ -1589,26 +1624,10 @@ class Manifest:
         # of strings) from the local configuration file if there is
         # one.
         #
-        # Returns [] if manifest.group-filter is not set and when
-        # there is no workspace.
+        # Returns [] if manifest.group-filter is not set, is empty,
+        # and when there was no workspace at __init__() time.
 
-        if not self.topdir:
-            # No workspace -> do not attempt to read config options.
-            return []
-
-        cp = cfg._configparser()
-        cfg.read_config(configfile=cfg.ConfigFile.LOCAL, config=cp,
-                        topdir=self.topdir)
-
-        if 'manifest' not in cp:
-            # We may have been created from a partially set up
-            # workspace with an explicit source_file and topdir,
-            # but no manifest.path config option set.
-            return []
-
-        raw_filter: Optional[str] = cp['manifest'].get('group-filter', None)
-
-        if not raw_filter:
+        if not self._raw_config_group_filter:
             return []
 
         # Be forgiving: allow empty strings and values with
@@ -1618,7 +1637,7 @@ class Manifest:
         # Whitespace in between groups, like "foo ,bar", is removed,
         # resulting in valid group names ['foo', 'bar'].
         ret: GroupFilterType = []
-        for item in raw_filter.split(','):
+        for item in self._raw_config_group_filter.split(','):
             stripped = item.strip()
             if not stripped:
                 # Don't emit a warning here.
@@ -1639,7 +1658,8 @@ class Manifest:
 
     def _malformed(self, complaint: str,
                    parent: Optional[Exception] = None) -> NoReturn:
-        context = (f'file: {self.path} ' if self.path else 'data')
+        context = (f'file: {self._ctx.current_abspath} '
+                   if self._ctx.current_abspath else 'data')
         args = [f'Malformed manifest {context}',
                 f'Schema file: {_SCHEMA_PATH}']
         if complaint:
@@ -1650,25 +1670,94 @@ class Manifest:
         else:
             raise exc
 
-    def _load_validated(self, manifest: Dict[str, Any],
-                        path_hint: Optional[Path],  # not PathType!
-                        ctx: _import_ctx) -> None:
-        # Initialize this instance.
-        #
-        # - manifest: manifest data, parsed and validated
-        # - path_hint: hint about where the manifest repo lives
-        # - ctx: recursive import context
+    def _top_level_init(self, source_data, topdir, topdir_abspath,
+                        config, project_importer,
+                        import_flags) -> _import_ctx:
+        # Validate the top-level arguments, perform some
+        # top-level-only early initialization, and set up the initial
+        # _import_ctx, returning it.
 
-        top_level = not bool(ctx.projects)
+        if not (topdir or source_data):
+            raise ValueError('neither topdir nor source_data were given')
+        if topdir and source_data:
+            raise ValueError('both topdir and source_data were given')
+        if source_data and config:
+            raise ValueError('both source_data and config were given')
+        if not _flags_ok(import_flags):
+            raise ValueError(f'bad import_flags {import_flags:x}')
 
-        if self.path:
-            loading_what = self.path
+        current_abspath = None
+        current_relpath = None
+        current_data = source_data
+        current_repo_abspath = None
+
+        if topdir_abspath:
+            config = config or Configuration(topdir=topdir_abspath)
+
+            def get_option(option, default=None):
+                # Gets a ConfigFile.LOCAL option from 'config'.
+                return config.get(option, default=default,
+                                  configfile=ConfigFile.LOCAL)
+
+            manifest_path_option = get_option('manifest.path')
+
+            if manifest_path_option is None:
+                raise MalformedConfig(
+                    'no local "manifest.path" config option is set')
+
+            manifest_path = Path(manifest_path_option)
+
+            if manifest_path.is_absolute():
+                _logger.warning('"manifest.path" should not be absolute: %s',
+                                manifest_path_option)
+
+            manifest_file = get_option('manifest.file', _WEST_YML)
+
+            current_relpath = manifest_path / manifest_file
+            current_abspath = topdir_abspath / current_relpath
+            current_data = current_abspath.read_text(encoding='utf-8')
+            current_repo_abspath = topdir_abspath / manifest_path
+
+            self.abspath = os.fspath(current_abspath)
+            self.relative_path = os.fspath(current_relpath)
+            self.repo_path = os.fspath(manifest_path)
+            self.repo_abspath = os.fspath(current_repo_abspath)
+            self._raw_config_group_filter = get_option('manifest.group-filter')
+            self._config_path = manifest_path
+
+        return _import_ctx(projects={},
+                           group_filter=[],
+                           manifest_west_commands=[],
+                           imap_filter=None,
+                           path_prefix=Path('.'),
+                           current_abspath=current_abspath,
+                           current_relpath=current_relpath,
+                           current_data=current_data,
+                           current_repo_abspath=current_repo_abspath,
+                           project_importer=project_importer,
+                           import_flags=import_flags)
+
+    def _recursive_init(self, ctx: _import_ctx):
+        # Set up any required state that we need while recursively
+        # resolving a manifest due to an import.
+
+        if ctx.current_repo_abspath:
+            self.repo_abspath = os.fspath(ctx.current_repo_abspath)
+
+    def _load_validated(self) -> None:
+        # Finish initializing this instance by loading data from YAML
+        # that's been validated against the schema.
+
+        if self._ctx.current_abspath:
+            loading_what: PathType = self._ctx.current_abspath
         else:
             loading_what = 'data (no file)'
 
         _logger.debug('loading %s', loading_what)
 
-        schema_version = str(manifest.get('version', SCHEMA_VERSION))
+        manifest_data = self._ctx.current_data['manifest']
+
+        schema_version = str(manifest_data.get('version', SCHEMA_VERSION))
 
         # We want to make an ordered map from project names to
         # corresponding Project instances. Insertion order into this
@@ -1679,47 +1768,51 @@ class Manifest:
         # 2. "manifest: projects:"
         # 3. Imported projects from "manifest: projects: ... import:"
 
-        # Create the ManifestProject, and import projects and
-        # group-filter data from "self:".
-        mp = self._load_self(manifest, path_hint, ctx)
+        # Load data from "self:", including resolving any self imports.
+        self._load_self(manifest_data)
 
-        # Load "group-filter:" from this manifest.
-        self_group_filter = self._load_group_filter(manifest, ctx)
+        # Load data from "group-filter:".
+        self._load_group_filter(manifest_data)
 
         # Add this manifest's projects to the map, and handle imported
         # projects and group-filter values.
         url_bases = {r['name']: r['url-base'] for r in
-                     manifest.get('remotes', [])}
-        defaults = self._load_defaults(manifest.get('defaults', {}), url_bases)
-        self._load_projects(manifest, url_bases, defaults, ctx)
+                     manifest_data.get('remotes', [])}
+        defaults = self._load_defaults(manifest_data.get('defaults', {}),
+                                       url_bases)
+        self._load_projects(manifest_data, url_bases, defaults)
 
-        # The manifest is resolved. Make sure paths are unique.
-        self._check_paths_are_unique(mp, ctx.projects, top_level)
+        # The manifest is resolved; perform post-resolution validation.
+        self._check_paths_are_unique()
+        self._check_names()
 
-        # Make sure that project names don't contain unsupported characters.
-        self._check_names(mp, ctx.projects)
+        # Set up top-level state which relies on the resolved and
+        # validated manifest.
+        if self._top_level:
+            # Create the ManifestProject instance.
+            mp = ManifestProject(
+                path=self._config_path if self.topdir else self.yaml_path,
+                west_commands=self._ctx.manifest_west_commands,
+                topdir=self.topdir)
 
-        # Save the resulting projects and initialize lookup tables.
-        self._projects = list(ctx.projects.values())
-        self._projects.insert(MANIFEST_PROJECT_INDEX, mp)
-        self._projects_by_name: Dict[str, Project] = {'manifest': mp}
-        self._projects_by_name.update(ctx.projects)
-        self._projects_by_rpath: Dict[Path, Project] = {}  # resolved paths
-        if self.topdir:
-            for i, p in enumerate(self.projects):
-                if i == MANIFEST_PROJECT_INDEX and not p.abspath:
-                    # When from_data() is called without a path hint, mp
-                    # can have a topdir but no path, and thus no abspath.
-                    continue
-                if TYPE_CHECKING:
-                    # The typing module can't tell that self.topdir
-                    # being truthy guarantees p.abspath is a str, not None.
-                    assert p.abspath
+            # Save the resulting projects and initialize lookup tables
+            # that rely on the ManifestProject existing.
+            self._projects = list(self._ctx.projects.values())
+            self._projects.insert(MANIFEST_PROJECT_INDEX, mp)
+            self._projects_by_name: Dict[str, Project] = {'manifest': mp}
+            self._projects_by_name.update(self._ctx.projects)
+            self._projects_by_rpath: Dict[Path, Project] = {}  # resolved paths
+            if self.topdir:
+                for i, p in enumerate(self.projects):
+                    if TYPE_CHECKING:
+                        # The typing module can't tell that self.topdir
+                        # being truthy guarantees p.abspath is a str, not None.
+                        assert p.abspath
 
-                self._projects_by_rpath[Path(p.abspath).resolve()] = p
+                    self._projects_by_rpath[Path(p.abspath).resolve()] = p
 
-        # Update self.group_filter
-        if top_level:
+            # Update self.group_filter
+            #
             # For schema version 0.10 or later, there's no point in
             # overwriting these attributes for anything except the top
             # level manifest: all the other ones we've loaded above
@@ -1727,18 +1820,16 @@ class Manifest:
             #
             # For schema version 0.9, we only want to warn once, at the
             # top level, if the distinction actually matters.
-            self._finalize_group_filter(self_group_filter, ctx,
-                                        schema_version)
+            self.group_filter = self._final_group_filter(schema_version)
 
         _logger.debug(f'loaded {loading_what}')
 
-    def _load_group_filter(self, manifest_data: Dict[str, Any],
-                           ctx: _import_ctx) -> GroupFilterType:
-        # Update ctx.group_filter from manifest_data.
+    def _load_group_filter(self, manifest_data: Dict[str, Any]) -> None:
+        # Update self._ctx.group_filter from manifest_data.
 
         if 'group-filter' not in manifest_data:
             _logger.debug('group-filter: unset')
-            return []
+            return
 
         raw_filter: List[RawGroupType] = manifest_data['group-filter']
         if not raw_filter:
@@ -1747,9 +1838,10 @@ class Manifest:
         group_filter = self._validated_group_filter('manifest', raw_filter)
         _logger.debug('group-filter: %s', group_filter)
 
-        ctx.group_filter[:0] = group_filter
+        self._ctx.group_filter[:0] = group_filter
 
-        return group_filter
+        if self._top_level:
+            self._top_level_group_filter = group_filter
 
     def _validated_group_filter(
             self, source: Optional[str], raw_filter: List[RawGroupType]
@@ -1782,33 +1874,39 @@ class Manifest:
 
         return ret
 
-    def _load_self(self, manifest: Dict[str, Any],
-                   path_hint: Optional[Path],
-                   ctx: _import_ctx) -> ManifestProject:
-        # Handle the "self:" section in the manifest data.
+    def _load_self(self, manifest_data: Dict[str, Any]) -> None:
+        # Handle the "self:" section in the manifest data, including
+        # import resolution and extension commands.
 
-        slf = manifest.get('self', {})
-        if 'path' in slf:
-            path = slf['path']
-            if path is None:
-                self._malformed(f'self: path: is {path}; this value '
-                                'must be nonempty if present')
-        else:
-            path = path_hint
+        slf: Optional[Dict[str, Any]] = manifest_data.get('self')
 
-        mp = ManifestProject(path=path, topdir=self.topdir,
-                             west_commands=slf.get('west-commands'))
+        if not slf:
+            return None
+
+        yaml_path = slf.get('path')
+        if 'path' in slf and not yaml_path:
+            self._malformed(f'self: path: is {yaml_path}; this value '
+                            'must be nonempty if present')
+        self.yaml_path = yaml_path
 
         imp = slf.get('import')
         if imp is not None:
-            if self._import_flags & ImportFlag.IGNORE:
-                _logger.debug('ignored self import')
-            else:
-                _logger.debug(f'resolving self import {imp}')
-                self._import_from_self(mp, imp, ctx)
-                _logger.debug('resolved self import')
+            _logger.debug(f'resolving self import {imp}')
+            self._import_from_self(imp)
+            _logger.debug('resolved self import')
 
-        return mp
+        # The current manifest data's west-comands comes first because
+        # we treat imports from self as if they are defined "before"
+        # the contents in the higher level manifest, so any west
+        # commands imported from self have higher precedence.
+        west_commands = slf.get('west-commands')
+        if west_commands:
+            assert isinstance(west_commands, str)
+            west_commands = [west_commands]
+        else:
+            west_commands = []
+        self._ctx.manifest_west_commands[:] = _west_commands_merge(
+            self._ctx.manifest_west_commands, west_commands)
 
     def _assert_imports_ok(self) -> None:
         # Sanity check that we aren't calling code that does importing
@@ -1817,10 +1915,9 @@ class Manifest:
         # Could be deleted if this feature stabilizes and we never hit
         # this assertion.
 
-        assert not self._import_flags & ImportFlag.IGNORE
+        assert not self._ctx.import_flags & ImportFlag.IGNORE
 
-    def _import_from_self(self, mp: ManifestProject, imp: Any,
-                          ctx: _import_ctx) -> None:
+    def _import_from_self(self, imp: Any) -> None:
         # Recursive helper to import projects from the manifest repository.
         #
         # The 'imp' argument is the loaded value of "foo" in "self:
@@ -1832,117 +1929,140 @@ class Manifest:
         #
         # This is unlike importing from projects -- for projects, data
         # are read from Git (treating it as a content-addressable file
-        # system) with a fallback on self._importer.
-
-        self._assert_imports_ok()
-
-        self.has_imports = True
+        # system) with a fallback on self._ctx.project_importer.
 
         imptype = type(imp)
         if imptype == bool:
             self._malformed(f'got "self: import: {imp}" of boolean')
-        elif imptype == str:
-            self._import_path_from_self(mp, imp, ctx)
+        elif self._ctx.import_flags & ImportFlag.IGNORE:
+            # If we're ignoring imports altogether, this is fine.
+            _logger.debug('ignored self import')
+            return
+        elif self.topdir is None:
+            # The import is well-formed and we aren't ignoring
+            # imports, but we have no topdir, and therefore have no
+            # good way to import this data within the existing API.
+            # Just fail instead.
+            #
+            # (We cannot pass a ManifestProject to the importer
+            # because that class is basically legacy code now, and
+            # we don't want to add any more users of it to the
+            # public west.manifest API. If someone complains about
+            # the missing feature and has a suggestion for how to
+            # generalize this that doesn't involve using
+            # ManifestProject here, we can think about it then.)
+            raise ManifestImportFailed(None, imp)
+
+        self._assert_imports_ok()
+        self.has_imports = True
+
+        if imptype == str:
+            self._import_path_from_self(imp)
         elif imptype == list:
             for subimp in imp:
-                self._import_from_self(mp, subimp, ctx)
+                self._import_from_self(subimp)
         elif imptype == dict:
-            imap = self._load_imap(imp, f'manifest file {mp.abspath}')
-            # imap may introduce additional constraints on the
-            # existing ctx, such as a stricter imap_filter or a longer
-            # path_prefix.
-            #
-            # We therefore need to compose them during the recursive import.
-            new_ctx = _compose_ctx_and_imap(ctx, imap)
-            self._import_path_from_self(mp, imap.file, new_ctx)
+            self._import_map_from_self(imp)
         else:
-            self._malformed(f'{mp.abspath}: "self: import: {imp}" '
-                            f'has invalid type {imptype}')
+            self._malformed(
+                f'"self: import: {imp}" has invalid type {imptype}')
 
-    def _import_path_from_self(self, mp: ManifestProject, imp: Any,
-                               ctx: _import_ctx) -> None:
-        if mp.abspath:
-            # Fast path, when we're working inside a fully initialized
-            # topdir.
-            repo_root = Path(mp.abspath)
+    def _import_path_from_self(self, imp: str) -> None:
+        pathobj = Path(imp)
+        if pathobj.is_absolute():
+            self._malformed(f'{imp} is an absolute path')
+        if TYPE_CHECKING:
+            assert self.repo_abspath is not None
+        pathobj_abs = (self.repo_abspath / pathobj).resolve()
+
+        if pathobj_abs.is_file():
+            _logger.debug('found submanifest file: %s', imp)
+            self._import_pathobj_from_self(pathobj_abs, pathobj)
+        elif pathobj_abs.is_dir():
+            _logger.debug('found submanifest directory: %s', imp)
+            for yml in filter(_is_yml, sorted(pathobj_abs.iterdir())):
+                _logger.debug('found submanifest file: %s', yml)
+                self._import_pathobj_from_self(yml, pathobj / yml.name)
         else:
-            # Fallback path, which is needed by at least west init. If
-            # this happens too often, something may be wrong with how
-            # we've implemented this. We'd like to avoid too many git
-            # commands, as subprocesses are slow on windows.
-            assert self.path is not None  # to ensure and satisfy type checker
-            start = Path(self.path).parent
-            _logger.debug(
-                f'searching for manifest repository root from {start}')
-            repo_root = Path(mp.git('rev-parse --show-toplevel',
-                                    capture_stdout=True,
-                                    cwd=start).
-                             stdout[:-1].      # chop off newline
-                             decode('utf-8'))  # hopefully this is safe
-        p = repo_root / imp
+            if pathobj_abs.exists():
+                hint = 'this is neither a file nor a directory'
+            else:
+                hint = 'file not found'
+            self._malformed(f'"self: import: {imp}": {hint}')
 
-        if p.is_file():
-            _logger.debug(f'found submanifest file: {p}')
-            self._import_pathobj_from_self(mp, p, ctx)
-        elif p.is_dir():
-            _logger.debug(f'found submanifest directory: {p}')
-            for yml in filter(_is_yml, sorted(p.iterdir())):
-                self._import_pathobj_from_self(mp, p / yml, ctx)
-        else:
-            # This also happens for special files like character
-            # devices, but it doesn't seem worth handling that error
-            # separately. Who would call mknod in their manifest repo?
-            self._malformed(f'{mp.abspath}: "self: import: {imp}": '
-                            f'file {p} not found')
+    def _import_pathobj_from_self(self, pathobj_abs: Path,
+                                  pathobj: Path) -> None:
+        # - pathobj_abs: the resolved path to the manifest file
+        # - pathobj: same, but relative to self.repo_abspath as obtained
+        #   from the import data
 
-    def _import_pathobj_from_self(self, mp: ManifestProject, pathobj: Path,
-                                  ctx: _import_ctx) -> None:
-        # Import a Path object, which is a manifest file in the
-        # manifest repository whose ManifestProject is mp.
-
-        # Destructively add the imported content into our 'projects'
-        # map, passing along our context. The intermediate manifest is
-        # thrown away; we're basically just using __init__ as a
-        # function here.
-        #
-        # The only thing we need to do with it is check if the
-        # submanifest has west commands, add them to mp's if so.
+        # Destructively merge imported content into self._ctx. The
+        # intermediate manifest is thrown away; we're just
+        # using __init__ as a function here.
+        child_ctx = self._ctx._replace(
+            current_abspath=pathobj_abs,
+            current_relpath=pathobj,
+            current_data=pathobj_abs.read_text(encoding='utf-8')
+        )
         try:
-            kwargs: Dict[str, Any] = {'import-context': ctx}
-            submp = Manifest(source_file=pathobj,
-                             manifest_path=mp.path,
-                             topdir=self.topdir,
-                             importer=self._importer,
-                             import_flags=self._import_flags,
-                             **kwargs).projects[MANIFEST_PROJECT_INDEX]
+            Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
         except RecursionError as e:
-            raise _ManifestImportDepth(mp, pathobj) from e
+            raise _ManifestImportDepth(None, pathobj) from e
 
-        # submp.west_commands comes first because we
-        # logically treat imports from self as if they are
-        # defined before the contents in the higher level
-        # manifest.
-        mp.west_commands = _west_commands_merge(submp.west_commands,
-                                                mp.west_commands)
+    def _import_map_from_self(self, imp: Dict) -> None:
+        # imap may introduce additional constraints on self._ctx, such
+        # as a stricter imap_filter or a longer path_prefix.
+        #
+        # We therefore need to compose them during the recursive import.
 
-    def _load_defaults(self, md: Dict, url_bases: Dict[str, str]) -> _defaults:
+        imap = self._load_imap(imp, f'manifest file {self.abspath}')
+        imap_filter = _compose_imap_filters(self._ctx.imap_filter,
+                                            _imap_filter(imap))
+        path_prefix = self._ctx.path_prefix / imap.path_prefix
+
+        pathobj = Path(imap.file)
+        if pathobj.is_absolute():
+            self._malformed(f'"self: import: {imp}" contains an absolute path')
+
+        if TYPE_CHECKING:
+            assert self.repo_abspath is not None
+        pathobj_abs = self.repo_abspath / pathobj
+        if pathobj_abs.is_dir():
+            # Use an iterator in case there are a lot of files in there.
+            to_import: Any = (f for f in sorted(pathobj_abs.iterdir())
+                              if _is_yml(f))
+        else:
+            to_import = iter([pathobj_abs])
+
+        for import_abs in to_import:
+            child_ctx = self._ctx._replace(
+                imap_filter=imap_filter,
+                path_prefix=path_prefix,
+                current_abspath=import_abs,
+                current_relpath=pathobj / import_abs.name,
+                current_data=import_abs.read_text(encoding='utf-8')
+            )
+            try:
+                Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
+            except RecursionError as e:
+                raise _ManifestImportDepth(None, import_abs) from e
+
+    def _load_defaults(self, defaults: Dict[str, Any],
+                       url_bases: Dict[str, str]) -> _defaults:
         # md = manifest defaults (dictionary with values parsed from
         # the manifest)
-        mdrem: Optional[str] = md.get('remote')
+        mdrem: Optional[str] = defaults.get('remote')
         if mdrem:
             # The default remote name, if provided, must refer to a
             # well-defined remote.
             if mdrem not in url_bases:
                 self._malformed(f'default remote {mdrem} is not defined')
-        return _defaults(mdrem, md.get('revision', _DEFAULT_REV))
+        return _defaults(mdrem, defaults.get('revision', _DEFAULT_REV))
 
     def _load_projects(self, manifest: Dict[str, Any],
                        url_bases: Dict[str, str],
-                       defaults: _defaults,
-                       ctx: _import_ctx) -> None:
-        # Load projects and add them to the list, returning
-        # information about which ones have imports that need to be
-        # processed next.
+                       defaults: _defaults) -> None:
+        # Load projects and add them to self._ctx.projects.
 
         if 'projects' not in manifest:
             return
@@ -1950,11 +2070,11 @@ class Manifest:
         have_imports = []
         names = set()
         for pd in manifest['projects']:
-            project = self._load_project(pd, url_bases, defaults, ctx)
+            project = self._load_project(pd, url_bases, defaults)
             name = project.name
 
-            if not _imap_filter_allows(ctx.imap_filter, project):
-                _logger.debug(f'project {name} in file {self.path} ' +
+            if not _imap_filter_allows(self._ctx.imap_filter, project):
+                _logger.debug(f'project {name} in file {self.abspath} ' +
                               'ignored: an importing manifest blocked or '
                               'did not allow it')
                 continue
@@ -1962,17 +2082,17 @@ class Manifest:
             if name in names:
                 # Project names must be unique within a manifest.
                 self._malformed(f'project name {name} used twice in ' +
-                                (self.path or 'the same manifest'))
+                                (self.abspath or 'the same manifest'))
             names.add(name)
 
             # Add the project to the map if it's new.
-            added = self._add_project(project, ctx.projects)
+            added = self._add_project(project)
             if added:
                 # Track project imports unless we are ignoring those.
                 imp = pd.get('import')
                 if imp:
-                    if self._import_flags & (ImportFlag.IGNORE |
-                                             ImportFlag.IGNORE_PROJECTS):
+                    if self._ctx.import_flags & (ImportFlag.IGNORE |
+                                                 ImportFlag.IGNORE_PROJECTS):
                         _logger.debug(
                             f'project {project}: ignored import ({imp})')
                     else:
@@ -1980,10 +2100,10 @@ class Manifest:
 
         # Handle imports from new projects in our "projects:" section.
         for project, imp in have_imports:
-            self._import_from_project(project, imp, ctx)
+            self._import_from_project(project, imp)
 
     def _load_project(self, pd: Dict, url_bases: Dict[str, str],
-                      defaults: _defaults, ctx: _import_ctx) -> Project:
+                      defaults: _defaults) -> Project:
         # pd = project data (dictionary with values parsed from the
         # manifest)
 
@@ -2025,7 +2145,7 @@ class Manifest:
                 'has no remote or url and no default remote is set')
 
         # The project's path needs to respect any import: path-prefix,
-        # regardless of self._import_flags. The 'ignore' type flags
+        # regardless of self._ctx.import_flags. The 'ignore' type flags
         # just mean ignore the imported data. The path-prefix in this
         # manifest affects the project no matter what.
         imp = pd.get('import', None)
@@ -2044,7 +2164,7 @@ class Manifest:
         # to POSIX style in all circumstances. If this breaks
         # anything, we can always revisit, maybe adding a 'nativepath'
         # attribute or something like that.
-        path = (ctx.path_prefix / pfx / pd.get('path', name)).as_posix()
+        path = (self._ctx.path_prefix / pfx / pd.get('path', name)).as_posix()
 
         raw_groups = pd.get('groups')
         if raw_groups:
@@ -2145,13 +2265,11 @@ class Manifest:
                         f'has type {type(submodules)}; '
                         'expected a list or boolean')
 
-    def _import_from_project(self, project: Project, imp: Any,
-                             ctx: _import_ctx):
+    def _import_from_project(self, project: Project, imp: Any):
         # Recursively resolve a manifest import from 'project'.
         #
         # - project: Project instance to import from
         # - imp: the parsed value of project's import key (string, list, etc.)
-        # - ctx: recursive import context
 
         self._assert_imports_ok()
 
@@ -2161,74 +2279,91 @@ class Manifest:
         if imptype == bool:
             # We should not have been called unless the import was truthy.
             assert imp
-            self._import_path_from_project(project, _WEST_YML, ctx)
+            self._import_path_from_project(project, _WEST_YML)
         elif imptype == str:
-            self._import_path_from_project(project, imp, ctx)
+            self._import_path_from_project(project, imp)
         elif imptype == list:
             for subimp in imp:
-                self._import_from_project(project, subimp, ctx)
+                self._import_from_project(project, subimp)
         elif imptype == dict:
-            imap = self._load_imap(imp, f'project {project.name}')
-            # Similar comments about composing ctx and imap apply here as
-            # they do in _import_from_self().
-            new_ctx = _compose_ctx_and_imap(ctx, imap)
-            self._import_path_from_project(project, imap.file, new_ctx)
+            self._import_map_from_project(project, imp)
         else:
             self._malformed(f'{project.name_and_path}: invalid import {imp} '
                             f'type: {imptype}')
 
-    def _import_path_from_project(self, project: Project, path: str,
-                                  ctx: _import_ctx) -> None:
+    def _import_path_from_project(self, project: Project, path: str) -> None:
         # Import data from git at the given path at revision manifest-rev.
-        # Fall back on self._importer if that fails.
+        # Fall back on self._ctx.project_importer if that fails.
 
         _logger.debug(f'resolving import {path} for {project}')
         imported = self._import_content_from_project(project, path)
         if imported is None:
-            # This can happen if self._importer returns None.
+            # This can happen if self._ctx.project_importer returns None.
             # It means there's nothing to do.
             return
 
         for data in imported:
-            if isinstance(data, str):
-                data = _load(data)
-                validate(data)
-            try:
-                # Force a fallback onto manifest_path=project.path.
-                # The subpath to the manifest file itself will not be
-                # available, so that's the best we can do.
-                #
-                # Perhaps there's a cleaner way to convince mypy that
-                # the validate() postcondition is that we've got a
-                # real manifest and this is safe, but maybe just
-                # fixing this hack would be best. For now, silence the
-                # type checker on this line.
-                del data['manifest']['self']['path']  # type: ignore
-            except KeyError:
-                pass
+            self._import_data_from_project(project, data, None)
 
-            # Destructively add the imported content into our 'projects'
-            # map, passing along our context.
-            try:
-                kwargs: Dict[str, Any] = {'import-context': ctx}
-                submp = Manifest(source_data=data,
-                                 manifest_path=project.path,
-                                 topdir=self.topdir,
-                                 importer=self._importer,
-                                 import_flags=self._import_flags,
-                                 **kwargs).projects[MANIFEST_PROJECT_INDEX]
-            except RecursionError as e:
-                raise _ManifestImportDepth(project, path) from e
-
-            # If the submanifest has west commands, merge them
-            # into project's.
-            project.west_commands = _west_commands_merge(
-                project.west_commands, submp.west_commands)
         _logger.debug(f'done resolving import {path} for {project}')
+
+    def _import_map_from_project(self, project: Project,
+                                 imp: Dict) -> None:
+        imap = self._load_imap(imp, f'project {project.name}')
+
+        _logger.debug(f'resolving import {imap} for {project}')
+
+        imported = self._import_content_from_project(project, imap.file)
+        if imported is None:
+            return
+
+        for data in imported:
+            self._import_data_from_project(project, data, imap)
+
+        _logger.debug(f'done resolving import {imap} for {project}')
+
+    def _import_data_from_project(self, project: Project, data: Any,
+                                  imap: Optional[_import_map]) -> None:
+        # Destructively add the imported data into our 'projects' map.
+
+        if imap is not None:
+            imap_filter = _compose_imap_filters(self._ctx.imap_filter,
+                                                _imap_filter(imap))
+            imap_path_prefix = imap.path_prefix
+        else:
+            imap_filter = self._ctx.imap_filter
+            imap_path_prefix = '.'
+
+        child_ctx = self._ctx._replace(
+            imap_filter=imap_filter,
+            path_prefix=self._ctx.path_prefix / imap_path_prefix,
+            current_abspath=None,
+            current_relpath=None,
+            current_data=data,
+            current_repo_abspath=(Path(project.abspath) if project.abspath
+                                  else None),
+            # If the manifest data we imported from the project has
+            # west commands, they logically belong to 'project'.
+            # We therefore use a separate list for tracking them
+            # from our current list.
+            manifest_west_commands=[]
+        )
+        try:
+            submanifest = Manifest(topdir=self.topdir,
+                                   internal_import_ctx=child_ctx)
+        except RecursionError as e:
+            raise _ManifestImportDepth(None, imap.file if imap else None) \
+                from e
+
+        # Patch up any extension commands in the imported data
+        # by allocating them to the project.
+        project.west_commands = _west_commands_merge(
+            project.west_commands,
+            submanifest._ctx.manifest_west_commands)
 
     def _import_content_from_project(self, project: Project,
                                      path: str) -> ImportedContentType:
-        if not (self._import_flags & ImportFlag.FORCE_PROJECTS) and \
+        if not (self._ctx.import_flags & ImportFlag.FORCE_PROJECTS) and \
            project.is_cloned():
             try:
                 content = _manifest_content_at(project, path)
@@ -2238,15 +2373,15 @@ class Manifest:
                 # We may need to fetch a new manifest-rev, e.g. if
                 # revision is a branch that didn't used to have a
                 # manifest, but now does.
-                content = self._importer(project, path)
+                content = self._ctx.project_importer(project, path)
             except subprocess.CalledProcessError:
                 # We may need a new manifest-rev, e.g. if revision is
                 # a SHA we don't have yet.
-                content = self._importer(project, path)
+                content = self._ctx.project_importer(project, path)
         else:
             # We need to clone this project, or we were specifically
             # asked to use the importer.
-            content = self._importer(project, path)
+            content = self._ctx.project_importer(project, path)
 
         if isinstance(content, str):
             content = [content]
@@ -2303,35 +2438,26 @@ class Manifest:
 
         return ret
 
-    def _add_project(self, project: Project,
-                     projects: Dict[str, Project]) -> bool:
+    def _add_project(self, project: Project) -> bool:
         # Add the project to our map if we don't already know about it.
         # Return the result.
 
-        if project.name not in projects:
-            projects[project.name] = project
+        if project.name not in self._ctx.projects:
+            self._ctx.projects[project.name] = project
             _logger.debug('added project %s path %s revision %s%s%s',
                           project.name, project.path, project.revision,
-                          (f' from {self.path}' if self.path else ''),
+                          (f' from {self.abspath}' if self.abspath else ''),
                           (f' groups {project.groups}' if project.groups
                            else ''))
             return True
         else:
             return False
 
-    def _check_paths_are_unique(self, mp: ManifestProject,
-                                projects: Dict[str, Project],
-                                top_level: bool) -> None:
-        # TODO: top_level can probably go away when #327 is done.
-
+    def _check_paths_are_unique(self) -> None:
         ppaths: Dict[Path, Project] = {}
-        if mp.path:
-            mppath: Optional[Path] = Path(mp.path)
-        else:
-            mppath = None
-        for name, project in projects.items():
+        for name, project in self._ctx.projects.items():
             pp = Path(project.path)
-            if top_level and pp == mppath:
+            if self._top_level and pp == self._config_path:
                 self._malformed(f'project {name} path "{project.path}" '
                                 'is taken by the manifest repository')
             other = ppaths.get(pp)
@@ -2340,14 +2466,12 @@ class Manifest:
                                 f'is taken by project {other.name}')
             ppaths[pp] = project
 
-    def _check_names(self, mp: ManifestProject,
-                     projects: Dict[str, Project]) -> None:
-        for name, project in projects.items():
+    def _check_names(self) -> None:
+        for name, project in self._ctx.projects.items():
             if _INVALID_PROJECT_NAME_RE.search(name):
                 self._malformed(f'Invalid project name: {name}')
 
-    def _finalize_group_filter(self, self_group_filter: GroupFilterType,
-                               ctx: _import_ctx, schema_version: str):
+    def _final_group_filter(self, schema_version: str):
         # Update self.group_filter based on the schema version.
 
         if schema_version == '0.9':
@@ -2357,7 +2481,7 @@ class Manifest:
             #
             # Hopefully no users ever actually see this warning.
 
-            if self_group_filter or ctx.group_filter:
+            if self._ctx.group_filter:
                 _logger.warning(
                     "providing deprecated group-filter semantics "
                     "due to explicit 'manifest: version: 0.9'; "
@@ -2367,9 +2491,22 @@ class Manifest:
                 # Set attribute for white-box testing the above warning.
                 self._legacy_group_filter_warned = True
 
-            _update_disabled_groups(self._disabled_groups, self_group_filter)
-            self.group_filter = self_group_filter
+            return self._top_level_group_filter
 
         else:
-            _update_disabled_groups(self._disabled_groups, ctx.group_filter)
-            self.group_filter = [f'-{g}' for g in self._disabled_groups]
+            _update_disabled_groups(self._disabled_groups,
+                                    self._ctx.group_filter)
+            return [f'-{g}' for g in self._disabled_groups]
+
+class _PatchedConfiguration(Configuration):
+    # Internal helper class that fakes out manifest.path and manifest.file
+    # to point at another location. Used by Manifest.from_file().
+
+    def __init__(self, patch_dict, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__patch_dict = patch_dict
+
+    def get(self, option, **kwargs):
+        if option in self.__patch_dict:
+            return self.__patch_dict[option]
+        return super().get(option, **kwargs)

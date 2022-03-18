@@ -116,7 +116,8 @@ class WestApp:
             return
 
         try:
-            self.manifest = Manifest.from_file(topdir=self.topdir)
+            self.manifest = Manifest.from_topdir(topdir=self.topdir,
+                                                 config=self.config)
         except (ManifestVersionError, MalformedManifest, MalformedConfig,
                 FileNotFoundError, ManifestImportFailed) as e:
             # Defer exception handling to WestCommand.run(), which uses
