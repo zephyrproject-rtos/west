@@ -149,10 +149,8 @@ def test_validate():
     with pytest.raises(MalformedManifest):
         validate({'not-manifest': 'foo'})
 
-    assert validate({'manifest':
-                     {'projects':
-                      [{'name': 'p',
-                        'url': 'u'}]}}) is None
+    manifest_data = {'manifest': {'projects': [{'name': 'p', 'url': 'u'}]}}
+    assert validate(manifest_data) == manifest_data
 
     with pytest.raises(MalformedManifest):
         # White box:
@@ -174,7 +172,11 @@ def test_validate():
       projects:
       - name: p
         url: u
-    ''') is None
+    ''') == {
+        'manifest': {
+            'projects': [{'name': 'p', 'url': 'u'}]
+        }
+    }
 
 def test_not_both_args():
     with pytest.raises(ValueError) as e:
