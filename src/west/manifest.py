@@ -427,28 +427,33 @@ def manifest_path() -> str:
         raise OSError(errno.ENOENT, os.strerror(errno.ENOENT), ret)
     return ret
 
-def validate(data: Any) -> None:
+def validate(data: Any) -> Dict[str, Any]:
     '''Validate manifest data
 
     Raises an exception if the manifest data is not valid for loading
     by this version of west. (Actually attempting to load the data may
     still fail if the it contains imports which cannot be resolved.)
 
+    Returns the validated YAML dictionary, which may be convenient if
+    the argument was a str and further loading is required.
+
     :param data: YAML manifest data as a string or object
     '''
     if isinstance(data, str):
         as_str = data
-        data = _load(data)
-        if not isinstance(data, dict):
+        as_dict = _load(data)
+        if not isinstance(as_dict, dict):
             raise MalformedManifest(f'{as_str} is not a YAML dictionary')
-    elif not isinstance(data, dict):
+    elif isinstance(data, dict):
+        as_dict = data
+    else:
         raise TypeError(f'{data} has type {type(data)}, '
-                        'expected valid manifest data')
+                        'expected raw str data or a loaded YAML dict')
 
-    if 'manifest' not in data:
+    if 'manifest' not in as_dict:
         raise MalformedManifest('manifest data contains no "manifest" key')
 
-    data = data['manifest']
+    data = as_dict['manifest']
 
     # Make sure this version of west can load this manifest data.
     # This has to happen before the schema check -- later schemas
@@ -485,6 +490,8 @@ def validate(data: Any) -> None:
                             schema_files=[_SCHEMA_PATH]).validate()
     except pykwalify.errors.SchemaError as se:
         raise MalformedManifest(se.msg) from se
+
+    return as_dict
 
 # A 'raw' element in a project 'groups:' or manifest 'group-filter:' list,
 # as it is parsed from YAML, before conversion to string.
