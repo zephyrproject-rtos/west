@@ -1367,7 +1367,7 @@ class Manifest:
             mpath: Optional[Path] = Path(manifest_path)
         else:
             mpath = None
-        self._load(source_data['manifest'], mpath, ctx)
+        self._load_validated(source_data['manifest'], mpath, ctx)
 
     def get_projects(self,
                      # any str name is also a PathType
@@ -1517,6 +1517,14 @@ class Manifest:
 
     @property
     def projects(self) -> List[Project]:
+        '''Sequence of `Project` objects representing manifest
+        projects.
+
+        Index 0 (`MANIFEST_PROJECT_INDEX`) contains a
+        `ManifestProject` representing the manifest repository. The
+        rest of the sequence contains projects in manifest file order
+        (or resolution order if the manifest contains imports).
+        '''
         return self._projects
 
     def is_active(self, project: Project,
@@ -1548,9 +1556,8 @@ class Manifest:
             # now.
             return True
 
-        # Load manifest.group-filter from the configuration file if we
-        # haven't already. Only do this once so we don't hit the file
-        # system for every project when looping over the manifest.
+        # Parse manifest.group-filter from the configuration file if we
+        # haven't already.
         cfg_gf = self._config_group_filter
 
         # Figure out what the disabled groups are. Skip reallocation
@@ -1578,7 +1585,7 @@ class Manifest:
         return self._cfg_gf
 
     def _load_config_group_filter(self) -> GroupFilterType:
-        # Load and return manifest.group-filter (converted to a list
+        # Parse the raw manifest.group-filter (converted to a list
         # of strings) from the local configuration file if there is
         # one.
         #
@@ -1614,8 +1621,7 @@ class Manifest:
         for item in raw_filter.split(','):
             stripped = item.strip()
             if not stripped:
-                # Don't emit a warning here. This avoids warnings if
-                # the option is set to an empty string.
+                # Don't emit a warning here.
                 continue
             if not stripped[0].startswith(('-', '+')):
                 _logger.warning(
@@ -1644,9 +1650,9 @@ class Manifest:
         else:
             raise exc
 
-    def _load(self, manifest: Dict[str, Any],
-              path_hint: Optional[Path],  # not PathType!
-              ctx: _import_ctx) -> None:
+    def _load_validated(self, manifest: Dict[str, Any],
+                        path_hint: Optional[Path],  # not PathType!
+                        ctx: _import_ctx) -> None:
         # Initialize this instance.
         #
         # - manifest: manifest data, parsed and validated
@@ -1660,7 +1666,7 @@ class Manifest:
         else:
             loading_what = 'data (no file)'
 
-        _logger.debug(f'loading {loading_what}')
+        _logger.debug('loading %s', loading_what)
 
         schema_version = str(manifest.get('version', SCHEMA_VERSION))
 
