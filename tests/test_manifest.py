@@ -589,9 +589,31 @@ def test_self_userdata(tmpdir):
     ''')
     foo, bar = m.get_projects(['manifest', 'bar'])
 
+    assert m.userdata == {'key': 'value'}
     assert foo.userdata == {'key': 'value'}
     assert bar.userdata is None
     assert 'userdata' in foo.as_dict()
+    assert 'userdata' not in bar.as_dict()
+
+
+def test_self_missing_userdata(tmpdir):
+    m = M('''
+    defaults:
+      remote: r
+    remotes:
+      - name: r
+        url-base: base
+    projects:
+    - name: bar
+    self:
+      path: foo
+    ''')
+    foo, bar = m.get_projects(['manifest', 'bar'])
+
+    assert m.userdata is None
+    assert foo.userdata is None
+    assert bar.userdata is None
+    assert 'userdata' not in foo.as_dict()
     assert 'userdata' not in bar.as_dict()
 
 
