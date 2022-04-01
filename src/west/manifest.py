@@ -1361,7 +1361,7 @@ class Manifest:
         self._posixpath: Optional[str] = None
         self._repo_posixpath: Optional[str] = None
         # This backs the userdata property
-        self._userdata: Optional[Any] = None
+        self.userdata: Any = None
         # Load context needed for import resolution. Do top-level
         # argument validation and storage if self._top_level is True,
         # but otherwise just get self._ctx from the caller.
@@ -1803,7 +1803,7 @@ class Manifest:
             mp = ManifestProject(
                 path=self._config_path if self.topdir else self.yaml_path,
                 west_commands=self._ctx.manifest_west_commands,
-                topdir=self.topdir, userdata=self._userdata)
+                topdir=self.topdir, userdata=self.userdata)
 
             # Save the resulting projects and initialize lookup tables
             # that rely on the ManifestProject existing.
@@ -1906,7 +1906,7 @@ class Manifest:
             _logger.debug('resolved self import')
 
         userdata = slf.get('userdata')
-        self._userdata = userdata
+        self.userdata = userdata
 
         # The current manifest data's west-comands comes first because
         # we treat imports from self as if they are defined "before"
