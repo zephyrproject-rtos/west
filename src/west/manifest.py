@@ -1190,7 +1190,7 @@ class Manifest:
         :param source_data: parsed YAML data as a Python object, or a
             string with unparsed YAML data
         :param importer: passed to Manifest
-        :param importer: passed to Manifest
+        :param import_flags: passed to Manifest
         '''
         if not source_data:
             raise MalformedManifest('manifest contains no data')
