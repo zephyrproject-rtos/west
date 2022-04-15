@@ -1143,12 +1143,15 @@ class Manifest:
         '''
         if source_file is None:
             start = Path.cwd()
+            fall_back = True
         else:
             source_file = Path(source_file).resolve()
             start = source_file.parent
+            fall_back = False
 
         # Find the workspace topdir.
-        topdir = Path(util.west_topdir(start=start, fall_back=False)).resolve()
+        topdir = Path(util.west_topdir(start=start,
+                                       fall_back=fall_back)).resolve()
 
         # Load a Configuration.
         if source_file is None:
