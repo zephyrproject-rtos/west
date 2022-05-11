@@ -230,7 +230,7 @@ class Configuration:
             return [self._global]
         elif configfile == ConfigFile.LOCAL:
             if self._local is None:
-                raise RuntimeError('local configuration file not found')
+                raise MalformedConfig('local configuration file not found')
             return [self._local]
         else:
             raise ValueError(configfile)
