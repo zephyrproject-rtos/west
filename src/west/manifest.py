@@ -25,7 +25,7 @@ import yaml
 
 from west import util
 from west.util import PathType
-from west.configuration import Configuration, ConfigFile
+from west.configuration import Configuration, ConfigFile, MalformedConfig
 
 #
 # Public constants
@@ -541,11 +541,6 @@ def is_group(raw_group: RawGroupType) -> bool:
 
 class MalformedManifest(Exception):
     '''Manifest parsing failed due to invalid data.
-    '''
-
-class MalformedConfig(Exception):
-    '''The west configuration was malformed in a way that made a
-    manifest operation fail.
     '''
 
 class ManifestImportFailed(Exception):
