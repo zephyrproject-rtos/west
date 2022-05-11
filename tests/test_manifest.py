@@ -25,6 +25,7 @@ from west.manifest import Manifest, Project, ManifestProject, \
     MalformedManifest, ManifestVersionError, ManifestImportFailed, \
     manifest_path, ImportFlag, validate, MANIFEST_PROJECT_INDEX, \
     _ManifestImportDepth, is_group, SCHEMA_VERSION
+from west.configuration import MalformedConfig
 
 # White box checks for the schema version.
 from west.manifest import _VALID_SCHEMA_VERS
@@ -1017,7 +1018,7 @@ def test_from_bad_topdir(tmpdir):
     # If we give a bad temporary directory that isn't a workspace
     # root, that should also fail.
 
-    with pytest.raises(RuntimeError) as e:
+    with pytest.raises(MalformedConfig) as e:
         Manifest.from_topdir(topdir=tmpdir)
     assert 'local configuration file not found' in str(e.value)
 
