@@ -45,6 +45,10 @@ import warnings
 
 from west.util import west_dir, WestNotFound, PathType
 
+class MalformedConfig(Exception):
+    '''The west configuration was malformed.
+    '''
+
 def _configparser():            # for internal use
     return configparser.ConfigParser(allow_no_value=True)
 
