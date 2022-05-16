@@ -700,11 +700,16 @@ def set_zephyr_base(args, manifest, topdir, config):
         zb_prefer = config.get('zephyr.base-prefer')
         rel_zb_config = config.get('zephyr.base')
         if rel_zb_config is None:
+            # Try to find a project named 'zephyr', or with path
+            # 'zephyr' inside the workspace.
             projects = None
             try:
-                projects = manifest.get_projects(['zephyr'])
+                projects = manifest.get_projects(['zephyr'], allow_paths=False)
             except ValueError:
-                pass
+                try:
+                    projects = manifest.get_projects([Path(topdir) / 'zephyr'])
+                except ValueError:
+                    pass
             if projects:
                 zephyr = projects[0]
                 config.set('zephyr.base', zephyr.path)
