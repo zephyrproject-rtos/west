@@ -192,8 +192,8 @@ class WestApp:
                 if args.command == 'update':
                     return      # that's fine
 
-                p, f = self.mle.project, self.mle.filename
-                ctxt = f'  Missing file: "{f}"'
+                p, imp = self.mle.project, self.mle.imp
+                ctxt = f'  Failed importing "{imp}"'
                 if not isinstance(p, ManifestProject):
                     # Try to be more helpful by explaining exactly
                     # what west.manifest needs to happen before we can
@@ -204,7 +204,7 @@ class WestApp:
                     ctxt += '  Hint: for this to work:\n'
                     ctxt += f'          - {p.name} must be cloned\n'
                     ctxt += (f'          - its {MANIFEST_REV_BRANCH} ref '
-                             'must point to a commit with the missing file\n')
+                             'must point to a commit with the import data\n')
                     ctxt += '        To fix, run:\n'
                     ctxt += '          west update'
 
