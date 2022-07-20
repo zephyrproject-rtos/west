@@ -119,7 +119,7 @@ class WestApp:
             self.manifest = Manifest.from_topdir(topdir=self.topdir,
                                                  config=self.config)
         except (ManifestVersionError, MalformedManifest, MalformedConfig,
-                FileNotFoundError, ManifestImportFailed) as e:
+                ManifestImportFailed, FileNotFoundError) as e:
             # Defer exception handling to WestCommand.run(), which uses
             # handle_builtin_manifest_load_err() to decide what to do.
             #
@@ -182,10 +182,6 @@ class WestApp:
             if isinst(MalformedManifest, MalformedConfig):
                 log.die('\n  '.join(["can't load west manifest"] +
                                     list(self.mle.args)))
-            elif isinst(FileNotFoundError):
-                # This should ordinarily only happen when the top
-                # level manifest is not found.
-                log.die(f"file not found: {self.mle.filename}")
             elif isinst(_ManifestImportDepth):
                 log.die('failed, likely due to manifest import loop')
             elif isinst(ManifestImportFailed):
@@ -210,6 +206,10 @@ class WestApp:
 
                 log.die(f'failed manifest import in {p.name_and_path}\n' +
                         ctxt)
+            elif isinst(FileNotFoundError):
+                # This should ordinarily only happen when the top
+                # level manifest is not found.
+                log.die(f"file not found: {self.mle.filename}")
             else:
                 log.die('internal error:',
                         f'unhandled manifest load exception: {self.mle}')
