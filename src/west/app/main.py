@@ -119,7 +119,7 @@ class WestApp:
             self.manifest = Manifest.from_topdir(topdir=self.topdir,
                                                  config=self.config)
         except (ManifestVersionError, MalformedManifest, MalformedConfig,
-                ManifestImportFailed, FileNotFoundError) as e:
+                ManifestImportFailed, FileNotFoundError, PermissionError) as e:
             # Defer exception handling to WestCommand.run(), which uses
             # handle_builtin_manifest_load_err() to decide what to do.
             #
@@ -210,6 +210,8 @@ class WestApp:
                 # This should ordinarily only happen when the top
                 # level manifest is not found.
                 log.die(f"file not found: {self.mle.filename}")
+            elif isinst(PermissionError):
+                log.die(f"permission denied: {self.mle.filename}")
             else:
                 log.die('internal error:',
                         f'unhandled manifest load exception: {self.mle}')
