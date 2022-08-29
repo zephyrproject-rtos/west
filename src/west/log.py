@@ -3,18 +3,31 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-'''Provides common methods for printing messages to display to the user.
+'''Deprecated due to its use of global state, which makes
+west harder to unit test. See:
 
-WestCommand instances should generally use the functions in this
-module rather than calling print() directly if possible, as these
-respect the ``color.ui`` configuration option and verbosity level.
+  https://github.com/zephyrproject-rtos/west/issues/149
+
+We will keep this in place for a long time, however, since extension
+commands are using these functions. Removal won't come until west v1.0
+at the earliest.
+
+In the future, commands should use equivalent WestCommand methods
+instead. For example, use WestCommand.dbg() instead of west.log.dbg(),
+and so forth.
+
+Provides common methods for printing messages to display to the user
+which respect the ``color.ui`` configuration option and verbosity
+level. These were formerly encouraged for WestCommand instances.
 '''
+
+import sys
+from typing import NoReturn
+import warnings
 
 from west import configuration as config
 
 import colorama
-import sys
-from typing import NoReturn
 
 VERBOSE_NONE = 0
 '''Default verbosity level, no dbg() messages printed.'''
@@ -40,6 +53,11 @@ WRN_COLOR = colorama.Fore.LIGHTYELLOW_EX
 #: Color used (when applicable) for printing with err() and die()
 ERR_COLOR = colorama.Fore.LIGHTRED_EX
 
+def deprecated():
+    warnings.warn('The west.log API is deprecated; '
+                  'use an equivalent west.commands.WestCommand API routine',
+                  DeprecationWarning, stacklevel=3)
+
 def set_verbosity(value):
     '''Set the logging verbosity level.
 
@@ -56,6 +74,7 @@ def dbg(*args, level=VERBOSE_NORMAL):
 
     The message is only printed if level is at least the current
     verbosity level.'''
+    deprecated()
     if level > VERBOSE:
         return
     print(*args)
@@ -68,6 +87,7 @@ def inf(*args, colorize=False):
                      is undefined or true, and stdout is a terminal, then
                      the message is printed in green.
     '''
+    deprecated()
 
     if not _use_colors():
         colorize = False
@@ -88,11 +108,13 @@ def banner(*args):
     '''Prints args as a "banner" at inf() level.
 
     The args are prefixed with '=== ' and colorized by default.'''
+    deprecated()
     inf('===', *args, colorize=True)
 
 def small_banner(*args):
     '''Prints args as a smaller banner(), i.e. prefixed with '-- ' and
     not colorized.'''
+    deprecated()
     inf('---', *args, colorize=False)
 
 def wrn(*args):
@@ -104,6 +126,7 @@ def wrn(*args):
 
     If the configuration option ``color.ui`` is undefined or true and
     stdout is a terminal, then the message is printed in yellow.'''
+    deprecated()
 
     if _use_colors():
         print(WRN_COLOR, end='', file=sys.stderr)
@@ -125,6 +148,7 @@ def err(*args, fatal=False):
 
     If the configuration option ``color.ui`` is undefined or true and
     stdout is a terminal, then the message is printed in red.'''
+    deprecated()
 
     if _use_colors():
         print(ERR_COLOR, end='', file=sys.stderr)
@@ -143,6 +167,7 @@ def die(*args, exit_code=1) -> NoReturn:
 
     Equivalent to ``die(*args, fatal=True)``, followed by an attempt to
     abort with the given *exit_code*.'''
+    deprecated()
     err(*args, fatal=True)
     sys.exit(exit_code)
 
@@ -156,6 +181,7 @@ def msg(*args, color=None, stream=sys.stdout):
     If color.ui is disabled, the message will still be printed, but
     without color.
     '''
+    deprecated()
     if color is None:
         raise ValueError('no color was given')
 
@@ -169,6 +195,7 @@ def msg(*args, color=None, stream=sys.stdout):
 
 def use_color():
     '''Returns True if the configuration requests colored output.'''
+    deprecated()
     return _use_colors(warn=False)
 
 _COLOR_UI_WARNED = False
