@@ -407,7 +407,7 @@ def _ext_specs(project):
         # outside of the project.
         if escapes_directory(spec_file, project.abspath):
             raise ExtensionCommandError(
-                f'west-commands file {cmd} '
+                hint=f'west-commands file {cmd} '
                 f'escapes project path {project.path}')
 
         # The project may not be cloned yet, or this might be coming
@@ -439,7 +439,7 @@ def _ext_specs_from_desc(project, commands_desc):
     # Verify the YAML's python file doesn't escape the project directory.
     if escapes_directory(py_file, project.abspath):
         raise ExtensionCommandError(
-            f'extension command python file "{commands_desc["file"]}" '
+            hint=f'extension command python file "{commands_desc["file"]}" '
             f'escapes project path {project.path}')
 
     # Create the command thunks.
