@@ -224,7 +224,11 @@ class WestApp:
             self.extensions = None
             return
 
-        path_specs = extension_commands(self.config, manifest=self.manifest)
+        try:
+            path_specs = extension_commands(self.config,
+                                            manifest=self.manifest)
+        except ExtensionCommandError as ece:
+            self.handle_extension_command_error(ece, None)
         extension_names = set()
 
         for path, specs in path_specs.items():
@@ -250,6 +254,24 @@ class WestApp:
                 self.extensions[spec.name] = spec
 
             self.extension_groups[path] = filtered
+
+    def handle_extension_command_error(self, ece, args):
+        if args is not None:
+            msg = f"extension command \"{args.command}\" couldn't be run"
+        else:
+            msg = "could not load extension command(s)"
+        if ece.hint:
+            msg += '\n  Hint: ' + ece.hint
+
+        if args is not None and args.verbose >= log.VERBOSE_EXTREME:
+            log.err(msg, fatal=True)
+            log.banner('Traceback (enabled by -vvv):')
+            traceback.print_exc()
+        else:
+            tb_file = dump_traceback()
+            msg += f'\n  See {tb_file} for a traceback.'
+            log.err(msg, fatal=True)
+        sys.exit(ece.returncode)
 
     def setup_parsers(self):
         # Set up and install command-line argument parsers.
@@ -355,19 +377,7 @@ class WestApp:
                 traceback.print_exc()
             sys.exit(cpe.returncode)
         except ExtensionCommandError as ece:
-            msg = f"extension command \"{args.command}\" couldn't be run"
-            if ece.hint:
-                msg += '\n  Hint: ' + ece.hint
-
-            if args.verbose >= log.VERBOSE_EXTREME:
-                log.err(msg, fatal=True)
-                log.banner('Traceback (enabled by -vvv):')
-                traceback.print_exc()
-            else:
-                tb_file = dump_traceback()
-                msg += f'\n  See {tb_file} for a traceback.'
-                log.err(msg, fatal=True)
-            sys.exit(ece.returncode)
+            self.handle_extension_command_error(ece, args)
         except CommandError as ce:
             # No need to dump_traceback() here. The command is responsible
             # for logging its own errors.
