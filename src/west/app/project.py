@@ -20,9 +20,8 @@ from time import perf_counter
 from urllib.parse import urlparse
 
 from west.configuration import Configuration
-from west import log
 from west import util
-from west.commands import WestCommand, CommandError
+from west.commands import WestCommand, CommandError, Verbosity
 from west.manifest import ImportFlag, Manifest, \
     ManifestProject, _manifest_content_at, ManifestImportFailed, \
     _ManifestImportDepth, ManifestVersionError, MalformedManifest
@@ -73,12 +72,12 @@ class _ProjectCommand(WestCommand):
             # Die with an error message on unknown or uncloned projects.
             unknown, uncloned = ve.args
             if unknown:
-                die_unknown(unknown)
+                self._die_unknown(unknown)
             elif only_cloned and uncloned:
                 s = 's' if len(uncloned) > 1 else ''
                 names = ' '.join(p.name for p in uncloned)
-                log.die(f'uncloned project{s}: {names}.\n'
-                        '  Hint: run "west update" and retry.')
+                self.die(f'uncloned project{s}: {names}.\n'
+                         '  Hint: run "west update" and retry.')
             else:
                 # Should never happen, but re-raise to fail fast and
                 # preserve a stack trace, to encourage a bug report.
@@ -94,22 +93,29 @@ class _ProjectCommand(WestCommand):
         elif len(failed) < 20:
             s = 's:' if len(failed) > 1 else ''
             projects = ', '.join(f'{p.name}' for p in failed)
-            log.err(f'{self.name} failed for project{s} {projects}')
+            self.err(f'{self.name} failed for project{s} {projects}')
         else:
-            log.err(f'{self.name} failed for multiple projects; see above')
+            self.err(f'{self.name} failed for multiple projects; see above')
         raise CommandError(1)
 
     def _setup_logging(self, args):
         logger = logging.getLogger('west.manifest')
 
-        verbose = min(args.verbose, log.VERBOSE_EXTREME)
-        if verbose >= log.VERBOSE_NORMAL:
+        if self.verbosity >= Verbosity.INF:
             level = logging.DEBUG
         else:
             level = logging.INFO
 
         logger.setLevel(level)
-        logger.addHandler(ProjectCommandLogHandler())
+        logger.addHandler(ProjectCommandLogHandler(self))
+
+    def _die_unknown(self, unknown):
+        # Scream and die about unknown projects.
+
+        s = 's' if len(unknown) > 1 else ''
+        names = ' '.join(unknown)
+        self.die(f'unknown project name{s}/path{s}: {names}\n'
+                 '  Hint: use "west list" to list all projects.')
 
 class Init(_ProjectCommand):
 
@@ -182,11 +188,15 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
                     This forces west to search for a workspace there.
                     Try unsetting ZEPHYR_BASE and re-running this command.''')
             else:
-                msg = ''
+                west_dir = Path(self.topdir) / '.west'
+                msg = ("\n  Hint: if you do not want a workspace there, \n"
+                       "  remove this directory and re-run this command:\n\n"
+                       f"  {west_dir}")
+
             self.die_already(self.topdir, msg)
 
         if args.local and (args.manifest_url or args.manifest_rev):
-            log.die('-l cannot be combined with -m or --mr')
+            self.die('-l cannot be combined with -m or --mr')
 
         self.die_if_no_git()
 
@@ -197,14 +207,14 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
         else:
             topdir = self.bootstrap(args)
 
-        log.banner(f'Initialized. Now run "west update" inside {topdir}.')
+        self.banner(f'Initialized. Now run "west update" inside {topdir}.')
 
     def die_already(self, where, also=None):
-        log.die(f'already initialized in {where}, aborting.{also or ""}')
+        self.die(f'already initialized in {where}, aborting.{also or ""}')
 
     def local(self, args) -> Path:
         if args.manifest_rev is not None:
-            log.die('--mr cannot be used with -l')
+            self.die('--mr cannot be used with -l')
 
         # We need to resolve this to handle the case that args.directory
         # is '.'. In that case, Path('.').parent is just Path('.') instead of
@@ -219,12 +229,12 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
         west_dir = topdir / WEST_DIR
 
         if not manifest_file.is_file():
-            log.die(f'can\'t init: no {manifest_filename} found in '
-                    f'{manifest_dir}')
+            self.die(f'can\'t init: no {manifest_filename} found in '
+                     f'{manifest_dir}')
 
-        log.banner('Initializing from existing manifest repository',
-                   rel_manifest)
-        log.small_banner(f'Creating {west_dir} and local configuration file')
+        self.banner('Initializing from existing manifest repository',
+                    rel_manifest)
+        self.small_banner(f'Creating {west_dir} and local configuration file')
         self.create(west_dir)
         os.chdir(topdir)
         self.config = Configuration(topdir=topdir)
@@ -235,7 +245,7 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
 
     def bootstrap(self, args) -> Path:
         topdir = Path(abspath(args.directory or os.getcwd()))
-        log.banner('Initializing in', topdir)
+        self.banner('Initializing in', topdir)
 
         manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
         if args.manifest_rev:
@@ -257,10 +267,10 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
         # Clone the manifest repository into a temporary directory.
         tempdir: Path = west_dir / 'manifest-tmp'
         if tempdir.is_dir():
-            log.dbg('removing existing temporary manifest directory', tempdir)
+            self.dbg('removing existing temporary manifest directory', tempdir)
             shutil.rmtree(tempdir)
         try:
-            log.small_banner(
+            self.small_banner(
                 f'Cloning manifest repository from {manifest_url}' +
                 (f', rev. {args.manifest_rev}' if args.manifest_rev else ''))
 
@@ -274,12 +284,12 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
         temp_manifest_filename = args.manifest_file or 'west.yml'
         temp_manifest = tempdir / temp_manifest_filename
         if not temp_manifest.is_file():
-            log.die(f'can\'t init: no {temp_manifest_filename} found in '
-                    f'{tempdir}\n'
-                    f'  Hint: check --manifest-url={manifest_url}' +
-                    (f' and --manifest-rev={args.manifest_rev}'
-                     if args.manifest_rev else '') +
-                    f'  You may need to remove {west_dir} before retrying.')
+            self.die(f'can\'t init: no {temp_manifest_filename} found in '
+                     f'{tempdir}\n'
+                     f'  Hint: check --manifest-url={manifest_url}' +
+                     (f' and --manifest-rev={args.manifest_rev}'
+                      if args.manifest_rev else '') +
+                     f'  You may need to remove {west_dir} before retrying.')
 
         # Parse the manifest to get "self: path:", if it declares one.
         # Otherwise, use the URL. Ignore imports -- all we really
@@ -297,14 +307,14 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
 
         manifest_abspath = topdir / manifest_path
 
-        log.dbg('moving', tempdir, 'to', manifest_abspath,
-                level=log.VERBOSE_EXTREME)
+        self.dbg('moving', tempdir, 'to', manifest_abspath,
+                 level=Verbosity.DBG_EXTREME)
         manifest_abspath.parent.mkdir(parents=True, exist_ok=True)
         try:
             shutil.move(os.fspath(tempdir), os.fspath(manifest_abspath))
         except shutil.Error as e:
-            log.die(e)
-        log.small_banner('setting manifest.path to', manifest_path)
+            self.die(e)
+        self.small_banner('setting manifest.path to', manifest_path)
         self.config = Configuration(topdir=topdir)
         self.config.set('manifest.path', manifest_path)
         self.config.set('manifest.file', temp_manifest_filename)
@@ -315,11 +325,11 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
         try:
             directory.mkdir(parents=True, exist_ok=exist_ok)
         except PermissionError:
-            log.die(f'Cannot initialize in {directory}: permission denied')
+            self.die(f'Cannot initialize in {directory}: permission denied')
         except FileExistsError:
-            log.die(f'Cannot initialize in {directory}: it already exists')
+            self.die(f'Cannot initialize in {directory}: it already exists')
         except Exception as e:
-            log.die(f"Can't create {directory}: {e}")
+            self.die(f"Can't create {directory}: {e}")
 
 class List(_ProjectCommand):
     def __init__(self):
@@ -386,8 +396,9 @@ The following arguments are available:
             self.die_if_no_git()
 
             if not project.is_cloned():
-                log.die(f'cannot get sha for uncloned project {project.name}; '
-                        f'run "west update {project.name}" and retry')
+                self.die(
+                    f'cannot get sha for uncloned project {project.name}; '
+                    f'run "west update {project.name}" and retry')
             elif isinstance(project, ManifestProject):
                 return f'{"N/A":40}'
             else:
@@ -408,7 +419,7 @@ The following arguments are available:
             # --all or named some projects explicitly.
             if not (args.all or args.projects or
                     self.manifest.is_active(project)):
-                log.dbg(f'{project.name}: skipping inactive project')
+                self.dbg(f'{project.name}: skipping inactive project')
                 continue
 
             # Spelling out the format keys explicitly here gives us
@@ -452,15 +463,15 @@ The following arguments are available:
                 # The raised KeyError seems to just put the first
                 # invalid argument in the args tuple, regardless of
                 # how many unrecognizable keys there were.
-                log.die(f'unknown key "{e.args[0]}" in format string '
-                        f'{shlex.quote(args.format)}')
+                self.die(f'unknown key "{e.args[0]}" in format string '
+                         f'{shlex.quote(args.format)}')
             except IndexError:
                 self.parser.print_usage()
-                log.die(f'invalid format string {shlex.quote(args.format)}')
+                self.die(f'invalid format string {shlex.quote(args.format)}')
             except subprocess.CalledProcessError:
-                log.die(f'subprocess failed while listing {project.name}')
+                self.die(f'subprocess failed while listing {project.name}')
 
-            log.inf(result, colorize=False)
+            self.inf(result, colorize=False)
 
 class ManifestCommand(_ProjectCommand):
     # The slightly weird naming is to avoid a conflict with
@@ -533,12 +544,12 @@ class ManifestCommand(_ProjectCommand):
         try:
             manifest = Manifest.from_topdir(topdir=self.topdir)
         except _ManifestImportDepth:
-            log.die("cannot resolve manifest -- is there a loop?")
+            self.die("cannot resolve manifest -- is there a loop?")
         except ManifestImportFailed as mif:
-            log.die(f"manifest import failed\n  Project: {mif.project}\n  "
-                    f"File: {mif.filename}")
+            self.die(f"manifest import failed\n  Project: {mif.project}\n  "
+                     f"File: {mif.filename}")
         except (MalformedManifest, ManifestVersionError) as e:
-            log.die('\n  '.join(str(arg) for arg in e.args))
+            self.die('\n  '.join(str(arg) for arg in e.args))
         dump_kwargs = {'default_flow_style': False,
                        'sort_keys': False}
 
@@ -549,7 +560,7 @@ class ManifestCommand(_ProjectCommand):
         elif args.freeze:
             self._dump(args, manifest.as_frozen_yaml(**dump_kwargs))
         elif args.path:
-            log.inf(manifest.path)
+            self.inf(manifest.path)
         else:
             # Can't happen.
             raise RuntimeError(f'internal error: unhandled args {args}')
@@ -586,7 +597,7 @@ class Diff(_ProjectCommand):
         no_diff = 0
         # We may need to force git to use colors if the user wants them,
         # which it won't do ordinarily since stdout is not a terminal.
-        color = ['--color=always'] if log.use_color() else []
+        color = ['--color=always'] if self.color_ui else []
         for project in self._cloned_projects(args, only_active=not args.all):
             # Use paths that are relative to the base directory to make it
             # easier to see where the changes are
@@ -597,15 +608,15 @@ class Diff(_ProjectCommand):
                              check=False)
             if cp.returncode == 0:
                 no_diff += 1
-            if cp.returncode == 1 or log.VERBOSE > log.VERBOSE_NONE:
-                log.banner(f'diff for {project.name_and_path}:')
-                log.inf(cp.stdout.decode('utf-8'))
+            if cp.returncode == 1 or self.verbosity >= Verbosity.DBG:
+                self.banner(f'diff for {project.name_and_path}:')
+                self.inf(cp.stdout.decode('utf-8'))
             elif cp.returncode:
                 failed.append(project)
         if failed:
             self._handle_failed(args, failed)
-        elif log.VERBOSE <= log.VERBOSE_NONE:
-            log.inf(f"Empty diff in {no_diff} projects.")
+        elif self.verbosity <= Verbosity.INF:
+            self.inf(f"Empty diff in {no_diff} projects.")
 
 class Status(_ProjectCommand):
     def __init__(self):
@@ -644,10 +655,11 @@ class Status(_ProjectCommand):
             # In verbose mode, we always print output.
 
             try:
-                if not (log.VERBOSE or self.should_print_for(project)):
+                if not (self.verbosity >= Verbosity.DBG or
+                        self.should_print_for(project)):
                     continue
 
-                log.banner(f'status of {project.name_and_path}:')
+                self.banner(f'status of {project.name_and_path}:')
                 project.git('status', extra_args=user_args)
             except subprocess.CalledProcessError:
                 failed.append(project)
@@ -684,7 +696,7 @@ class Status(_ProjectCommand):
             except ValueError:
                 # In case this isn't issue35182, handle the exception
                 # anyway.
-                log.wrn(
+                self.wrn(
                     f'{project.name}: internal error; got ValueError '
                     'from Popen.communicate() when checking status. '
                     'Ignoring it, but please report this to the west '
@@ -813,7 +825,7 @@ class Update(_ProjectCommand):
 
         self.args = args
         if args.exclude_west:
-            log.wrn('ignoring --exclude-west')
+            self.wrn('ignoring --exclude-west')
 
         config = self.config
         self.narrow = args.narrow or config.getboolean('update.narrow')
@@ -827,11 +839,11 @@ class Update(_ProjectCommand):
         def handle(group_filter_item):
             item = group_filter_item.strip()
             if not item.startswith(('-', '+')):
-                log.die(f'invalid --group-filter item {item}: '
-                        'must start with - or +')
+                self.die(f'invalid --group-filter item {item}: '
+                         'must start with - or +')
             if not is_project_group(item[1:]):
-                log.die(f'invalid --group-filter item {item}: '
-                        f'"{item[1:]}" is not a valid group name')
+                self.die(f'invalid --group-filter item {item}: '
+                         f'"{item[1:]}" is not a valid group name')
             self.group_filter.append(item)
 
         for item in args.group_filter:
@@ -866,7 +878,7 @@ class Update(_ProjectCommand):
                 continue
             try:
                 if not self.project_is_active(project):
-                    log.dbg(f'{project.name}: skipping inactive project')
+                    self.dbg(f'{project.name}: skipping inactive project')
                     continue
                 self.update(project)
                 self.updated.add(project.name)
@@ -877,7 +889,7 @@ class Update(_ProjectCommand):
     def update_importer(self, project, path):
         if isinstance(project, ManifestProject):
             if not project.is_cloned():
-                log.die("manifest repository {project.abspath} was deleted")
+                self.die("manifest repository {project.abspath} was deleted")
         else:
             # There's no need to call self.project_is_active(),
             # because the Manifest API guarantees that 'groups' cannot
@@ -899,17 +911,17 @@ class Update(_ProjectCommand):
             # is a total fire hose.
             name = project.name
             sha = project.sha(QUAL_MANIFEST_REV)
-            if log.VERBOSE < log.VERBOSE_EXTREME:
+            if self.verbosity < Verbosity.DBG_EXTREME:
                 suggest_vvv = ('\n'
                                '        Use "west -vvv update" to debug.')
             else:
                 suggest_vvv = ''
-            log.die(f"can't import from project {name}\n"
-                    f'  Expected to import from {path} at revision {sha}\n'
-                    f'  Hint: possible manifest file fixes for {name}:\n'
-                    f'          - set "revision:" to a git ref with this file '
-                    f'at URL {project.url}\n'
-                    '          - remove the "import:"' + suggest_vvv)
+            self.die(f"can't import from project {name}\n"
+                     f'  Expected to import from {path} at revision {sha}\n'
+                     f'  Hint: possible manifest file fixes for {name}:\n'
+                     f'          - set "revision:" to a git ref with this '
+                     f'file at URL {project.url}\n'
+                     '          - remove the "import:"' + suggest_vvv)
 
     def update_some(self):
         # The 'west update PROJECT [...]' style invocation is only
@@ -960,27 +972,27 @@ class Update(_ProjectCommand):
         try:
             self.manifest = Manifest.from_file()
         except ManifestImportFailed:
-            log.die('one or more projects are unknown or defined via '
-                    'imports; please run plain "west update".')
+            self.die('one or more projects are unknown or defined via '
+                     'imports; please run plain "west update".')
 
         _, unknown = projects_unknown(self.manifest, ids)
         if unknown:
-            die_unknown(unknown)
+            self._die_unknown(unknown)
         else:
             # All of the ids are known projects, but some of them
             # are not defined in the manifest repository.
             mr_unknown_set = set(mr_unknown)
             from_projects = [p for p in ids if p in mr_unknown_set]
-            log.die('refusing to update project: ' +
-                    " ".join(from_projects) + '\n' +
-                    '  It or they were resolved via project imports.\n'
-                    '  Only plain "west update" can currently update them.')
+            self.die('refusing to update project: ' +
+                     " ".join(from_projects) + '\n' +
+                     '  It or they were resolved via project imports.\n'
+                     '  Only plain "west update" can currently update them.')
 
     def fetch_strategy(self):
         cfg = self.config.get('update.fetch')
         if cfg is not None and cfg not in ('always', 'smart'):
-            log.wrn(f'ignoring invalid config update.fetch={cfg}; '
-                    'choices: always, smart')
+            self.wrn(f'ignoring invalid config update.fetch={cfg}; '
+                     'choices: always, smart')
             cfg = None
         if self.args.fetch_strategy:
             return self.args.fetch_strategy
@@ -1023,7 +1035,7 @@ class Update(_ProjectCommand):
             stats = None
         take_stats = stats is not None
 
-        log.banner(f'updating {project.name_and_path}:')
+        self.banner(f'updating {project.name_and_path}:')
 
         # Make sure we've got a project to work with.
         self.ensure_cloned(project, stats, take_stats)
@@ -1055,8 +1067,8 @@ class Update(_ProjectCommand):
         if self.args.keep_descendants and is_ancestor:
             # A descendant is currently checked out and keep_descendants was
             # given, so there's nothing more to do.
-            log.inf(f'west update: left descendant branch '
-                    f'"{current_branch}" checked out; current status:')
+            self.inf(f'west update: left descendant branch '
+                     f'"{current_branch}" checked out; current status:')
             if take_stats:
                 start = perf_counter()
             project.git('status')
@@ -1064,7 +1076,7 @@ class Update(_ProjectCommand):
                 stats['get current status'] = perf_counter - start
         elif try_rebase:
             # Attempt a rebase.
-            log.inf(f'west update: rebasing to {MANIFEST_REV} {sha}')
+            self.inf(f'west update: rebasing to {MANIFEST_REV} {sha}')
             if take_stats:
                 start = perf_counter()
             project.git('rebase ' + QUAL_MANIFEST_REV)
@@ -1078,7 +1090,8 @@ class Update(_ProjectCommand):
             project.git('checkout --detach ' + sha)
             if take_stats:
                 stats['checkout new manifest-rev'] = perf_counter() - start
-            _post_checkout_help(project, current_branch, sha, is_ancestor)
+            self.post_checkout_help(project, current_branch,
+                                    sha, is_ancestor)
 
         # Update project submodules, if it has any.
         if take_stats:
@@ -1093,9 +1106,39 @@ class Update(_ProjectCommand):
             slop = update_total - sum(stats.values())
             stats['other work'] = slop
             stats['TOTAL'] = update_total
-            log.inf('performance statistics:')
+            self.inf('performance statistics:')
             for stat, value in stats.items():
-                log.inf(f'  {stat}: {value} sec')
+                self.inf(f'  {stat}: {value} sec')
+
+    def post_checkout_help(self, project, branch, sha, is_ancestor):
+        # Print helpful information to the user about a project that
+        # might have just left a branch behind.
+
+        if branch == 'HEAD':
+            # If there was no branch checked out, there are no
+            # additional diagnostics that need emitting.
+            return
+
+        rel = relpath(project.abspath)
+        if is_ancestor:
+            # If the branch we just left behind is a descendant of
+            # the new HEAD (e.g. if this is a topic branch the
+            # user is working on and the remote hasn't changed),
+            # print a message that makes it easy to get back,
+            # no matter where in the workspace os.getcwd() is.
+            self.wrn(f'left behind {project.name} branch "{branch}"; '
+                     f'to switch back to it (fast forward):\n'
+                     f'  git -C {rel} checkout {branch}')
+            self.dbg('(To do this automatically in the future,',
+                     'use "west update --keep-descendants".)')
+        else:
+            # Tell the user how they could rebase by hand, and
+            # point them at west update --rebase.
+            self.wrn(f'left behind {project.name} branch "{branch}"; '
+                     f'to rebase onto the new HEAD:\n'
+                     f'  git -C {rel} rebase {sha} {branch}')
+            self.dbg('(To do this automatically in the future,',
+                     'use "west update --rebase".)')
 
     def ensure_cloned(self, project, stats, take_stats):
         # update() helper. Make sure project is cloned and initialized.
@@ -1121,7 +1164,7 @@ class Update(_ProjectCommand):
         cache_dir = self.project_cache(project)
 
         if cache_dir is None:
-            log.small_banner(f'{project.name}: initializing')
+            self.small_banner(f'{project.name}: initializing')
 
             init_cmd = ['init', project.abspath]
             # Silence the very verbose and repetitive init.defaultBranch
@@ -1138,7 +1181,7 @@ class Update(_ProjectCommand):
             # The user is therefore free to change the URL of this remote.
             project.git(f'remote add -- {project.remote_name} {project.url}')
         else:
-            log.small_banner(f'{project.name}: cloning from {cache_dir}')
+            self.small_banner(f'{project.name}: cloning from {cache_dir}')
             # Clone the project from a local cache repository. Set the
             # remote name to the value that would be used without a
             # cache.
@@ -1174,25 +1217,25 @@ class Update(_ProjectCommand):
         if self.name_cache is not None:
             maybe = Path(self.name_cache) / project.name
             if maybe.is_dir():
-                log.dbg(
+                self.dbg(
                     f'found {project.name} in --name-cache {self.name_cache}',
-                    level=log.VERBOSE_VERY)
+                    level=Verbosity.DBG_MORE)
                 return os.fspath(maybe)
             else:
-                log.dbg(
+                self.dbg(
                     f'{project.name} not in --name-cache {self.name_cache}',
-                    level=log.VERBOSE_VERY)
+                    level=Verbosity.DBG_MORE)
         elif self.path_cache is not None:
             maybe = Path(self.path_cache) / project.path
             if maybe.is_dir():
-                log.dbg(
+                self.dbg(
                     f'found {project.path} in --path-cache {self.path_cache}',
-                    level=log.VERBOSE_VERY)
+                    level=Verbosity.DBG_MORE)
                 return os.fspath(maybe)
             else:
-                log.dbg(
+                self.dbg(
                     f'{project.path} not in --path-cache {self.path_cache}',
-                    level=log.VERBOSE_VERY)
+                    level=Verbosity.DBG_MORE)
 
         return None
 
@@ -1203,7 +1246,7 @@ class Update(_ProjectCommand):
         if self.fs == 'always' or _rev_type(project) not in ('tag', 'commit'):
             self.fetch(project, stats, take_stats)
         else:
-            log.dbg('skipping unnecessary fetch')
+            self.dbg('skipping unnecessary fetch')
             if take_stats:
                 start = perf_counter()
             _update_manifest_rev(project, f'{project.revision}^{{commit}}')
@@ -1250,7 +1293,7 @@ class Update(_ProjectCommand):
             refspec = project.revision
             next_manifest_rev = 'FETCH_HEAD^{commit}'
 
-        log.small_banner(f'{project.name}: fetching, need revision {rev}')
+        self.small_banner(f'{project.name}: fetching, need revision {rev}')
         # --tags is required to get tags if we're not run as 'west
         # update --narrow', since the remote is specified as a URL.
         tags = (['--tags'] if not self.narrow else [])
@@ -1325,8 +1368,7 @@ class Update(_ProjectCommand):
             if take_stats:
                 stats['checkout new manifest-rev'] = perf_counter() - start
 
-    @staticmethod
-    def manifest_rev_sha(project, stats, take_stats):
+    def manifest_rev_sha(self, project, stats, take_stats):
         # update() helper. Get the SHA for manifest-rev.
 
         try:
@@ -1337,8 +1379,8 @@ class Update(_ProjectCommand):
                 stats['get new manifest-rev SHA'] = perf_counter() - start
         except subprocess.CalledProcessError:
             # This is a sign something's really wrong. Add more help.
-            log.err(f'no SHA for branch {MANIFEST_REV} '
-                    f'in {project.name_and_path}; was the branch deleted?')
+            self.err(f'no SHA for branch {MANIFEST_REV} '
+                     f'in {project.name_and_path}; was the branch deleted?')
             raise
 
     def decide_update_strategy(self, project, sha, stats, take_stats):
@@ -1352,7 +1394,7 @@ class Update(_ProjectCommand):
             stats['get current branch HEAD'] = perf_counter() - start
         current_branch = cp.stdout.decode('utf-8').strip()
         if not current_branch:
-            log.die(
+            self.die(
                 f"Unable to retrieve ref for 'HEAD' in project "
                 f"{project.name!r}. It is possible the project has a tag or "
                 f"branch with the name 'HEAD'. If so, please delete it.")
@@ -1413,7 +1455,7 @@ class ForAll(_ProjectCommand):
 
         failed = []
         for project in self._cloned_projects(args, only_active=not args.all):
-            log.banner(
+            self.banner(
                 f'running "{args.subcommand}" in {project.name_and_path}:')
             rc = subprocess.Popen(args.subcommand, shell=True,
                                   cwd=project.abspath).wait()
@@ -1437,7 +1479,7 @@ class Topdir(_ProjectCommand):
         return self._parser(parser_adder)
 
     def do_run(self, args, user_args):
-        log.inf(PurePath(self.topdir).as_posix())
+        self.inf(PurePath(self.topdir).as_posix())
 
 class SelfUpdate(_ProjectCommand):
     def __init__(self):
@@ -1450,7 +1492,7 @@ class SelfUpdate(_ProjectCommand):
         return self._parser(parser_adder)
 
     def do_run(self, args, user_args):
-        log.die(self.description)
+        self.die(self.description)
 
 #
 # Private helper routines.
@@ -1553,36 +1595,6 @@ def _head_ok(project):
     return project.git('show-ref --quiet --head /',
                        check=False).returncode == 0
 
-def _post_checkout_help(project, branch, sha, is_ancestor):
-    # Print helpful information to the user about a project that
-    # might have just left a branch behind.
-
-    if branch == 'HEAD':
-        # If there was no branch checked out, there are no
-        # additional diagnostics that need emitting.
-        return
-
-    rel = relpath(project.abspath)
-    if is_ancestor:
-        # If the branch we just left behind is a descendant of
-        # the new HEAD (e.g. if this is a topic branch the
-        # user is working on and the remote hasn't changed),
-        # print a message that makes it easy to get back,
-        # no matter where in the workspace os.getcwd() is.
-        log.wrn(f'left behind {project.name} branch "{branch}"; '
-                f'to switch back to it (fast forward):\n'
-                f'  git -C {rel} checkout {branch}')
-        log.dbg('(To do this automatically in the future,',
-                'use "west update --keep-descendants".)')
-    else:
-        # Tell the user how they could rebase by hand, and
-        # point them at west update --rebase.
-        log.wrn(f'left behind {project.name} branch "{branch}"; '
-                f'to rebase onto the new HEAD:\n'
-                f'  git -C {rel} rebase {sha} {branch}')
-        log.dbg('(To do this automatically in the future,',
-                'use "west update --rebase".)')
-
 def projects_unknown(manifest, projects):
     # Retrieve the projects with get_projects(project,
     # only_cloned=False). Return a pair: (projects, unknown)
@@ -1598,14 +1610,6 @@ def projects_unknown(manifest, projects):
         if not unknown:
             raise   # only_cloned is False, so this "can't happen"
         return (None, unknown)
-
-def die_unknown(unknown):
-    # Scream and die about unknown projects.
-
-    s = 's' if len(unknown) > 1 else ''
-    names = ' '.join(unknown)
-    log.die(f'unknown project name{s}/path{s}: {names}\n'
-            '  Hint: use "west list" to list all projects.')
 
 #
 # Special files and directories in the west workspace.
@@ -1684,22 +1688,23 @@ class ProjectCommandLogFormatter(logging.Formatter):
 
 class ProjectCommandLogHandler(logging.Handler):
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, command):
+        super().__init__()
+        self.command = command
         self.setFormatter(ProjectCommandLogFormatter())
 
     def emit(self, record):
         fmt = self.format(record)
         lvl = record.levelno
         if lvl > logging.CRITICAL:
-            log.die(fmt)
+            self.command.die(fmt)
         elif lvl >= logging.ERROR:
-            log.err(fmt)
+            self.command.err(fmt)
         elif lvl >= logging.WARNING:
-            log.wrn(fmt)
+            self.command.wrn(fmt)
         elif lvl >= logging.INFO:
-            log.inf(fmt)
+            self.command.inf(fmt)
         elif lvl >= logging.DEBUG:
-            log.dbg(fmt)
+            self.command.dbg(fmt)
         else:
-            log.dbg(fmt, level=log.VERBOSE_EXTREME)
+            self.command.dbg(fmt, level=Verbosity.DBG_EXTREME)
