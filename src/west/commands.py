@@ -6,6 +6,7 @@
 from abc import ABC, abstractmethod
 import argparse
 from collections import OrderedDict
+from dataclasses import dataclass
 import importlib.util
 import itertools
 import os
@@ -22,7 +23,7 @@ import yaml
 
 from west import log
 from west.configuration import Configuration
-from west.manifest import Manifest
+from west.manifest import Manifest, Project
 from west.util import escapes_directory, quote_sh_list, PathType
 
 '''\
@@ -340,31 +341,60 @@ class WestCommand(ABC):
 # implementation detail.
 #
 
+@dataclass
+class _ExtFactory:
+
+    py_file: str
+    name: str
+    attr: str
+
+    def __call__(self):
+        # Append the python file's directory to sys.path. This lets
+        # its code import helper modules in a natural way.
+        py_dir = os.path.dirname(self.py_file)
+        sys.path.append(py_dir)
+
+        # Load the module containing the command. Convert only
+        # expected exceptions to ExtensionCommandError.
+        try:
+            mod = _commands_module_from_file(self.py_file)
+        except ImportError as ie:
+            raise ExtensionCommandError(
+                hint=f'could not import {self.py_file}') from ie
+
+        # Get the attribute which provides the WestCommand subclass.
+        try:
+            cls = getattr(mod, self.attr)
+        except AttributeError as ae:
+            raise ExtensionCommandError(
+                hint=f'no attribute {self.attr} in {self.py_file}') from ae
+
+        # Create the command instance and return it.
+        try:
+            return cls()
+        except Exception as e:
+            raise ExtensionCommandError(
+                hint='command constructor threw an exception') from e
+
+@dataclass
 class WestExtCommandSpec:
     # An object which allows instantiating a west extension.
 
-    def __init__(self, name, project, help, factory):
-        self.name = name
-        '''Command name, as known to the user.'''
+    # Command name, as known to the user
+    name: str
 
-        self.project = project
-        '''west.manifest.Project instance which defined the command.'''
+    # Project instance which defined the command
+    project: Project
 
-        self.help = help
-        '''Help string in west-commands.yml, or a default value.'''
+    # Help string in west-commands.yml, or a default value
+    help: str
 
-        self.factory = factory
-        '''"Factory" callable for the command.
-
-        This returns a WestCommand instance when called.
-        It may do some additional steps (like importing the definition of
-        the command) before constructing it, however.'''
-
-    def __repr__(self):
-        return (f'<WestExtCommandSpec name={repr(self.name)}'
-                f' project {self.project.name}'
-                f' help={repr(self.help)}'
-                f' factory={self.factory}>')
+    # "Factory" callable for the command.
+    #
+    # This returns a WestCommand instance when called.
+    # It may do some additional steps (like importing the definition of
+    # the command) before constructing it, however.
+    factory: _ExtFactory
 
 def extension_commands(config: Configuration, manifest: Manifest = None):
     # Get descriptions of available extension commands.
@@ -485,38 +515,3 @@ def _commands_module_from_file(file):
     _EXT_MODULES_CACHE[file] = mod
 
     return mod
-
-class _ExtFactory:
-
-    def __init__(self, py_file, name, attr):
-        self.py_file = py_file
-        self.name = name
-        self.attr = attr
-
-    def __call__(self):
-        # Append the python file's directory to sys.path. This lets
-        # its code import helper modules in a natural way.
-        py_dir = os.path.dirname(self.py_file)
-        sys.path.append(py_dir)
-
-        # Load the module containing the command. Convert only
-        # expected exceptions to ExtensionCommandError.
-        try:
-            mod = _commands_module_from_file(self.py_file)
-        except ImportError as ie:
-            raise ExtensionCommandError(
-                hint=f'could not import {self.py_file}') from ie
-
-        # Get the attribute which provides the WestCommand subclass.
-        try:
-            cls = getattr(mod, self.attr)
-        except AttributeError as ae:
-            raise ExtensionCommandError(
-                hint=f'no attribute {self.attr} in {self.py_file}') from ae
-
-        # Create the command instance and return it.
-        try:
-            return cls()
-        except Exception as e:
-            raise ExtensionCommandError(
-                hint='command constructor threw an exception') from e
