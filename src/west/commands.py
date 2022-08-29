@@ -1,5 +1,6 @@
 # Copyright 2018 Open Source Foundries Limited.
 # Copyright 2019 Foundries.io Limited.
+# Copyright 2022 Nordic Semiconductor ASA
 #
 # SPDX-License-Identifier: Apache-2.0
 
@@ -7,6 +8,7 @@ from abc import ABC, abstractmethod
 import argparse
 from collections import OrderedDict
 from dataclasses import dataclass
+from enum import IntEnum
 import importlib.util
 import itertools
 import os
@@ -16,8 +18,9 @@ import shutil
 import subprocess
 import sys
 from types import ModuleType
-from typing import Dict, List, Optional
+from typing import Dict, List, NoReturn, Optional
 
+import colorama
 import pykwalify
 import yaml
 
@@ -72,12 +75,50 @@ Things to try:
   - Run "west init -h" for additional information.
 '''
 
+class Verbosity(IntEnum):
+    '''Verbosity levels for WestCommand instances.'''
+
+    #: No output is printed when WestCommand.dbg(), .inf(), etc.
+    #: are called.
+    QUIET = 0
+
+    #: Only error messages are printed.
+    ERR = 1
+
+    #: Only error and warnings are printed.
+    WRN = 2
+
+    #: Errors, warnings, and informational messages are printed.
+    INF = 3
+
+    #: Like INFO, but WestCommand.dbg(..., level=Verbosity.DBG) output
+    #: is also printed.
+    DBG = 4
+
+    #: Like DEBUG, but WestCommand.dbg(..., level=Verbosity.DBG_MORE)
+    #: output is also printed.
+    DBG_MORE = 5
+
+    #: Like DEBUG_MORE, but WestCommand.dbg(..., level=Verbosity.DBG_EXTREME)
+    #: output is also printed.
+    DBG_EXTREME = 6
+
+#: Color used (when applicable) for printing with inf()
+INF_COLOR = colorama.Fore.LIGHTGREEN_EX
+
+#: Color used (when applicable) for printing with wrn()
+WRN_COLOR = colorama.Fore.LIGHTYELLOW_EX
+
+#: Color used (when applicable) for printing with err() and die()
+ERR_COLOR = colorama.Fore.LIGHTRED_EX
+
 class WestCommand(ABC):
     '''Abstract superclass for a west command.'''
 
     def __init__(self, name: str, help: str, description: str,
                  accepts_unknown_args: bool = False,
-                 requires_workspace: bool = True):
+                 requires_workspace: bool = True,
+                 verbosity: Verbosity = Verbosity.INF):
         '''Abstract superclass for a west command.
 
         Some fields, such as *name*, *help*, and *description*,
@@ -96,12 +137,14 @@ class WestCommand(ABC):
         :param requires_workspace: if true, the command requires a
             west workspace to run, and running it outside of one is
             a fatal error.
+        :param verbosity: command output verbosity level; can be changed later
         '''
         self.name: str = name
         self.help: str = help
         self.description: str = description
         self.accepts_unknown_args: bool = accepts_unknown_args
         self.requires_workspace = requires_workspace
+        self.verbosity = verbosity
         self.topdir: Optional[str] = None
         self.manifest = None
         self.config = None
@@ -333,6 +376,126 @@ class WestCommand(ABC):
         if patch is None:
             return version
         return version + (int(patch),)
+
+    def dbg(self, *args, level: Verbosity = Verbosity.DBG):
+        '''Print a verbose debug message.
+
+        The message is only printed if *self.verbosity* is at least *level*.
+
+        :param args: sequence of arguments to print
+        :param level: verbosity level of the message
+        '''
+        if level > self.verbosity:
+            return
+        print(*args)
+
+    def inf(self, *args, colorize: bool = False):
+        '''Print an informational message.
+
+        The message is only printed if *self.verbosity* is at least INF.
+
+        :param args: sequence of arguments to print.
+        :param colorize: If this is True, the configuration option ``color.ui``
+                         is undefined or true, and stdout is a terminal, then
+                         the message is printed in green.
+        '''
+        if not self.color_ui:
+            colorize = False
+
+        # This approach colorizes any sep= and end= text too, as expected.
+        #
+        # colorama automatically strips the ANSI escapes when stdout isn't a
+        # terminal (by wrapping sys.stdout).
+        if colorize:
+            print(INF_COLOR, end='')
+
+        print(*args)
+
+        if colorize:
+            self._reset_colors(sys.stdout)
+
+    def banner(self, *args):
+        '''Prints args as a "banner" using inf().
+
+        The args are prefixed with '=== ' and colorized by default.'''
+        self.inf('===', *args, colorize=True)
+
+    def small_banner(self, *args):
+        '''Prints args as a smaller banner(), i.e. prefixed with '-- ' and
+        not colorized.'''
+        self.inf('---', *args, colorize=False)
+
+    def wrn(self, *args):
+        '''Print a warning.
+
+        The message is only printed if *self.verbosity* is at least WRN.
+
+        The message is prefixed with the string ``"WARNING: "``.
+
+        If the configuration option ``color.ui`` is undefined or true and
+        stdout is a terminal, then the message is printed in yellow.
+
+        :param args: sequence of arguments to print.'''
+
+        if self.color_ui:
+            print(WRN_COLOR, end='', file=sys.stderr)
+
+        print('WARNING: ', end='', file=sys.stderr)
+        print(*args, file=sys.stderr)
+
+        if self.color_ui:
+            self._reset_colors(sys.stderr)
+
+    def err(self, *args, fatal: bool = False):
+        '''Print an error.
+
+        The message is only printed if *self.verbosity* is at least ERR.
+
+        This function does not abort the program. For that, use `die()`.
+
+        If the configuration option ``color.ui`` is undefined or true and
+        stdout is a terminal, then the message is printed in red.
+
+        :param args: sequence of arguments to print.
+        :param fatal: if True, the the message is prefixed with
+                      "FATAL ERROR: "; otherwise, "ERROR: " is used.
+        '''
+
+        if self.color_ui:
+            print(ERR_COLOR, end='', file=sys.stderr)
+
+        print('FATAL ERROR: ' if fatal else 'ERROR: ', end='', file=sys.stderr)
+        print(*args, file=sys.stderr)
+
+        if self.color_ui:
+            self._reset_colors(sys.stderr)
+
+    def die(self, *args, exit_code: int = 1) -> NoReturn:
+        '''Print a fatal error using err(), and abort the program.
+
+        :param args: sequence of arguments to print.
+        :param exit_code: return code the program should use when aborting.
+
+        Equivalent to ``die(*args, fatal=True)``, followed by an attempt to
+        abort with the given *exit_code*.'''
+        self.err(*args, fatal=True)
+        sys.exit(exit_code)
+
+    @property
+    def color_ui(self) -> bool:
+        '''Should we colorize output?'''
+        return self.config.getboolean('color.ui', default=True)
+
+    #
+    # Internal APIs. Not for public consumption.
+    #
+
+    def _reset_colors(self, file):
+        # The flush=True avoids issues with unrelated output from
+        # commands (usually Git) becoming colorized, due to the final
+        # attribute reset ANSI escape getting line-buffered
+        print(colorama.Style.RESET_ALL, end='', file=file, flush=True)
+
 
 #
 # Private extension API
