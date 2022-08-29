@@ -52,7 +52,7 @@ def dbg(*args, level=VERBOSE_NORMAL):
     '''Print a verbose debug logging message.
 
     :param args: sequence of arguments to print.
-    :param value: verbosity level to set, e.g. VERBOSE_VERY.
+    :param level: verbosity level to set, e.g. VERBOSE_VERY.
 
     The message is only printed if level is at least the current
     verbosity level.'''
