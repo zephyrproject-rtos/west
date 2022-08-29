@@ -28,7 +28,7 @@ import traceback
 from west import log
 import west.configuration
 from west.commands import WestCommand, extension_commands, \
-    CommandError, ExtensionCommandError
+    CommandError, ExtensionCommandError, Verbosity
 from west.app.project import List, ManifestCommand, Diff, Status, \
     SelfUpdate, ForAll, Init, Update, Topdir
 from west.app.config import Config
@@ -361,6 +361,8 @@ class WestApp:
                     self.handle_builtin_manifest_load_err(args)
 
                 cmd = self.builtins.get(args.command, self.builtins['help'])
+                cmd.verbosity = min(cmd.verbosity + args.verbose,
+                                    Verbosity.DBG_EXTREME)
                 cmd.run(args, unknown, self.topdir, manifest=self.manifest,
                         config=self.config)
             else:

@@ -78,6 +78,8 @@ Things to try:
 class Verbosity(IntEnum):
     '''Verbosity levels for WestCommand instances.'''
 
+    # DO NOT CHANGE THESE VALUES WITHOUT UPDATING main.py!
+
     #: No output is printed when WestCommand.dbg(), .inf(), etc.
     #: are called.
     QUIET = 0
