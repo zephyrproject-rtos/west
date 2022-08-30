@@ -18,7 +18,7 @@ import shutil
 import subprocess
 import sys
 from types import ModuleType
-from typing import Dict, List, NoReturn, Optional
+from typing import Callable, Dict, List, NoReturn, Optional
 
 import colorama
 import pykwalify
@@ -149,6 +149,18 @@ class WestCommand(ABC):
         self.topdir: Optional[str] = None
         self.manifest = None
         self.config = None
+        self._hooks: List[Callable[['WestCommand'], None]] = []
+
+    def add_pre_run_hook(self,
+                         hook: Callable[['WestCommand'], None]) -> None:
+        '''Add a hook which will be called right before do_run().
+
+        This can be useful to defer work that needs a fully set up
+        command to work.
+
+        :param hook: hook to add
+        '''
+        self._hooks.append(hook)
 
     def run(self, args: argparse.Namespace, unknown: List[str],
             topdir: PathType,
@@ -177,6 +189,8 @@ class WestCommand(ABC):
         self.topdir = os.fspath(topdir) if topdir else None
         self.manifest = manifest
         self.config = config
+        for hook in self._hooks:
+            hook(self)
         self.do_run(args, unknown)
 
     def add_parser(self, parser_adder) -> argparse.ArgumentParser:
