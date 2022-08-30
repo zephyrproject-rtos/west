@@ -14,3 +14,4 @@ def test_parse_git_version():
     assert gv(b'git version 2.28.0.windows.1\n') == (2, 28, 0)
     assert gv(b'git version 2.24.3 (Apple Git-128)\n') == (2, 24, 3)
     assert gv(b'git version 2.29.GIT\n') == (2, 29)
+    assert gv(b'not a git version') is None
