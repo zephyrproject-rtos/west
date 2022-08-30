@@ -24,7 +24,6 @@ import colorama
 import pykwalify
 import yaml
 
-from west import log
 from west.configuration import Configuration
 from west.manifest import Manifest, Project
 from west.util import escapes_directory, quote_sh_list, PathType
@@ -174,7 +173,7 @@ class WestCommand(ABC):
         if unknown and not self.accepts_unknown_args:
             self.parser.error(f'unexpected arguments: {unknown}')
         if not topdir and self.requires_workspace:
-            log.die(_no_topdir_msg(os.getcwd(), self.name))
+            self.die(_no_topdir_msg(os.getcwd(), self.name))
         self.topdir = os.fspath(topdir) if topdir else None
         self.manifest = manifest
         self.config = config
@@ -245,9 +244,9 @@ class WestCommand(ABC):
         Otherwise, a fatal error occurs.
         '''
         if self._manifest is None:
-            log.die(f"can't run west {self.name};",
-                    "it requires the manifest, which was not available.",
-                    'Try "west manifest --validate" to debug.')
+            self.die(f"can't run west {self.name};",
+                     "it requires the manifest, which was not available.",
+                     'Try "west manifest --validate" to debug.')
         return self._manifest
 
     def _set_manifest(self, manifest: Optional[Manifest]):
@@ -271,8 +270,8 @@ class WestCommand(ABC):
         Otherwise, a fatal error occurs.
         '''
         if self._config is None:
-            log.die(f"can't run west {self.name}; it requires config "
-                    "variables, which were not available.")
+            self.die(f"can't run west {self.name}; it requires config "
+                     "variables, which were not available.")
         return self._config
 
     def _set_config(self, config: Optional[Configuration]):
@@ -284,24 +283,22 @@ class WestCommand(ABC):
     # Other public methods
     #
 
-    @staticmethod
-    def check_call(args, cwd=None):
+    def check_call(self, args, cwd=None):
         '''Runs subprocess.check_call(args, cwd=cwd) after
-        logging the call at VERBOSE_VERY level.'''
+        logging the call at Verbosity.DBG_MORE level.'''
 
         cmd_str = quote_sh_list(args)
-        log.dbg(f"running '{cmd_str}' in {cwd or os.getcwd()}",
-                level=log.VERBOSE_VERY)
+        self.dbg(f"running '{cmd_str}' in {cwd or os.getcwd()}",
+                 level=Verbosity.DBG_MORE)
         subprocess.check_call(args, cwd=cwd)
 
-    @staticmethod
-    def check_output(args, cwd=None):
+    def check_output(self, args, cwd=None):
         '''Runs subprocess.check_output(args, cwd=cwd) after
-        logging the call at VERBOSE_VERY level.'''
+        logging the call at Verbosity.DBG_MORE level.'''
 
         cmd_str = quote_sh_list(args)
-        log.dbg(f"running '{cmd_str}' in {cwd or os.getcwd()}",
-                level=log.VERBOSE_VERY)
+        self.dbg(f"running '{cmd_str}' in {cwd or os.getcwd()}",
+                 level=Verbosity.DBG_MORE)
         return subprocess.check_output(args, cwd=cwd)
 
     def die_if_no_git(self):
@@ -310,7 +307,7 @@ class WestCommand(ABC):
         if not hasattr(self, '_git'):
             self._git = shutil.which('git')
         if self._git is None:
-            log.die("can't find git; install it or ensure it's on your PATH")
+            self.die("can't find git; install it or ensure it's on your PATH")
 
     @property
     def git_version_info(self):
@@ -329,9 +326,11 @@ class WestCommand(ABC):
 
         if not hasattr(self, '_git_ver'):
             self.die_if_no_git()
-            self._git_ver = self._parse_git_version(
-                self.check_output([self._git, '--version']))
-            log.dbg(f'git version: {self._git_ver}', level=log.VERBOSE_VERY)
+            raw_version = self.check_output([self._git, '--version'])
+            self._git_ver = self._parse_git_version(raw_version)
+            if self._git_ver is None:
+                self.die(f"can't get git version from {raw_version!r}")
+            self.dbg(f'git version: {self._git_ver}', level=Verbosity.DBG_MORE)
         return self._git_ver
 
     @staticmethod
@@ -370,7 +369,7 @@ class WestCommand(ABC):
             r'\s(?P<major>\d+)\.(?P<minor>\d+)(\.(?P<patch>\d+))?',
             raw_version.decode(), flags=re.ASCII)
         if not match:
-            log.die(f"can't get git version from {raw_version!r}")
+            return None
 
         major, minor, patch = (match.group('major'), match.group('minor'),
                                match.group('patch'))
