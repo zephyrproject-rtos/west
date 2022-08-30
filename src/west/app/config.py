@@ -6,7 +6,6 @@
 
 import argparse
 
-from west import log
 from west.configuration import ConfigFile
 from west.commands import WestCommand, CommandError
 
@@ -154,7 +153,7 @@ class Config(WestCommand):
     def list(self, args):
         what = args.configfile or ALL
         for option, value in self.config.items(configfile=what):
-            log.inf(f'{option}={value}')
+            self.inf(f'{option}={value}')
 
     def delete(self, args):
         if args.delete_all:
@@ -171,7 +170,7 @@ class Config(WestCommand):
                 return
             except KeyError:
                 if i == len(configfiles) - 1:
-                    log.dbg(
+                    self.dbg(
                         f'{args.name} was not set in requested location(s)')
                     raise CommandError(returncode=1)
             except PermissionError as pe:
@@ -180,9 +179,9 @@ class Config(WestCommand):
     def read(self, args):
         value = self.config.get(args.name, configfile=args.configfile or ALL)
         if value is not None:
-            log.inf(value)
+            self.inf(value)
         else:
-            log.dbg(f'{args.name} is unset')
+            self.dbg(f'{args.name} is unset')
             raise CommandError(returncode=1)
 
     def write(self, args):
@@ -195,5 +194,5 @@ class Config(WestCommand):
     def _perm_error(self, pe, what, name):
         rootp = ('; are you root/administrator?' if what in [SYSTEM, ALL]
                  else '')
-        log.die(f"can't update {name}: "
-                f"permission denied when writing {pe.filename}{rootp}")
+        self.die(f"can't update {name}: "
+                 f"permission denied when writing {pe.filename}{rootp}")
