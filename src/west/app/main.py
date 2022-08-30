@@ -60,6 +60,8 @@ class WestApp:
         self.extension_groups = OrderedDict()  # project path -> ext spec list
         self.west_parser = None     # a WestArgumentParser
         self.subparser_gen = None   # an add_subparsers() return value
+        self.cmd = None             # west.commands.WestCommand, eventually
+        self.queued_io = []         # I/O hooks we want self.cmd to do
 
         for group, classes in BUILTIN_COMMAND_GROUPS.items():
             lst = [cls() for cls in classes]
@@ -131,10 +133,6 @@ class WestApp:
             # manifest.path foo' to fix the MalformedConfig error, but
             # there's no way to know until we've parsed the command
             # line arguments.
-            if isinstance(e, _ManifestImportDepth):
-                log.wrn('recursion depth exceeded during manifest resolution; '
-                        'your manifest likely contains an import loop. '
-                        'Run "west -v manifest --resolve" to debug.')
             self.mle = e
 
     def handle_builtin_manifest_load_err(self, args):
@@ -154,17 +152,21 @@ class WestApp:
         # Handle ManifestVersionError is a special case.
         if isinstance(self.mle, ManifestVersionError):
             if args.command == 'help':
-                log.wrn(mve_msg(self.mle, suggest_upgrade=False) +
-                        '\n  Cannot get extension command help, ' +
-                        "and most commands won't run." +
-                        '\n  To silence this warning, upgrade west.')
+                self.queued_io.append(
+                    lambda cmd:
+                    cmd.wrn(mve_msg(self.mle, suggest_upgrade=False) +
+                            '\n  Cannot get extension command help, ' +
+                            "and most commands won't run." +
+                            '\n  To silence this warning, upgrade west.'))
                 return
             elif args.command in ['config', 'topdir']:
                 # config and topdir are safe to run, but let's
                 # warn the user that most other commands won't be.
-                log.wrn(mve_msg(self.mle, suggest_upgrade=False) +
-                        "\n  This should work, but most commands won't." +
-                        '\n  To silence this warning, upgrade west.')
+                self.queued_io.append(
+                    lambda cmd:
+                    cmd.wrn(mve_msg(self.mle, suggest_upgrade=False) +
+                            "\n  This should work, but most commands won't." +
+                            '\n  To silence this warning, upgrade west.'))
                 return
             elif args.command == 'init':
                 # init is fine to run -- it will print its own error,
@@ -172,7 +174,8 @@ class WestApp:
                 # and what the user's choices are.
                 return
             else:
-                log.die(mve_msg(self.mle))
+                self.queued_io.append(lambda cmd: cmd.die(mve_msg(self.mle)))
+                return
 
         # Other errors generally just fall back on no_manifest_ok.
         def isinst(*args):
@@ -180,10 +183,17 @@ class WestApp:
 
         if args.command not in no_manifest_ok:
             if isinst(MalformedManifest, MalformedConfig):
-                log.die('\n  '.join(["can't load west manifest"] +
-                                    list(self.mle.args)))
+                self.queued_io.append(
+                    lambda cmd:
+                    cmd.die('\n  '.join(["can't load west manifest"] +
+                                        list(self.mle.args))))
             elif isinst(_ManifestImportDepth):
-                log.die('failed, likely due to manifest import loop')
+                self.queued_io.append(
+                    lambda cmd:
+                    cmd.die(
+                        'recursion depth exceeded during manifest resolution; '
+                        'your manifest likely contains an import loop. '
+                        'Run "west -v manifest --resolve" to debug.'))
             elif isinst(ManifestImportFailed):
                 if args.command == 'update':
                     return      # that's fine
@@ -204,17 +214,25 @@ class WestApp:
                     ctxt += '        To fix, run:\n'
                     ctxt += '          west update'
 
-                log.die(f'failed manifest import in {p.name_and_path}\n' +
-                        ctxt)
+                self.queued_io.append(
+                    lambda cmd:
+                    cmd.die(f'failed manifest import in {p.name_and_path}\n' +
+                            ctxt))
             elif isinst(FileNotFoundError):
                 # This should ordinarily only happen when the top
                 # level manifest is not found.
-                log.die(f"file not found: {self.mle.filename}")
+                self.queued_io.append(
+                    lambda cmd:
+                    cmd.die(f"file not found: {self.mle.filename}"))
             elif isinst(PermissionError):
-                log.die(f"permission denied: {self.mle.filename}")
+                self.queued_io.append(
+                    lambda cmd:
+                    cmd.die(f"permission denied: {self.mle.filename}"))
             else:
-                log.die('internal error:',
-                        f'unhandled manifest load exception: {self.mle}')
+                self.queued_io.append(
+                    lambda cmd:
+                    cmd.die('internal error:',
+                            f'unhandled manifest load exception: {self.mle}'))
 
     def load_extension_specs(self):
         if self.manifest is None:
@@ -228,7 +246,7 @@ class WestApp:
             path_specs = extension_commands(self.config,
                                             manifest=self.manifest)
         except ExtensionCommandError as ece:
-            self.handle_extension_command_error(ece, None)
+            self.handle_extension_command_error(ece)
         extension_names = set()
 
         for path, specs in path_specs.items():
@@ -238,15 +256,19 @@ class WestApp:
             filtered = []
             for spec in specs:
                 if spec.name in self.builtins:
-                    log.wrn(f'ignoring project {spec.project.name} '
+                    self.queued_io.append(
+                        lambda cmd: cmd.wrn(
+                            f'ignoring project {spec.project.name} '
                             f'extension command "{spec.name}"; '
-                            'this is a built in command')
+                            'this is a built in command'))
                     continue
                 if spec.name in extension_names:
-                    log.wrn(f'ignoring project {spec.project.name} '
+                    self.queued_io.append(
+                        lambda cmd: cmd.wrn(
+                            f'ignoring project {spec.project.name} '
                             f'extension command "{spec.name}"; '
                             f'command "{spec.name}" is '
-                            'already defined as extension command')
+                            'already defined as extension command'))
                     continue
 
                 filtered.append(spec)
@@ -255,22 +277,22 @@ class WestApp:
 
             self.extension_groups[path] = filtered
 
-    def handle_extension_command_error(self, ece, args):
-        if args is not None:
-            msg = f"extension command \"{args.command}\" couldn't be run"
+    def handle_extension_command_error(self, ece):
+        if self.cmd is not None:
+            msg = f"extension command \"{self.cmd.name}\" couldn't be run"
         else:
             msg = "could not load extension command(s)"
         if ece.hint:
             msg += '\n  Hint: ' + ece.hint
 
-        if args is not None and args.verbose >= log.VERBOSE_EXTREME:
-            log.err(msg, fatal=True)
-            log.banner('Traceback (enabled by -vvv):')
+        if self.cmd and self.cmd.verbosity >= Verbosity.DBG_EXTREME:
+            self.cmd.err(msg, fatal=True)
+            self.cmd.banner('Traceback (enabled by -vvv):')
             traceback.print_exc()
         else:
             tb_file = dump_traceback()
             msg += f'\n  See {tb_file} for a traceback.'
-            log.err(msg, fatal=True)
+            self.cmd.err(msg, fatal=True)
         sys.exit(ece.returncode)
 
     def setup_parsers(self):
@@ -340,11 +362,10 @@ class WestApp:
 
         args, unknown = self.west_parser.parse_known_args(args=argv)
 
-        # Set up logging verbosity before running the command, so e.g.
-        # verbose messages related to argument handling errors work
-        # properly.
+        # Set up logging verbosity before running the command, for
+        # backwards compatibility. Remove this when we can part ways
+        # with the log module.
         log.set_verbosity(args.verbose)
-        log.dbg('args namespace:', args, level=log.VERBOSE_EXTREME)
 
         # If we were run as 'west -h ...' or 'west --help ...',
         # monkeypatch the args namespace so we end up running Help.  The
@@ -356,15 +377,10 @@ class WestApp:
 
         # Finally, run the command.
         try:
+            # Both run_builtin() and run_extension() set self.cmd so
+            # we can use it in the exception handling blocks below.
             if args.command in self.builtins:
-                if self.mle:
-                    self.handle_builtin_manifest_load_err(args)
-
-                cmd = self.builtins.get(args.command, self.builtins['help'])
-                cmd.verbosity = min(cmd.verbosity + args.verbose,
-                                    Verbosity.DBG_EXTREME)
-                cmd.run(args, unknown, self.topdir, manifest=self.manifest,
-                        config=self.config)
+                self.run_builtin(args, unknown)
             else:
                 self.run_extension(args.command, argv)
         except KeyboardInterrupt:
@@ -372,14 +388,14 @@ class WestApp:
         except BrokenPipeError:
             sys.exit(0)
         except CalledProcessError as cpe:
-            log.err(f'command exited with status {cpe.returncode}: '
-                    f'{quote_sh_list(cpe.cmd)}', fatal=True)
-            if args.verbose >= log.VERBOSE_EXTREME:
-                log.banner('Traceback (enabled by -vvv):')
+            self.cmd.err(f'command exited with status {cpe.returncode}: '
+                         f'{quote_sh_list(cpe.cmd)}', fatal=True)
+            if self.cmd.verbosity >= Verbosity.DBG_EXTREME:
+                self.cmd.banner('Traceback (enabled by -vvv):')
                 traceback.print_exc()
             sys.exit(cpe.returncode)
         except ExtensionCommandError as ece:
-            self.handle_extension_command_error(ece, args)
+            self.handle_extension_command_error(ece)
         except CommandError as ce:
             # No need to dump_traceback() here. The command is responsible
             # for logging its own errors.
@@ -390,9 +406,24 @@ class WestApp:
             # try to fix a previous update that left 'manifest-rev'
             # branches pointing at revisions with invalid manifest
             # data in projects that get imported.
-            log.die('\n  '.join(str(arg) for arg in mm.args))
+            self.cmd.die('\n  '.join(str(arg) for arg in mm.args))
         except WestNotFound as wnf:
-            log.die(str(wnf))
+            self.cmd.die(str(wnf))
+
+    def run_builtin(self, args, unknown):
+        self.queued_io.append(
+            lambda cmd: cmd.dbg('args namespace:', args,
+                                level=Verbosity.DBG_EXTREME))
+        self.cmd = self.builtins.get(args.command,
+                                     self.builtins['help'])
+        adjust_command_verbosity(self.cmd, args)
+        if self.mle:
+            self.handle_builtin_manifest_load_err(args)
+        for io_hook in self.queued_io:
+            self.cmd.add_pre_run_hook(io_hook)
+        self.cmd.run(args, unknown, self.topdir,
+                     manifest=self.manifest,
+                     config=self.config)
 
     def run_extension(self, name, argv):
         # Check a program invariant. We should never get here
@@ -402,16 +433,23 @@ class WestApp:
             f'internal error: running extension "{name}" ' \
             f'but got {self.mle}'
 
-        command = self.extensions[name].factory()
+        self.cmd = self.extensions[name].factory()
 
         # Our original top level parser and subparser generator have some
         # garbage state that prevents us from registering the 'real'
         # command subparser. Just make new ones.
         west_parser, subparser_gen = self.make_parsers()
-        command.add_parser(subparser_gen)
+        self.cmd.add_parser(subparser_gen)
 
         # Parse arguments again.
         args, unknown = west_parser.parse_known_args(argv)
+
+        adjust_command_verbosity(self.cmd, args)
+        self.queued_io.append(
+            lambda cmd: cmd.dbg('args namespace:', args,
+                                level=Verbosity.DBG_EXTREME))
+        for io_hook in self.queued_io:
+            self.cmd.add_pre_run_hook(io_hook)
 
         # HACK: try to set ZEPHYR_BASE.
         #
@@ -424,10 +462,129 @@ class WestApp:
         #   (controversial)
         # - make zephyr extensions that need ZEPHYR_BASE just set it
         #   themselves (easy if above is OK, unnecessary if it isn't)
-        set_zephyr_base(args, self.manifest, self.topdir, self.config)
+        self.set_zephyr_base(args)
 
-        command.run(args, unknown, self.topdir, manifest=self.manifest,
-                    config=self.config)
+        self.cmd.run(args, unknown, self.topdir, manifest=self.manifest,
+                     config=self.config)
+
+    def set_zephyr_base(self, args):
+        '''Ensure ZEPHYR_BASE is set
+        Order of precedence:
+        1) Value given as command line argument
+        2) Value from environment setting: ZEPHYR_BASE
+        3) Value of zephyr.base setting in west config file
+        4) Project in the manifest with name, or path, "zephyr" (will
+           be persisted as zephyr.base in the local config if found)
+
+        Order of precedence between 2) and 3) can be changed with the setting
+        zephyr.base-prefer.
+        zephyr.base-prefer takes the values 'env' and 'configfile'
+
+        If 2) and 3) have different values and zephyr.base-prefer is unset,
+        a warning is printed.'''
+        manifest = self.manifest
+        topdir = self.topdir
+        config = self.config
+
+        if args.zephyr_base:
+            # The command line --zephyr-base takes precedence over
+            # everything else.
+            zb = os.path.abspath(args.zephyr_base)
+            zb_origin = 'command line'
+        else:
+            # If the user doesn't specify it concretely, then use ZEPHYR_BASE
+            # from the environment or zephyr.base from west.configuration.
+            #
+            # (We will configure zephyr.base to the project that has path
+            # 'zephyr' as a last resort here.)
+            #
+            # At some point, we need a more flexible way to set environment
+            # variables based on manifest contents, but this is good enough
+            # to get started with and to ask for wider testing.
+            zb_env = os.environ.get('ZEPHYR_BASE')
+            zb_prefer = config.get('zephyr.base-prefer')
+            rel_zb_config = config.get('zephyr.base')
+            if rel_zb_config is None:
+                # Try to find a project named 'zephyr', or with path
+                # 'zephyr' inside the workspace.
+                projects = None
+                try:
+                    projects = manifest.get_projects(['zephyr'],
+                                                     allow_paths=False)
+                except ValueError:
+                    try:
+                        projects = manifest.get_projects([Path(topdir) /
+                                                          'zephyr'])
+                    except ValueError:
+                        pass
+                if projects:
+                    zephyr = projects[0]
+                    config.set('zephyr.base', zephyr.path)
+                    rel_zb_config = zephyr.path
+            if rel_zb_config is not None:
+                zb_config = Path(topdir) / rel_zb_config
+            else:
+                zb_config = None
+
+            if zb_prefer == 'env' and zb_env is not None:
+                zb = zb_env
+                zb_origin = 'env'
+            elif zb_prefer == 'configfile' and zb_config is not None:
+                zb = str(zb_config)
+                zb_origin = 'configfile'
+            elif zb_env is not None:
+                zb = zb_env
+                zb_origin = 'env'
+                try:
+                    different = (zb_config and not zb_config.samefile(zb_env))
+                except FileNotFoundError:
+                    different = (zb_config and
+                                 (PurePath(zb_config)) !=
+                                 PurePath(zb_env))
+                if different:
+                    # The environment ZEPHYR_BASE takes precedence
+                    # over the config setting, but is different than
+                    # the zephyr.base config value.
+                    #
+                    # Therefore, issue a warning as the user might have
+                    # run zephyr-env.sh/cmd in some other zephyr
+                    # workspace and forgotten about it.
+                    self.queued_io.append(
+                        lambda cmd:
+                        cmd.wrn(
+                            f'ZEPHYR_BASE={zb_env} '
+                            f'in the calling environment will be used,\n'
+                            f'but the zephyr.base config option in {topdir} '
+                            f'is "{rel_zb_config}"\n'
+                            'which implies a different '
+                            f'ZEPHYR_BASE={zb_config}\n'
+                            f'To disable this warning in the future, execute '
+                            f"'west config --global zephyr.base-prefer env'"))
+            elif zb_config:
+                zb = str(zb_config)
+                zb_origin = 'configfile'
+            else:
+                zb = None
+                zb_origin = None
+                # No --zephyr-base, no ZEPHYR_BASE, and no zephyr.base.
+                self.queued_io.append(
+                    lambda cmd:
+                    cmd.wrn(
+                        "can't find the zephyr repository\n"
+                        '  - no --zephyr-base given\n'
+                        '  - ZEPHYR_BASE is unset\n'
+                        '  - west config contains no zephyr.base setting\n'
+                        '  - no manifest project has name or path "zephyr"\n'
+                        '\n'
+                        "  If this isn't a Zephyr workspace, you can "
+                        "  silence this warning with something like this:\n"
+                        '    west config zephyr.base not-using-zephyr'))
+
+        if zb is not None:
+            os.environ['ZEPHYR_BASE'] = zb
+            self.queued_io.append(
+                lambda cmd:
+                cmd.dbg(f'ZEPHYR_BASE={zb} (origin: {zb_origin})'))
 
 class Help(WestCommand):
     # west help <command> implementation.
@@ -464,12 +621,12 @@ class Help(WestCommand):
             # parent stack frame.
             app.run_extension(name, [name, '--help'])
         else:
-            log.wrn(f'unknown command "{name}"')
+            self.wrn(f'unknown command "{name}"')
             app.west_parser.print_help(top_level=True)
             if app.mle:
-                log.wrn('your manifest could not be loaded, '
-                        'which may be causing this issue.\n'
-                        '  Try running "west update" or fixing the manifest.')
+                self.wrn('your manifest could not be loaded, '
+                         'which may be causing this issue.\n'
+                         '  Try running "west update" or fixing the manifest.')
 
 class WestHelpAction(argparse.Action):
 
@@ -667,9 +824,12 @@ class WestArgumentParser(argparse.ArgumentParser):
         super().add_argument(*args, **kwargs)
 
     def error(self, message):
-        if self.west_app and self.west_app.mle and \
-           isinstance(self.west_app.mle, ManifestVersionError):
-            log.die(mve_msg(self.west_app.mle))
+        if (self.west_app and
+                self.west_app.mle and
+                isinstance(self.west_app.mle,
+                           ManifestVersionError) and
+                self.west_app.cmd):
+            self.west_app.cmd.die(mve_msg(self.west_app.mle))
         super().error(message=message)
 
 def mve_msg(mve, suggest_upgrade=True):
@@ -679,108 +839,9 @@ def mve_msg(mve, suggest_upgrade=True):
         ([f'Manifest file: {mve.file}'] if mve.file else []) +
         (['Please upgrade west and retry.'] if suggest_upgrade else []))
 
-def set_zephyr_base(args, manifest, topdir, config):
-    '''Ensure ZEPHYR_BASE is set
-    Order of precedence:
-    1) Value given as command line argument
-    2) Value from environment setting: ZEPHYR_BASE
-    3) Value of zephyr.base setting in west config file
-    4) Project in the manifest with name, or path, "zephyr" (will
-       be persisted as zephyr.base in the local config if found)
-
-    Order of precedence between 2) and 3) can be changed with the setting
-    zephyr.base-prefer.
-    zephyr.base-prefer takes the values 'env' and 'configfile'
-
-    If 2) and 3) have different values and zephyr.base-prefer is unset,
-    a warning is printed.'''
-
-    if args.zephyr_base:
-        # The command line --zephyr-base takes precedence over
-        # everything else.
-        zb = os.path.abspath(args.zephyr_base)
-        zb_origin = 'command line'
-    else:
-        # If the user doesn't specify it concretely, then use ZEPHYR_BASE
-        # from the environment or zephyr.base from west.configuration.
-        #
-        # (We will configure zephyr.base to the project that has path
-        # 'zephyr' as a last resort here.)
-        #
-        # At some point, we need a more flexible way to set environment
-        # variables based on manifest contents, but this is good enough
-        # to get started with and to ask for wider testing.
-        zb_env = os.environ.get('ZEPHYR_BASE')
-        zb_prefer = config.get('zephyr.base-prefer')
-        rel_zb_config = config.get('zephyr.base')
-        if rel_zb_config is None:
-            # Try to find a project named 'zephyr', or with path
-            # 'zephyr' inside the workspace.
-            projects = None
-            try:
-                projects = manifest.get_projects(['zephyr'], allow_paths=False)
-            except ValueError:
-                try:
-                    projects = manifest.get_projects([Path(topdir) / 'zephyr'])
-                except ValueError:
-                    pass
-            if projects:
-                zephyr = projects[0]
-                config.set('zephyr.base', zephyr.path)
-                rel_zb_config = zephyr.path
-        if rel_zb_config is not None:
-            zb_config = Path(topdir) / rel_zb_config
-        else:
-            zb_config = None
-
-        if zb_prefer == 'env' and zb_env is not None:
-            zb = zb_env
-            zb_origin = 'env'
-        elif zb_prefer == 'configfile' and zb_config is not None:
-            zb = str(zb_config)
-            zb_origin = 'configfile'
-        elif zb_env is not None:
-            zb = zb_env
-            zb_origin = 'env'
-            try:
-                different = (zb_config and not zb_config.samefile(zb_env))
-            except FileNotFoundError:
-                different = (zb_config and
-                             (PurePath(zb_config)) != PurePath(zb_env))
-            if different:
-                # The environment ZEPHYR_BASE takes precedence over the config
-                # setting, but is different than the zephyr.base config value.
-                #
-                # Therefore, issue a warning as the user might have
-                # run zephyr-env.sh/cmd in some other zephyr
-                # workspace and forgotten about it.
-                log.wrn(f'ZEPHYR_BASE={zb_env} '
-                        f'in the calling environment will be used,\n'
-                        f'but the zephyr.base config option in {topdir} '
-                        f'is "{rel_zb_config}"\n'
-                        f'which implies a different ZEPHYR_BASE={zb_config}\n'
-                        f'To disable this warning in the future, execute '
-                        f"'west config --global zephyr.base-prefer env'")
-        elif zb_config:
-            zb = str(zb_config)
-            zb_origin = 'configfile'
-        else:
-            zb = None
-            zb_origin = None
-            # No --zephyr-base, no ZEPHYR_BASE, and no zephyr.base.
-            log.wrn("can't find the zephyr repository\n"
-                    '  - no --zephyr-base given\n'
-                    '  - ZEPHYR_BASE is unset\n'
-                    '  - west config contains no zephyr.base setting\n'
-                    '  - no manifest project has name or path "zephyr"\n'
-                    '\n'
-                    "  If this isn't a Zephyr workspace, you can "
-                    "  silence this warning with something like this:\n"
-                    '    west config zephyr.base not-using-zephyr')
-
-    if zb is not None:
-        os.environ['ZEPHYR_BASE'] = zb
-        log.dbg(f'ZEPHYR_BASE={zb} (origin: {zb_origin})')
+def adjust_command_verbosity(command, args):
+    command.verbosity = min(command.verbosity + args.verbose,
+                            Verbosity.DBG_EXTREME)
 
 def dump_traceback():
     # Save the current exception to a file and return its path.
