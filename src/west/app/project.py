@@ -648,7 +648,7 @@ class Status(_ProjectCommand):
                     continue
 
                 log.banner(f'status of {project.name_and_path}:')
-                project.git('status', extra_args=user_args)
+                project.git(['status'], extra_args=user_args)
             except subprocess.CalledProcessError:
                 failed.append(project)
         self._handle_failed(args, failed)
@@ -1059,7 +1059,7 @@ class Update(_ProjectCommand):
                     f'"{current_branch}" checked out; current status:')
             if take_stats:
                 start = perf_counter()
-            project.git('status')
+            project.git(['status'])
             if take_stats:
                 stats['get current status'] = perf_counter - start
         elif try_rebase:
@@ -1067,7 +1067,7 @@ class Update(_ProjectCommand):
             log.inf(f'west update: rebasing to {MANIFEST_REV} {sha}')
             if take_stats:
                 start = perf_counter()
-            project.git('rebase ' + QUAL_MANIFEST_REV)
+            project.git(['rebase', QUAL_MANIFEST_REV])
             if take_stats:
                 stats['rebase onto new manifest-rev'] = perf_counter() - start
         else:
@@ -1075,7 +1075,7 @@ class Update(_ProjectCommand):
             # out the new detached HEAD, then print some helpful context.
             if take_stats:
                 start = perf_counter()
-            project.git('checkout --detach ' + sha)
+            project.git(['checkout', '--detach', sha])
             if take_stats:
                 stats['checkout new manifest-rev'] = perf_counter() - start
             _post_checkout_help(project, current_branch, sha, is_ancestor)
@@ -1136,7 +1136,8 @@ class Update(_ProjectCommand):
             # This remote is added as a convenience for the user.
             # However, west always fetches project data by URL, not name.
             # The user is therefore free to change the URL of this remote.
-            project.git(f'remote add -- {project.remote_name} {project.url}')
+            project.git(['remote', 'add', '--',
+                         project.remote_name, project.url])
         else:
             log.small_banner(f'{project.name}: cloning from {cache_dir}')
             # Clone the project from a local cache repository. Set the
@@ -1149,7 +1150,7 @@ class Update(_ProjectCommand):
                          project.url])
             # Make sure we have a detached HEAD so we can delete the
             # local branch created by git clone.
-            project.git('checkout --quiet --detach HEAD')
+            project.git(['checkout', '--quiet', '--detach', 'HEAD'])
             # Find the name of any local branch created by git clone.
             # West commits to only touching 'manifest-rev' in the
             # local branch name space.
@@ -1321,7 +1322,7 @@ class Update(_ProjectCommand):
             # it avoids a spammy detached HEAD warning from Git.
             if take_stats:
                 start = perf_counter()
-            project.git('checkout --detach ' + QUAL_MANIFEST_REV)
+            project.git(['checkout', '--detach', QUAL_MANIFEST_REV])
             if take_stats:
                 stats['checkout new manifest-rev'] = perf_counter() - start
 
@@ -1347,7 +1348,8 @@ class Update(_ProjectCommand):
 
         if take_stats:
             start = perf_counter()
-        cp = project.git('rev-parse --abbrev-ref HEAD', capture_stdout=True)
+        cp = project.git(['rev-parse', '--abbrev-ref', 'HEAD'],
+                         capture_stdout=True)
         if take_stats:
             stats['get current branch HEAD'] = perf_counter() - start
         current_branch = cp.stdout.decode('utf-8').strip()
@@ -1460,15 +1462,15 @@ def _clean_west_refspace(project):
     # Clean the refs/west space to ensure they do not show up in 'git log'.
 
     # Get all the ref names that start with refs/west/.
-    list_refs_cmd = ('for-each-ref --format="%(refname)" -- ' +
-                     QUAL_REFS + '**')
-    cp = project.git(list_refs_cmd, capture_stdout=True)
+    cp = project.git(['for-each-ref',
+                      '--format=%(refname)',
+                      '--',
+                      f'{QUAL_REFS}**'], capture_stdout=True)
     west_references = cp.stdout.decode('utf-8').strip()
 
     # Safely delete each one.
     for ref in west_references.splitlines():
-        delete_ref_cmd = 'update-ref -d ' + ref
-        project.git(delete_ref_cmd)
+        project.git(['update-ref', '-d', ref])
 
 def _update_manifest_rev(project, new_manifest_rev):
     project.git(['update-ref',
@@ -1550,7 +1552,7 @@ def _head_ok(project):
     # will return:
     # - 0 if HEAD is present
     # - 1 otherwise
-    return project.git('show-ref --quiet --head /',
+    return project.git(['show-ref', '--quiet', '--head', '/'],
                        check=False).returncode == 0
 
 def _post_checkout_help(project, branch, sha, is_ancestor):
