@@ -58,6 +58,13 @@ class _InternalCF:
     # but presenting a west-style section.key = value style API.
 
     @staticmethod
+    def parse_key(dotted_name: str):
+        section_child = dotted_name.split('.', 1)
+        if len(section_child) != 2:
+            raise ValueError(f"Invalid key name: '{dotted_name}'")
+        return section_child
+
+    @staticmethod
     def from_path(path: Optional[Path]) -> Optional['_InternalCF']:
         return _InternalCF(path) if path and path.exists() else None
 
@@ -69,7 +76,7 @@ class _InternalCF:
             raise FileNotFoundError(path)
 
     def __contains__(self, option: str) -> bool:
-        section, key = option.split('.', 1)
+        section, key = _InternalCF.parse_key(option)
 
         return section in self.cp and key in self.cp[section]
 
@@ -86,7 +93,7 @@ class _InternalCF:
         return self._get(option, self.cp.getfloat)
 
     def _get(self, option, getter):
-        section, key = option.split('.', 1)
+        section, key = _InternalCF.parse_key(option)
 
         try:
             return getter(section, key)
@@ -94,7 +101,7 @@ class _InternalCF:
             raise KeyError(option)
 
     def set(self, option: str, value: Any):
-        section, key = option.split('.', 1)
+        section, key = _InternalCF.parse_key(option)
 
         if section not in self.cp:
             self.cp[section] = {}
@@ -105,7 +112,7 @@ class _InternalCF:
             self.cp.write(f)
 
     def delete(self, option: str):
-        section, key = option.split('.', 1)
+        section, key = _InternalCF.parse_key(option)
 
         if section not in self.cp:
             raise KeyError(option)
