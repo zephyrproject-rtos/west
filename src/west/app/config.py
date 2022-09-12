@@ -156,6 +156,7 @@ class Config(WestCommand):
             self.inf(f'{option}={value}')
 
     def delete(self, args):
+        self.check_config(args.name)
         if args.delete_all:
             configfiles = [ALL]
         elif args.configfile:
@@ -176,7 +177,13 @@ class Config(WestCommand):
             except PermissionError as pe:
                 self._perm_error(pe, configfile, args.name)
 
+    def check_config(self, option):
+        if '.' not in option:
+            self.die(f'invalid configuration option "{option}"; '
+                     'expected "section.key" format')
+
     def read(self, args):
+        self.check_config(args.name)
         value = self.config.get(args.name, configfile=args.configfile or ALL)
         if value is not None:
             self.inf(value)
@@ -185,6 +192,7 @@ class Config(WestCommand):
             raise CommandError(returncode=1)
 
     def write(self, args):
+        self.check_config(args.name)
         what = args.configfile or LOCAL
         try:
             self.config.set(args.name, args.value, configfile=what)
