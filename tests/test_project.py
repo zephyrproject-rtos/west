@@ -417,6 +417,75 @@ def test_update_tag_to_tag(west_init_tmpdir):
     assert ur.tr_head_0 == v1_0
     assert ur.tr_head_1 == v2_0
 
+def test_update_head_0(west_init_tmpdir):
+    # Verify that using HEAD~0 as the revision causes west to not touch the
+    # local repo. In this case, local zephyr should remain unchanged, even
+    # though it is referenced in the new top-level manifest 'my_manifest',
+    # since it's referenced with HEAD~0. Check that a local commit remains, and
+    # that local changes are kept as is. An invalid url ('na') is used to check
+    # that west doesn't attempt to access it.
+    # Expect only Kconfiglib to be updated, since it's mentioned in the new
+    # manifest's name-allowlist.
+    # Note: HEAD~0 is used instead of HEAD because HEAD causes west to instead
+    # fetch the remote HEAD.
+    # In git, HEAD is a reference, whereas HEAD~<n> is a valid revision but
+    # not a reference. West fetches references, such as refs/heads/main or
+    # HEAD, and commits not available locally, but will not fetch commits if
+    # they are already available.
+    # HEAD~0 is resolved to a specific commit that is locally available, and
+    # therefore west will simply checkout the locally available commit,
+    # identified by HEAD~0.
+
+    # create local repositories
+    cmd('update')
+
+    local_zephyr = west_init_tmpdir / "zephyr"
+
+    add_commit(local_zephyr, "local commit")
+    local_commit = check_output([GIT, 'rev-parse', 'HEAD'], cwd=local_zephyr)
+
+    with open(local_zephyr / "CODEOWNERS", 'a') as f:
+        f.write("\n") # Make a local change (add a newline)
+
+    my_manifest_dir = west_init_tmpdir / "my_manifest"
+    my_manifest_dir.mkdir()
+
+    my_manifest = Path(my_manifest_dir / "west.yml")
+    my_manifest.write_text(
+        '''
+          manifest:
+            projects:
+              - name: zephyr
+                revision: HEAD~0
+                url: na
+                import:
+                  name-allowlist:
+                    - Kconfiglib
+        ''')
+
+    cmd(f"config manifest.path {my_manifest_dir}")
+
+    # Update the upstream repositories, getting an UpdateResults tuple
+    # back.
+    ur = update_helper(west_init_tmpdir)
+
+    assert all(ur)
+
+    assert ur.nt_mr_0 == ur.nt_mr_1, 'net-tools manifest-rev changed'
+    assert ur.kl_mr_0 != ur.kl_mr_1, 'failed updating kconfiglib manifest-rev'
+    assert ur.tr_mr_0 == ur.tr_mr_1, 'tagged_repo manifest-rev changed'
+    assert ur.nt_head_0 == ur.nt_head_1, 'net-tools HEAD changed'
+    assert ur.kl_head_0 != ur.kl_head_1, 'failed updating kconfiglib HEAD'
+    assert ur.tr_head_0 == ur.tr_head_1, 'tagged_repo HEAD changed'
+
+    local_commit2 = check_output([GIT, 'rev-parse', 'HEAD'], cwd=local_zephyr)
+    modified_files = check_output([GIT, 'status', '--porcelain'],
+                                  cwd=local_zephyr)
+
+    assert local_commit == local_commit2, 'zephyr local commit changed'
+    assert modified_files.strip() == "M CODEOWNERS", \
+           'local zephyr change not preserved'
+
 def test_update_some_with_imports(repos_tmpdir):
     # 'west update project1 project2' should work fine even when
     # imports are used, as long as the relevant projects are all
