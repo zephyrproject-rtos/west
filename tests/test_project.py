@@ -2090,3 +2090,33 @@ def test_import_project_rolling(repos_tmpdir):
 
     assert head_before != rev_parse(zephyr_ws, 'HEAD')
     assert (zephyr_ws / 'should-clone').check(file=1)
+
+def test_change(west_init_tmpdir):
+    # Chenge revision for 'zephyr' project.
+
+    new_revision = 'v1.0.2'
+
+    with open(west_init_tmpdir / 'zephyr/west.yml', 'w') as f:
+        f.write("""
+        manifest:
+          defaults:
+            remote: r
+          remotes:
+            - name: r
+              url-base: https://example.com
+          projects:
+          - name: Kconfiglib
+            revision: main
+            groups:
+            - foo-group-1
+          - name: bar
+            path: path-for-bar
+          - name: foo
+        """)
+
+    cmd(f'change Kconfiglib --revision {new_revision}')
+
+    manifest = Manifest.from_topdir(topdir=west_init_tmpdir)
+    projects = manifest.get_projects(['Kconfiglib'])
+
+    assert projects[0].revision == new_revision

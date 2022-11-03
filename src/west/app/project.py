@@ -11,6 +11,7 @@ import logging
 import os
 from os.path import abspath, relpath
 from pathlib import PurePath, Path
+import ruamel.yaml
 import shutil
 import shlex
 import subprocess
@@ -1480,6 +1481,65 @@ class Topdir(_ProjectCommand):
 
     def do_run(self, args, user_args):
         self.inf(PurePath(self.topdir).as_posix())
+
+class Change(_ProjectCommand):
+    def __init__(self):
+        super().__init__(
+            'change',
+            'change project details in the manifest',
+            textwrap.dedent('''\
+            Update projects information',
+            'Change project config in west.yml.'''))
+
+    def do_add_parser(self, parser_adder):
+        parser = self._parser(parser_adder)
+
+        parser.add_argument('name',
+                            help="name of the updated project")
+        parser.add_argument("--revision",
+                            help="what revision to use")
+        parser.add_argument("--path",
+                            help="what path to use")
+        parser.add_argument("--url",
+                            help="what url to use")
+
+        return parser
+
+    def do_run(self, args, ignored):
+        self._setup_logging(args)
+
+        manifest = Manifest.from_file(import_flags=ImportFlag.IGNORE_PROJECTS)
+        m = ruamel.yaml.YAML()
+        m.indent(mapping=2, sequence=4, offset=2)
+        m.preserve_quotes = True
+
+        with open(manifest.path, "r") as fh:
+            x = m.load(fh.read())
+            project_found = False
+            for p in x["manifest"]["projects"]:
+                if p["name"] == args.name:
+                    project_found = True
+                    if args.revision:
+                        self.inf(f'Revision of project {p["name"]} changed:\n'
+                                 f'  Old: {p["revision"]}\n'
+                                 f'  New: {args.revision}')
+                        p["revision"] = args.revision
+                    if args.path:
+                        self.inf(f'Path of project {p["name"]} changed:\n'
+                                 f'  Old: {p["path"]}\n'
+                                 f'  New: {args.path}')
+                        p["path"] = args.path
+                    if args.url:
+                        self.inf(f'Url of project {p["name"]} changed:\n'
+                                 f'  Old: {p["url"]}\n'
+                                 f'  New: {args.url}')
+                        p["url"] = args.url
+
+            if not project_found:
+                self.wrn(f'Project {args.name} not found')
+
+        with open(manifest.path, "w") as fh:
+            m.dump(x, fh)
 
 class SelfUpdate(_ProjectCommand):
     def __init__(self):
