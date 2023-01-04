@@ -60,6 +60,9 @@ SUBMODULE_ADD = [GIT,
                  'submodule',
                  'add']
 
+# Helper string for the same purpose when running west update.
+PROTOCOL_FILE_ALLOW = '--submodule-init-config protocol.file.allow=always'
+
 #
 # Test fixtures
 #
@@ -645,7 +648,7 @@ def test_update_submodules_list(repos_tmpdir):
     assert not net_tools_project.is_cloned()
 
     # Update only zephyr project.
-    cmd('update zephyr', cwd=ws)
+    cmd(f'update {PROTOCOL_FILE_ALLOW} zephyr', cwd=ws)
 
     # Verify if only zephyr project was cloned.
     assert zephyr_project.is_cloned()
@@ -658,7 +661,7 @@ def test_update_submodules_list(repos_tmpdir):
     assert not (res.returncode or res.stdout.strip())
 
     # Update all projects
-    cmd('update', cwd=ws)
+    cmd(f'update {PROTOCOL_FILE_ALLOW}', cwd=ws)
 
     # Verify if both projects were cloned
     assert zephyr_project.is_cloned()
@@ -739,7 +742,7 @@ def test_update_all_submodules(repos_tmpdir):
     assert not zephyr_project.is_cloned()
 
     # Update zephyr project.
-    cmd('update zephyr', cwd=ws)
+    cmd(f'update {PROTOCOL_FILE_ALLOW} zephyr', cwd=ws)
 
     # Verify if zephyr project was cloned.
     assert zephyr_project.is_cloned()
@@ -903,7 +906,7 @@ def test_update_submodules_strategy(repos_tmpdir):
     assert not net_tools_project.is_cloned()
 
     # Update only zephyr project using checkout strategy (selected by default).
-    cmd('update zephyr', cwd=ws)
+    cmd(f'update {PROTOCOL_FILE_ALLOW} zephyr', cwd=ws)
 
     # Verify if only zephyr project was cloned.
     assert zephyr_project.is_cloned()
@@ -916,7 +919,7 @@ def test_update_submodules_strategy(repos_tmpdir):
     assert not (res.returncode or res.stdout.strip())
 
     # Update only net-tools project using rebase strategy
-    cmd('update net-tools -r', cwd=ws)
+    cmd(f'update {PROTOCOL_FILE_ALLOW} net-tools -r', cwd=ws)
 
     # Verify if both projects were cloned
     assert zephyr_project.is_cloned()
