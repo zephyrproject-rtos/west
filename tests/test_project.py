@@ -49,6 +49,17 @@ UpdateResults = collections.namedtuple('UpdateResults',
                                        'kl_head_0 kl_head_1 '
                                        'tr_head_0 tr_head_1')
 
+# Helper list for forming commands that add submodules from
+# remotes which may be on the local file system. Such cases
+# must be explicitly authorized since git 2.28.1. For details,
+# see:
+#
+# https://github.blog/2022-10-18-git-security-vulnerabilities-announced/#cve-2022-39253
+SUBMODULE_ADD = [GIT,
+                 '-c', 'protocol.file.allow=always',
+                 'submodule',
+                 'add']
+
 #
 # Test fixtures
 #
@@ -600,15 +611,16 @@ def test_update_submodules_list(repos_tmpdir):
     cmd(f'init -l {manifest_repo}')
 
     # Make tagged_repo to be zephyr project submodule.
-    subprocess.check_call(
-        [GIT, 'submodule', 'add', str(tagged_repo), 'tagged_repo'], cwd=zephyr)
+    subprocess.check_call(SUBMODULE_ADD +
+                          [str(tagged_repo), 'tagged_repo'],
+                          cwd=zephyr)
     # Commit changes to the zephyr repo.
     add_commit(zephyr, 'zephyr submodule change commit')
 
     # Make Kconfiglib to be net-tools project submodule.
-    subprocess.check_call(
-        [GIT, 'submodule', 'add', str(kconfiglib), kconfiglib_submodule],
-        cwd=net_tools)
+    subprocess.check_call(SUBMODULE_ADD +
+                          [str(kconfiglib), kconfiglib_submodule],
+                          cwd=net_tools)
     # Commit changes to the net-tools repo.
     add_commit(net_tools, 'net-tools submodule change commit')
 
@@ -694,21 +706,23 @@ def test_update_all_submodules(repos_tmpdir):
     cmd(f'init -l {manifest_repo}')
 
     # Make tagged_repo to be zephyr project submodule.
-    subprocess.check_call(
-        [GIT, 'submodule', 'add', str(tagged_repo), 'tagged_repo'], cwd=zephyr)
+    subprocess.check_call(SUBMODULE_ADD +
+                          [str(tagged_repo), 'tagged_repo'],
+                          cwd=zephyr)
     # Commit changes to the zephyr repo.
     add_commit(zephyr, 'zephyr submodule tagged_repo commit')
 
     # Make Kconfiglib to be net_tools submodule.
-    subprocess.check_call(
-        [GIT, 'submodule', 'add', str(kconfiglib), 'Kconfiglib'],
-        cwd=net_tools)
+    subprocess.check_call(SUBMODULE_ADD +
+                          [str(kconfiglib), 'Kconfiglib'],
+                          cwd=net_tools)
     # Commit changes to the net_tools repo.
     add_commit(net_tools, 'net_tools submodule Kconfiglib commit')
 
     # Make net_tools to be zephyr project submodule.
-    subprocess.check_call(
-        [GIT, 'submodule', 'add', str(net_tools), 'net-tools'], cwd=zephyr)
+    subprocess.check_call(SUBMODULE_ADD +
+                          [str(net_tools), 'net-tools'],
+                          cwd=zephyr)
     # Commit changes to the zephyr repo.
     add_commit(zephyr, 'zephyr submodule net-tools commit')
 
@@ -780,14 +794,16 @@ def test_update_no_submodules(repos_tmpdir):
     cmd(f'init -l {manifest_repo}')
 
     # Make tagged_repo to be zephyr project submodule.
-    subprocess.check_call(
-        [GIT, 'submodule', 'add', str(tagged_repo), 'tagged_repo'], cwd=zephyr)
+    subprocess.check_call(SUBMODULE_ADD +
+                          [str(tagged_repo), 'tagged_repo'],
+                          cwd=zephyr)
     # Commit changes to the zephyr repo.
     add_commit(zephyr, 'zephyr submodule tagged_repo commit')
 
     # Make net_tools to be zephyr project submodule.
-    subprocess.check_call(
-        [GIT, 'submodule', 'add', str(net_tools), 'net-tools'], cwd=zephyr)
+    subprocess.check_call(SUBMODULE_ADD +
+                          [str(net_tools), 'net-tools'],
+                          cwd=zephyr)
     # Commit changes to the zephyr repo.
     add_commit(zephyr, 'zephyr submodule net-tools commit')
 
@@ -862,15 +878,16 @@ def test_update_submodules_strategy(repos_tmpdir):
     cmd(f'init -l {manifest_repo}')
 
     # Make tagged_repo to be zephyr project submodule.
-    subprocess.check_call(
-        [GIT, 'submodule', 'add', str(tagged_repo), 'tagged_repo'], cwd=zephyr)
+    subprocess.check_call(SUBMODULE_ADD +
+                          [str(tagged_repo), 'tagged_repo'],
+                          cwd=zephyr)
     # Commit changes to the zephyr repo.
     add_commit(zephyr, 'zephyr submodule change commit')
 
     # Make Kconfiglib to be net-tools project submodule.
-    subprocess.check_call(
-        [GIT, 'submodule', 'add', str(kconfiglib), 'Kconfiglib'],
-        cwd=net_tools)
+    subprocess.check_call(SUBMODULE_ADD +
+                          [str(kconfiglib), 'Kconfiglib'],
+                          cwd=net_tools)
     # Commit changes to the net-tools repo.
     add_commit(net_tools, 'net-tools submodule change commit')
 
