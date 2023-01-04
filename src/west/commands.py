@@ -574,7 +574,8 @@ class WestExtCommandSpec:
     # the command) before constructing it, however.
     factory: _ExtFactory
 
-def extension_commands(config: Configuration, manifest: Manifest = None):
+def extension_commands(config: Configuration,
+                       manifest: Optional[Manifest] = None):
     # Get descriptions of available extension commands.
     #
     # The return value is an ordered map from project paths to lists of
