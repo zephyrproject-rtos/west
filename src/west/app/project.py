@@ -795,6 +795,11 @@ class Update(_ProjectCommand):
                            help='''proceed as if FILTER was appended to
                            manifest.group-filter; may be given multiple
                            times''')
+        group.add_argument('--submodule-init-config',
+                           action='append', default=[],
+                           help='''git configuration option to set when running
+                           'git submodule init' in '<option>=<value>' format;
+                           may be given more than once''')
 
         group = parser.add_argument_group('deprecated options')
         group.add_argument('-x', '--exclude-west', action='store_true',
@@ -1011,20 +1016,26 @@ class Update(_ProjectCommand):
         submodules = project.submodules
         submodules_update_strategy = ('--rebase' if self.args.rebase
                                       else '--checkout')
+        config_opts = []
+        for config_opt in self.args.submodule_init_config:
+            config_opts.extend(['-c', config_opt])
+
         # For the list type, update given list of submodules.
         if isinstance(submodules, list):
             for submodule in submodules:
                 if self.sync_submodules:
                     project.git(['submodule', 'sync', '--recursive',
                                  '--', submodule.path])
-                project.git(['submodule', 'update',
+                project.git(config_opts +
+                            ['submodule', 'update',
                              '--init', submodules_update_strategy,
                              '--recursive', submodule.path])
         # For the bool type, update all project submodules
         elif isinstance(submodules, bool):
             if self.sync_submodules:
                 project.git(['submodule', 'sync', '--recursive'])
-            project.git(['submodule', 'update', '--init',
+            project.git(config_opts +
+                        ['submodule', 'update', '--init',
                          submodules_update_strategy, '--recursive'])
 
     def update(self, project):
