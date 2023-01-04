@@ -328,7 +328,7 @@ class WestApp:
         parser = WestArgumentParser(
             prog='west', description='The Zephyr RTOS meta-tool.',
             epilog='''Run "west help <command>" for help on each <command>.''',
-            add_help=False, west_app=self)
+            add_help=False, west_app=self, allow_abbrev=False)
 
         # Remember to update zephyr's west-completion.bash if you add or
         # remove flags. This is currently the only place where shell
