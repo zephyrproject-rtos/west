@@ -157,8 +157,8 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
                             help='''manifest repository URL to clone;
                             cannot be combined with -l''')
         parser.add_argument('--mr', '--manifest-rev', dest='manifest_rev',
-                            help='''manifest revision to check out and use;
-                            cannot be combined with -l''')
+                            help='''manifest repository branch or tag name
+                            to check out first; cannot be combined with -l''')
         parser.add_argument('--mf', '--manifest-file', dest='manifest_file',
                             help='manifest file name to use')
         parser.add_argument('-l', '--local', action='store_true',
