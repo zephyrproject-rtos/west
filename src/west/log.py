@@ -72,8 +72,9 @@ def dbg(*args, level=VERBOSE_NORMAL):
     :param args: sequence of arguments to print.
     :param level: verbosity level to set, e.g. VERBOSE_VERY.
 
-    The message is only printed if level is at least the current
-    verbosity level.'''
+    The message is only printed if the ``level`` parameter is at most
+    the current verbosity level.
+    '''
     deprecated()
     if level > VERBOSE:
         return
