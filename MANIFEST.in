@@ -1,2 +1,3 @@
 include src/west/west-commands-schema.yml
 include src/west/manifest-schema.yml
+include src/west/py.typed
