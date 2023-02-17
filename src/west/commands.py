@@ -182,13 +182,13 @@ class WestCommand(ABC):
         :param config: `west.configuration.Configuration` or ``None``,
             accessible as ``self.config`` from `WestCommand.do_run`
         '''
+        self.config = config
         if unknown and not self.accepts_unknown_args:
             self.parser.error(f'unexpected arguments: {unknown}')
         if not topdir and self.requires_workspace:
             self.die(_no_topdir_msg(os.getcwd(), self.name))
         self.topdir = os.fspath(topdir) if topdir else None
         self.manifest = manifest
-        self.config = config
         for hook in self._hooks:
             hook(self)
         self.do_run(args, unknown)
