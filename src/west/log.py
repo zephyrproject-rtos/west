@@ -8,9 +8,7 @@ west harder to unit test. See:
 
   https://github.com/zephyrproject-rtos/west/issues/149
 
-We will keep this in place for a long time, however, since extension
-commands are using these functions. Removal won't come until west v1.0
-at the earliest.
+Removal won't come until west v2.0.
 
 In the future, commands should use equivalent WestCommand methods
 instead. For example, use WestCommand.dbg() instead of west.log.dbg(),
