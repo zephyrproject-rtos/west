@@ -22,11 +22,12 @@ and/or update the repositories named in the manifest.
 
 By default, west uses `upstream Zephyr's manifest file
 <https://github.com/zephyrproject-rtos/zephyr/blob/main/west.yml>`_, but west
-doesn't care if the manifest repository is a Zephyr tree or not.
+doesn't care if the manifest repository is zephyr or not. You can and are
+encouraged to make your own manifest repositories to meet your needs.
 
-For more details, see `Multiple Repository Management
-<https://docs.zephyrproject.org/latest/guides/west/repo-tool.html>`_ in the
-west documentation.
+For more details, see the `West guide
+<https://docs.zephyrproject.org/latest/guides/west/index.html>`_ in the Zephyr
+documentation.
 
 Example usage using the upstream manifest file::
 
@@ -82,11 +83,25 @@ See the tox configuration file, tox.ini, for more details.
 Hacking on West
 ---------------
 
+This section contains notes for getting started developing west itself.
+
+Editable Install
+~~~~~~~~~~~~~~~~
+
+To run west "live" from the current source code tree, run this command from the
+top level directory in the west repository::
+
+  pip3 install -e .
+
+This is useful if you are actively working on west and don't want to re-package
+and install a wheel each time you run it.
+
 Installing from Source
 ~~~~~~~~~~~~~~~~~~~~~~
 
-The `wheel`_ package is required to install west from source. See "Installing
-Wheel" below if you don't have ``wheel`` installed.
+You can create and install a wheel package to install west as well.
+The `wheel`_ Python package is required to do this. See "Installing Wheel"
+below if you need to do this.
 
 To build the west wheel file::
 
@@ -105,17 +120,6 @@ To install the wheel::
 
 You can ``pip3 uninstall west`` to remove this wheel before re-installing the
 version from PyPI, etc.
-
-Editable Install
-~~~~~~~~~~~~~~~~
-
-To run west "live" from the current source code tree, run this command from the
-top level directory in the west repository::
-
-  pip3 install -e .
-
-This is useful if you are actively working on west and don't want to re-package
-and install a wheel each time you run it.
 
 Installing Wheel
 ~~~~~~~~~~~~~~~~
