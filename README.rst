@@ -25,7 +25,7 @@ By default, west uses `upstream Zephyr's manifest file
 doesn't care if the manifest repository is a Zephyr tree or not.
 
 For more details, see `Multiple Repository Management
-<https://docs.zephyrproject.org/latest/guides/west/repo-tool.html>`_ in the
+<https://docs.zephyrproject.org/latest/guides/west/index.html>`_ in the
 west documentation.
 
 Example usage using the upstream manifest file::
