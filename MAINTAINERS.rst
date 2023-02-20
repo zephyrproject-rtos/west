@@ -64,10 +64,19 @@ Pre-release test plan
 
    (It's still a pass if ``west build`` requires ``--pristine``.)
 
-7. Assuming that all went well (if it didn't, go fix it and repeat), update
-   __version__ to 'X.Y.Z' (i.e. drop the 'aN' suffix that denotes alpha N), tag
-   the release (see "Tagging the release" for a procedure) and upload to PyPI
-   (see "Building and uploading the release wheels" for a procedure).
+7. Assuming that all went well (if it didn't, go fix it and repeat):
+
+   - update __version__ to 'X.Y.Z' (i.e. drop the 'aN' suffix that denotes
+     alpha N)
+
+   - tag the release on GitHub (see "Tagging the release" for a procedure)
+
+   - create a release on GitHub from the new tag by going to
+     https://github.com/zephyrproject-rtos/west/releases
+     clicking "Draft a new release", and following instructions
+
+   - upload the release artifacts to PyPI (see "Building and uploading the
+     release wheels" for a procedure)
 
 8. Send email to the Zephyr lists, announce@ and users@, notifying them of the
    new release. Include 'git shortlog' data of the new commits since the last
