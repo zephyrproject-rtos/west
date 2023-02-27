@@ -223,11 +223,14 @@ class WestApp:
                 # level manifest is not found.
                 self.queued_io.append(
                     lambda cmd:
-                    cmd.die(f"file not found: {self.mle.filename}"))
+                    cmd.die(f"manifest file not found: {self.mle.filename}\n"
+                            "Please check manifest.file and manifest.path in "
+                            f"{self.topdir + '/' or ''}.west/config"))
             elif isinst(PermissionError):
                 self.queued_io.append(
                     lambda cmd:
-                    cmd.die(f"permission denied: {self.mle.filename}"))
+                    cmd.die("permission denied when loading manifest file: "
+                            f"{self.mle.filename}"))
             else:
                 self.queued_io.append(
                     lambda cmd:
