@@ -1456,6 +1456,8 @@ class ForAll(_ProjectCommand):
                             required=True)
         parser.add_argument('-a', '--all', action='store_true',
                             help='include inactive projects'),
+        parser.add_argument('-p', '--pipe', action='store_true',
+                            help='pipe subcommand stdout and stderr'),
         parser.add_argument('projects', metavar='PROJECT', nargs='*',
                             help='''projects (by name or path) to operate on;
                             defaults to active cloned projects''')
@@ -1468,9 +1470,15 @@ class ForAll(_ProjectCommand):
         for project in self._cloned_projects(args, only_active=not args.all):
             self.banner(
                 f'running "{args.subcommand}" in {project.name_and_path}:')
-            rc = subprocess.Popen(args.subcommand, shell=True,
-                                  cwd=project.abspath).wait()
-            if rc:
+            kwargs={}
+            if args.pipe:
+                kwargs['stdout'] = subprocess.PIPE
+                kwargs['stderr'] = subprocess.STDOUT
+            cp = subprocess.run(args.subcommand, shell=True,
+                                cwd=project.abspath, **kwargs)
+            if args.pipe:
+                print(cp.stdout.decode('utf-8'))
+            if cp.returncode:
                 failed.append(project)
         self._handle_failed(args, failed)
 
