@@ -18,7 +18,9 @@ from io import StringIO
 import logging
 import os
 from pathlib import Path, PurePath
+import platform
 import shutil
+import signal
 import sys
 from subprocess import CalledProcessError
 import tempfile
@@ -384,7 +386,38 @@ class WestApp:
             else:
                 self.run_extension(args.command, argv)
         except KeyboardInterrupt:
-            sys.exit(0)
+            # Catching this avoids dumping stack.
+            #
+            # Here we replicate CPython's behavior in exit_sigint() in
+            # Modules/main.c (as of
+            # 2f62a5da949cd368a9498e6a03e700f4629fa97f), but in pure
+            # Python since it's not clear how or if we can call that
+            # directly from here.
+            #
+            # For more discussion on this behavior, see:
+            #
+            # https://bugs.python.org/issue1054041
+            if platform.system() == 'Windows':
+                # The hex number is a standard value (STATUS_CONTROL_C_EXIT):
+                # https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/596a1078-e883-4972-9bbc-49e60bebca55
+                #
+                # Subtracting 2**32 seems to be the convention for
+                # making it fit in an int32_t.
+                CONTROL_C_EXIT_CODE = 0xC000013A - 2**32
+                sys.exit(CONTROL_C_EXIT_CODE)
+            else:
+                # On Unix, just reinstate the default SIGINT handler
+                # and send the signal again, overriding the CPython
+                # KeyboardInterrupt stack dump.
+                #
+                # In addition to exiting with the correct "dying due
+                # to SIGINT" status code (usually 130), this signals
+                # to the calling environment that we were interrupted,
+                # so that e.g. "while true; do west ... ; done" will
+                # exit out of the entire while loop and not just
+                # the west command.
+                signal.signal(signal.SIGINT, signal.SIG_DFL)
+                os.kill(os.getpid(), signal.SIGINT)
         except BrokenPipeError:
             sys.exit(0)
         except CalledProcessError as cpe:
