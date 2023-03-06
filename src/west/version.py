@@ -5,7 +5,7 @@
 # This is the Python 3 version of option 3 in:
 # https://packaging.python.org/guides/single-sourcing-package-version/#single-sourcing-the-version
 
-__version__ = '1.0.0'
+__version__ = '1.0.1'
 #
 # MAINTAINERS:
 #
