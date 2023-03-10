@@ -317,6 +317,11 @@ def test_forall(west_init_tmpdir):
         '=== running "echo foo" in net-tools (net-tools):',
         'foo']
 
+    assert cmd('forall --group Kconfiglib-group -c "echo foo"'
+               ).splitlines() == [
+                   '=== running "echo foo" in Kconfiglib (subdir/Kconfiglib):',
+                   'foo',
+               ]
 
 def test_update_projects(west_init_tmpdir):
     # Test the 'west update' command. It calls through to the same backend
