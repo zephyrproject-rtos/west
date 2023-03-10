@@ -670,15 +670,6 @@ class Status(_ProjectCommand):
         # to print. We manually use Popen in order to try to exit as
         # quickly as possible if 'git status' prints anything.
 
-        # This technique fails when tested on Python 3.6, which west
-        # still supports at time of writing. This seems likely to be
-        # due to https://bugs.python.org/issue35182.
-        #
-        # Users of old python versions will have to deal with the
-        # verbose output.
-        if sys.version_info < (3, 7):
-            return True
-
         popen = subprocess.Popen(['git', 'status', '--porcelain'],
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE,
@@ -693,15 +684,6 @@ class Status(_ProjectCommand):
                 stdout, stderr = popen.communicate(timeout=0.1)
             except subprocess.TimeoutExpired:
                 pass
-            except ValueError:
-                # In case this isn't issue35182, handle the exception
-                # anyway.
-                self.wrn(
-                    f'{project.name}: internal error; got ValueError '
-                    'from Popen.communicate() when checking status. '
-                    'Ignoring it, but please report this to the west '
-                    'developers.')
-                return True
             return stdout or stderr
 
         while True:
