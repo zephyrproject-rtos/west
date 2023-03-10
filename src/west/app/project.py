@@ -1456,6 +1456,12 @@ class ForAll(_ProjectCommand):
                             required=True)
         parser.add_argument('-a', '--all', action='store_true',
                             help='include inactive projects'),
+        parser.add_argument('-g', '--group', dest='groups',
+                            default=[], action='append',
+                            help='''only run COMMAND if a project is
+                            in this group; if given more than once,
+                            the command will be run if the project is
+                            in any of the groups''')
         parser.add_argument('projects', metavar='PROJECT', nargs='*',
                             help='''projects (by name or path) to operate on;
                             defaults to active cloned projects''')
@@ -1465,7 +1471,10 @@ class ForAll(_ProjectCommand):
         self._setup_logging(args)
 
         failed = []
+        group_set = set(args.groups)
         for project in self._cloned_projects(args, only_active=not args.all):
+            if group_set and not group_set.intersection(set(project.groups)):
+                continue
             self.banner(
                 f'running "{args.subcommand}" in {project.name_and_path}:')
             rc = subprocess.Popen(args.subcommand, shell=True,
