@@ -117,6 +117,36 @@ class _ProjectCommand(WestCommand):
         self.die(f'unknown project name{s}/path{s}: {names}\n'
                  '  Hint: use "west list" to list all projects.')
 
+    def _has_nonempty_status(self, project):
+        # Check if the project has any status output to print. We
+        # manually use Popen in order to try to exit as quickly as
+        # possible if 'git status' prints anything.
+
+        popen = subprocess.Popen(['git', 'status', '--porcelain'],
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE,
+                                 cwd=project.abspath)
+
+        def has_output():
+            # 'git status --porcelain' prints nothing if there
+            # are no notable changes, so any output at all
+            # means we should run 'git status' on the project.
+            stdout, stderr = None, None
+            try:
+                stdout, stderr = popen.communicate(timeout=0.1)
+            except subprocess.TimeoutExpired:
+                pass
+            return stdout or stderr
+
+        while True:
+            if has_output():
+                popen.kill()
+                return True
+            if popen.poll() is not None:
+                break
+
+        return has_output()
+
 class Init(_ProjectCommand):
 
     def __init__(self):
@@ -656,7 +686,7 @@ class Status(_ProjectCommand):
 
             try:
                 if not (self.verbosity >= Verbosity.DBG or
-                        self.should_print_for(project)):
+                        self._has_nonempty_status(project)):
                     continue
 
                 self.banner(f'status of {project.name_and_path}:')
@@ -664,36 +694,6 @@ class Status(_ProjectCommand):
             except subprocess.CalledProcessError:
                 failed.append(project)
         self._handle_failed(args, failed)
-
-    def should_print_for(self, project):
-        # do_run() helper; check if the project has any status output
-        # to print. We manually use Popen in order to try to exit as
-        # quickly as possible if 'git status' prints anything.
-
-        popen = subprocess.Popen(['git', 'status', '--porcelain'],
-                                 stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE,
-                                 cwd=project.abspath)
-
-        def has_output():
-            # 'git status --porcelain' prints nothing if there
-            # are no notable changes, so any output at all
-            # means we should run 'git status' on the project.
-            stdout, stderr = None, None
-            try:
-                stdout, stderr = popen.communicate(timeout=0.1)
-            except subprocess.TimeoutExpired:
-                pass
-            return stdout or stderr
-
-        while True:
-            if has_output():
-                popen.kill()
-                return True
-            if popen.poll() is not None:
-                break
-
-        return has_output()
 
 class Update(_ProjectCommand):
 
