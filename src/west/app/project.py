@@ -602,6 +602,134 @@ class ManifestCommand(_ProjectCommand):
         else:
             sys.stdout.write(to_dump)
 
+class Compare(_ProjectCommand):
+    def __init__(self):
+        super().__init__(
+            'compare',
+            "compare project status against the manifest",
+            textwrap.dedent('''\
+            Compare each project's working tree state against the results
+            of the most recent successful "west update" command.
+
+            This command prints output for a project if (and only if)
+            at least one of the following is true:
+
+            1. its checked out commit is different than the commit checked
+               out by the most recent successful "west update"
+            2. its working tree is not clean (i.e. there are local uncommitted
+               changes)
+            3. it has a local checked out branch (unless the configuration
+               option compare.ignore-branches is true or --ignore-branches
+               is given on the command line, either of which disable this)
+
+            The command also prints output for the manifest repository if it
+            has nonempty status.
+
+            The output is meant to be human-readable, and may change. It is
+            not a stable interface to write scripts against. This command
+            requires git 2.22 or later.''')
+        )
+
+    def do_add_parser(self, parser_adder):
+        parser = self._parser(parser_adder,
+                              epilog=ACTIVE_CLONED_PROJECTS_HELP)
+        parser.add_argument('projects', metavar='PROJECT', nargs='*',
+                            help='''projects (by name or path) to operate on;
+                            defaults to active cloned projects''')
+        parser.add_argument('-a', '--all', action='store_true',
+                            help='include output for inactive projects')
+        parser.add_argument('--exit-code', action='store_true',
+                            help='''exit with status code 1 if status output
+                            was printed for any project''')
+        parser.add_argument('--ignore-branches',
+                            default=None, action='store_true',
+                            help='''skip output for projects with checked out
+                            branches and clean working trees if the branch is
+                            at the same commit as the last "west update"''')
+        parser.add_argument('--no-ignore-branches', dest='ignore_branches',
+                            action='store_false',
+                            help='''overrides a previous --ignore-branches
+                            or any compare.ignore-branches configuration
+                            option''')
+        return parser
+
+    def do_run(self, args, ignored):
+        self.die_if_no_git()
+        if self.git_version_info < (2, 22):
+            # This is for git branch --show-current.
+            self.die('git version 2.22 or later is required')
+        self._setup_logging(args)
+
+        if args.ignore_branches is not None:
+            self.ignore_branches = args.ignore_branches
+        else:
+            self.ignore_branches = \
+                self.config.getboolean('compare.ignore-branches', False)
+
+        failed = []
+        printed_status = False
+        for project in self._cloned_projects(args, only_active=not args.all):
+            if isinstance(project, ManifestProject):
+                # West doesn't track the relationship between the manifest
+                # repository and any remote, but users are still interested
+                # in printing output for comparisons that makes sense.
+                if self._has_nonempty_status(project):
+                    try:
+                        self.banner(f'{project.name_and_path}:')
+                        self.small_banner('HEAD:')
+                        project.git('log --oneline -n 1 HEAD')
+                        self.small_banner('status:')
+                        project.git('status')
+                        printed_status = True
+                    except subprocess.CalledProcessError:
+                        failed.append(project)
+                continue
+
+            # 'git status' output for all projects is noisy when there
+            # are lots of projects.
+            #
+            # We avoid this problem in 2 steps:
+            #
+            #   1. Check if we need to print any output for the
+            #      project.
+            #
+            #   2. If so, run 'git status' on the project. Otherwise,
+            #      skip output for the project entirely.
+            #
+            # In verbose mode, we always print output.
+
+            def has_checked_out_branch(project):
+                if self.ignore_branches:
+                    return False
+
+                return bool(project.git('branch --show-current',
+                                        capture_stdout=True,
+                                        capture_stderr=True).stdout.strip())
+
+            try:
+                if not (self.verbosity >= Verbosity.DBG or
+                        has_checked_out_branch(project) or
+                        (project.sha(QUAL_MANIFEST_REV) !=
+                         project.sha('HEAD')) or
+                        self._has_nonempty_status(project)):
+                    continue
+
+                self.banner(f'{project.name_and_path}:')
+                # `git status` shows `manifest-rev` "sometimes", see
+                # #643. If manifest-rev is missing, then we already
+                # failed earlier anyway.
+                self.small_banner('manifest-rev:')
+                project.git('log --oneline -n 1 manifest-rev')
+                self.small_banner('status:')
+                project.git('status')
+                printed_status = True
+            except subprocess.CalledProcessError:
+                failed.append(project)
+        self._handle_failed(args, failed)
+
+        if args.exit_code and printed_status:
+            raise CommandError(1)
+
 class Diff(_ProjectCommand):
     def __init__(self):
         super().__init__(

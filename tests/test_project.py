@@ -259,6 +259,72 @@ def test_manifest_freeze(west_update_tmpdir):
         assert re.match(eline_re, aline) is not None, (aline, eline_re)
 
 
+def test_compare(west_init_tmpdir):
+    # 'west compare' with no projects cloned should still work,
+    # and not print anything.
+    assert cmd('compare') == ''
+
+    # Create an empty file and make sure the manifest repository
+    # is included in 'west compare' output, and that we get some
+    # information about the dirty tree from git.
+    foo = west_init_tmpdir / 'zephyr' / 'foo'
+    with open(foo, 'w'):
+        pass
+    actual = cmd('compare')
+    assert actual.startswith('=== manifest')
+    assert 'foo' in actual
+
+    # --exit-code should work for the manifest repository too.
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('compare --exit-code')
+
+    # Remove the file and verify compare output is empty again.
+    os.unlink(foo)
+    assert cmd('compare') == ''
+
+    # Make sure project related output seems reasonable.
+    cmd('update')
+    kconfiglib = west_init_tmpdir / 'subdir' / 'Kconfiglib'
+    bar = kconfiglib / 'bar'
+    with open(bar, 'w'):
+        pass
+    actual = cmd('compare')
+    assert actual.startswith('=== Kconfiglib (subdir/Kconfiglib):')
+    assert 'bar' in actual
+
+    # We shouldn't get any output for inactive projects by default, so
+    # temporarily deactivate the Kconfiglib project and make sure that
+    # works.
+    cmd('config manifest.group-filter -- -Kconfiglib-group')
+    assert cmd('compare') == ''
+    # unless we ask for it with --all, or the project by name
+    assert cmd('compare Kconfiglib').startswith(
+        '=== Kconfiglib (subdir/Kconfiglib)')
+    assert cmd('compare --all').startswith(
+        '=== Kconfiglib (subdir/Kconfiglib)')
+    # Activate the project again.
+    cmd('config -d manifest.group-filter')
+
+    # Verify --exit-code works as advertised, and clean up again.
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd('compare --exit-code')
+    os.unlink(bar)
+    assert cmd('compare --exit-code') == ''
+
+    # By default, a checked-out branch should print output, even if
+    # the tree is otherwise clean...
+    check_output(['git', 'checkout', '-b', 'mybranch'], cwd=kconfiglib)
+    actual = cmd('compare')
+    assert actual.startswith('=== Kconfiglib (subdir/Kconfiglib):')
+    assert 'mybranch' in actual
+    # unless we disable that explicitly...
+    assert cmd('compare --ignore-branches') == ''
+    # or the compare.ignore-branches configuration option is true...
+    cmd('config compare.ignore-branches true')
+    assert cmd('compare') == ''
+    # unless we override that option on the command line.
+    assert 'mybranch' in cmd('compare --no-ignore-branches')
+
 def test_diff(west_init_tmpdir):
     # FIXME: Check output
 

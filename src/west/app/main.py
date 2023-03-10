@@ -31,7 +31,7 @@ from west import log
 import west.configuration
 from west.commands import WestCommand, extension_commands, \
     CommandError, ExtensionCommandError, Verbosity
-from west.app.project import List, ManifestCommand, Diff, Status, \
+from west.app.project import List, ManifestCommand, Compare, Diff, Status, \
     SelfUpdate, ForAll, Init, Update, Topdir
 from west.app.config import Config
 from west.manifest import Manifest, MalformedConfig, MalformedManifest, \
@@ -907,6 +907,7 @@ BUILTIN_COMMAND_GROUPS = {
         Update,
         List,
         ManifestCommand,
+        Compare,
         Diff,
         Status,
         ForAll,
