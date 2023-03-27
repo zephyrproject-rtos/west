@@ -242,6 +242,8 @@ def test_manifest_freeze(west_update_tmpdir):
                     '^    url: .*$',
                     '^    revision: [a-f0-9]{40}$',
                     '^    path: subdir/Kconfiglib$',
+                    '^    groups:$',
+                    '^    - Kconfiglib-group$',
                     '^  - name: tagged_repo$',
                     '^    url: .*$',
                     '^    revision: [a-f0-9]{40}$',
