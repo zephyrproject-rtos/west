@@ -288,20 +288,32 @@ def test_status(west_init_tmpdir):
 
 
 def test_forall(west_init_tmpdir):
-    # FIXME: Check output
-    # The 'echo' command is available in both 'shell' and 'batch'
+    # Note that the 'echo' command is available in both Unix shells
+    # and Windows .bat files.
 
     # 'forall' with no projects cloned shouldn't fail
 
-    cmd('forall -c "echo *"')
+    assert cmd('forall -c "echo foo"').splitlines() == [
+        '=== running "echo foo" in manifest (zephyr):',
+        'foo']
 
     # Neither should it fail after cloning one or both projects
 
     cmd('update net-tools')
-    cmd('forall -c "echo *"')
+    assert cmd('forall -c "echo foo"').splitlines() == [
+        '=== running "echo foo" in manifest (zephyr):',
+        'foo',
+        '=== running "echo foo" in net-tools (net-tools):',
+        'foo']
 
     cmd('update Kconfiglib')
-    cmd('forall -c "echo *"')
+    assert cmd('forall -c "echo foo"').splitlines() == [
+        '=== running "echo foo" in manifest (zephyr):',
+        'foo',
+        '=== running "echo foo" in Kconfiglib (subdir/Kconfiglib):',
+        'foo',
+        '=== running "echo foo" in net-tools (net-tools):',
+        'foo']
 
 
 def test_update_projects(west_init_tmpdir):
