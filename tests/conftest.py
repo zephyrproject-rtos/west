@@ -42,6 +42,8 @@ manifest:
     - name: Kconfiglib
       revision: zephyr
       path: subdir/Kconfiglib
+      groups:
+        - Kconfiglib-group
     - name: tagged_repo
       revision: v1.0
     - name: net-tools
