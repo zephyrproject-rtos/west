@@ -46,15 +46,21 @@ QUAL_REFS_WEST = 'refs/west/'
 
 #: The latest manifest schema version supported by this west program.
 #:
-#: This value changes when a new version of west includes new manifest
-#: file features not supported by earlier versions of west.
-SCHEMA_VERSION = '0.13'
+#: This value will change whenever a new version of west includes new
+#: manifest file features not supported by earlier versions of west.
+#: (Its value changed to 1.0 following the release of west versions
+#: v1.0.x, so that users can say "I want schema version 1" instead of
+#: having to keep using '0.13', which was the previous version this
+#: changed.)
+SCHEMA_VERSION = '1.0'
 # MAINTAINERS:
 #
 # - Make sure to update _VALID_SCHEMA_VERS if you change this.
 #
-# - When changing this, make sure that it has the exact same value as
-#   west.version.__version__ when the next release is cut.
+# - When changing this, make sure that it matches the major.minor
+#   version of west itself. E.g. if you add a new manifest feature for
+#   west 1.6, then SCHEMA_VERSION above should be 1.6, and west's
+#   release version numbers should be 1.6.x.
 
 #
 # Internal helpers
@@ -115,7 +121,7 @@ _SCHEMA_VER = parse_version(SCHEMA_VERSION)
 _EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
 _VALID_SCHEMA_VERS = [
     _EARLIEST_VER_STR,
-    '0.7', '0.8', '0.9', '0.10', '0.12',
+    '0.7', '0.8', '0.9', '0.10', '0.12', '0.13',
     SCHEMA_VERSION
 ]
 
