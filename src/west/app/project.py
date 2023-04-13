@@ -614,8 +614,9 @@ class Compare(_ProjectCommand):
             This command prints output for a project if (and only if)
             at least one of the following is true:
 
-            1. its checked out commit is different than the commit checked
-               out by the most recent successful "west update"
+            1. its checked out commit (HEAD) is different than the commit
+               checked out by the most recent successful "west update"
+               (which the manifest-rev branch will point to)
             2. its working tree is not clean (i.e. there are local uncommitted
                changes)
             3. it has a local checked out branch (unless the configuration
@@ -667,7 +668,7 @@ class Compare(_ProjectCommand):
                 self.config.getboolean('compare.ignore-branches', False)
 
         failed = []
-        printed_status = False
+        printed_output = False
         for project in self._cloned_projects(args, only_active=not args.all):
             if isinstance(project, ManifestProject):
                 # West doesn't track the relationship between the manifest
@@ -675,12 +676,8 @@ class Compare(_ProjectCommand):
                 # in printing output for comparisons that makes sense.
                 if self._has_nonempty_status(project):
                     try:
-                        self.banner(f'{project.name_and_path}:')
-                        self.small_banner('HEAD:')
-                        project.git('log --oneline -n 1 HEAD')
-                        self.small_banner('status:')
-                        project.git('status')
-                        printed_status = True
+                        self.compare(project)
+                        printed_output = True
                     except subprocess.CalledProcessError:
                         failed.append(project)
                 continue
@@ -714,21 +711,52 @@ class Compare(_ProjectCommand):
                         self._has_nonempty_status(project)):
                     continue
 
-                self.banner(f'{project.name_and_path}:')
-                # `git status` shows `manifest-rev` "sometimes", see
-                # #643. If manifest-rev is missing, then we already
-                # failed earlier anyway.
-                self.small_banner('manifest-rev:')
-                project.git('log --oneline -n 1 manifest-rev')
-                self.small_banner('status:')
-                project.git('status')
-                printed_status = True
+                self.compare(project)
+                printed_output = True
             except subprocess.CalledProcessError:
                 failed.append(project)
         self._handle_failed(args, failed)
 
-        if args.exit_code and printed_status:
+        if args.exit_code and printed_output:
             raise CommandError(1)
+
+    def compare(self, project):
+        self.banner(f'{project.name_and_path}:')
+        self.print_rev_info(project)
+        self.print_status(project)
+
+    def print_rev_info(self, project):
+        # For non-manifest repositories, print HEAD's and
+        # manifest-rev's SHAs and commit titles, but only if they are
+        # different.
+        #
+        # We force git not to print in color so west's colored
+        # banner() separators stand out more in the output.
+        if isinstance(project, ManifestProject):
+            return
+
+        def rev_info(rev):
+            return project.git(
+                ['log', '-1', '--color=never', '--pretty=%h %s', rev],
+                capture_stdout=True,
+                capture_stderr=True).stdout.decode().rstrip()
+        head_info = rev_info('HEAD')
+        # If manifest-rev is missing, we already failed earlier.
+        manifest_rev_info = rev_info('manifest-rev')
+        if head_info != manifest_rev_info:
+            self.small_banner(f'manifest-rev: {manifest_rev_info}')
+            self.inf(f'            HEAD: {head_info}')
+
+    def print_status(self, project):
+        # `git status` shows `manifest-rev` "sometimes", see #643.
+        if self.color_ui:
+            color = '-c status.color=always'
+        else:
+            color = ''
+        cp = project.git(f'{color} status', capture_stdout=True,
+                         capture_stderr=True)
+        self.small_banner('status:')
+        self.inf(textwrap.indent(cp.stdout.decode().rstrip(), ' ' * 4))
 
 class Diff(_ProjectCommand):
     def __init__(self):
