@@ -680,6 +680,7 @@ class Compare(_ProjectCommand):
                         project.git('log --oneline -n 1 HEAD')
                         self.small_banner('status:')
                         project.git('status')
+                        print()
                         printed_status = True
                     except subprocess.CalledProcessError:
                         failed.append(project)
@@ -722,6 +723,7 @@ class Compare(_ProjectCommand):
                 project.git('log --oneline -n 1 manifest-rev')
                 self.small_banner('status:')
                 project.git('status')
+                print()
                 printed_status = True
             except subprocess.CalledProcessError:
                 failed.append(project)
