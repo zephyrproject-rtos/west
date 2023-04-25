@@ -200,26 +200,7 @@ class WestApp:
                 if args.command == 'update':
                     return      # that's fine
 
-                p, imp = self.mle.project, self.mle.imp
-                ctxt = f'  Failed importing "{imp}"'
-                if not isinstance(p, ManifestProject):
-                    # Try to be more helpful by explaining exactly
-                    # what west.manifest needs to happen before we can
-                    # resolve the missing import.
-                    rev = p.revision
-
-                    ctxt += f' from revision "{rev}"\n'
-                    ctxt += '  Hint: for this to work:\n'
-                    ctxt += f'          - {p.name} must be cloned\n'
-                    ctxt += (f'          - its {MANIFEST_REV_BRANCH} ref '
-                             'must point to a commit with the import data\n')
-                    ctxt += '        To fix, run:\n'
-                    ctxt += '          west update'
-
-                self.queued_io.append(
-                    lambda cmd:
-                    cmd.die(f'failed manifest import in {p.name_and_path}\n' +
-                            ctxt))
+                self.queued_io.append(lambda cmd: cmd.die(mie_msg(self.mle)))
             elif isinst(FileNotFoundError):
                 # This should ordinarily only happen when the top
                 # level manifest is not found.
@@ -860,20 +841,60 @@ class WestArgumentParser(argparse.ArgumentParser):
         super().add_argument(*args, **kwargs)
 
     def error(self, message):
-        if (self.west_app and
-                self.west_app.mle and
-                isinstance(self.west_app.mle,
-                           ManifestVersionError) and
-                self.west_app.cmd):
-            self.west_app.cmd.die(mve_msg(self.west_app.mle))
+        if self.west_app and self.west_app.mle:
+            # If we have a known WestApp instance and the manifest
+            # failed to load, then try to specialize the error message
+            # to handle west-specific situations.
+
+            app = self.west_app
+            mle = self.west_app.mle
+            if app.cmd:
+                cmd = app.cmd
+            else:
+                # No app.cmd probably means that the user is
+                # running an extension command that they expected
+                # to work, but we don't know about because the
+                # import failed and thus we have no manifest to
+                # load extensions from.
+                #
+                # Just use the help command as a stand-in instead.
+                # We have to manually patch up its config
+                # attribute in order to do this outside of
+                # do_run().
+                cmd = app.builtins['help']
+                cmd.config = west.configuration.Configuration(
+                    topdir=app.topdir)
+            if isinstance(mle, ManifestVersionError):
+                cmd.die(mve_msg(mle))
+            elif isinstance(mle, ManifestImportFailed):
+                cmd.die(mie_msg(mle))
         super().error(message=message)
 
 def mve_msg(mve, suggest_upgrade=True):
+    # Helper for getting a message for a ManifestVersionError.
     return '\n  '.join(
         [f'west v{mve.version} or later is required by the manifest',
          f'West version: v{__version__}'] +
         ([f'Manifest file: {mve.file}'] if mve.file else []) +
         (['Please upgrade west and retry.'] if suggest_upgrade else []))
+
+def mie_msg(mie):
+    # Helper for getting a message for a ManifestImportError.
+
+    p, imp = mie.project, mie.imp
+    ret = (f'failed manifest import in {p.name_and_path}:\n'
+           f'  Failed importing "{imp}"')
+    if not isinstance(p, ManifestProject):
+        # Try to be more helpful by explaining exactly
+        # what west.manifest needs to happen before we can
+        # resolve the missing import.
+        ret += (f' from revision "{p.revision}"\n'
+                f'  Hint: {p.name} must be cloned and its '
+                f'{MANIFEST_REV_BRANCH} ref must point to a '
+                'commit with the import data\n'
+                '  To fix, run "west update"')
+
+    return ret
 
 def adjust_command_verbosity(command, args):
     command.verbosity = min(command.verbosity + args.verbose,
