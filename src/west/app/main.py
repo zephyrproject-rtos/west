@@ -843,8 +843,9 @@ class WestArgumentParser(argparse.ArgumentParser):
     def error(self, message):
         if self.west_app and self.west_app.mle:
             # If we have a known WestApp instance and the manifest
-            # failed to load, then try to specialize the error message
-            # to handle west-specific situations.
+            # failed to load, then try to specialize the generic error
+            # message we're getting from argparse to handle west-specific
+            # errors better.
 
             app = self.west_app
             mle = self.west_app.mle

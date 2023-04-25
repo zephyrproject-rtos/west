@@ -565,12 +565,14 @@ class ManifestImportFailed(Exception):
         self.imp = imp
 
     def __str__(self):
-        if self.project is not None:
-            return (f'ManifestImportFailed: project {self.project} '
-                    f'value {self.imp}')
+        if self.project is None:
+            # This happens when imports fail in the manifest repository
+            return (f'cannot import {self.imp}; is it present '
+                    'in your manifest repository?')
         else:
-            return (f'ManifestImportFailed: manifest repository '
-                    f'value {self.imp}')
+            return (f'project {self.project.name_and_path}: '
+                    f'cannot import contents of {self.imp}; '
+                    'do you need to run "west update"?')
 
 
 class ManifestVersionError(Exception):
