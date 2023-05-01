@@ -85,6 +85,10 @@ def MF(**kwargs):
     # A convenience to save typing
     return Manifest.from_file(**kwargs)
 
+def MT(**kwargs):
+    # A convenience to save typing
+    return Manifest.from_topdir(**kwargs)
+
 #########################################
 # The very basics
 #
