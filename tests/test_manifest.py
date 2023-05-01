@@ -85,6 +85,10 @@ def MF(**kwargs):
     # A convenience to save typing
     return Manifest.from_file(**kwargs)
 
+def MT(**kwargs):
+    # A convenience to save typing
+    return Manifest.from_topdir(**kwargs)
+
 #########################################
 # The very basics
 #
@@ -774,7 +778,7 @@ def test_from_topdir(tmp_workspace):
           - name: my-cool-project
             url: from-manifest-dir
         ''')
-    m = Manifest.from_topdir(topdir=topdir)
+    m = MT(topdir=topdir)
     # Path-related Manifest attribute tests.
     assert Path(m.abspath) == mf
     assert m.posixpath == mf.as_posix()
@@ -803,7 +807,7 @@ def test_from_topdir(tmp_workspace):
           self:
             path: something/else
         ''')
-    m = Manifest.from_topdir(topdir=topdir)
+    m = MT(topdir=topdir)
     # Path-related Manifest attribute tests.
     assert Path(m.abspath) == abspath
     assert m.posixpath == abspath.as_posix()
@@ -835,7 +839,7 @@ def test_from_topdir(tmp_workspace):
           self:
             path: something/else
         ''')
-    m = Manifest.from_topdir(topdir=topdir)
+    m = MT(topdir=topdir)
     p1 = m.projects[1]
     assert p1.path == 'project-path'
     assert Path(p1.abspath) == topdir / 'project-path'
@@ -867,7 +871,7 @@ def test_manifest_path_conflicts(tmp_workspace):
         ''')
 
     with pytest.raises(MalformedManifest) as e:
-        Manifest.from_topdir(topdir=tmp_workspace)
+        MT(topdir=tmp_workspace)
     assert 'p path "mp" is taken by the manifest repository' in str(e.value)
 
     m = M('''\
@@ -914,7 +918,7 @@ def test_manifest_repo_discovery(manifest_repo):
     assert PurePath(p.topdir) == topdir
 
     # Manifest.from_topdir() should work similarly.
-    manifest = Manifest.from_topdir()
+    manifest = MT()
     assert Path(manifest.topdir) == topdir
 
 def test_parse_multiple_manifest_files(manifest_repo):
@@ -1012,14 +1016,14 @@ def test_bad_topdir_fails(tmp_workspace):
     # with the topdir kwarg when no west.yml exists.
 
     with pytest.raises(FileNotFoundError):
-        Manifest.from_topdir(topdir=tmp_workspace)
+        MT(topdir=tmp_workspace)
 
 def test_from_bad_topdir(tmpdir):
     # If we give a bad temporary directory that isn't a workspace
     # root, that should also fail.
 
     with pytest.raises(MalformedConfig) as e:
-        Manifest.from_topdir(topdir=tmpdir)
+        MT(topdir=tmpdir)
     assert 'local configuration file not found' in str(e.value)
 
 #########################################
@@ -1073,7 +1077,7 @@ def test_get_projects(tmp_workspace):
 
     # Asking for an uncloned project should fail if only_cloned=False.
     # The ValueError args are (unknown, uncloned).
-    manifest = Manifest.from_topdir(topdir=tmp_workspace)
+    manifest = MT(topdir=tmp_workspace)
     with pytest.raises(ValueError) as e:
         manifest.get_projects(['foo'], only_cloned=True)
     unknown, uncloned = e.value.args
@@ -1147,7 +1151,7 @@ def test_as_dict_and_yaml(manifest_repo):
     # produces.
     manifest = MF()
 
-    manifest_topdir = Manifest.from_topdir(
+    manifest_topdir = MT(
         topdir=os.path.dirname(manifest_repo))
 
     # We can always call as_dict() and as_yaml(), regardless of what's
@@ -1841,9 +1845,9 @@ def test_import_self_directory(content, tmp_workspace):
 
     # Resolve the manifest. The mp/west.d content comes
     # from the file system in this case.
-    actual = Manifest.from_topdir(topdir=tmp_workspace,
-                                  importer=make_importer(call_map),
-                                  import_flags=FPI).projects
+    actual = MT(topdir=tmp_workspace,
+                importer=make_importer(call_map),
+                import_flags=FPI).projects
 
     expected = [
         ManifestProject(path='mp', topdir=tmp_workspace),
@@ -2317,7 +2321,7 @@ def test_import_path_prefix_basics(manifest_repo):
                reconfigure=False)
 
     # Check semantics for directly imported projects and nested imports.
-    actual = Manifest.from_topdir(topdir=topdir).projects
+    actual = MT(topdir=topdir).projects
     expected = [ManifestProject(path='mp', topdir=topdir),
                 # Projects in main west.yml with proper path-prefixing
                 # applied.
@@ -2374,7 +2378,7 @@ def test_import_path_prefix_self(manifest_repo):
                reconfigure=False)
 
     # Check semantics for directly imported projects and nested imports.
-    actual = Manifest.from_topdir(topdir=topdir).projects[0]
+    actual = MT(topdir=topdir).projects[0]
     expected = ManifestProject(path='mp', topdir=topdir)
     check_proj_consistency(actual, expected)
 
@@ -2421,7 +2425,7 @@ def test_import_path_prefix_propagation(manifest_repo):
                reconfigure=False)
 
     # Check semantics for directly imported projects and nested imports.
-    actual = Manifest.from_topdir(topdir=topdir).projects[1:]
+    actual = MT(topdir=topdir).projects[1:]
     expected = [Project('project-1', 'https://example.com/project-1',
                         path='prefix/1/prefix-2/project-one-path',
                         topdir=topdir),
@@ -2453,7 +2457,7 @@ def test_import_path_prefix_no_escape(manifest_repo):
     add_commit(manifest_repo, 'OK',
                files={'west.yml': mfst('ext')},
                reconfigure=False)
-    m = Manifest.from_topdir(topdir=topdir, import_flags=ImportFlag.IGNORE)
+    m = MT(topdir=topdir, import_flags=ImportFlag.IGNORE)
     assert (Path(m.projects[1].abspath) ==
             Path(topdir) / 'ext' / 'project')
 
@@ -2462,7 +2466,7 @@ def test_import_path_prefix_no_escape(manifest_repo):
                files={'west.yml': mfst('..')},
                reconfigure=False)
     with pytest.raises(MalformedManifest) as excinfo:
-        Manifest.from_topdir(topdir=topdir, import_flags=ImportFlag.IGNORE)
+        MT(topdir=topdir, import_flags=ImportFlag.IGNORE)
     assert 'escapes the workspace topdir' in str(excinfo.value)
 
 def test_import_loop_detection_self(manifest_repo):
