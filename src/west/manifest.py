@@ -224,6 +224,7 @@ class _import_map(NamedTuple):
     name_blocklist: List[str]
     path_blocklist: List[str]
     path_prefix: str
+    if_: Dict[str, Any]
 
 def _is_imap_list(value: Any) -> bool:
     # Return True if the value is a valid import map 'blocklist' or
@@ -232,6 +233,15 @@ def _is_imap_list(value: Any) -> bool:
     return (isinstance(value, str) or
             (isinstance(value, list) and
              all(isinstance(item, str) for item in value)))
+
+def _is_imap_if(value: Any) -> bool:
+    # Return True if the value is a valid import map 'if:' condition.
+    # This doesn't mean that the import should be done! It just means
+    # that the value of the 'if:' in the manifest file is well-formed.
+
+    return (isinstance(value, dict) and
+            ((len(value) == 1 and 'config-enabled' in value) or
+             not value))
 
 def _imap_filter(imap: _import_map) -> ImapFilterFnType:
     # Returns either None (if no filter is necessary) or a
@@ -338,6 +348,10 @@ class _import_ctx(NamedTuple):
 
     # Bit vector of flags that modify import behavior.
     import_flags: 'ImportFlag'
+
+    # Configuration passed to the top-level manifest instance in the
+    # import hierarchy.
+    config: Optional[Configuration]
 
 def _imap_filter_allows(imap_filter: ImapFilterFnType,
                         project: 'Project') -> bool:
@@ -1273,7 +1287,14 @@ class Manifest:
 
         If *source_data* is given:
 
-            - You cannot pass *config*.
+            - Since west v1.1, you can pass *config* if you want to
+              influence an "import: if: config-enabled: <option>"
+              behavior in the data. If you do not, the <option>'s
+              value will be considered false and no import will
+              be done.
+
+              Prior to west v1.1, passing *config* would raise an
+              exception.
 
             - Manifest imports will fail unless you pass *importer*
               or ignore them with *import_flags*.
@@ -1695,8 +1716,6 @@ class Manifest:
             raise ValueError('neither topdir nor source_data were given')
         if topdir and source_data:
             raise ValueError('both topdir and source_data were given')
-        if source_data and config:
-            raise ValueError('both source_data and config were given')
         if not _flags_ok(import_flags):
             raise ValueError(f'bad import_flags {import_flags:x}')
 
@@ -1749,7 +1768,8 @@ class Manifest:
                            current_data=current_data,
                            current_repo_abspath=current_repo_abspath,
                            project_importer=project_importer,
-                           import_flags=import_flags)
+                           import_flags=import_flags,
+                           config=config)
 
     def _recursive_init(self, ctx: _import_ctx):
         # Set up any required state that we need while recursively
@@ -2033,6 +2053,9 @@ class Manifest:
         # We therefore need to compose them during the recursive import.
 
         imap = self._load_imap(imp, f'manifest file {self.abspath}')
+        if not self._imap_if_is_true(imap):
+            return
+
         imap_filter = _compose_imap_filters(self._ctx.imap_filter,
                                             _imap_filter(imap))
         path_prefix = self._ctx.path_prefix / imap.path_prefix
@@ -2162,9 +2185,15 @@ class Manifest:
                 'has no remote or url and no default remote is set')
 
         # The project's path needs to respect any import: path-prefix,
-        # regardless of self._ctx.import_flags. The 'ignore' type flags
-        # just mean ignore the imported data. The path-prefix in this
-        # manifest affects the project no matter what.
+        # regardless of self._ctx.import_flags or whether the import
+        # 'if:' condition is met.
+        #
+        # The 'ignore' type flags just mean ignore the imported data,
+        # and the 'if:' condition decides whether we try to load the
+        # imported data.
+        #
+        # The path-prefix value in this manifest affects the project
+        # no matter what.
         imp = pd.get('import', None)
         if isinstance(imp, dict):
             pfx = self._load_imap(imp, f'project {name}').path_prefix
@@ -2329,6 +2358,11 @@ class Manifest:
                                  imp: Dict) -> None:
         imap = self._load_imap(imp, f'project {project.name}')
 
+        if not self._imap_if_is_true(imap):
+            _logger.debug('project {project}: import "if:" ({imap.if_}) '
+                          'is false; skipping the import')
+            return
+
         _logger.debug(f'resolving import {imap} for {project}')
 
         imported = self._import_content_from_project(project, imap.file)
@@ -2431,7 +2465,8 @@ class Manifest:
                           path_allowlist,
                           name_blocklist,
                           path_blocklist,
-                          copy.pop('path-prefix', ''))
+                          copy.pop('path-prefix', ''),
+                          if_=copy.pop('if', {}))
 
         # Check that the value is OK.
         if copy:
@@ -2453,8 +2488,28 @@ class Manifest:
             self._malformed(f'{src}: bad import path-prefix '
                             f'{ret.path_prefix}; expected str, not '
                             f'{type(ret.path_prefix)}')
+        elif not _is_imap_if(ret.if_):
+            self._malformed(f'{src}: bad import if condition '
+                            f'{ret.if_}; expected dict with config-enabled '
+                            'key, or an empty dict')
 
         return ret
+
+    def _imap_if_is_true(self, imap: _import_map) -> bool:
+        # Return true if the import map's "if" condition says we should
+        # perform the import.
+        if not imap.if_:
+            return True
+
+        config = self._ctx.config
+
+        if config is None:
+            # If this happens, we're loading the top level Manifest
+            # from data and the caller wants us to treat the option
+            # as though it is unset.
+            return False
+
+        return config.getboolean(imap.if_['config-enabled'])
 
     def _add_project(self, project: Project) -> bool:
         # Add the project to our map if we don't already know about it.

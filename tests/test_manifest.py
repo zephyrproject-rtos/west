@@ -25,7 +25,7 @@ from west.manifest import Manifest, Project, ManifestProject, \
     MalformedManifest, ManifestVersionError, ManifestImportFailed, \
     manifest_path, ImportFlag, validate, MANIFEST_PROJECT_INDEX, \
     _ManifestImportDepth, is_group, SCHEMA_VERSION
-from west.configuration import MalformedConfig
+from west.configuration import Configuration, MalformedConfig
 
 # White box checks for the schema version.
 from west.manifest import _VALID_SCHEMA_VERS
@@ -202,9 +202,6 @@ def test_constructor_arg_validation():
     with pytest.raises(ValueError) as e:
         Manifest(source_data='x', topdir='y')
     assert 'both topdir and source_data were given' in str(e.value)
-    with pytest.raises(ValueError) as e:
-        Manifest(source_data='x', config='y')
-    assert 'both source_data and config were given' in str(e.value)
 
 #########################################
 # Project parsing tests
@@ -2490,6 +2487,158 @@ def test_import_loop_detection_self(manifest_repo):
 
     with pytest.raises(_ManifestImportDepth):
         MF()
+
+def test_import_if_basics(manifest_repo, config_tmpdir):
+    # Smoke test for basic 'import: if:' semantics.
+
+    topdir = manifest_repo.topdir
+
+    # Redirect the local configuration file into topdir for the
+    # duration of the test. The config_tmpdir fixture makes sure the
+    # global and system files are pointing at empty files. It will
+    # also clean up the environment after we exit.
+    os.environ['WEST_CONFIG_LOCAL'] = str(topdir / '.west' / 'config')
+    config = Configuration()
+
+    def make_manifest():
+        return MT(topdir=topdir, config=config)
+
+    add_commit(manifest_repo, 'add manifest',
+               files={'west.yml':
+                      '''
+                      manifest:
+                        projects:
+                          - name: test-project
+                            url: ignored
+                            import:
+                              if:
+                                config-enabled: test.option
+                          - name: test-path-prefix
+                            url: ignored
+                            import:
+                              path-prefix: pfx
+                              if:
+                                config-enabled: test.not-set
+
+                        self:
+                          import:
+                            file: ignored-but-does-not-exist
+                            if:
+                              config-enabled: test.not-set
+                      '''},
+               reconfigure=False)
+
+    # We should be able to load the manifest: no imports should be
+    # done since test.option and test.not-set aren't explicitly set
+    # to true.
+    manifest = make_manifest()
+
+    # The projects should be in the resulting Manifest.
+    # The path-prefix option should be respected regardless
+    # of whether the import if condition is true.
+    test_project, test_path_prefix = manifest.get_projects(
+        ['test-project', 'test-path-prefix'], allow_paths=False)
+    assert isinstance(test_project, Project)
+    assert Path(test_path_prefix.abspath) == (Path(topdir) / 'pfx' /
+                                              'test-path-prefix')
+
+    # We should also still be able to get 'test-project' if the
+    # condition is explicitly set to false.
+    config.set('test.option', 'false')
+    manifest = make_manifest()
+    assert isinstance(manifest.get_projects(['test-project'])[0], Project)
+
+    # Enabling the option should lead to an attempt to import, which
+    # then fails because the workspace doesn't have a 'test-project'
+    # cloned.
+    config.set('test.option', 'true')
+    with pytest.raises(ManifestImportFailed) as e:
+        make_manifest()
+    assert e.value.imp == 'west.yml'
+
+def test_import_if_config_enabled(manifest_repo, config_tmpdir):
+    # A 'import: if:' test case that exercises 'config-enabled:'.
+    # The setup looks like this:
+    #
+    # <workspace topdir>
+    # ├── has_import
+    # │   └── west.yml: imports 'imported'
+    # ├── imported
+    # └── mp  <--- corresponds to the 'manifest_repo' variable
+    #     └── west.yml: imports 'has_import' with an 'if: config-enabled:'
+
+    # See comments in test_import_if_basics() for why we're doing this.
+    topdir = manifest_repo.topdir
+    os.environ['WEST_CONFIG_LOCAL'] = str(topdir / '.west' / 'config')
+    config = Configuration()
+
+    def make_manifest():
+        return MT(topdir=str(topdir), config=config)
+
+    # Set up the workspace without 'imported' existing yet, so
+    # we can test that west will treat it as unknown.
+    has_import = topdir / 'has_import'
+    create_repo(has_import, initial_branch='manifest-rev')
+    add_commit(has_import, 'add imported manifest',
+               files={'west.yml':
+                      '''
+                      manifest:
+                        projects:
+                          - name: imported
+                            url: ignored
+                            revision: HEAD~0
+                      '''},
+               reconfigure=False)
+    add_commit(manifest_repo, 'update top level manifest',
+               files={'west.yml':
+                      '''
+                      manifest:
+                        projects:
+                          - name: has_import
+                            url: ignored
+                            revision: HEAD~0
+                            import:
+                              if:
+                                config-enabled: test.option
+                      '''},
+               reconfigure=False)
+
+    def check_unknown_uncloned(manifest,
+                               unknown_expected=None,
+                               uncloned_expected=None):
+        unknown_expected = unknown_expected or []
+        uncloned_expected = uncloned_expected or []
+        with pytest.raises(ValueError) as e:
+            manifest.get_projects(['imported'], only_cloned=True)
+        unknown, uncloned = e.value.args
+        assert unknown == unknown_expected
+        assert [project.name for project in uncloned] == uncloned_expected
+
+    # 'has_import' is a project, but since test.option is not set,
+    # 'imported' is an unknown (not uncloned) project.
+    manifest = make_manifest()
+    check_unknown_uncloned(manifest, unknown_expected=['imported'])
+
+    # Setting the option will now make 'imported' a project, and we
+    # should still be able to import the manifest. 'imported' is
+    # uncloned now.
+    config.set('test.option', 'true')
+    manifest = make_manifest()
+    check_unknown_uncloned(manifest, uncloned_expected=['imported'])
+
+    # Now create 'imported': we should then be able to get the project
+    # using the same manifest instance.
+    imported = topdir / 'imported'
+    create_repo(imported)
+    assert isinstance(manifest.get_projects(['imported'], only_cloned=True)[0],
+                      Project)
+
+    # Setting the config option to false and reloading the manifest
+    # will make 'imported' into an unknown project again, because
+    # we shouldn't have performed the import in the first place.
+    config.set('test.option', 'false')
+    manifest = make_manifest()
+    check_unknown_uncloned(manifest, unknown_expected=['imported'])
 
 #########################################
 # Manifest project group: basic tests
