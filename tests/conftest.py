@@ -228,6 +228,70 @@ def west_init_tmpdir(repos_tmpdir):
     config.read_config()
     return west_tmpdir
 
+@pytest.fixture
+def config_tmpdir(tmpdir):
+    # Fixture for running from a temporary directory with
+    # environmental overrides in place so all configuration files
+    # live inside of it. This makes sure we don't touch
+    # the user's actual files.
+    #
+    # We also set ZEPHYR_BASE (to avoid complaints in subcommand
+    # stderr), but to a spurious location (so that attempts to read
+    # from inside of it are caught here).
+    #
+    # Using this makes the tests run faster than if we used
+    # west_init_tmpdir from conftest.py, and also ensures that the
+    # configuration code doesn't depend on features like the existence
+    # of a manifest file, helping separate concerns.
+    system = tmpdir / 'config.system'
+    glbl = tmpdir / 'config.global'
+    local = tmpdir / 'config.local'
+
+    os.environ['ZEPHYR_BASE'] = str(tmpdir.join('no-zephyr-here'))
+    os.environ['WEST_CONFIG_SYSTEM'] = str(system)
+    os.environ['WEST_CONFIG_GLOBAL'] = str(glbl)
+    os.environ['WEST_CONFIG_LOCAL'] = str(local)
+
+    # Make sure our environment variables (as well as other topdirs)
+    # are respected from tmpdir, and we aren't going to touch the
+    # user's real files.
+    start_dir = os.getcwd()
+    tmpdir.chdir()
+
+    try:
+        assert config._location(config.ConfigFile.SYSTEM) == str(system)
+        assert config._location(config.ConfigFile.GLOBAL) == str(glbl)
+        td = tmpdir / 'test-topdir'
+        td.ensure(dir=True)
+        (td / '.west').ensure(dir=True)
+        (td / '.west' / 'config').ensure(file=True)
+        assert config._location(config.ConfigFile.LOCAL) == str(local)
+        assert (config._location(config.ConfigFile.LOCAL,
+                                 topdir=str(td)) ==
+                str(local))
+        td.remove(rec=1)
+        assert not td.exists()
+
+        assert not local.exists()
+
+        # All clear: switch to the temporary directory and run the test.
+        yield tmpdir
+    finally:
+        # Go back to where we started, for repeatability of results.
+        os.chdir(start_dir)
+
+        # Clean up after ourselves so other test cases don't know
+        # about this tmpdir. It's OK if test cases deleted these
+        # settings already.
+        if 'ZEPHYR_BASE' in os.environ:
+            del os.environ['ZEPHYR_BASE']
+        if 'WEST_CONFIG_SYSTEM' in os.environ:
+            del os.environ['WEST_CONFIG_SYSTEM']
+        if 'WEST_CONFIG_GLOBAL' in os.environ:
+            del os.environ['WEST_CONFIG_GLOBAL']
+        if 'WEST_CONFIG_LOCAL' in os.environ:
+            del os.environ['WEST_CONFIG_LOCAL']
+
 #
 # Helper functions
 #
