@@ -2191,10 +2191,11 @@ class Manifest:
             groups = []
 
         if imp and groups:
-            # Maybe there is a sensible way to combine the two of these.
-            # but it's not clear what it is. Let's avoid weird edge cases
-            # like "what do I do about a project whose group is disabled
-            # that I need to import data from?".
+            # There isn't a sensible way to handle this case. We can't
+            # decide whether or not to import because we don't know if
+            # the project is active or not until after all group filters
+            # are resolved, which won't happen until we're done resolving
+            # the manifest.
             self._malformed(
                 f'project {name}: "groups" cannot be combined with "import"')
 
