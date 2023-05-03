@@ -17,6 +17,7 @@ import subprocess
 import sys
 import textwrap
 from time import perf_counter
+from typing import List as ListType
 from urllib.parse import urlparse
 
 from west.configuration import Configuration
@@ -962,7 +963,7 @@ class Update(_ProjectCommand):
         else:
             self.update_some()
 
-    def init_state(self, args):
+    def init_state(self, args: argparse.Namespace):
         # Helper for initializing instance state in response to
         # command line args and configuration files.
 
@@ -977,7 +978,7 @@ class Update(_ProjectCommand):
         self.sync_submodules = config.getboolean('update.sync-submodules',
                                                  default=True)
 
-        self.group_filter: List[str] = []
+        self.group_filter: ListType[str] = []
 
         def handle(group_filter_item):
             item = group_filter_item.strip()
