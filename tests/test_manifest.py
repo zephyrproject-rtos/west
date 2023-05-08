@@ -2774,9 +2774,9 @@ def test_group_filter_self_import(manifest_repo):
     self_import_helper('', [])
     self_import_helper('version: 0.9', ['-foo'])
 
-@pytest.mark.xfail
 def test_group_filter_imports(manifest_repo):
-    # More complex test that ensures group filters are imported correctly:
+    # More complex test that ensures group filters are imported correctly
+    # when 'import-group-filters:' is true / not set.
     #
     #   - imports from self have highest precedence
     #   - the top level manifest comes next

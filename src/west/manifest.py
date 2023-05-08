@@ -52,7 +52,7 @@ QUAL_REFS_WEST = 'refs/west/'
 #: v1.0.x, so that users can say "I want schema version 1" instead of
 #: having to keep using '0.13', which was the previous version this
 #: changed.)
-SCHEMA_VERSION = '1.0'
+SCHEMA_VERSION = '1.1'
 # MAINTAINERS:
 #
 # - Make sure to update _VALID_SCHEMA_VERS if you change this.
@@ -121,7 +121,7 @@ _SCHEMA_VER = parse_version(SCHEMA_VERSION)
 _EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
 _VALID_SCHEMA_VERS = [
     _EARLIEST_VER_STR,
-    '0.7', '0.8', '0.9', '0.10', '0.12', '0.13',
+    '0.7', '0.8', '0.9', '0.10', '0.12', '0.13', '1.0',
     SCHEMA_VERSION
 ]
 
@@ -282,15 +282,20 @@ class _import_ctx(NamedTuple):
     # element.
     projects: Dict[str, 'Project']
 
-    # The current shared group filter. This is mutable state in the
-    # same way 'projects' is. Manifests which are imported earlier get
-    # higher precedence here too.
+    # The validated group filters that are disabled by this manifest
+    # and any nodes above it in the import tree.
     #
-    # This is done by prepending (NOT appending) any 'manifest:
-    # group-filter:' lists we encounter during import resolution onto
-    # this list. Since group-filter lists have "last entry wins"
-    # semantics, earlier manifests take precedence.
-    group_filter: GroupFilterType
+    # This is ordered "upwards" in the sense that the last element of
+    # the list is the group filter of the top level manifest, and the
+    # first element is the group filter of the manifest we are loading
+    # now. We copy this and modify the copies as we recursively
+    # resolve imports.
+    #
+    # We need to track this information so that an "imported"
+    # manifest's group filter can be overridden by the "importing"
+    # manifest's. For that reason, these contain "+foo" as well as
+    # "-foo" entries.
+    current_group_filters: List[GroupFilterType]
 
     # The list of west command names provided by the manifest
     # repository itself. This is mutable state in the same way
@@ -360,6 +365,12 @@ def _compose_imap_filters(imap_filter1: ImapFilterFnType,
 
 _RESERVED_GROUP_RE = re.compile(r'(^[+-]|[\s,:])')
 _INVALID_PROJECT_NAME_RE = re.compile(r'([/\\])')
+
+def _is_inactivated_by(project: 'Project', disabled_groups: Set[str]) -> bool:
+    # Is the project made inactive by the given set of disabled groups?
+
+    return bool(project.groups and all(group in disabled_groups for
+                                       group in project.groups))
 
 def _update_disabled_groups(disabled_groups: Set[str],
                             group_filter: GroupFilterType):
@@ -496,6 +507,15 @@ def validate(data: Any) -> Dict[str, Any]:
                 msg += ('. Do you need to quote the value '
                         '(e.g. "0.10" instead of 0.10)?')
             raise MalformedManifest(msg)
+
+        # It's not valid to use features that are newer than the
+        # requested schema version.
+        if (min_version < parse_version('1.1') and
+                'import-group-filters' in data):
+            raise MalformedManifest(
+                f'manifest schema version {min_version_str}: '
+                'this is too old to use with import-group-filters; '
+                'to fix, use at least \'version: "1.1"\'')
 
     try:
         pykwalify.core.Core(source_data=data,
@@ -1345,22 +1365,54 @@ class Manifest:
         else:
             topdir_abspath = None
         self.has_imports: bool = False
+        # This is the final, effective group filter, with simplifications
+        # applied so that e.g. ['-foo', '+foo', '-bar'] becomes ['-bar'],
+        # and with any values imported from other manifests applied if
+        # self._import_group_filters (see below) is True.
         self.group_filter: GroupFilterType = []
 
         # Initialize private state, some of which is also overwritten
         # later as needed.
 
-        # This backs group_filter.
+        # The value in the manifest can override this default later.
+        self._import_group_filters: bool = True
+        # The final set of groups which are explicitly disabled in
+        # this manifest data, after resolving imports. This is used
+        # both to initialize group_filter and as an optimization in
+        # is_active().
         self._disabled_groups: Set[str] = set()
-        # This backs the projects() property.
-        self._projects: List[Project] = []
         # The "raw" (unparsed) manifest.group-filter configuration
         # option in the local configuration file. See
         # _config_group_filter(); only initialized if self._top_level
         # is True and if we're loading from a file in a workspace.
         self._raw_config_group_filter: Optional[str] = None
-        # A helper attribute we use for schema version v0.9 compatibility.
-        self._top_level_group_filter: GroupFilterType = []
+        # The validated and cleaned up "group-filter:" value from this
+        # manifest's data, before applying any imports.
+        #
+        # This is *not* simplified. For example, "group-filter: [+foo]"
+        # in the manifest data would result in this attribute being
+        # set to ['+foo'].
+        self._this_group_filter: GroupFilterType = []
+        # A temporary list of Manifest objects that we resolve
+        # while handling 'import:' statements in 'projects:' in
+        # the current manifest data.
+        #
+        # We need this information because the final 'group_filter'
+        # attribute for this manifest may depend on them if
+        # self._import_group_filters remains True.
+        #
+        # For simplicity, we keep track of the list regardless of
+        # whether it's true or false. We delete this after resolving
+        # the current manifest to avoid keeping garbage Manifest
+        # objects around.
+        self._imported_from_projects: List['Manifest'] = []
+        # Like _imported_from_projects, but for 'self: import:'. This
+        # has to be a separate list because the final group_filter
+        # will be the concatenation of _imported_from_projects, then
+        # this manifest's group-filter, then the self-imports.
+        self._imported_from_self: List['Manifest'] = []
+        # This backs the projects() property.
+        self._projects: List[Project] = []
         # The manifest.path configuration option in the local
         # configuration file, as a Path.
         self._config_path: Optional[Path] = None
@@ -1403,6 +1455,10 @@ class Manifest:
         # Finish loading the validated data.
 
         self._load_validated()
+
+        # Get rid of intermediate state.
+        del self._imported_from_projects
+        del self._imported_from_self
 
     def get_projects(self,
                      # any str name is also a PathType
@@ -1608,7 +1664,7 @@ class Manifest:
         else:
             disabled_groups = self._disabled_groups
 
-        return any(group not in disabled_groups for group in project.groups)
+        return not _is_inactivated_by(project, disabled_groups)
 
     @property
     def path(self) -> Optional[str]:  # for compatibility
@@ -1743,7 +1799,7 @@ class Manifest:
             self._config_path = manifest_path
 
         return _import_ctx(projects={},
-                           group_filter=[],
+                           current_group_filters=[],
                            manifest_west_commands=[],
                            imap_filter=None,
                            path_prefix=Path('.'),
@@ -1774,7 +1830,7 @@ class Manifest:
 
         manifest_data = self._ctx.current_data['manifest']
 
-        schema_version = str(manifest_data.get('version', SCHEMA_VERSION))
+        self._init_group_filter_state(manifest_data)
 
         # We want to make an ordered map from project names to
         # corresponding Project instances. Insertion order into this
@@ -1788,11 +1844,8 @@ class Manifest:
         # Load data from "self:", including resolving any self imports.
         self._load_self(manifest_data)
 
-        # Load data from "group-filter:".
-        self._load_group_filter(manifest_data)
-
-        # Add this manifest's projects to the map, and handle imported
-        # projects and group-filter values.
+        # Handle this manifest's projects, and anything imported from
+        # "projects:".
         url_bases = {r['name']: r['url-base'] for r in
                      manifest_data.get('remotes', [])}
         defaults = self._load_defaults(manifest_data.get('defaults', {}),
@@ -1828,37 +1881,37 @@ class Manifest:
 
                     self._projects_by_rpath[Path(p.abspath).resolve()] = p
 
-            # Update self.group_filter
-            #
-            # For schema version 0.10 or later, there's no point in
-            # overwriting these attributes for anything except the top
-            # level manifest: all the other ones we've loaded above
-            # during import resolution are already garbage.
-            #
-            # For schema version 0.9, we only want to warn once, at the
-            # top level, if the distinction actually matters.
-            self.group_filter = self._final_group_filter(schema_version)
+        # Update any group filter related state that requires resolving
+        # imports to handle properly.
+        schema_version = str(manifest_data.get('version', SCHEMA_VERSION))
+        self._finalize_group_filter_state(schema_version)
 
         _logger.debug(f'loaded {loading_what}')
 
-    def _load_group_filter(self, manifest_data: Dict[str, Any]) -> None:
-        # Update self._ctx.group_filter from manifest_data.
+    def _init_group_filter_state(self, manifest_data: Dict[str, Any]) -> None:
+        # Set up initial state related to group filters.
+        # This may be updated later depending on 'import-group-filters:'.
+        # We do this now to error out early if necessary, before trying
+        # to resolve imports.
+
+        if 'import-group-filters' in manifest_data:
+            self._import_group_filters = manifest_data['import-group-filters']
+            _logger.debug('import-group-filters: %s',
+                          self._import_group_filters)
+        else:
+            _logger.debug('import-group-filters: unset')
 
         if 'group-filter' not in manifest_data:
             _logger.debug('group-filter: unset')
             return
 
-        raw_filter: List[RawGroupType] = manifest_data['group-filter']
-        if not raw_filter:
+        raw_group_filter = manifest_data['group-filter']
+        _logger.debug('group-filter: %s', raw_group_filter)
+        if not raw_group_filter:
             self._malformed('"manifest: group-filter:" may not be empty')
-
-        group_filter = self._validated_group_filter('manifest', raw_filter)
-        _logger.debug('group-filter: %s', group_filter)
-
-        self._ctx.group_filter[:0] = group_filter
-
-        if self._top_level:
-            self._top_level_group_filter = group_filter
+        self._this_group_filter = \
+            self._validated_group_filter('manifest', raw_group_filter)
+        self._ctx.current_group_filters.append(self._this_group_filter)
 
     def _validated_group_filter(
             self, source: Optional[str], raw_filter: List[RawGroupType]
@@ -2016,16 +2069,16 @@ class Manifest:
         # - pathobj: same, but relative to self.repo_abspath as obtained
         #   from the import data
 
-        # Destructively merge imported content into self._ctx. The
-        # intermediate manifest is thrown away; we're just
-        # using __init__ as a function here.
         child_ctx = self._ctx._replace(
+            current_group_filters=list(self._ctx.current_group_filters),
             current_abspath=pathobj_abs,
             current_relpath=pathobj,
             current_data=pathobj_abs.read_text(encoding='utf-8')
         )
         try:
-            Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
+            self._imported_from_self.append(
+                Manifest(topdir=self.topdir,
+                         internal_import_ctx=child_ctx))
         except RecursionError as e:
             raise _ManifestImportDepth(None, pathobj) from e
 
@@ -2056,6 +2109,7 @@ class Manifest:
 
         for import_abs in to_import:
             child_ctx = self._ctx._replace(
+                current_group_filters=list(self._ctx.current_group_filters),
                 imap_filter=imap_filter,
                 path_prefix=path_prefix,
                 current_abspath=import_abs,
@@ -2063,7 +2117,9 @@ class Manifest:
                 current_data=import_abs.read_text(encoding='utf-8')
             )
             try:
-                Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
+                self._imported_from_self.append(
+                    Manifest(topdir=self.topdir,
+                             internal_import_ctx=child_ctx))
             except RecursionError as e:
                 raise _ManifestImportDepth(None, import_abs) from e
 
@@ -2193,13 +2249,10 @@ class Manifest:
         else:
             groups = []
 
-        if imp and groups:
-            # Maybe there is a sensible way to combine the two of these.
-            # but it's not clear what it is. Let's avoid weird edge cases
-            # like "what do I do about a project whose group is disabled
-            # that I need to import data from?".
+        if imp and groups and self._import_group_filters:
             self._malformed(
-                f'project {name}: "groups" cannot be combined with "import"')
+                f'project {name}: "groups" cannot be combined with "import" '
+                'unless you add "import-group-filters: false" to the manifest')
 
         userdata = pd.get('userdata')
 
@@ -2293,6 +2346,10 @@ class Manifest:
 
         self._assert_imports_ok()
 
+        if not self._should_import_from_project(project):
+            _logger.debug(f'{project.name_and_path}: ignoring the import')
+            return
+
         self.has_imports = True
 
         imptype = type(imp)
@@ -2310,6 +2367,38 @@ class Manifest:
         else:
             self._malformed(f'{project.name_and_path}: invalid import {imp} '
                             f'type: {imptype}')
+
+    def _should_import_from_project(self, project: Project) -> bool:
+        # Helper for deciding whether a project import should be done
+        # or not. Currently we can ignore an inactive project with
+        # "import-group-filters: false" if the project is made inactive
+        # by the current list of group filters we are dealing with
+        # as we recursively resolve the manifest.
+
+        return not _is_inactivated_by(project, self._current_disabled_groups)
+
+    @property
+    def _current_disabled_groups(self) -> Set[str]:
+        # A private helper property that build the set of disabled
+        # groups at this particular Manifest in the import tree on
+        # demand, and saves the results for later use.
+        #
+        # The return value reflects:
+        #
+        # - the group filter in the manifest data we are currently
+        #   loading
+        # - the group filters of any parent manifests, and
+        # - (if there is a workspace) the configuration option
+        #   manifest.group-filter.
+
+        if not hasattr(self, '_cur_disabled_groups'):
+            self._cur_disabled_groups: Set[str] = set()
+            for group_filter in reversed(self._ctx.current_group_filters):
+                _update_disabled_groups(self._cur_disabled_groups,
+                                        group_filter)
+            _update_disabled_groups(self._cur_disabled_groups,
+                                    self._config_group_filter)
+        return self._cur_disabled_groups
 
     def _import_path_from_project(self, project: Project, path: str) -> None:
         # Import data from git at the given path at revision manifest-rev.
@@ -2355,6 +2444,7 @@ class Manifest:
             imap_path_prefix = '.'
 
         child_ctx = self._ctx._replace(
+            current_group_filters=list(self._ctx.current_group_filters),
             imap_filter=imap_filter,
             path_prefix=self._ctx.path_prefix / imap_path_prefix,
             current_abspath=None,
@@ -2374,6 +2464,8 @@ class Manifest:
         except RecursionError as e:
             raise _ManifestImportDepth(None, imap.file if imap else None) \
                 from e
+
+        self._imported_from_projects.append(submanifest)
 
         # Patch up any extension commands in the imported data
         # by allocating them to the project.
@@ -2491,17 +2583,35 @@ class Manifest:
             if _INVALID_PROJECT_NAME_RE.search(name):
                 self._malformed(f'Invalid project name: {name}')
 
-    def _final_group_filter(self, schema_version: str):
-        # Update self.group_filter based on the schema version.
+    def _finalize_group_filter_state(self, schema_version: str):
+        # Decide the final self.group_filter based on the schema
+        # version and 'import-group-filters:' value.
 
         if schema_version == '0.9':
             # If the user requested v0.9.x group-filter semantics,
             # provide them, but emit a warning that can't be silenced
             # if group filters were used anywhere.
             #
-            # Hopefully no users ever actually see this warning.
+            # Hopefully no users ever actually see this warning,
+            # but either way, we only want to warn once, at the
+            # top level, if the distinction actually matters.
 
-            if self._ctx.group_filter:
+            if self._top_level and (
+                    any(bool(manifest._this_group_filter)
+                        for manifest in self._imported_from_projects) or
+                    self._this_group_filter or
+                    any(bool(manifest._this_group_filter)
+                        for manifest in self._imported_from_self)):
+                # Note that if any submanifest in
+                # self._imported_from_* has 'import-group-filters:
+                # false', and that submanifest imports but ignores
+                # some sub-sub-manifest's group-filter, we won't warn
+                # here about the sub-sub-manifest's group-filter.
+                #
+                # This seems like the right thing to do: the
+                # submanifest has taken explicit action to have an
+                # empty group-filter; let's respect that. (This too
+                # seems incredibly unlikely to happen in practice.)
                 _logger.warning(
                     "providing deprecated group-filter semantics "
                     "due to explicit 'manifest: version: 0.9'; "
@@ -2511,12 +2621,47 @@ class Manifest:
                 # Set attribute for white-box testing the above warning.
                 self._legacy_group_filter_warned = True
 
-            return self._top_level_group_filter
+            _update_disabled_groups(self._disabled_groups,
+                                    self._this_group_filter)
+            self.group_filter = self._this_group_filter
+        elif self._import_group_filters:
+            # Here, we accumulate Manifest._this_group_filter values
+            # from imports and this manifest's data to determine the
+            # final group filter.
+            #
+            # We use this attribute because, for example, if we import
+            # from project A and it has "group-filter: [-foo]", then later
+            # we import from project B and it has "group-filter: [+foo]",
+            # the final result is that foo is *enabled*.
+            #
+            # We therefore can't use Manifest._disabled_groups to
+            # decide our final group filter, since that doesn't track
+            # which groups were explicitly *enabled* by some group
+            # filter.
 
+            # We will reset self._this_group_filter to the
+            # concatenation of everything we know about as described
+            # in the west documentation. This also ensures that
+            # recursively importing group filters up multiple levels
+            # in the tree works as expected.
+            this_group_filter = []
+
+            # The order here matters; group filters which are
+            # processed later have higher precedence.
+            for manifest in self._imported_from_projects:
+                this_group_filter.extend(manifest._this_group_filter)
+            this_group_filter.extend(self._this_group_filter)
+            for manifest in self._imported_from_self:
+                this_group_filter.extend(manifest._this_group_filter)
+
+            self._this_group_filter = this_group_filter
+            _update_disabled_groups(self._disabled_groups,
+                                    self._this_group_filter)
+            self.group_filter = [f'-{g}' for g in self._disabled_groups]
         else:
             _update_disabled_groups(self._disabled_groups,
-                                    self._ctx.group_filter)
-            return [f'-{g}' for g in self._disabled_groups]
+                                    self._this_group_filter)
+            self.group_filter = [f'-{g}' for g in self._disabled_groups]
 
 class _PatchedConfiguration(Configuration):
     # Internal helper class that fakes out manifest.path and manifest.file

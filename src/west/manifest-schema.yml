@@ -35,6 +35,16 @@ mapping:
     required: false
     type: text
 
+  # The "import-group-filters" key is an optional boolean that defaults
+  # to 'true'. If it's 'false', then the group filter for this manifest
+  # will not depend on the group filters of any manifests it imports.
+  # If it's 'true', it will represent the combination of its own group
+  # filter and the group filters of imported manifests. Setting this to
+  # 'false' is the only way to combine 'import:' with 'groups:' in a project
+  # element.
+  import-group-filters:
+    type: bool
+
   # The "defaults" key specifies some default values used in the
   # rest of the manifest.
   defaults:
