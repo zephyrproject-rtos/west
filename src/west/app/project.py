@@ -576,8 +576,7 @@ class ManifestCommand(_ProjectCommand):
         except _ManifestImportDepth:
             self.die("cannot resolve manifest -- is there a loop?")
         except ManifestImportFailed as mif:
-            self.die(f"manifest import failed\n  Project: {mif.project}\n  "
-                     f"File: {mif.filename}")
+            self.die(str(mif))
         except (MalformedManifest, ManifestVersionError) as e:
             self.die('\n  '.join(str(arg) for arg in e.args))
         dump_kwargs = {'default_flow_style': False,
