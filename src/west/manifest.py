@@ -1356,7 +1356,8 @@ class Manifest:
         self._projects: List[Project] = []
         # The "raw" (unparsed) manifest.group-filter configuration
         # option in the local configuration file. See
-        # _config_group_filter().
+        # _config_group_filter(); only initialized if self._top_level
+        # is True and if we're loading from a file in a workspace.
         self._raw_config_group_filter: Optional[str] = None
         # A helper attribute we use for schema version v0.9 compatibility.
         self._top_level_group_filter: GroupFilterType = []
