@@ -259,7 +259,7 @@ def test_manifest_freeze(west_update_tmpdir):
         assert re.match(eline_re, aline) is not None, (aline, eline_re)
 
 
-def test_compare(west_init_tmpdir):
+def test_compare(config_tmpdir, west_init_tmpdir):
     # 'west compare' with no projects cloned should still work,
     # and not print anything.
     assert cmd('compare') == ''
