@@ -145,9 +145,17 @@ class Configuration:
     Allows getting, setting, and deleting configuration options
     in the system, global, and local files.
 
-    Sets take effect immediately and are not protected against
-    concurrent gets. The caller is responsible for any necessary
+    Setting values affects files immediately and is not protected against
+    concurrent reads. The caller is responsible for any necessary
     mutual exclusion.
+
+    WEST_CONFIG_* environment variables take effect when and only when
+    a Configuration object is created. This can be used to point
+    different objects at different files.
+
+    If no topdir argument is passed to the constructor and WEST_CONFIG_LOCAL
+    is not defined then the object does not point to any local file.
+
     '''
 
     def __init__(self, topdir: Optional[PathType] = None):
@@ -158,7 +166,7 @@ class Configuration:
         '''
 
         local_path = _location(ConfigFile.LOCAL, topdir=topdir,
-                               search_for_local=False) or None
+                               find_local=False) or None
 
         self._system_path = Path(_location(ConfigFile.SYSTEM))
         self._global_path = Path(_location(ConfigFile.GLOBAL))
@@ -547,7 +555,7 @@ def delete_config(section: str, key: str,
         raise KeyError(f'{section}.{key}')
 
 def _location(cfg: ConfigFile, topdir: Optional[PathType] = None,
-              search_for_local: bool = True) -> str:
+              find_local: bool = True) -> str:
     # Making this a function that gets called each time you ask for a
     # configuration file makes it respect updated environment
     # variables (such as XDG_CONFIG_HOME, PROGRAMDATA) if they're set
@@ -610,7 +618,7 @@ def _location(cfg: ConfigFile, topdir: Optional[PathType] = None,
         if topdir:
             return os.fspath(Path(topdir) / '.west' / 'config')
 
-        if search_for_local:
+        if find_local:
             # Might raise WestNotFound!
             return os.fspath(Path(west_dir()) / 'config')
         else:
