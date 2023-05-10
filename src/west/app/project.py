@@ -736,10 +736,19 @@ class Compare(_ProjectCommand):
             return
 
         def rev_info(rev):
-            return project.git(
-                ['log', '-1', '--color=never', '--pretty=%h %s', rev],
+            title = project.git(
+                ['log', '-1', '--color=never', '--pretty=%h%d %s',
+                 '--decorate-refs-exclude=refs/heads/manifest-rev',
+                 rev],
                 capture_stdout=True,
                 capture_stderr=True).stdout.decode().rstrip()
+            # "HEAD" is special; '--decorate-refs-exclude=HEAD' doesn't work.
+            # Fortunately it's always first.
+            return (
+                title.replace('(HEAD) ', '').replace('(HEAD, ', '(')
+                .replace('(HEAD -> ', '(')
+            )
+
         head_info = rev_info('HEAD')
         # If manifest-rev is missing, we already failed earlier.
         manifest_rev_info = rev_info('manifest-rev')
