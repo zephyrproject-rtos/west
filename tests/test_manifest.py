@@ -2512,7 +2512,8 @@ def test_no_groups_and_import():
         ''',
                            importer=importer)
 
-    assert '"groups" cannot be combined with "import"' in str(e.value)
+    assert ('"groups" cannot be combined with "import" '
+            'unless you add "import-group-filters: false"') in str(e.value)
 
 def test_invalid_groups():
     # Invalid group values must be rejected.
@@ -2902,6 +2903,187 @@ def test_group_filter_imports(manifest_repo):
     assert m.group_filter == []
     assert hasattr(m, '_legacy_group_filter_warned')
 
+def test_recursive_group_filter_imports(manifest_repo):
+    # Make sure that indirect group filter imports that have to
+    # propagate up multiple levels of manifest imports work as
+    # expected.
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write(textwrap.dedent('''
+        manifest:
+          import-group-filters: true
+          projects:
+            - name: project-1
+              url: ignored
+              revision: HEAD~0
+              import: true
+          self:
+            import: self-import-1.yml
+        '''))
+
+    with open(manifest_repo / 'self-import-1.yml', 'w') as f:
+        f.write(textwrap.dedent('''
+        manifest:
+          self:
+            import: self-import-2.yml
+        '''))
+
+    with open(manifest_repo / 'self-import-2.yml', 'w') as f:
+        f.write(textwrap.dedent('''
+        manifest:
+          group-filter: [-from-self-import-2]
+        '''))
+
+    topdir = manifest_repo.topdir
+
+    project_1 = topdir / 'project-1'
+    project_2 = topdir / 'project-2'
+
+    create_repo(project_1)
+    create_repo(project_2)
+
+    create_branch(project_1, 'manifest-rev', checkout=True)
+    create_branch(project_2, 'manifest-rev', checkout=True)
+
+    add_commit(project_1, 'project-1 commit',
+               files={'west.yml': '''
+               manifest:
+                 projects:
+                   - name: project-2
+                     url: ignored
+                     import: true
+               '''})
+    add_commit(project_2, 'project-2 commit',
+               files={'west.yml': '''
+               manifest:
+                 group-filter: [-from-project-2]
+               '''})
+
+    m = MT(topdir=topdir)
+    assert sorted(m.group_filter) == ['-from-project-2',
+                                      '-from-self-import-2']
+
+def test_old_schema_with_import_group_filters():
+    # Make sure we don't try to use this new feature with old schema.
+
+    with pytest.raises(MalformedManifest) as e:
+        validate('''
+        manifest:
+          version: "1.0"
+          import-group-filters: true
+        ''')
+    assert ('manifest schema version 1.0: this is too old '
+            'to use with import-group-filters') in str(e.value)
+
+def test_import_group_filter_false(manifest_repo):
+    # Smoke test for "import-group-filters: false".
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write(textwrap.dedent('''
+        manifest:
+          import-group-filters: false
+          self:
+            import: self-import.yml
+        '''))
+
+    with open(manifest_repo / 'self-import.yml', 'w') as f:
+        f.write(textwrap.dedent('''
+        manifest:
+          group-filter: [-foo]
+        '''))
+
+    m = MT(topdir=manifest_repo.topdir)
+    assert m.group_filter == []
+
+def test_import_group_filter_false_with_group(manifest_repo):
+    # Verify expected behavior when combining import, groups, and
+    # import-group-filters.
+
+    topdir = manifest_repo.topdir
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write(textwrap.dedent('''
+        manifest:
+          import-group-filters: false
+          group-filter: [-g]
+          projects:
+            - name: p
+              url: ignored
+              revision: HEAD~0
+              groups: [g]
+              import: true
+        '''))
+
+    # Even though project 'p' does not currently exist on the file
+    # system, we should be able to resolve the manifest: p is also
+    # inactive (since group 'g' is disabled), so the import should be
+    # ignored.
+    m = MT(topdir=topdir)
+    assert m.group_filter == ['-g']
+    p = m.get_projects(['p'])[0]
+    assert not m.is_active(p)
+
+    # Adding a self-import that also enables 'g', doesn't change that:
+    # the main manifest is not importing any group filters, so 'g'
+    # remains disabled, even though normally the self-import's
+    # group-filter would override the main manifest's.
+    with open(manifest_repo / 'west.yml', 'a') as f:
+        f.write(textwrap.dedent('''
+          self:
+            import: self-import.yml
+        '''))
+    with open(manifest_repo / 'self-import.yml', 'w') as f:
+        f.write(textwrap.dedent('''
+        manifest:
+          group-filter: [+g]
+        '''))
+    m = MT(topdir=topdir)
+    assert m.group_filter == ['-g']
+    p = m.get_projects(['p'])[0]
+    assert not m.is_active(p)
+
+def test_import_group_filter_downwards_propagation(manifest_repo):
+    # A parent manifest's group-filter should be able to make a
+    # project in an imported manifest inactive.
+
+    topdir = manifest_repo.topdir
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write(textwrap.dedent('''
+        manifest:
+          group-filter: [-disabled]
+          projects:
+            - name: project-1
+              revision: HEAD~0
+              url: ignored
+              import: true
+        '''))
+
+    topdir = manifest_repo.topdir
+
+    project_1 = topdir / 'project-1'
+    project_2 = topdir / 'project-2'
+
+    create_repo(project_1)
+    create_repo(project_2)
+
+    create_branch(project_1, 'manifest-rev', checkout=True)
+    create_branch(project_2, 'manifest-rev', checkout=True)
+
+    add_commit(project_1, 'project-1 commit',
+               files={'west.yml': '''
+               manifest:
+                 import-group-filters: false
+                 projects:
+                   - name: project-2
+                     url: ignored
+                     groups: [disabled]
+                     import: true
+               '''})
+
+    m = MT(topdir=topdir)
+    p2 = m.get_projects(['project-2'])[0]
+    assert not m.is_active(p2)
 
 #########################################
 # Various invalid manifests
