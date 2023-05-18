@@ -1015,7 +1015,7 @@ def test_bad_topdir_fails(tmp_workspace):
     # Make sure we get expected failure using Manifest.from_topdir()
     # with the topdir kwarg when no west.yml exists.
 
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(MalformedConfig):
         MT(topdir=tmp_workspace)
 
 def test_from_bad_topdir(tmpdir):

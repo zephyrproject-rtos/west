@@ -1788,7 +1788,15 @@ class Manifest:
 
             current_relpath = manifest_path / manifest_file
             current_abspath = topdir_abspath / current_relpath
-            current_data = current_abspath.read_text(encoding='utf-8')
+            try:
+                current_data = current_abspath.read_text(encoding='utf-8')
+            except FileNotFoundError:
+                raise MalformedConfig(
+                    f'file not found: manifest file {current_abspath} '
+                    '(from configuration options '
+                    f'manifest.path="{manifest_path_option}", '
+                    f'manifest.file="{manifest_file}")')
+
             current_repo_abspath = topdir_abspath / manifest_path
 
             self.abspath = os.fspath(current_abspath)
