@@ -1828,7 +1828,7 @@ class Manifest:
             self._projects_by_name.update(self._ctx.projects)
             self._projects_by_rpath: Dict[Path, Project] = {}  # resolved paths
             if self.topdir:
-                for i, p in enumerate(self.projects):
+                for p in self.projects:
                     if TYPE_CHECKING:
                         # The typing module can't tell that self.topdir
                         # being truthy guarantees p.abspath is a str, not None.
