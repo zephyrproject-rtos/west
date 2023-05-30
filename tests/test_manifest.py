@@ -1716,6 +1716,35 @@ def test_import_project_submanifest_commands_both(manifest_repo):
     expected = ['p1-commands.yml', 'm1-commands.yml', 'm2-commands.yml']
     assert p1.west_commands == expected
 
+def test_import_map_error_handling():
+    # Make sure we handle expected errors when loading import:
+    # values that are maps.
+
+    def importer(*args, **kwargs):
+        return None
+
+    def make_manifest(import_map):
+        return Manifest.from_data({'manifest':
+                                   {'projects':
+                                    [{'name': 'foo',
+                                      'url': 'ignored',
+                                      'import': import_map}]}},
+                                  importer=importer)
+
+    def check_error(import_map, expected_err_contains):
+        with pytest.raises(MalformedManifest) as e:
+            make_manifest(import_map)
+        assert expected_err_contains in str(e.value)
+
+    # Unexpected keys are errors.
+    check_error({'invalid-key': 1}, 'invalid import contents')
+    # Invalid types for map keys are errors.
+    check_error({'name-allowlist': {}}, 'bad import name-allowlist')
+    check_error({'path-allowlist': {}}, 'bad import path-allowlist')
+    check_error({'name-blocklist': {}}, 'bad import name-blocklist')
+    check_error({'path-blocklist': {}}, 'bad import path-blocklist')
+    check_error({'path-prefix': {}}, 'bad import path-prefix')
+
 # A manifest repository with a subdirectory containing multiple
 # additional files:
 #
