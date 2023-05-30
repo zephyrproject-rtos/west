@@ -1809,7 +1809,6 @@ class Manifest:
 
         # The manifest is resolved; perform post-resolution validation.
         self._check_paths_are_unique()
-        self._check_names()
 
         # Set up top-level state which relies on the resolved and
         # validated manifest.
@@ -2474,6 +2473,7 @@ class Manifest:
         # Return the result.
 
         if project.name not in self._ctx.projects:
+            self._check_project_name(project)
             self._ctx.projects[project.name] = project
             _logger.debug('added project %s path %s revision %s%s%s',
                           project.name, project.path, project.revision,
@@ -2483,6 +2483,11 @@ class Manifest:
             return True
         else:
             return False
+
+    def _check_project_name(self, project):
+        name = project.name
+        if _INVALID_PROJECT_NAME_RE.search(name):
+            self._malformed(f'Invalid project name: {name}')
 
     def _check_paths_are_unique(self) -> None:
         ppaths: Dict[Path, Project] = {}
@@ -2496,11 +2501,6 @@ class Manifest:
                 self._malformed(f'project {name} path "{project.path}" '
                                 f'is taken by project {other.name}')
             ppaths[pp] = project
-
-    def _check_names(self) -> None:
-        for name, project in self._ctx.projects.items():
-            if _INVALID_PROJECT_NAME_RE.search(name):
-                self._malformed(f'Invalid project name: {name}')
 
     def _final_group_filter(self, schema_version: str):
         # Update self.group_filter based on the schema version.
