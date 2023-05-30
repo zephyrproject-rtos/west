@@ -2444,6 +2444,9 @@ class Manifest:
                           copy.pop('path-prefix', ''))
 
         # Check that the value is OK.
+        #
+        # If you modify the error handling here, be sure to
+        # update test_import_map_error_handling() as needed.
         if copy:
             # We popped out all of the valid keys already.
             self._malformed(f'{src}: invalid import contents: {copy}')
