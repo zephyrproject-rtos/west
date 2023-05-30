@@ -358,8 +358,16 @@ def _compose_imap_filters(imap_filter1: ImapFilterFnType,
     else:
         return imap_filter1 or imap_filter2
 
+# It's an error if a group name matches this pattern.
 _RESERVED_GROUP_RE = re.compile(r'(^[+-]|[\s,:])')
+
+# _INVALID_PROJECT_NAME_RE: pattern for project names that
+#                           are errors
+# _RESERVED_PROJECT_NAME_RE: pattern for names that cause warnings by
+#                            default for now, but will be errors later
+#                            (west 2.0 or later)
 _INVALID_PROJECT_NAME_RE = re.compile(r'([/\\])')
+_RESERVED_PROJECT_NAME_RE = re.compile(r'[\s,]')
 
 def _update_disabled_groups(disabled_groups: Set[str],
                             group_filter: GroupFilterType):
@@ -2488,6 +2496,15 @@ class Manifest:
         name = project.name
         if _INVALID_PROJECT_NAME_RE.search(name):
             self._malformed(f'Invalid project name: {name}')
+        if _RESERVED_PROJECT_NAME_RE.search(name):
+            if self._ctx.current_abspath:
+                context = f' (defined in {self._ctx.current_abspath})'
+            elif self._ctx.current_repo_abspath:
+                context = f' (loaded from {self._ctx.current_repo_abspath})'
+            _logger.warning(
+                f'project "{name}"{context} contains comma (",") or '
+                'whitespace; this will be forbidden in a future version '
+                'of west')
 
     def _check_paths_are_unique(self) -> None:
         ppaths: Dict[Path, Project] = {}
