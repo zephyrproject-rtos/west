@@ -552,14 +552,23 @@ class ManifestCommand(_ProjectCommand):
         if args.validate:
             pass              # nothing more to do
         elif args.resolve:
+            self._die_if_manifest_project_filter('resolve')
             self._dump(args, manifest.as_yaml(**dump_kwargs))
         elif args.freeze:
+            self._die_if_manifest_project_filter('freeze')
             self._dump(args, manifest.as_frozen_yaml(**dump_kwargs))
         elif args.path:
             self.inf(manifest.path)
         else:
             # Can't happen.
             raise RuntimeError(f'internal error: unhandled args {args}')
+
+    def _die_if_manifest_project_filter(self, action):
+        if self.config.get('manifest.project-filter') is not None:
+            self.die(f'"west manifest --{action}" is not (yet) supported '
+                     'when the manifest.project-filter option is set. '
+                     'Please contact the west developers if you have a '
+                     'use case for this.')
 
     def _dump(self, args, to_dump):
         if args.out:
