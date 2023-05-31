@@ -184,6 +184,8 @@ class WestApp:
     def run(self, argv):
         # Run the command-line application with argument list 'argv'.
 
+        early_args = parse_early_args(argv)
+
         # Silence validation errors from pykwalify, which are logged at
         # logging.ERROR level. We want to handle those ourselves as
         # needed.
@@ -218,7 +220,7 @@ class WestApp:
         self.setup_parsers()
 
         # OK, we are all set. Run the command.
-        self.run_command(argv)
+        self.run_command(argv, early_args)
 
     def load_manifest(self):
         # Try to parse the manifest. We'll save it if that works, so
@@ -451,11 +453,12 @@ class WestApp:
 
         return parser, subparser_gen
 
-    def run_command(self, argv):
+    def run_command(self, argv, early_args):
         # Parse command line arguments and run the WestCommand.
         # If we're running an extension, instantiate it from its
         # spec and re-parse arguments before running.
 
+        self.handle_early_arg_errors(early_args)
         args, unknown = self.west_parser.parse_known_args(args=argv)
 
         # Set up logging verbosity before running the command, for
@@ -536,6 +539,30 @@ class WestApp:
             self.cmd.die('\n  '.join(str(arg) for arg in mm.args))
         except WestNotFound as wnf:
             self.cmd.die(str(wnf))
+
+    def handle_early_arg_errors(self, early_args):
+        # If early_args indicates we should error out, handle it
+        # gracefully. This provides more user-friendly output than
+        # argparse can do on its own.
+
+        if (early_args.command_name and
+            (early_args.command_name not in self.builtins and
+             (not self.extensions or
+              early_args.command_name not in self.extensions))):
+            self.handle_unknown_command(early_args.command_name)
+
+    def handle_unknown_command(self, command_name):
+        if self.topdir:
+            extra_help = (f'workspace {self.topdir} does not define '
+                          'this extension command -- try "west help"')
+        else:
+            extra_help = 'do you need to run this inside a workspace?'
+        self.print_usage_and_exit(f'west: unknown command "{command_name}"; '
+                                  f'{extra_help}')
+
+    def print_usage_and_exit(self, message):
+        self.west_parser.print_usage(file=sys.stderr)
+        sys.exit(message)
 
     def run_builtin(self, args, unknown):
         self.queued_io.append(
