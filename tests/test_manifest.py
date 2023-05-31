@@ -25,7 +25,7 @@ from west.manifest import Manifest, Project, ManifestProject, \
     MalformedManifest, ManifestVersionError, ManifestImportFailed, \
     manifest_path, ImportFlag, validate, MANIFEST_PROJECT_INDEX, \
     _ManifestImportDepth, is_group, SCHEMA_VERSION
-from west.configuration import MalformedConfig
+from west.configuration import Configuration, ConfigFile, MalformedConfig
 
 # White box checks for the schema version.
 from west.manifest import _VALID_SCHEMA_VERS
@@ -1288,6 +1288,51 @@ def test_version_check_success(ver):
         url: https://foo.com
     ''')
     assert manifest.projects[-1].name == 'foo'
+
+def test_project_filter_validation(config_tmpdir):
+    # Make sure we error out in the expected way when invalid
+    # manifest.project-filter options occur anywhere.
+
+    topdir = config_tmpdir / 'test-topdir'
+    manifest_repo = topdir / 'mp'
+    config = Configuration(topdir=topdir)
+    config.set('manifest.path', 'mp')
+    create_repo(manifest_repo)
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('manifest: {}')
+
+    def clean_up_config_files():
+        for configfile in [ConfigFile.SYSTEM,
+                           ConfigFile.GLOBAL,
+                           ConfigFile.LOCAL]:
+            try:
+                config.delete('manifest.project-filter',
+                              configfile=configfile)
+            except KeyError:
+                pass
+
+    def check_error(project_filter, expected_err_contains):
+        for configfile, name in [(ConfigFile.SYSTEM, 'system'),
+                                 (ConfigFile.GLOBAL, 'global'),
+                                 (ConfigFile.LOCAL, 'local')]:
+            clean_up_config_files()
+            config.set('manifest.project-filter', project_filter,
+                       configfile=configfile)
+
+            with pytest.raises(MalformedConfig) as e:
+                MT(topdir=topdir)
+
+            err = str(e.value)
+            assert (f'invalid {name} "manifest.project-filter" option value '
+                    f'"{project_filter}":') in err
+            assert expected_err_contains in err
+
+    check_error('foo', 'element "foo" does not start with "+" or "-"')
+    check_error('foo,+bar', 'element "foo" does not start with "+" or "-"')
+    check_error('foo , +bar', 'element "foo" does not start with "+" or "-"')
+    check_error('+', 'a bare "+" or "-" contains no regular expression')
+    check_error('-', 'a bare "+" or "-" contains no regular expression')
+    check_error('++', 'invalid regular expression "+":')
 
 #########################################
 # Manifest import tests
