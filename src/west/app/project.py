@@ -23,8 +23,7 @@ from west.configuration import Configuration
 from west import util
 from west.commands import WestCommand, CommandError, Verbosity
 from west.manifest import ImportFlag, Manifest, \
-    ManifestProject, _manifest_content_at, ManifestImportFailed, \
-    _ManifestImportDepth, ManifestVersionError, MalformedManifest
+    ManifestProject, _manifest_content_at, ManifestImportFailed
 from west.manifest import is_group as is_project_group
 from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
 from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
@@ -97,17 +96,6 @@ class _ProjectCommand(WestCommand):
         else:
             self.err(f'{self.name} failed for multiple projects; see above')
         raise CommandError(1)
-
-    def _setup_logging(self, args):
-        logger = logging.getLogger('west.manifest')
-
-        if self.verbosity >= Verbosity.INF:
-            level = logging.DEBUG
-        else:
-            level = logging.INFO
-
-        logger.setLevel(level)
-        logger.addHandler(ProjectCommandLogHandler(self))
 
     def _die_unknown(self, unknown):
         # Scream and die about unknown projects.
@@ -229,8 +217,6 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
             self.die('-l cannot be combined with -m or --mr')
 
         self.die_if_no_git()
-
-        self._setup_logging(args)
 
         if args.local:
             topdir = self.local(args)
@@ -442,8 +428,6 @@ The following arguments are available:
         def delay(func, project):
             return DelayFormat(partial(func, project))
 
-        self._setup_logging(args)
-
         for project in self._projects(args.projects):
             # Skip inactive projects unless the user said
             # --all or named some projects explicitly.
@@ -561,24 +545,7 @@ class ManifestCommand(_ProjectCommand):
         return parser
 
     def do_run(self, args, user_args):
-        self._setup_logging(args)
-
-        # Since the user is explicitly managing the manifest, we are
-        # deliberately loading it again instead of using self.manifest
-        # to emit debug logs if enabled, which are turned off when the
-        # manifest is initially parsed in main.py.
-        #
-        # The code in main.py is usually responsible for handling any
-        # errors and printing useful messages. We re-do error checking
-        # for manifest-related errors that it won't handle.
-        try:
-            manifest = Manifest.from_topdir(topdir=self.topdir)
-        except _ManifestImportDepth:
-            self.die("cannot resolve manifest -- is there a loop?")
-        except ManifestImportFailed as mif:
-            self.die(str(mif))
-        except (MalformedManifest, ManifestVersionError) as e:
-            self.die('\n  '.join(str(arg) for arg in e.args))
+        manifest = self.manifest
         dump_kwargs = {'default_flow_style': False,
                        'sort_keys': False}
 
@@ -658,7 +625,6 @@ class Compare(_ProjectCommand):
         if self.git_version_info < (2, 22):
             # This is for git branch --show-current.
             self.die('git version 2.22 or later is required')
-        self._setup_logging(args)
 
         if args.ignore_branches is not None:
             self.ignore_branches = args.ignore_branches
@@ -785,7 +751,6 @@ class Diff(_ProjectCommand):
 
     def do_run(self, args, ignored):
         self.die_if_no_git()
-        self._setup_logging(args)
 
         failed = []
         no_diff = 0
@@ -831,7 +796,6 @@ class Status(_ProjectCommand):
 
     def do_run(self, args, user_args):
         self.die_if_no_git()
-        self._setup_logging(args)
 
         failed = []
         for project in self._cloned_projects(args, only_active=not args.all):
@@ -959,7 +923,6 @@ class Update(_ProjectCommand):
 
     def do_run(self, args, _):
         self.die_if_no_git()
-        self._setup_logging(args)
         self.init_state(args)
 
         # We can't blindly call self._projects() here: manifests with
@@ -1614,8 +1577,6 @@ class ForAll(_ProjectCommand):
         return parser
 
     def do_run(self, args, user_args):
-        self._setup_logging(args)
-
         failed = []
         group_set = set(args.groups)
         for project in self._cloned_projects(args, only_active=not args.all):

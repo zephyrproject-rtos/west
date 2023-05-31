@@ -139,6 +139,24 @@ def parse_early_args(argv: ListType[str]) -> EarlyArgs:
     return EarlyArgs(help, version, zephyr_base, verbosity,
                      command_name, unexpected_arguments)
 
+class LogFormatter(logging.Formatter):
+
+    def __init__(self):
+        super().__init__(fmt='%(name)s: %(levelname)s: %(message)s')
+
+class LogHandler(logging.Handler):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFormatter(LogFormatter())
+
+    def emit(self, record):
+        formatted = self.format(record)
+        if record.levelno >= logging.WARNING:
+            print(formatted, file=sys.stderr)
+        else:
+            print(formatted)
+
 class WestApp:
     # The west 'application' object.
     #
@@ -190,6 +208,9 @@ class WestApp:
         # logging.ERROR level. We want to handle those ourselves as
         # needed.
         logging.getLogger('pykwalify').setLevel(logging.CRITICAL)
+
+        # Use verbosity to determine west API log levels
+        self.setup_west_logging(early_args.verbosity)
 
         # Makes ANSI color escapes work on Windows, and strips them when
         # stdout/stderr isn't a terminal
@@ -563,6 +584,18 @@ class WestApp:
     def print_usage_and_exit(self, message):
         self.west_parser.print_usage(file=sys.stderr)
         sys.exit(message)
+
+    def setup_west_logging(self, verbosity):
+        logger = logging.getLogger('west.manifest')
+
+        if verbosity >= 2:
+            logger.setLevel(logging.DEBUG)
+        elif verbosity == 1:
+            logger.setLevel(logging.INFO)
+        else:
+            logger.setLevel(logging.WARNING)
+
+        logger.addHandler(LogHandler())
 
     def run_builtin(self, args, unknown):
         self.queued_io.append(
