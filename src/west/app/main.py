@@ -85,6 +85,15 @@ class WestApp:
     def run(self, argv):
         # Run the command-line application with argument list 'argv'.
 
+        # Silence validation errors from pykwalify, which are logged at
+        # logging.ERROR level. We want to handle those ourselves as
+        # needed.
+        logging.getLogger('pykwalify').setLevel(logging.CRITICAL)
+
+        # Makes ANSI color escapes work on Windows, and strips them when
+        # stdout/stderr isn't a terminal
+        colorama.init()
+
         # See if we're in a workspace. It's fine if we're not.
         # Note that this falls back on searching from ZEPHYR_BASE
         # if the current directory isn't inside a west workspace.
@@ -910,15 +919,6 @@ def dump_traceback():
     return name
 
 def main(argv=None):
-    # Silence validation errors from pykwalify, which are logged at
-    # logging.ERROR level. We want to handle those ourselves as
-    # needed.
-    logging.getLogger('pykwalify').setLevel(logging.CRITICAL)
-
-    # Makes ANSI color escapes work on Windows, and strips them when
-    # stdout/stderr isn't a terminal
-    colorama.init()
-
     # Create the WestApp instance and let it run.
     app = WestApp()
     app.run(argv or sys.argv[1:])
