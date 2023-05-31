@@ -88,6 +88,15 @@ GroupFilterType = List[str]
 # A list of group names belonging to a project, like ['foo', 'bar']
 GroupsType = List[str]
 
+class PFR(enum.Enum):
+    # "Project filter result": internal type for expressing whether a
+    # project has been explicitly made active or inactive via
+    # manifest.project-filter.
+
+    ACTIVE = 1
+    INACTIVE = 2
+    NONE = 3
+
 # Type for an individual element of a project filter.
 class ProjectFilterElt(NamedTuple):
     # The regular expression to match against project names
@@ -1327,7 +1336,8 @@ class Manifest:
 
             - ``has_imports``: bool, True if the manifest contains
               an "import:" attribute in "self:" or "projects:" that were
-              not ignored due to *import_flags*; False otherwise
+              not ignored due to *import_flags* or manifest.project-filter;
+              False otherwise
 
             - ``group_filter``: a group filter value equivalent to
               the resolved manifest's "group-filter:", along with any
@@ -1650,23 +1660,53 @@ class Manifest:
                   extra_filter: Optional[Iterable[str]] = None) -> bool:
         '''Is a project active?
 
-        Projects with empty 'project.groups' lists are always active.
+        If the manifest.project-filter configuration option is set
+        in any of the system, global, or local configuration files,
+        and one or more of its elements apply to the project's name,
+        the return value determined by the option's values in these files:
 
-        Otherwise, if any group in 'project.groups' is enabled by this
-        manifest's 'group-filter:' list (and the
-        'manifest.group-filter' local configuration option, if we have
-        a workspace), returns True.
+        - The elements of the manifest.project-filter options in each
+          of these files are checked against the project's name. If the
+          regular expression in the element matches the project's name,
+          then the project is active or inactive depending on if the
+          element begins with + or - respectively.
 
-        Otherwise, i.e. if all of the project's groups are disabled,
-        this returns False.
+        - If multiple elements have regular expressions matching the
+          project's name, the last element which has a match determines
+          the result.
+
+        - This function returns True if the project is active or
+          inactive according to these rules.
+
+        Otherwise, the return value depends on whether the project has
+        any groups, and if so, whether they are enabled:
+
+        - Projects with empty 'project.groups' lists are always active,
+          and this function returns True for such projects.
+
+        - If 'project.groups' is not empty, and any group in it is
+          enabled by this manifest's 'group-filter:' list (and the
+          'manifest.group-filter' local configuration option, if we
+          have a workspace), this returns True.
+
+        - Otherwise, i.e. if all of the project's groups are disabled,
+          this returns False.
 
         "Inactive" projects should generally be considered absent from
-        the workspace for purposes like updating it, listing projects,
-        etc.
+        the workspace for purposes like updating, listing, resolving
+        imports, etc.
 
         :param project: project to check
         :param extra_filter: an optional additional group filter
         '''
+
+        if not isinstance(project, ManifestProject):
+            pfr = self._pfr(project)
+            if pfr == PFR.ACTIVE:
+                return True
+            elif pfr == PFR.INACTIVE:
+                return False
+
         if not project.groups:
             # Projects without any groups are always active, so just
             # exit early. Note that this happens to treat the
@@ -1693,6 +1733,21 @@ class Manifest:
             disabled_groups = self._disabled_groups
 
         return any(group not in disabled_groups for group in project.groups)
+
+    def _pfr(self, project: Project) -> PFR:
+        # Internal helper for checking if a project has been
+        # made explicitly active or inactive.
+
+        name = project.name
+        ret = PFR.NONE
+        for elt in self._ctx.project_filter:
+            if not elt.pattern.fullmatch(name):
+                continue
+            if elt.make_active:
+                ret = PFR.ACTIVE
+            else:
+                ret = PFR.INACTIVE
+        return ret
 
     @property
     def path(self) -> Optional[str]:  # for compatibility
@@ -2403,8 +2458,13 @@ class Manifest:
         # - project: Project instance to import from
         # - imp: the parsed value of project's import key (string, list, etc.)
 
-        self._assert_imports_ok()
+        pfr = self._pfr(project)
+        if pfr == PFR.INACTIVE:
+            _logger.debug(f'project {project.name} is inactive due to '
+                          'manifest.project-filter; ignoring its "import:"')
+            return
 
+        self._assert_imports_ok()
         self.has_imports = True
 
         imptype = type(imp)
@@ -2598,10 +2658,18 @@ class Manifest:
                 context = f' (defined in {self._ctx.current_abspath})'
             elif self._ctx.current_repo_abspath:
                 context = f' (loaded from {self._ctx.current_repo_abspath})'
-            _logger.warning(
-                f'project "{name}"{context} contains comma (",") or '
-                'whitespace; this will be forbidden in a future version '
-                'of west')
+            if self._ctx.project_filter:
+                raise MalformedConfig(
+                    f'project "{name}"{context} contains comma (",") or '
+                    'whitespace; this is incompatible with use of the '
+                    'manifest.project-filter option. '
+                    '(These characters will be forbidden entirely in a '
+                    'future version of west.)')
+            else:
+                _logger.warning(
+                    f'project "{name}"{context} contains comma (",") or '
+                    'whitespace; this will be forbidden in a future version '
+                    'of west')
 
     def _check_paths_are_unique(self) -> None:
         ppaths: Dict[Path, Project] = {}
