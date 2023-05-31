@@ -66,8 +66,6 @@ SCHEMA_VERSION = '1.0'
 # Internal helpers
 #
 
-# Type aliases
-
 # The value of a west-commands as passed around during manifest
 # resolution. It can become a list due to resolving imports, even
 # though it's just a str in each individual file right now.
@@ -89,6 +87,77 @@ GroupFilterType = List[str]
 
 # A list of group names belonging to a project, like ['foo', 'bar']
 GroupsType = List[str]
+
+# Type for an individual element of a project filter.
+class ProjectFilterElt(NamedTuple):
+    # The regular expression to match against project names
+    # when applying the filter. This must match the entire project
+    # name in order for this filter to apply.
+    pattern: re.Pattern
+
+    # If True, projects whose names match 'pattern' are explicitly
+    # made active. If False, projects whose names match the regular
+    # expression are made inactive.
+    make_active: bool
+
+# The internal representation for a 'manifest.project-filter'
+# configuration option's value.
+#
+# If an individual list element matches, it makes the project active
+# or inactive accordingly. The "activate/inactivate result" from the
+# last match in the list "wins". If there are no matches, the
+# project's active/inactive status is not changed by the filter.
+#
+# For example, "-hal_.*,+hal_my_vendor' would make all projects
+# whose names start with 'hal_' inactive, except a project named exactly
+# 'hal_my_vendor'. We would represent that like this:
+#
+#   [ProjectFilterElt(re.compile('hal_.*'), False),
+#    ProjectFilterElt(re.compile('hal_my_vendor'), True)]
+#
+# The regular expression must match the entire project name.
+ProjectFilterType = List[ProjectFilterElt]
+
+def _update_project_filter(project_filter: ProjectFilterType,
+                           option_value: Optional[str],
+                           configfile: ConfigFile,
+                           name: str) -> None:
+    # Validate a 'manifest.project-filter' configuration option's
+    # value. The 'option_value' argument is the raw configuration
+    # option. If 'option_value' is invalid, error out. Otherwise,
+    # destructively modify 'project_filter' to reflect the option's
+    # value.
+    #
+    # The 'configfile' and 'name' arguments are just for error
+    # reporting.
+
+    if option_value is None:
+        return
+
+    def _err(message):
+        raise MalformedConfig(
+            f'invalid {name} "manifest.project-filter" option value '
+            f'"{option_value}": {message}')
+
+    for elt in option_value.split(','):
+        elt = elt.strip()
+        if not elt:
+            continue
+        elif not elt.startswith(('-', '+')):
+            _err(f'element "{elt}" does not start with "+" or "-"')
+        if len(elt) == 1:
+            _err('a bare "+" or "-" contains no regular expression')
+
+        make_active = elt.startswith('+')
+        regexp = elt[1:]
+
+        try:
+            pattern = re.compile(regexp)
+        except re.error as e:
+            _err(f'invalid regular expression "{regexp}": {str(e)}')
+
+        project_filter.append(ProjectFilterElt(pattern=pattern,
+                                               make_active=make_active))
 
 # The parsed contents of a manifest YAML file as returned by _load(),
 # after sanitychecking with validate().
@@ -281,6 +350,13 @@ class _import_ctx(NamedTuple):
     # contains a name which is already present here, we ignore that
     # element.
     projects: Dict[str, 'Project']
+
+    # The project filters we should apply while resolving imports. We
+    # try to load this only once from the 'manifest.project-filter'
+    # configuration option. It should not be used after resolving
+    # imports; instead, the lookup should dynamically use the
+    # configuration we were passed at construction.
+    project_filter: ProjectFilterType
 
     # The current shared group filter. This is mutable state in the
     # same way 'projects' is. Manifests which are imported earlier get
@@ -1715,6 +1791,7 @@ class Manifest:
         current_relpath = None
         current_data = source_data
         current_repo_abspath = None
+        project_filter: ProjectFilterType = []
 
         if topdir_abspath:
             config = config or Configuration(topdir=topdir_abspath)
@@ -1758,7 +1835,27 @@ class Manifest:
             self._raw_config_group_filter = get_option('manifest.group-filter')
             self._config_path = manifest_path
 
+            def project_filter_val(configfile) -> Optional[str]:
+                return config.get('manifest.project-filter',
+                                  configfile=configfile)
+
+            # Update our project filter based on the value in all the
+            # configuration files. This allows us to progressively
+            # build up a project filter with default settings in
+            # configuration files with wider scope, refining as
+            # needed. For example, you could do '-foo,-bar' in the
+            # global config file, and then '+bar' in the local config
+            # file, to have a final filter of '-foo'.
+            for configfile, name in [(ConfigFile.SYSTEM, 'system'),
+                                     (ConfigFile.GLOBAL, 'global'),
+                                     (ConfigFile.LOCAL, 'local')]:
+                _update_project_filter(project_filter,
+                                       project_filter_val(configfile),
+                                       configfile,
+                                       name)
+
         return _import_ctx(projects={},
+                           project_filter=project_filter,
                            group_filter=[],
                            manifest_west_commands=[],
                            imap_filter=None,
