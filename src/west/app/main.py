@@ -26,6 +26,8 @@ from subprocess import CalledProcessError
 import tempfile
 import textwrap
 import traceback
+from typing import NamedTuple, Optional
+from typing import List as ListType
 
 from west import log
 import west.configuration
@@ -39,6 +41,103 @@ from west.manifest import Manifest, MalformedConfig, MalformedManifest, \
     ManifestProject, MANIFEST_REV_BRANCH
 from west.util import quote_sh_list, west_topdir, WestNotFound
 from west.version import __version__
+
+class EarlyArgs(NamedTuple):
+    # Data type for storing "early" argument parsing results.
+    #
+    # We do some manual parsing of the command-line arguments before
+    # delegating the hard parts to argparse. This extra work figures
+    # out the command name, verbosity level, etc.
+    #
+    # This is necessary for:
+    #
+    # - nicer error-handling in situations where the command is an
+    #   extension but we're not in a workspace
+    #
+    # - setting up log levels from the verbosity level
+
+    # Expected arguments:
+    help: bool                  # True if -h was given
+    version: bool               # True if -V was given
+    zephyr_base: Optional[str]  # -z argument value
+    verbosity: int              # 0 if not given, otherwise counts
+    command_name: Optional[str]
+
+    # Other arguments are appended here.
+    unexpected_arguments: ListType[str]
+
+def parse_early_args(argv: ListType[str]) -> EarlyArgs:
+    # Hand-rolled argument parser for early arguments.
+
+    help = False
+    version = False
+    zephyr_base = None
+    verbosity = 0
+    command_name = None
+    unexpected_arguments = []
+
+    expecting_zephyr_base = False
+
+    def consume_more_args(rest):
+        # Handle the 'Vv' portion of 'west -hVv'.
+
+        nonlocal help, version, zephyr_base, verbosity, command_name
+        nonlocal unexpected_arguments
+        nonlocal expecting_zephyr_base
+
+        if not rest:
+            return
+
+        if rest.startswith('h'):
+            help = True
+            consume_more_args(rest[1:])
+        elif rest.startswith('V'):
+            version = True
+            consume_more_args(rest[1:])
+        elif rest.startswith('v'):
+            verbosity += 1
+            consume_more_args(rest[1:])
+        elif rest.startswith('z'):
+            if not rest[1:]:
+                expecting_zephyr_base = True
+            elif rest[1] == '=':
+                zephyr_base = rest[2:]
+            else:
+                zephyr_base = rest[1:]
+        else:
+            unexpected_arguments.append(rest)
+
+    for arg in argv:
+        if expecting_zephyr_base:
+            zephyr_base = arg
+        elif arg.startswith('-h'):
+            help = True
+            consume_more_args(arg[2:])
+        elif arg.startswith('-V'):
+            version = True
+            consume_more_args(arg[2:])
+        elif arg == '--version':
+            version = True
+        elif arg.startswith('-v'):
+            verbosity += 1
+            consume_more_args(arg[2:])
+        elif arg == '--verbose':
+            verbosity += 1
+        elif arg.startswith('-z'):
+            if arg == '-z':
+                expecting_zephyr_base = True
+            elif arg.startswith('-z='):
+                zephyr_base = arg[3:]
+            else:
+                zephyr_base = arg[2:]
+        elif arg.startswith('-'):
+            unexpected_arguments.append(arg)
+        else:
+            command_name = arg
+            break
+
+    return EarlyArgs(help, version, zephyr_base, verbosity,
+                     command_name, unexpected_arguments)
 
 class WestApp:
     # The west 'application' object.
@@ -328,6 +427,8 @@ class WestApp:
         # Remember to update zephyr's west-completion.bash if you add or
         # remove flags. This is currently the only place where shell
         # completion is available.
+        #
+        # If you update these, also update parse_early_args().
 
         parser.add_argument('-h', '--help', action=WestHelpAction, nargs=0,
                             help='get help for west or a command')
