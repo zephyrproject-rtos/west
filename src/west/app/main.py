@@ -318,8 +318,8 @@ class WestApp:
             if isinst(MalformedManifest, MalformedConfig):
                 self.queued_io.append(
                     lambda cmd:
-                    cmd.die('\n  '.join(["can't load west manifest"] +
-                                        list(self.mle.args))))
+                    cmd.die("can't load west manifest: " +
+                            "\n".join(list(self.mle.args))))
             elif isinst(_ManifestImportDepth):
                 self.queued_io.append(
                     lambda cmd:
