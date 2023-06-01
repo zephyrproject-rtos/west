@@ -349,7 +349,8 @@ def _is_imap_ok(imap: _import_map, project: 'Project') -> bool:
         return allowed or no_allowlists
 
 class _import_ctx(NamedTuple):
-    # Holds state that changes as we recurse down the manifest import tree.
+    # Holds shared state that we want to pass around as we
+    # resolve imports.
 
     # The current map from already-defined project names to Projects.
     #
@@ -363,9 +364,7 @@ class _import_ctx(NamedTuple):
 
     # The project filters we should apply while resolving imports. We
     # try to load this only once from the 'manifest.project-filter'
-    # configuration option. It should not be used after resolving
-    # imports; instead, the lookup should dynamically use the
-    # configuration we were passed at construction.
+    # configuration option.
     project_filter: ProjectFilterType
 
     # Deque of group filters from every manifest we import.
