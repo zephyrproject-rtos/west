@@ -11,6 +11,7 @@
 
 from copy import deepcopy
 from glob import glob
+import logging
 import os
 from pathlib import PurePath, Path
 import platform
@@ -1333,6 +1334,176 @@ def test_project_filter_validation(config_tmpdir):
     check_error('+', 'a bare "+" or "-" contains no regular expression')
     check_error('-', 'a bare "+" or "-" contains no regular expression')
     check_error('++', 'invalid regular expression "+":')
+
+def test_project_filter_matching(config_tmpdir):
+    # Test manifest.project-filter matching rules by making
+    # sure that projects can be made active or inactive. Also
+    # test that west ignores empty elements.
+
+    topdir = config_tmpdir / 'test-topdir'
+    manifest_repo = topdir / 'mp'
+    config = Configuration(topdir=topdir)
+    config.set('manifest.path', 'mp')
+    create_repo(manifest_repo)
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''
+        manifest:
+          projects:
+            - name: foo
+            - name: foobar
+            - name: bar
+
+          defaults:
+            remote: test
+          remotes:
+            - name: test
+              url-base: ignored
+        ''')
+
+    # West currently does not dynamically adjust its conception
+    # of what the configuration files said after __init__ time, so
+    # we recreate the manifest object every time.
+
+    config.set('manifest.project-filter', '-foo')
+    manifest = Manifest.from_topdir(topdir=topdir, config=config)
+    foo, foobar, bar = manifest.get_projects(['foo', 'foobar', 'bar'])
+    assert not manifest.is_active(foo)
+    assert manifest.is_active(foobar)
+    assert manifest.is_active(bar)
+
+    config.set('manifest.project-filter', '-foo,-bar')
+    manifest = Manifest.from_topdir(topdir=topdir, config=config)
+    foo, foobar, bar = manifest.get_projects(['foo', 'foobar', 'bar'])
+    assert not manifest.is_active(foo)
+    assert manifest.is_active(foobar)
+    assert not manifest.is_active(bar)
+
+    config.set('manifest.project-filter', '-foobar,-fo')
+    manifest = Manifest.from_topdir(topdir=topdir, config=config)
+    foo, foobar, bar = manifest.get_projects(['foo', 'foobar', 'bar'])
+    assert manifest.is_active(foo)
+    assert not manifest.is_active(foobar)
+    assert manifest.is_active(bar)
+
+    # This is equivalent to above: west should ignore the empty element.
+    config.set('manifest.project-filter', '-foobar,,-fo')
+    manifest = Manifest.from_topdir(topdir=topdir, config=config)
+    foo, foobar, bar = manifest.get_projects(['foo', 'foobar', 'bar'])
+    assert manifest.is_active(foo)
+    assert not manifest.is_active(foobar)
+    assert manifest.is_active(bar)
+
+def test_project_filter_precedence(config_tmpdir):
+    # Test manifest.project-filter matching rules by making
+    # sure that projects can be made active or inactive.
+
+    topdir = config_tmpdir / 'test-topdir'
+    manifest_repo = topdir / 'mp'
+    config = Configuration(topdir=topdir)
+    config.set('manifest.path', 'mp')
+    create_repo(manifest_repo)
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''
+        manifest:
+          projects:
+            - name: foo
+            - name: bar
+            - name: baz
+
+          defaults:
+            remote: test
+          remotes:
+            - name: test
+              url-base: ignored
+        ''')
+
+    # West currently does not dynamically adjust its conception
+    # of what the configuration files said after __init__ time, so
+    # we recreate the manifest object every time.
+
+    # Global has higher precedence than system.
+    config.set('manifest.project-filter', '-foo,-bar,-baz',
+               configfile=ConfigFile.SYSTEM)
+    config.set('manifest.project-filter', '+foo',
+               configfile=ConfigFile.GLOBAL)
+    manifest = Manifest.from_topdir(topdir=topdir, config=config)
+    foo, bar, baz = manifest.get_projects(['foo', 'bar', 'baz'])
+    assert manifest.is_active(foo)
+    assert not manifest.is_active(bar)
+    assert not manifest.is_active(baz)
+
+    # Local has higher precedence than either.
+    config.set('manifest.project-filter', '+baz,-f.*',
+               configfile=ConfigFile.LOCAL)
+    manifest = Manifest.from_topdir(topdir=topdir, config=config)
+    foo, bar, baz = manifest.get_projects(['foo', 'bar', 'baz'])
+    assert not manifest.is_active(foo)
+    assert not manifest.is_active(bar)
+    assert manifest.is_active(baz)
+
+def test_project_filter_inactive_prevents_import(config_tmpdir):
+    # West should not try to import from inactive projects.
+    # West should import from active projects.
+
+    topdir = config_tmpdir / 'test-topdir'
+    manifest_repo = topdir / 'mp'
+    config = Configuration(topdir=topdir)
+    config.set('manifest.path', 'mp')
+    config.set('manifest.project-filter', '-foo')
+    create_repo(manifest_repo)
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''
+        manifest:
+          projects:
+            - name: foo
+              url: ignored
+              import: true
+        ''')
+
+    # With foo inactive, we can load the project but its import
+    # is ignored.
+    manifest = Manifest.from_topdir(topdir=topdir, config=config)
+    assert not manifest.is_active(manifest.get_projects(['foo'])[0])
+
+    # Making foo active will try to do the import and thus fail
+    # to resolve the manifest.
+    config.set('manifest.project-filter', '+foo')
+    with pytest.raises(ManifestImportFailed):
+        Manifest.from_topdir(topdir=topdir, config=config)
+
+def test_project_filter_warnings_and_errors(config_tmpdir, caplog):
+    topdir = config_tmpdir / 'test-topdir'
+    manifest_repo = topdir / 'mp'
+    config = Configuration(topdir=topdir)
+    config.set('manifest.path', 'mp')
+    create_repo(manifest_repo)
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''
+        manifest:
+          projects:
+            - name: foo,bar
+              url: ignored
+        ''')
+
+    Manifest.from_topdir(topdir=topdir, config=config)
+    warned = False
+    for source, level, message in caplog.record_tuples:
+        if source != 'west.manifest':
+            continue
+        if level != logging.WARNING:
+            continue
+        if not message.startswith('project "foo,bar"'):
+            continue
+        if 'contains comma (",") or whitespace' in message:
+            warned = True
+    assert warned, caplog.record_tuples
+
+    config.set('manifest.project-filter', '+arbitrary')
+    with pytest.raises(MalformedConfig) as e:
+        Manifest.from_topdir(topdir=topdir, config=config)
+    err = str(e.value)
+    assert 'project "foo,bar"' in err
+    assert 'contains comma (",") or whitespace' in err
 
 #########################################
 # Manifest import tests
