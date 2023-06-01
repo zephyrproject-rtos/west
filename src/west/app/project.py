@@ -567,8 +567,11 @@ class ManifestCommand(_ProjectCommand):
         if self.config.get('manifest.project-filter') is not None:
             self.die(f'"west manifest --{action}" is not (yet) supported '
                      'when the manifest.project-filter option is set. '
-                     'Please contact the west developers if you have a '
-                     'use case for this.')
+                     'Please clear the project-filter configuration '
+                     'option and re-run this command, or contact the '
+                     'west developers if you have a use case for resolving '
+                     'the manifest while projects are made inactive by the '
+                     'project filter.')
 
     def _dump(self, args, to_dump):
         if args.out:
