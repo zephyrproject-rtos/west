@@ -1439,15 +1439,21 @@ class Manifest:
         else:
             topdir_abspath = None
         self.has_imports: bool = False
+        # The final, effective group filter, with simplifications
+        # applied so that e.g. ['-foo', '+foo', '-bar'] becomes
+        # ['-bar'], with filters imported from other manifests applied.
         self.group_filter: GroupFilterType = []
 
         # Initialize private state, some of which is also overwritten
         # later as needed.
 
-        # This backs group_filter.
-        self._disabled_groups: Set[str] = set()
         # This backs the projects() property.
         self._projects: List[Project] = []
+        # The final set of groups which are explicitly disabled in
+        # this manifest data, after resolving imports. This is used
+        # both to initialize group_filter and as an optimization in
+        # is_active().
+        self._disabled_groups: Set[str] = set()
         # The "raw" (unparsed) manifest.group-filter configuration
         # option in the local configuration file. See
         # _config_group_filter(); only initialized if self._top_level
