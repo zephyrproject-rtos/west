@@ -129,24 +129,19 @@ class ProjectFilterElt(NamedTuple):
 ProjectFilterType = List[ProjectFilterElt]
 
 def _update_project_filter(project_filter: ProjectFilterType,
-                           option_value: Optional[str],
-                           configfile: ConfigFile,
-                           name: str) -> None:
+                           option_value: Optional[str]) -> None:
     # Validate a 'manifest.project-filter' configuration option's
     # value. The 'option_value' argument is the raw configuration
     # option. If 'option_value' is invalid, error out. Otherwise,
     # destructively modify 'project_filter' to reflect the option's
     # value.
-    #
-    # The 'configfile' and 'name' arguments are just for error
-    # reporting.
 
     if option_value is None:
         return
 
     def _err(message):
         raise MalformedConfig(
-            f'invalid {name} "manifest.project-filter" option value '
+            f'invalid "manifest.project-filter" option value '
             f'"{option_value}": {message}')
 
     for elt in option_value.split(','):
@@ -1662,23 +1657,24 @@ class Manifest:
                   extra_filter: Optional[Iterable[str]] = None) -> bool:
         '''Is a project active?
 
-        If the manifest.project-filter configuration option is set
-        in any of the system, global, or local configuration files,
-        and one or more of its elements apply to the project's name,
-        the return value determined by the option's values in these files:
+        If the manifest.project-filter configuration option is set,
+        the return value determined by the option's value:
 
-        - The elements of the manifest.project-filter options in each
-          of these files are checked against the project's name. If the
-          regular expression in the element matches the project's name,
-          then the project is active or inactive depending on if the
-          element begins with + or - respectively.
+        - The elements of the manifest.project-filter value are checked
+          against the project's name. If the regular expression in the
+          element matches the project's name, then the project is active
+          or inactive depending on if the element begins with + or -
+          respectively.
 
         - If multiple elements have regular expressions matching the
           project's name, the last element which has a match determines
           the result.
 
-        - This function returns True if the project is active or
+        - This function returns True or False if the project is active or
           inactive according to these rules.
+
+        The manifest.project-filter value that was set at the time
+        this Manifest object was constructed is used.
 
         Otherwise, the return value depends on whether the project has
         any groups, and if so, whether they are enabled:
@@ -1891,25 +1887,8 @@ class Manifest:
             self.repo_abspath = os.fspath(current_repo_abspath)
             self._raw_config_group_filter = get_option('manifest.group-filter')
             self._config_path = manifest_path
-
-            def project_filter_val(configfile) -> Optional[str]:
-                return config.get('manifest.project-filter',
-                                  configfile=configfile)
-
-            # Update our project filter based on the value in all the
-            # configuration files. This allows us to progressively
-            # build up a project filter with default settings in
-            # configuration files with wider scope, refining as
-            # needed. For example, you could do '-foo,-bar' in the
-            # global config file, and then '+bar' in the local config
-            # file, to have a final filter of '-foo'.
-            for configfile, name in [(ConfigFile.SYSTEM, 'system'),
-                                     (ConfigFile.GLOBAL, 'global'),
-                                     (ConfigFile.LOCAL, 'local')]:
-                _update_project_filter(project_filter,
-                                       project_filter_val(configfile),
-                                       configfile,
-                                       name)
+            _update_project_filter(project_filter,
+                                   config.get('manifest.project-filter'))
 
         return _import_ctx(projects={},
                            project_filter=project_filter,
