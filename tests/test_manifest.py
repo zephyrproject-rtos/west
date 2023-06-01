@@ -3019,7 +3019,6 @@ def test_group_filter_self_import(manifest_repo):
     self_import_helper('', [])
     self_import_helper('version: 0.9', ['-foo'])
 
-@pytest.mark.xfail
 def test_group_filter_imports(manifest_repo):
     # More complex test that ensures group filters are imported correctly:
     #
@@ -3077,7 +3076,7 @@ def test_group_filter_imports(manifest_repo):
     sha2 = setup_project('project2', '[+gy,+gy,-gz]')
 
     v0_9_expected = ['+ga', '-gc']
-    v0_10_expected = ['-ga', '-gb', '-gc', '-gw', '-gz']
+    v0_10_expected = ['-ga', '-gb', '-gc', '-gw', '-gy', '-gz']
 
     #
     # Basic tests of the above setup.
