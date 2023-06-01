@@ -1313,9 +1313,9 @@ def test_project_filter_validation(config_tmpdir):
                 pass
 
     def check_error(project_filter, expected_err_contains):
-        for configfile, name in [(ConfigFile.SYSTEM, 'system'),
-                                 (ConfigFile.GLOBAL, 'global'),
-                                 (ConfigFile.LOCAL, 'local')]:
+        for configfile in [ConfigFile.SYSTEM,
+                           ConfigFile.GLOBAL,
+                           ConfigFile.LOCAL]:
             clean_up_config_files()
             config.set('manifest.project-filter', project_filter,
                        configfile=configfile)
@@ -1324,7 +1324,7 @@ def test_project_filter_validation(config_tmpdir):
                 MT(topdir=topdir)
 
             err = str(e.value)
-            assert (f'invalid {name} "manifest.project-filter" option value '
+            assert (f'invalid "manifest.project-filter" option value '
                     f'"{project_filter}":') in err
             assert expected_err_contains in err
 
@@ -1424,16 +1424,16 @@ def test_project_filter_precedence(config_tmpdir):
     # Global has higher precedence than system.
     config.set('manifest.project-filter', '-foo,-bar,-baz',
                configfile=ConfigFile.SYSTEM)
-    config.set('manifest.project-filter', '+foo',
+    config.set('manifest.project-filter', '-foo',
                configfile=ConfigFile.GLOBAL)
     manifest = Manifest.from_topdir(topdir=topdir, config=config)
     foo, bar, baz = manifest.get_projects(['foo', 'bar', 'baz'])
-    assert manifest.is_active(foo)
-    assert not manifest.is_active(bar)
-    assert not manifest.is_active(baz)
+    assert not manifest.is_active(foo)
+    assert manifest.is_active(bar)
+    assert manifest.is_active(baz)
 
     # Local has higher precedence than either.
-    config.set('manifest.project-filter', '+baz,-f.*',
+    config.set('manifest.project-filter', '-bar,-f.*',
                configfile=ConfigFile.LOCAL)
     manifest = Manifest.from_topdir(topdir=topdir, config=config)
     foo, bar, baz = manifest.get_projects(['foo', 'bar', 'baz'])
