@@ -7,6 +7,7 @@
 Parser and abstract data types for west manifests.
 '''
 
+from collections import deque
 import enum
 import errno
 import logging
@@ -367,15 +368,12 @@ class _import_ctx(NamedTuple):
     # configuration we were passed at construction.
     project_filter: ProjectFilterType
 
-    # The current shared group filter. This is mutable state in the
-    # same way 'projects' is. Manifests which are imported earlier get
-    # higher precedence here too.
-    #
-    # This is done by prepending (NOT appending) any 'manifest:
-    # group-filter:' lists we encounter during import resolution onto
-    # this list. Since group-filter lists have "last entry wins"
-    # semantics, earlier manifests take precedence.
-    group_filter: GroupFilterType
+    # Deque of group filters from every manifest we import.
+    # Manifests that are imported *earlier* appear *later*
+    # in the queue. That means that iterating over the queue
+    # is the same thing as iterating over group filters in
+    # the import tree in precedence order.
+    group_filter_q: deque
 
     # The list of west command names provided by the manifest
     # repository itself. This is mutable state in the same way
@@ -1451,8 +1449,7 @@ class Manifest:
         self._projects: List[Project] = []
         # The final set of groups which are explicitly disabled in
         # this manifest data, after resolving imports. This is used
-        # both to initialize group_filter and as an optimization in
-        # is_active().
+        # as an optimization in is_active().
         self._disabled_groups: Set[str] = set()
         # The "raw" (unparsed) manifest.group-filter configuration
         # option in the local configuration file. See
@@ -1917,7 +1914,7 @@ class Manifest:
 
         return _import_ctx(projects={},
                            project_filter=project_filter,
-                           group_filter=[],
+                           group_filter_q=deque(),
                            manifest_west_commands=[],
                            imap_filter=None,
                            path_prefix=Path('.'),
@@ -2015,7 +2012,7 @@ class Manifest:
         _logger.debug(f'loaded {loading_what}')
 
     def _load_group_filter(self, manifest_data: Dict[str, Any]) -> None:
-        # Update self._ctx.group_filter from manifest_data.
+        # Update self._ctx.group_filter_q from manifest_data.
 
         if 'group-filter' not in manifest_data:
             _logger.debug('group-filter: unset')
@@ -2028,7 +2025,7 @@ class Manifest:
         group_filter = self._validated_group_filter('manifest', raw_filter)
         _logger.debug('group-filter: %s', group_filter)
 
-        self._ctx.group_filter[:0] = group_filter
+        self._ctx.group_filter_q.appendleft(group_filter)
 
         if self._top_level:
             self._top_level_group_filter = group_filter
@@ -2700,7 +2697,7 @@ class Manifest:
             #
             # Hopefully no users ever actually see this warning.
 
-            if self._ctx.group_filter:
+            if any(self._ctx.group_filter_q):
                 _logger.warning(
                     "providing deprecated group-filter semantics "
                     "due to explicit 'manifest: version: 0.9'; "
@@ -2713,9 +2710,14 @@ class Manifest:
             return self._top_level_group_filter
 
         else:
-            _update_disabled_groups(self._disabled_groups,
-                                    self._ctx.group_filter)
-            return [f'-{g}' for g in self._disabled_groups]
+            _logger.debug(
+                'group filters in precedence order (later is higher): %s',
+                self._ctx.group_filter_q)
+            for group_filter in self._ctx.group_filter_q:
+                _update_disabled_groups(self._disabled_groups, group_filter)
+            ret = [f'-{g}' for g in self._disabled_groups]
+            _logger.debug('final top level group-filter: %s', ret)
+            return ret
 
 class _PatchedConfiguration(Configuration):
     # Internal helper class that fakes out manifest.path and manifest.file
