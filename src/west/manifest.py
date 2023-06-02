@@ -1869,22 +1869,31 @@ class Manifest:
                                 manifest_path_option)
 
             manifest_file = get_option('manifest.file', _WEST_YML)
+            manifest_file_separator = get_option('manifest.file-separator', ',')
 
-            current_relpath = manifest_path / manifest_file
-            current_abspath = topdir_abspath / current_relpath
-            try:
-                current_data = current_abspath.read_text(encoding='utf-8')
-            except FileNotFoundError:
-                raise MalformedConfig(
-                    f'file not found: manifest file {current_abspath} '
-                    '(from configuration options '
-                    f'manifest.path="{manifest_path_option}", '
-                    f'manifest.file="{manifest_file}")')
+            manifest_files = manifest_file.split(manifest_file_separator)
+            if len(manifest_files) > 1:
+                list_str = '\n\r    - '.join(manifest_files)
+                current_data = '''manifest:
+  self:
+    import:
+    - ''' + list_str
+            else:
+                current_relpath = manifest_path / manifest_file
+                current_abspath = topdir_abspath / current_relpath
+                try:
+                    current_data = current_abspath.read_text(encoding='utf-8')
+                except FileNotFoundError:
+                    raise MalformedConfig(
+                        f'file not found: manifest file {current_abspath} '
+                        '(from configuration options '
+                        f'manifest.path="{manifest_path_option}", '
+                        f'manifest.file="{manifest_file}")')
+                self.abspath = os.fspath(current_abspath)
+                self.relative_path = os.fspath(current_relpath)
 
             current_repo_abspath = topdir_abspath / manifest_path
 
-            self.abspath = os.fspath(current_abspath)
-            self.relative_path = os.fspath(current_relpath)
             self.repo_path = os.fspath(manifest_path)
             self.repo_abspath = os.fspath(current_repo_abspath)
             self._raw_config_group_filter = get_option('manifest.group-filter')
