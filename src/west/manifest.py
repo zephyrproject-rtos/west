@@ -685,6 +685,10 @@ class _ManifestImportDepth(ManifestImportFailed):
     # A hack to signal to main.py what happened.
     pass
 
+class _ManifestRequired(Exception):
+    # A built-in command had to read the manifest but it wasn't loaded.
+    pass
+
 #
 # The main Manifest class and its public helper types, like Project
 # and ImportFlag.

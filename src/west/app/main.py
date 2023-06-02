@@ -37,8 +37,8 @@ from west.app.project import List, ManifestCommand, Compare, Diff, Status, \
     SelfUpdate, ForAll, Init, Update, Topdir
 from west.app.config import Config
 from west.manifest import Manifest, MalformedConfig, MalformedManifest, \
-    ManifestVersionError, ManifestImportFailed, _ManifestImportDepth, \
-    ManifestProject, MANIFEST_REV_BRANCH
+    _ManifestRequired, ManifestVersionError, ManifestImportFailed, \
+    _ManifestImportDepth, ManifestProject, MANIFEST_REV_BRANCH
 from west.util import quote_sh_list, west_topdir, WestNotFound
 from west.version import __version__
 
@@ -608,9 +608,18 @@ class WestApp:
             self.handle_builtin_manifest_load_err(args)
         for io_hook in self.queued_io:
             self.cmd.add_pre_run_hook(io_hook)
-        self.cmd.run(args, unknown, self.topdir,
-                     manifest=self.manifest,
-                     config=self.config)
+        try:
+            self.cmd.run(args, unknown, self.topdir,
+                         manifest=self.manifest,
+                         config=self.config)
+        except _ManifestRequired:
+            # We tried to run the command despite having failed to
+            # load_manifest(), but the manifest was needed after all.
+            # Show the deferred exception and exit.
+            if self.mle.args:
+                self.cmd.die('\n  '.join(str(arg) for arg in self.mle.args))
+            else:
+                self.cmd.die(str(self.mle))
 
     def run_extension(self, name, argv):
         # Check a program invariant. We should never get here
