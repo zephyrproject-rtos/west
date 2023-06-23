@@ -713,8 +713,7 @@ class Compare(_ProjectCommand):
 
     def print_rev_info(self, project):
         # For non-manifest repositories, print HEAD's and
-        # manifest-rev's SHAs and commit titles, but only if they are
-        # different.
+        # manifest-rev's SHAs and commit titles.
         #
         # We force git not to print in color so west's colored
         # banner() separators stand out more in the output.
@@ -738,9 +737,8 @@ class Compare(_ProjectCommand):
         head_info = rev_info('HEAD')
         # If manifest-rev is missing, we already failed earlier.
         manifest_rev_info = rev_info('manifest-rev')
-        if head_info != manifest_rev_info:
-            self.small_banner(f'manifest-rev: {manifest_rev_info}')
-            self.inf(f'            HEAD: {head_info}')
+        self.small_banner(f'manifest-rev: {manifest_rev_info}')
+        self.inf(f'            HEAD: {head_info}')
 
     def print_status(self, project):
         # `git status` shows `manifest-rev` "sometimes", see #643.
