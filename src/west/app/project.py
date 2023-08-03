@@ -325,6 +325,15 @@ With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
 
         self.dbg('moving', tempdir, 'to', manifest_abspath,
                  level=Verbosity.DBG_EXTREME)
+
+        # As shutil.move() is used to relocate tempdir, if manifest_abspath
+        # is an existing directory, tmpdir will be moved _inside_ it, instead
+        # of _to_ that path - this must be avoided. If manifest_abspath exists
+        # but is not a directory, then semantics depend on os.rename(), so
+        # avoid that too...
+        if manifest_abspath.exists():
+            self.die(f'target directory already exists ({manifest_abspath})')
+
         manifest_abspath.parent.mkdir(parents=True, exist_ok=True)
         try:
             shutil.move(os.fspath(tempdir), os.fspath(manifest_abspath))
