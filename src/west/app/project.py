@@ -1602,6 +1602,247 @@ class ForAll(_ProjectCommand):
                 failed.append(project)
         self._handle_failed(args, failed)
 
+GREP_EPILOG = '''
+EXAMPLES
+--------
+
+To get "git grep foo" results from all cloned, active projects:
+
+  west grep foo
+
+To do the same with:
+
+- git grep --untracked: west grep --untracked foo
+- ripgrep:              west grep --tool ripgrep foo
+- grep --recursive:     west grep --tool grep foo
+
+To switch the default tool to:
+
+- ripgrep:  west config grep.tool ripgrep
+- grep:     west config grep.tool grep
+
+GREP TOOLS
+----------
+
+This command runs a "grep tool" command in the top directory of each project.
+Supported tools:
+
+- git-grep (default)
+- ripgrep
+- grep
+
+Set the "grep.tool" configuration option to change the default.
+
+Use "--tool" to switch the tool from its default.
+
+TOOL PATH
+---------
+
+Use --tool-path to override the path to the tool. For example:
+
+  west grep --tool ripgrep --tool-path /my/special/ripgrep
+
+Without --tool-path, the "grep.<TOOL>-path" configuration option
+is checked next. For example, to set the default path to ripgrep:
+
+  west config grep.ripgrep-path /my/special/ripgrep
+
+If the option is not set, "west grep" searches for the tool as follows:
+
+- git-grep: search for "git" (and run as "git grep")
+- ripgrep: search for "rg", then "ripgrep"
+- grep: search for "grep"
+
+TOOL ARGUMENTS
+--------------
+
+The "grep.<TOOL>-args" configuration options, if set, contain arguments
+that are always passed to the tool. The defaults for these are:
+
+- git-grep: (none)
+- ripgrep: (none)
+- grep: "--recursive"
+
+Command line options or arguments not recognized by "west grep" are
+passed to the tool after that. This applies to --foo here, for example:
+
+  west grep --foo --project=myproject
+
+To force arguments to be given to the tool instead of west, put them
+after a "--", like the --project and --tool-path options here:
+
+  west grep -- --project=myproject --tool-path=mypath
+
+Arguments before '--' that aren't recognized by west grep are still
+passed to the grep tool.
+
+To pass '--' to the grep tool, pass one for 'west grep' first.
+For example, to search for '--foo' with grep, you can run:
+
+  west grep --tool grep -- -- --foo
+
+The first '--' separates west grep args from tool args. The second '--'
+separates options from positional arguments in the 'grep' command line.
+
+COLORS
+------
+
+By default, west will force the tool to print colored output as long
+as the "color.ui" configuration option is true. If color.ui is false,
+west forces the tool not to print colored output.
+
+Since all supported tools have similar --color options, you can
+override this behavior on the command line, for example with:
+
+  west grep --color=never
+
+To do this permanently, set "grep.color":
+
+  west config grep.color never
+'''
+# color.ui limitation:
+# https://github.com/zephyrproject-rtos/west/issues/651
+
+class Grep(_ProjectCommand):
+
+    # When adding a tool, make sure to check:
+    #
+    # - the 'failed' handling below for proper exit codes
+    # - color handling works as expected
+    TOOLS = ['git-grep', 'ripgrep', 'grep']
+
+    DEFAULT_TOOL = 'git-grep'
+
+    DEFAULT_TOOL_ARGS = {
+        'git-grep': [],
+        'ripgrep': [],
+        'grep': ['--recursive'],
+    }
+
+    DEFAULT_TOOL_EXECUTABLES = {
+        # git-grep is intentionally omitted: use self._git
+        'ripgrep': ['rg', 'ripgrep'],
+        'grep': ['grep'],
+    }
+
+    def __init__(self):
+        super().__init__(
+            'grep',
+            'run grep or a grep-like tool in one or more local projects',
+            'Run grep or a grep-like tool in one or more local projects.',
+            accepts_unknown_args=True)
+
+    def do_add_parser(self, parser_adder):
+        parser = self._parser(parser_adder, epilog=GREP_EPILOG)
+        parser.add_argument('--tool', choices=self.TOOLS, help='grep tool')
+        parser.add_argument('--tool-path', help='path to grep tool executable')
+        # Unlike other project commands, we don't take the project as
+        # a positional argument. This inconsistency makes the usual
+        # use case of "search the entire workspace" faster to type.
+        parser.add_argument('-p', '--project', metavar='PROJECT',
+                            dest='projects', default=[], action='append',
+                            help='''project to run grep tool in (may be given
+                            more than once); default is all cloned active
+                            projects''')
+        return parser
+
+    def do_run(self, args, tool_cmdline_args):
+        tool = self.tool(args)
+        command_list = ([self.tool_path(tool, args)] +
+                        self.tool_args(tool, tool_cmdline_args))
+        failed = []
+        for project in self._cloned_projects(args,
+                                             only_active=not args.projects):
+            completed_process = self.run_subprocess(
+                command_list,
+                capture_output=True,
+                text=True,
+                cwd=project.abspath)
+
+            # By default, supported tools generally exit 1 if
+            # nothing is found and 0 if something was found, with
+            # other return codes indicating an error.
+            #
+            # For git grep, this is experimentally true, even if
+            # the man page doesn't say so.
+            #
+            # Per grep's and ripgrep's man pages, this is true
+            # except that if an error occurred and --quiet was
+            # given and a match was found, then the exit status is
+            # still 0.
+            #
+            # Using --quiet can thus be used to print repositories
+            # with a match, while ignoring errors.
+            if completed_process.returncode == 1:
+                continue
+            self.banner(f'{project.name_and_path}:')
+            if completed_process.returncode != 0:
+                self.err(f'{util.quote_sh_list(command_list)}:\n'
+                         f'{completed_process.stderr}', end='')
+                failed.append(project)
+            elif completed_process.stdout:
+                # With 'west grep --quiet PATTERN', we will just be
+                # printing a list of repositories that contain
+                # matches. We want to avoid printing the newline from
+                # self.inf() in that case.
+                self.inf(completed_process.stdout, end='')
+        self._handle_failed(args, failed)
+
+    def tool(self, args):
+        if args.tool:
+            return args.tool
+
+        return self.config.get('grep.tool', self.DEFAULT_TOOL)
+
+    def tool_path(self, tool, args):
+        if args.tool_path:
+            return args.tool_path
+
+        config_option = self.config.get(f'grep.{tool}-path')
+        if config_option:
+            return config_option
+
+        if tool == 'git-grep':
+            self.die_if_no_git()
+            return self._git
+
+        for executable in self.DEFAULT_TOOL_EXECUTABLES[tool]:
+            path = shutil.which(executable)
+            if path is not None:
+                return path
+
+        self.die(f'grep tool "{tool}" not found, please use --tool-path')
+
+    def tool_args(self, tool, cmdline_args):
+        ret = []
+
+        if tool == 'git-grep':
+            ret.append('grep')
+
+        config_color = self.config.get('grep.color')
+        if config_color:
+            color = config_color
+        else:
+            if self.color_ui:
+                color = 'always'
+            else:
+                color = 'never'
+
+        ret.extend([f'--color={color}'])
+        ret.extend(shlex.split(self.config.get(f'grep.{tool}-args'), '') or
+                   self.DEFAULT_TOOL_ARGS[tool])
+
+        # The first '--' we see is "meant for" west grep. Take that
+        # out of the options we pass to the tool.
+        found_first_dashes = False
+        for arg in cmdline_args:
+            if arg == '--' and not found_first_dashes:
+                found_first_dashes = True
+            else:
+                ret.append(arg)
+
+        return ret
+
 class Topdir(_ProjectCommand):
     def __init__(self):
         super().__init__(
