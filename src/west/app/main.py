@@ -34,7 +34,7 @@ import west.configuration
 from west.commands import WestCommand, extension_commands, \
     CommandError, ExtensionCommandError, Verbosity
 from west.app.project import List, ManifestCommand, Compare, Diff, Status, \
-    SelfUpdate, ForAll, Init, Update, Topdir
+    SelfUpdate, ForAll, Grep, Init, Update, Topdir
 from west.app.config import Config
 from west.manifest import Manifest, MalformedConfig, MalformedManifest, \
     ManifestVersionError, ManifestImportFailed, _ManifestImportDepth, \
@@ -1097,6 +1097,7 @@ BUILTIN_COMMAND_GROUPS = {
         Diff,
         Status,
         ForAll,
+        Grep,
     ],
 
     'other built-in commands': [
