@@ -293,27 +293,35 @@ class WestCommand(ABC):
 
     config = property(_get_config, _set_config)
 
+    def _log_subproc(self, args, **kwargs):
+        self.dbg(f"running '{quote_sh_list(args)}' in "
+                 f"{kwargs.get('cwd') or os.getcwd()}",
+                 level=Verbosity.DBG_MORE)
+
     #
     # Other public methods
     #
 
-    def check_call(self, args, cwd=None):
-        '''Runs subprocess.check_call(args, cwd=cwd) after
+    def check_call(self, args, **kwargs):
+        '''Runs subprocess.check_call(args, **kwargs) after
         logging the call at Verbosity.DBG_MORE level.'''
 
-        cmd_str = quote_sh_list(args)
-        self.dbg(f"running '{cmd_str}' in {cwd or os.getcwd()}",
-                 level=Verbosity.DBG_MORE)
-        subprocess.check_call(args, cwd=cwd)
+        self._log_subproc(args, **kwargs)
+        subprocess.check_call(args, **kwargs)
 
-    def check_output(self, args, cwd=None):
-        '''Runs subprocess.check_output(args, cwd=cwd) after
+    def check_output(self, args, **kwargs):
+        '''Runs subprocess.check_output(args, **kwargs) after
         logging the call at Verbosity.DBG_MORE level.'''
 
-        cmd_str = quote_sh_list(args)
-        self.dbg(f"running '{cmd_str}' in {cwd or os.getcwd()}",
-                 level=Verbosity.DBG_MORE)
-        return subprocess.check_output(args, cwd=cwd)
+        self._log_subproc(args, **kwargs)
+        return subprocess.check_output(args, **kwargs)
+
+    def run_subprocess(self, args, **kwargs):
+        '''Runs subprocess.run(args, **kwargs) after logging
+        the call at Verbosity.DBG_MORE level.'''
+
+        self._log_subproc(args, **kwargs)
+        return subprocess.run(args, **kwargs)
 
     def die_if_no_git(self):
         '''Abort if git is not installed on PATH.
