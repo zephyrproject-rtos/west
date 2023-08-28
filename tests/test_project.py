@@ -389,6 +389,30 @@ def test_forall(west_init_tmpdir):
                    'foo',
                ]
 
+
+def test_grep(west_init_tmpdir):
+    # Make sure we don't find things we don't expect, and do find
+    # things we do.
+
+    actual_before_update = cmd('grep net-').strip()
+    actual_before_update_lines = actual_before_update.splitlines()
+    assert len(actual_before_update_lines) == 2
+    assert re.fullmatch(r'=== manifest \(zephyr\):',
+                        actual_before_update_lines[0])
+    assert re.search('net-tools',
+                     actual_before_update_lines[1])
+
+    assert not re.search('hello', cmd('grep hello'))
+
+    cmd('update')
+    assert re.search('hello', cmd('grep hello'))
+
+    # Make sure '--' is handled properly: the first one is for
+    # west, and the second one is for the tool
+
+    assert re.search('west-commands', cmd('grep -- -- -commands'))
+
+
 def test_update_projects(west_init_tmpdir):
     # Test the 'west update' command. It calls through to the same backend
     # functions that are used for automatic updates and 'west init'
