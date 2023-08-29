@@ -400,7 +400,7 @@ class WestCommand(ABC):
             return version
         return version + (int(patch),)
 
-    def dbg(self, *args, level: Verbosity = Verbosity.DBG):
+    def dbg(self, *args, level: Verbosity = Verbosity.DBG, end: str = '\n'):
         '''Print a verbose debug message.
 
         The message is only printed if *self.verbosity* is at least *level*.
@@ -410,9 +410,9 @@ class WestCommand(ABC):
         '''
         if level > self.verbosity:
             return
-        print(*args)
+        print(*args, end=end)
 
-    def inf(self, *args, colorize: bool = False):
+    def inf(self, *args, colorize: bool = False, end: str = '\n'):
         '''Print an informational message.
 
         The message is only printed if *self.verbosity* is at least INF.
@@ -432,7 +432,7 @@ class WestCommand(ABC):
         if colorize:
             print(INF_COLOR, end='')
 
-        print(*args)
+        print(*args, end=end)
 
         if colorize:
             self._reset_colors(sys.stdout)
@@ -448,7 +448,7 @@ class WestCommand(ABC):
         not colorized.'''
         self.inf('---', *args, colorize=False)
 
-    def wrn(self, *args):
+    def wrn(self, *args, end: str = '\n'):
         '''Print a warning.
 
         The message is only printed if *self.verbosity* is at least WRN.
@@ -464,12 +464,12 @@ class WestCommand(ABC):
             print(WRN_COLOR, end='', file=sys.stderr)
 
         print('WARNING: ', end='', file=sys.stderr)
-        print(*args, file=sys.stderr)
+        print(*args, end=end, file=sys.stderr)
 
         if self.color_ui:
             self._reset_colors(sys.stderr)
 
-    def err(self, *args, fatal: bool = False):
+    def err(self, *args, fatal: bool = False, end: str = '\n'):
         '''Print an error.
 
         The message is only printed if *self.verbosity* is at least ERR.
@@ -488,7 +488,7 @@ class WestCommand(ABC):
             print(ERR_COLOR, end='', file=sys.stderr)
 
         print('FATAL ERROR: ' if fatal else 'ERROR: ', end='', file=sys.stderr)
-        print(*args, file=sys.stderr)
+        print(*args, end=end, file=sys.stderr)
 
         if self.color_ui:
             self._reset_colors(sys.stderr)
