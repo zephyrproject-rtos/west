@@ -13,8 +13,8 @@
 #
 #  DO NOT CHANGE THIS FILE WITHOUT:
 #
-#  - updating west.manifest.SCHEMA_VERSION
-#  - updating test_version_check_success() in test_manifest.py
+#  - updating west.manifest.SCHEMA_VERSION and 
+#    west.manifest._VALID_SCHEMA_VERS
 #  - reviewing and updating sphinx documentation
 #
 # --------------------------------------------------------------
