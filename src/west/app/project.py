@@ -385,6 +385,7 @@ The default format string is:
 The following arguments are available:
 
 - name: project name in the manifest
+- description: project description in the manifest
 - url: full remote URL as specified by the manifest
 - path: the relative path to the project from the top level,
   as specified in the manifest where applicable
@@ -473,6 +474,7 @@ The following arguments are available:
 
                 result = args.format.format(
                     name=project.name,
+                    description=project.description or "None",
                     url=project.url or 'N/A',
                     path=path,
                     abspath=apath,

@@ -82,6 +82,10 @@ mapping:
           name:
             required: true
             type: str
+          # Project description. Has no effect.
+          description:
+            required: false
+            type: str
           # Name of the project's remote. May not be combined with "url".
           remote:
             required: false

@@ -569,6 +569,35 @@ def test_project_sha(tmpdir):
                       topdir=tmpdir.parent)
     assert project.sha(project.revision) == expected_sha
 
+def test_project_description(tmpdir):
+    m = M('''\
+    defaults:
+      remote: r
+    remotes:
+      - name: r
+        url-base: base
+    projects:
+    - name: foo
+    - name: bar
+      description: bar-description
+    - name: baz
+      description: |
+        This is a long multi-line description
+        for project baz.
+    ''')
+    foo, bar, baz = m.get_projects(['foo', 'bar', 'baz'])
+
+    assert foo.description is None
+    assert bar.description == 'bar-description'
+    desc = 'This is a long multi-line description\n' \
+           'for project baz.\n'
+
+    assert baz.description == desc
+    assert 'description' not in foo.as_dict()
+    assert 'description' in bar.as_dict()
+    assert 'bar-description' == bar.as_dict()['description']
+
+
 def test_project_userdata(tmpdir):
     m = M('''\
     defaults:
