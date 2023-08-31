@@ -53,7 +53,7 @@ QUAL_REFS_WEST = 'refs/west/'
 #: v1.0.x, so that users can say "I want schema version 1" instead of
 #: having to keep using '0.13', which was the previous version this
 #: changed.)
-SCHEMA_VERSION = '1.0'
+SCHEMA_VERSION = '1.2'
 # MAINTAINERS:
 #
 # - Make sure to update _VALID_SCHEMA_VERS if you change this.
@@ -195,7 +195,7 @@ _SCHEMA_VER = parse_version(SCHEMA_VERSION)
 _EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
 _VALID_SCHEMA_VERS = [
     _EARLIEST_VER_STR,
-    '0.7', '0.8', '0.9', '0.10', '0.12', '0.13',
+    '0.7', '0.8', '0.9', '0.10', '0.12', '0.13', '1.0',
     SCHEMA_VERSION
 ]
 
@@ -728,12 +728,20 @@ def _flags_ok(flags: ImportFlag) -> bool:
     else:
         return True
 
+class _MLS(str):
+    ''' Multi-Line String.
+        This class is only used to represent multi-line strings that will be
+        then dumped into YAML using block style literals ("|").
+    '''
+    pass
+
 class Project:
     '''Represents a project defined in a west manifest.
 
     Attributes:
 
     - ``name``: project's unique name
+    - ``description``: project's description
     - ``url``: project fetch URL
     - ``revision``: revision to fetch from ``url`` when the
       project is updated
@@ -777,6 +785,7 @@ class Project:
         return f'<Project {self.name} ({path_repr}) at {self.revision}>'
 
     def __init__(self, name: str, url: str,
+                 description: Optional[str] = None,
                  revision: Optional[str] = None,
                  path: Optional[PathType] = None,
                  submodules: SubmodulesType = False,
@@ -792,6 +801,7 @@ class Project:
         (``abspath`` and ``posixpath``) will also be ``None``.
 
         :param name: project's ``name:`` attribute in the manifest
+        :param description: project's description or None
         :param url: fetch URL
         :param revision: fetch revision
         :param path: path (relative to topdir), or None for *name*
@@ -808,6 +818,7 @@ class Project:
         '''
 
         self.name = name
+        self.description = description
         self.url = url
         self.submodules = submodules
         self.revision = revision or _DEFAULT_REV
@@ -855,6 +866,8 @@ class Project:
         '''
         ret: Dict = {}
         ret['name'] = self.name
+        if self.description:
+            ret['description'] = _MLS(self.description)
         ret['url'] = self.url
         ret['revision'] = self.revision
         if self.path != self.name:
@@ -1125,6 +1138,7 @@ class ManifestProject(Project):
         self.name: str = 'manifest'
 
         # Pretending that this is a Project, even though it's not (#327)
+        self.description: Optional[str] = None
         self.url: str = ''
         self.submodules = False
         self.revision: str = 'HEAD'
@@ -1618,6 +1632,23 @@ class Manifest:
 
         return self._as_dict_helper(pdict=pdict)
 
+    def _dump_yaml(self, to_dump: Dict, **kwargs) -> str:
+        ''' Dumps dictionary to YAML using the multi-line string representer.
+
+        :param dict: dictionary to be dumped
+        :param kwargs: passed to yaml.safe_dump()
+        '''
+
+        def mls_representer(dumper, data):
+            if '\n' in data:
+                tag = u'tag:yaml.org,2002:str'
+                return dumper.represent_scalar(tag, data, style="|")
+            else:
+                return dumper.represent_str(data)
+
+        yaml.add_representer(_MLS, mls_representer, Dumper=yaml.SafeDumper)
+        return yaml.safe_dump(to_dump, **kwargs)
+
     def as_yaml(self, **kwargs) -> str:
         '''Returns a YAML representation for self, fully resolved.
 
@@ -1627,7 +1658,7 @@ class Manifest:
 
         :param kwargs: passed to yaml.safe_dump()
         '''
-        return yaml.safe_dump(self.as_dict(), **kwargs)
+        return self._dump_yaml(self.as_dict(), **kwargs)
 
     def as_frozen_yaml(self, **kwargs) -> str:
         '''Returns a YAML representation for self, but frozen.
@@ -1639,7 +1670,7 @@ class Manifest:
 
         :param kwargs: passed to yaml.safe_dump()
         '''
-        return yaml.safe_dump(self.as_frozen_dict(), **kwargs)
+        return self._dump_yaml(self.as_frozen_dict(), **kwargs)
 
     @property
     def projects(self) -> List[Project]:
@@ -2351,7 +2382,9 @@ class Manifest:
 
         userdata = pd.get('userdata')
 
-        ret = Project(name, url, pd.get('revision', defaults.revision), path,
+        ret = Project(name, url, description=pd.get('description'),
+                      revision=pd.get('revision', defaults.revision),
+                      path=path,
                       submodules=self._load_submodules(pd.get('submodules'),
                                                        f'project {name}'),
                       clone_depth=pd.get('clone-depth'),

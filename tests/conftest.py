@@ -40,6 +40,9 @@ manifest:
 
   projects:
     - name: Kconfiglib
+      description: |
+        Kconfiglib is an implementation of
+        the Kconfig language written in Python.
       revision: zephyr
       path: subdir/Kconfiglib
       groups:
@@ -47,6 +50,7 @@ manifest:
     - name: tagged_repo
       revision: v1.0
     - name: net-tools
+      description: Networking tools.
       clone-depth: 1
       west-commands: scripts/west-commands.yml
   self:
