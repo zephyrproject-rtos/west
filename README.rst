@@ -78,6 +78,23 @@ Then, run the test suite locally from the top level directory::
 
   tox
 
+You can use ``--`` to tell tox to pass arguments to ``pytest``. This is
+especially useful to focus on specific tests and save time. Examples::
+
+  # Run a subset of tests
+  tox  --  tests/test_project.py
+
+  # Debug the ``test_update_narrow()`` code with ``pdb`` (but _not_ the
+  # west code which is running in subprocesses)
+  tox  --  --verbose --exitfirst --trace -k test_update_narrow
+
+  # Run all tests with "import" in their name and let them log to the
+  # current terminal
+  tox  --  -v -k import --capture=no
+
+The tests cannot be run with ``pytest`` directly, they require the tox
+environment.
+
 See the tox configuration file, tox.ini, for more details.
 
 Hacking on West
