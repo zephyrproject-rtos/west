@@ -1829,7 +1829,7 @@ class Grep(_ProjectCommand):
                 color = 'never'
 
         ret.extend([f'--color={color}'])
-        ret.extend(shlex.split(self.config.get(f'grep.{tool}-args'), '') or
+        ret.extend(shlex.split(self.config.get(f'grep.{tool}-args', '')) or
                    self.DEFAULT_TOOL_ARGS[tool])
 
         # The first '--' we see is "meant for" west grep. Take that
