@@ -951,7 +951,7 @@ class Project:
         # Though we capture stderr, it will be available as the stderr
         # attribute in the CalledProcessError raised by git() in
         # Python 3.5 and above if this call fails.
-        cp = self.git(f'rev-parse {rev}^{{commit}}', capture_stdout=True,
+        cp = self.git(['rev-parse', f'{rev}^{{commit}}'], capture_stdout=True,
                       cwd=cwd, capture_stderr=True)
         # Assumption: SHAs are hex values and thus safe to decode in ASCII.
         # It'll be fun when we find out that was wrong and how...
@@ -1023,7 +1023,7 @@ class Project:
         # instead, which prints an empty string (i.e., just a newline,
         # which we strip) for the top-level directory.
         _logger.debug(f'{self.name}: checking if cloned')
-        res = self.git('rev-parse --show-cdup', check=False, cwd=cwd,
+        res = self.git(['rev-parse', '--show-cdup'], check=False, cwd=cwd,
                        capture_stderr=True, capture_stdout=True)
 
         return not (res.returncode or res.stdout.strip())
