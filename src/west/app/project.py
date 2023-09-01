@@ -685,7 +685,7 @@ class Compare(_ProjectCommand):
                 if self.ignore_branches:
                     return False
 
-                return bool(project.git('branch --show-current',
+                return bool(project.git(['branch', '--show-current'],
                                         capture_stdout=True,
                                         capture_stderr=True).stdout.strip())
 
@@ -1228,7 +1228,7 @@ class Update(_ProjectCommand):
             # out the new detached HEAD, then print some helpful context.
             if take_stats:
                 start = perf_counter()
-            project.git('checkout --detach ' + sha)
+            project.git(['checkout', '--detach', sha])
             if take_stats:
                 stats['checkout new manifest-rev'] = perf_counter() - start
             self.post_checkout_help(project, current_branch,
@@ -1320,7 +1320,7 @@ class Update(_ProjectCommand):
             # This remote is added as a convenience for the user.
             # However, west always fetches project data by URL, not name.
             # The user is therefore free to change the URL of this remote.
-            project.git(f'remote add -- {project.remote_name} {project.url}')
+            project.git(['remote', 'add', '--', project.remote_name, project.url])
         else:
             self.small_banner(f'{project.name}: cloning from {cache_dir}')
             # Clone the project from a local cache repository. Set the
@@ -1891,14 +1891,14 @@ def _clean_west_refspace(project):
     # Clean the refs/west space to ensure they do not show up in 'git log'.
 
     # Get all the ref names that start with refs/west/.
-    list_refs_cmd = ('for-each-ref --format="%(refname)" -- ' +
-                     QUAL_REFS + '**')
+    list_refs_cmd = ['for-each-ref', '--format=%(refname)', '--',
+                     QUAL_REFS + '**']
     cp = project.git(list_refs_cmd, capture_stdout=True)
     west_references = cp.stdout.decode('utf-8').strip()
 
     # Safely delete each one.
     for ref in west_references.splitlines():
-        delete_ref_cmd = 'update-ref -d ' + ref
+        delete_ref_cmd = ['update-ref', '-d', ref]
         project.git(delete_ref_cmd)
 
 def _update_manifest_rev(project, new_manifest_rev):
