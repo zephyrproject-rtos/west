@@ -303,21 +303,21 @@ class WestCommand(ABC):
     #
 
     def check_call(self, args, **kwargs):
-        '''Runs subprocess.check_call(args, **kwargs) after
+        '''Runs ``subprocess.check_call(args, **kwargs)`` after
         logging the call at Verbosity.DBG_MORE level.'''
 
         self._log_subproc(args, **kwargs)
         subprocess.check_call(args, **kwargs)
 
     def check_output(self, args, **kwargs):
-        '''Runs subprocess.check_output(args, **kwargs) after
+        '''Runs ``subprocess.check_output(args, **kwargs)`` after
         logging the call at Verbosity.DBG_MORE level.'''
 
         self._log_subproc(args, **kwargs)
         return subprocess.check_output(args, **kwargs)
 
     def run_subprocess(self, args, **kwargs):
-        '''Runs subprocess.run(args, **kwargs) after logging
+        '''Runs ``subprocess.run(args, **kwargs)`` after logging
         the call at Verbosity.DBG_MORE level.'''
 
         self._log_subproc(args, **kwargs)
