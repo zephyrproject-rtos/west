@@ -26,6 +26,7 @@ from west.manifest import ImportFlag, Manifest, \
     ManifestProject, _manifest_content_at, ManifestImportFailed
 from west.manifest import is_group as is_project_group
 from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
+from west.manifest import Submodule
 from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
 from west.manifest import QUAL_REFS_WEST as QUAL_REFS
 
@@ -1150,23 +1151,43 @@ class Update(_ProjectCommand):
         for config_opt in self.args.submodule_init_config:
             config_opts.extend(['-c', config_opt])
 
-        # For the list type, update given list of submodules.
-        if isinstance(submodules, list):
-            for submodule in submodules:
+        cache_dir = self.project_cache(project)
+        # For the boolean type, update all the submodules.
+        if isinstance(submodules, bool):
+            if cache_dir is None:
                 if self.sync_submodules:
-                    project.git(['submodule', 'sync', '--recursive',
-                                 '--', submodule.path])
+                    project.git(['submodule', 'sync', '--recursive'])
                 project.git(config_opts +
-                            ['submodule', 'update',
-                             '--init', submodules_update_strategy,
-                             '--recursive', submodule.path])
-        # For the bool type, update all project submodules
-        elif isinstance(submodules, bool):
+                            ['submodule', 'update', '--init',
+                                submodules_update_strategy, '--recursive'])
+                return
+            else:
+                # Cache used so convert to a list so that --reference can be used.
+                res = project.git(['submodule', 'status'], capture_stdout=True)
+                if not res.stdout or res.returncode:
+                    self.die(
+                        f"Submodule status failed for project: {project.name}.")
+                mod_list = [s.strip() for s in res.stdout.decode('utf-8').split('\n') if s]
+                submodules = [Submodule(line.split(' ')[1]) for line in mod_list]
+
+        # For the list type, update given list of submodules.
+        for submodule in submodules:
             if self.sync_submodules:
-                project.git(['submodule', 'sync', '--recursive'])
+                project.git(['submodule', 'sync', '--recursive',
+                             '--', submodule.path])
+            ref = []
+            if (cache_dir):
+                submodule_ref = Path(cache_dir, submodule.path)
+                if any(os.scandir(submodule_ref)):
+                    ref = ['--reference', os.fspath(submodule_ref)]
+                    self.small_banner(f'using reference from: {submodule_ref}')
+                    self.dbg(
+                        f'found {submodule.path} in --path-cache {submodule_ref}',
+                        level=Verbosity.DBG_MORE)
             project.git(config_opts +
-                        ['submodule', 'update', '--init',
-                         submodules_update_strategy, '--recursive'])
+                        ['submodule', 'update',
+                            '--init', submodules_update_strategy,
+                            '--recursive'] + ref + [submodule.path])
 
     def update(self, project):
         if self.args.stats:
