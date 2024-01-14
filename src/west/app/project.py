@@ -844,6 +844,53 @@ class Status(_ProjectCommand):
                 failed.append(project)
         self._handle_failed(args, failed)
 
+        # List projects not tracked by manifest.
+        projects = [project.abspath for project in self._cloned_projects(args, only_active=True)]
+        topdir = Path(self.topdir)
+        untracked = []
+
+        self.do_find_untracked(topdir, projects, untracked)
+
+        ignored_config = self.config.get('status.ignore')
+        ignored = ignored_config.split(',') if ignored_config else []
+        # Ignore .west folder in untracked projects
+        ignored.append('.west/')
+        for ignore in ignored:
+            try:
+                untracked.remove(ignore)
+            except:
+                pass
+
+        if len(untracked) > 0:
+            self.banner('untracked:')
+            for project in untracked:
+                self.inf(textwrap.indent(f'{project}', ' ' * 4))
+
+    def is_manifest_subfolder(self, path, projects):
+        for project_path in projects:
+            try:
+                if Path(project_path).relative_to(Path(path)):
+                    return True
+            except ValueError:
+                pass
+        return False
+
+    def do_find_untracked(self, path, projects, untracked):
+        obj = os.scandir(path)
+
+        for entry in obj:
+            if entry.is_dir():
+                if entry.path in projects:
+                    continue
+                if self.is_manifest_subfolder(entry.path, projects):
+                    self.do_find_untracked(entry, projects, untracked)
+                else:
+                    untracked.append(os.path.relpath(entry.path, Path(self.topdir)) + '/')
+            if entry.is_file():
+                untracked.append(os.path.relpath(entry.path, Path(self.topdir)))
+
+        obj.close()
+
 class Update(_ProjectCommand):
 
     def __init__(self):
