@@ -153,6 +153,16 @@ manifest repository. If --mr is not given, the remote's default
 branch will be used, if it exists.
 
 With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
+
+Warning: 'west init' renames and/or deletes temporary files inside the
+workspace being created. This fails on some filesystems when some
+development tool or any other program is trying to read/index these
+temporary files at the same time. For instance, it is required to stop
+Visual Studio Code before running 'west init` on the Windows NTFS
+filesystem. Find other, similar "Access is denied" examples in west
+issue #558.
+This is not required on inode-based, Linux filesystems that wait and
+finalize the deletion until there is no concurrent user left.
 ''',
             requires_workspace=False)
 
