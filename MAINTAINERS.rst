@@ -11,20 +11,34 @@ Pre-release test plan
 
      git checkout vX.Y-branch
 
-1. Make tox happy on the following first-party platforms:
+1. Make tox happy on the following first-party non-Linux platforms:
 
    - Windows 10
    - the latest macOS
-   - the latest Ubuntu LTS
 
-2. Make tox happy on other popular Linux distributions as resources allow.
-   Doing this in a container is fine.
+   Do this by hand and check for any anomalous warnings in the output.
+   Do not just trust CI.
+
+2. Make tox happy on other popular Linux distributions:
 
    - Arch
-   - the latest Ubuntu release (if different than the latest LTS)
-   - Debian stable (if its Python 3 is still supported)
+   - the latest Ubuntu LTS (22.04 at time of writing)
+   - the latest Ubuntu release (23.04 at time of writing)
+   - Debian stable (12 at time of writing)
    - Debian testing
-   - Fedora
+   - the latest Fedora (38 at time of writing)
+
+   Automated infrastructure for doing this in docker is in the docker-testing
+   directory. Start by updating the Dockerfiles and compose.yaml in that
+   directory if any newer distribution versions should be tested.
+
+   Then, install docker compose in your host Linux environment and run::
+
+     cd docker-testing
+     ./run-tests.sh
+
+   Make sure to check the tox.log files mentioned in the output for any
+   anomalous warnings.
 
 3. Build alpha N (N=1 to start, then N=2 if you need more commits, etc.) and
    upload to pypi. See "Building and uploading the release wheels" below for

@@ -1,0 +1,76 @@
+# It would be nicer to consolidate the common user/volumes
+# boilerplate, but there wasn't enough time to figure out if it was
+# possible at time of writing. Improvements welcome.
+
+services:
+  west-arch:
+    build: arch
+    environment:
+      WEST_TOX_OUT: /west/docker-testing/outdir/arch
+      WEST_TOX_OUT_IN_HOST: ${WEST_IN_HOST}/docker-testing/outdir/arch
+
+    user: ${MY_UID}:${MY_GID}
+    volumes:
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+      - ..:/west
+
+  west-debian-12:
+    build: debian-12
+    environment:
+      WEST_TOX_OUT: /west/docker-testing/outdir/debian-12
+      WEST_TOX_OUT_IN_HOST: ${WEST_IN_HOST}/docker-testing/outdir/debian-12
+
+    user: ${MY_UID}:${MY_GID}
+    volumes:
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+      - ..:/west
+
+  west-debian-testing:
+    build: debian-testing
+    environment:
+      WEST_TOX_OUT: /west/docker-testing/outdir/debian-testing
+      WEST_TOX_OUT_IN_HOST: ${WEST_IN_HOST}/docker-testing/outdir/debian-testing
+
+    user: ${MY_UID}:${MY_GID}
+    volumes:
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+      - ..:/west
+
+  west-fedora-38:
+    build: fedora-38
+    environment:
+      WEST_TOX_OUT: /west/docker-testing/outdir/fedora-38
+      WEST_TOX_OUT_IN_HOST: ${WEST_IN_HOST}/docker-testing/outdir/fedora-38
+
+    user: ${MY_UID}:${MY_GID}
+    volumes:
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+      - ..:/west
+
+  west-ubuntu-22.04:
+    build: ubuntu-22.04
+    environment:
+      WEST_TOX_OUT: /west/docker-testing/outdir/ubuntu-22.04
+      WEST_TOX_OUT_IN_HOST: ${WEST_IN_HOST}/docker-testing/outdir/ubuntu-22.04
+
+    user: ${MY_UID}:${MY_GID}
+    volumes:
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+      - ..:/west
+
+  west-ubuntu-23.04:
+    build: ubuntu-23.04
+    environment:
+      WEST_TOX_OUT: /west/docker-testing/outdir/ubuntu-23.04
+      WEST_TOX_OUT_IN_HOST: ${WEST_IN_HOST}/docker-testing/outdir/ubuntu-23.04
+
+    user: ${MY_UID}:${MY_GID}
+    volumes:
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+      - ..:/west
