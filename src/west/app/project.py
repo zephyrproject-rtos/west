@@ -321,7 +321,7 @@ finalize the deletion until there is no concurrent user left.
         # Parse the manifest to get "self: path:", if it declares one.
         # Otherwise, use the URL. Ignore imports -- all we really
         # want to know is if there's a "self: path:" or not.
-        manifest = Manifest.from_data(temp_manifest.read_text('utf-8'),
+        manifest = Manifest.from_data(temp_manifest.read_text(encoding='utf-8'),
                                       import_flags=ImportFlag.IGNORE)
         if manifest.yaml_path:
             manifest_path = manifest.yaml_path
