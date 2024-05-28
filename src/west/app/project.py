@@ -1049,7 +1049,7 @@ class Update(_ProjectCommand):
         self.updated.add(project.name)
 
         try:
-            return _manifest_content_at(project, path)
+            return _manifest_content_at(project, path, Manifest.encoding)
         except FileNotFoundError:
             # FIXME we need each project to have back-pointers
             # to the manifest file where it was defined, so we can

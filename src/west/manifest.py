@@ -243,7 +243,7 @@ def _west_commands_merge(wc1: List[str], wc2: List[str]) -> List[str]:
 def _default_importer(project: 'Project', file: str) -> NoReturn:
     raise ManifestImportFailed(project, file)
 
-def _manifest_content_at(project: 'Project', path: PathType,
+def _manifest_content_at(project: 'Project', path: PathType, mf_encoding: str,
                          rev: str = QUAL_MANIFEST_REV_BRANCH) \
                                 -> ImportedContentType:
     # Get a list of manifest data from project at path
@@ -278,7 +278,7 @@ def _manifest_content_at(project: 'Project', path: PathType,
 
     if ptype == 'blob':
         # Importing a file: just return its content.
-        return project.read_at(path, rev=rev).decode('utf-8')
+        return project.read_at(path, rev=rev).decode(mf_encoding)
     elif ptype == 'tree':
         # Importing a tree: return the content of the YAML files inside it.
         ret = []
@@ -287,7 +287,7 @@ def _manifest_content_at(project: 'Project', path: PathType,
         pathobj = PurePosixPath(path)
         for f in filter(_is_yml, project.listdir_at(path, rev=rev,
                                                     encoding=git_filenames_encoding)):
-            ret.append(project.read_at(pathobj / f, rev=rev).decode('utf-8'))
+            ret.append(project.read_at(pathobj / f, rev=rev).decode(mf_encoding))
         return ret
     else:
         raise MalformedManifest(f"can't decipher project {project.name} "
@@ -1187,6 +1187,9 @@ class Manifest:
     '''The parsed contents of a west manifest file.
     '''
 
+    # TODO: make this a new west config: 'manifest.encoding'
+    encoding: str = 'utf-8'
+
     @staticmethod
     def from_topdir(topdir: Optional[PathType] = None,
                     config: Optional[Configuration] = None,
@@ -1905,7 +1908,7 @@ class Manifest:
             current_relpath = manifest_path / manifest_file
             current_abspath = topdir_abspath / current_relpath
             try:
-                current_data = current_abspath.read_text(encoding='utf-8')
+                current_data = current_abspath.read_text(encoding=Manifest.encoding)
             except FileNotFoundError:
                 raise MalformedConfig(
                     f'file not found: manifest file {current_abspath} '
@@ -2204,7 +2207,7 @@ class Manifest:
         child_ctx = self._ctx._replace(
             current_abspath=pathobj_abs,
             current_relpath=pathobj,
-            current_data=pathobj_abs.read_text(encoding='utf-8')
+            current_data=pathobj_abs.read_text(encoding=Manifest.encoding)
         )
         try:
             Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
@@ -2242,7 +2245,7 @@ class Manifest:
                 path_prefix=path_prefix,
                 current_abspath=import_abs,
                 current_relpath=pathobj / import_abs.name,
-                current_data=import_abs.read_text(encoding='utf-8')
+                current_data=import_abs.read_text(encoding=Manifest.encoding)
             )
             try:
                 Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
@@ -2575,7 +2578,7 @@ class Manifest:
         if not (self._ctx.import_flags & ImportFlag.FORCE_PROJECTS) and \
            project.is_cloned():
             try:
-                content = _manifest_content_at(project, path)
+                content = _manifest_content_at(project, path, Manifest.encoding)
             except MalformedManifest as mm:
                 self._malformed(mm.args[0])
             except FileNotFoundError:
