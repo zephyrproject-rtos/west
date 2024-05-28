@@ -272,7 +272,9 @@ def _manifest_content_at(project: 'Project', path: PathType,
         # enough!
         raise OSError(errno.ENOENT, os.strerror(errno.ENOENT), path)
 
-    ptype = out.decode('utf-8').split()[1]
+    # TODO: does git always output utf-8? Test git config 'core.precomposeunicode' etc.
+    git_filenames_encoding = 'utf-8'
+    ptype = out.decode(git_filenames_encoding).split()[1]
 
     if ptype == 'blob':
         # Importing a file: just return its content.
@@ -283,7 +285,8 @@ def _manifest_content_at(project: 'Project', path: PathType,
         # Use a PurePosixPath because that's the form git seems to
         # store internally, even on Windows.
         pathobj = PurePosixPath(path)
-        for f in filter(_is_yml, project.listdir_at(path, rev=rev)):
+        for f in filter(_is_yml, project.listdir_at(path, rev=rev,
+                                                    encoding=git_filenames_encoding)):
             ret.append(project.read_at(pathobj / f, rev=rev).decode('utf-8'))
         return ret
     else:
