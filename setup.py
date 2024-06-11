@@ -46,6 +46,7 @@ setuptools.setup(
         'pykwalify',
         'setuptools',
         'packaging',
+        'joblib'
     ],
     python_requires='>=3.8',
     entry_points={'console_scripts': ('west = west.app.main:main',)},
