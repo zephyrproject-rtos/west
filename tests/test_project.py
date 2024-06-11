@@ -447,14 +447,14 @@ def test_grep(west_init_tmpdir):
 
     assert re.search('west-commands', cmd('grep -- -- -commands'))
 
-
-def test_update_projects(west_init_tmpdir):
+@pytest.mark.parametrize("options", ["", "-j 1", "-j 2", "-j"])
+def test_update_projects(options, west_init_tmpdir):
     # Test the 'west update' command. It calls through to the same backend
     # functions that are used for automatic updates and 'west init'
     # reinitialization.
 
     # create local repositories
-    cmd('update')
+    cmd('update ' + options)
 
     # Add commits to the local repos.
     ur = update_helper(west_init_tmpdir)
@@ -644,7 +644,8 @@ def test_update_head_0(west_init_tmpdir):
     assert modified_files.strip() == "M CODEOWNERS", \
            'local zephyr change not preserved'
 
-def test_update_some_with_imports(repos_tmpdir):
+@pytest.mark.parametrize("options", ["", "-j 1", "-j 2", "-j -1"])
+def test_update_some_with_imports(options, repos_tmpdir):
     # 'west update project1 project2' should work fine even when
     # imports are used, as long as the relevant projects are all
     # defined in the manifest repository.
@@ -685,19 +686,19 @@ def test_update_some_with_imports(repos_tmpdir):
     # Updating unknown projects should fail as always.
 
     with pytest.raises(subprocess.CalledProcessError):
-        cmd('update unknown-project', cwd=ws)
+        cmd(f'update {options} unknown-project', cwd=ws)
 
     # Updating a list of projects when some are resolved via project
     # imports must fail.
 
     with pytest.raises(subprocess.CalledProcessError):
-        cmd('update Kconfiglib net-tools', cwd=ws)
+        cmd(f'update {options} Kconfiglib net-tools', cwd=ws)
 
     # Updates of projects defined in the manifest repository or all
     # projects must succeed, and behave the same as if no imports
     # existed.
 
-    cmd('update net-tools', cwd=ws)
+    cmd(f'update {options} net-tools', cwd=ws)
     with pytest.raises(ManifestImportFailed):
         Manifest.from_topdir(topdir=ws)
     manifest = Manifest.from_topdir(topdir=ws,
@@ -708,10 +709,10 @@ def test_update_some_with_imports(repos_tmpdir):
     assert net_tools_project.is_cloned()
     assert not zephyr_project.is_cloned()
 
-    cmd('update zephyr', cwd=ws)
+    cmd(f'update {options} zephyr', cwd=ws)
     assert zephyr_project.is_cloned()
 
-    cmd('update', cwd=ws)
+    cmd(f'update {options}', cwd=ws)
     manifest = Manifest.from_topdir(topdir=ws)
     assert manifest.get_projects(['Kconfiglib'])[0].is_cloned()
 

@@ -21,6 +21,7 @@ dependencies = [
     "pykwalify",
     "setuptools",
     "packaging",
+    "joblib",
 ]
 
 [project.license]
