@@ -30,6 +30,12 @@ from west.manifest import Submodule
 from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
 from west.manifest import QUAL_REFS_WEST as QUAL_REFS
 
+JOBLIB_PRESENT = True
+try:
+    from joblib import Parallel, delayed
+except ModuleNotFoundError:
+    JOBLIB_PRESENT = False
+
 #
 # Project-related or multi-repo commands, like "init", "update",
 # "diff", etc.
@@ -883,6 +889,12 @@ class Update(_ProjectCommand):
         parser.add_argument('--stats', action='store_true',
                             help='''print performance statistics for
                             update operations''')
+        if JOBLIB_PRESENT:
+            parser.add_argument('-j', '--jobs', nargs='?', const=-1,
+                                default=1, type=int, action='store',
+                                help='''Use multiple jobs to paralelize update process.
+                                Pass -1 to use all avaliable jobs.
+                                ''')
 
         group = parser.add_argument_group(
             title='local project clone caches',
@@ -1018,18 +1030,26 @@ class Update(_ProjectCommand):
             import_flags=ImportFlag.FORCE_PROJECTS)
 
         failed = []
-        for project in self.manifest.projects:
+
+        def project_update(project):
             if (isinstance(project, ManifestProject) or
                     project.name in self.updated):
-                continue
+                return
             try:
                 if not self.project_is_active(project):
                     self.dbg(f'{project.name}: skipping inactive project')
-                    continue
-                self.update(project)
+                    return
                 self.updated.add(project.name)
+                self.update(project)
             except subprocess.CalledProcessError:
                 failed.append(project)
+
+        if not JOBLIB_PRESENT or self.args.jobs == 1:
+            for project in self.manifest.projects:
+                project_update(project)
+        else:
+            Parallel(n_jobs=self.args.jobs, require='sharedmem')(
+                delayed(project_update)(project) for project in self.manifest.projects)
         self._handle_failed(self.args, failed)
 
     def update_importer(self, project, path):
@@ -1090,13 +1110,22 @@ class Update(_ProjectCommand):
             projects = self._projects(self.args.projects)
 
         failed = []
-        for project in projects:
+
+        def project_update_some(project):
             if isinstance(project, ManifestProject):
-                continue
+                return
             try:
                 self.update(project)
             except subprocess.CalledProcessError:
                 failed.append(project)
+
+        if not JOBLIB_PRESENT or self.args.jobs == 1:
+            for project in projects:
+                project_update_some(project)
+        else:
+            Parallel(n_jobs=self.args.jobs, require='sharedmem')(
+                delayed(project_update_some)(project) for project in projects)
+
         self._handle_failed(self.args, failed)
 
     def toplevel_projects(self):
