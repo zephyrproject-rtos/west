@@ -1,8 +1,9 @@
+import importlib.metadata
 import os
 import subprocess
 import sys
 
-import west.version
+__version__ = importlib.metadata.version("west")
 
 assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
 
@@ -16,5 +17,5 @@ def test_main():
     output_as_module = subprocess.check_output([sys.executable, '-m', 'west',
                                                 '--version']).decode()
     output_directly = subprocess.check_output(['west', '--version']).decode()
-    assert west.version.__version__ in output_as_module
+    assert __version__ in output_as_module
     assert output_as_module == output_directly
