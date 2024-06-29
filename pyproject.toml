@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "west"
+version = "1.2.99"
+authors = [{name = "Zephyr Project", email = "devel@lists.zephyrproject.org"}]
+description = "Zephyr RTOS Project meta-tool"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "colorama",
+    "PyYAML>=5.1",
+    "pykwalify",
+    "setuptools",
+    "packaging",
+]
+
+[project.license]
+file = "LICENSE"
+
+[project.readme]
+file = "README.rst"
+content-type = "text/x-rst"
+
+[project.urls]
+Homepage = "https://github.com/zephyrproject-rtos/west"
+
+[project.scripts]
+west = "west.app.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+zip-safe = false
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = false
