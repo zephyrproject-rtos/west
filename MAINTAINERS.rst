@@ -66,8 +66,8 @@ Pre-release test plan
 
 7. Assuming that all went well (if it didn't, go fix it and repeat):
 
-   - update __version__ to 'X.Y.Z' (i.e. drop the 'aN' suffix that denotes
-     alpha N)
+   - update version in pyproject.toml to 'X.Y.Z' (i.e. drop the 'aN' suffix
+     that denotes alpha N)
 
    - tag the release on GitHub (see "Tagging the release" for a procedure)
 
@@ -88,11 +88,14 @@ Building and uploading the release wheels
 You need the zephyr-project PyPI credentials for the 'twine upload' command. ::
 
   git clean -ffdx
-  python3 setup.py sdist bdist_wheel
+  pip3 install --upgrade build twine
+  pyproject-build
   twine upload -u zephyr-project dist/*
 
 The 'git clean' step is important. We've anecdotally observed broken wheels
 being generated from dirty repositories.
+
+Check out [packaging.python.org](https://packaging.python.org/en/latest/tutorials/packaging-projects/#generating-distribution-archives) for more detailed instructions.
 
 Tagging the release
 -------------------
@@ -158,7 +161,7 @@ Summary of what happens:
 3. In vX.Y-branch, in src/west/version.py, set __version__ to X.Y.0a1.
    Push this to origin/vX.Y-branch. You don't need a PR for this.
 
-4. In the main branch, set __version__ to X.Y.99.
+4. In the main branch, set version in pyproject.toml to X.Y.99.
    Push this to origin/main. You don't need a PR for this.
 
 5. Create an annotated tag vX.Y.99 which points to the main branch commit you
