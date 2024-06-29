@@ -5,7 +5,9 @@
 # This is the Python 3 version of option 3 in:
 # https://packaging.python.org/guides/single-sourcing-package-version/#single-sourcing-the-version
 
-__version__ = '1.2.99'
+import importlib.metadata
+
+__version__ = importlib.metadata.version("west")
 #
 # MAINTAINERS:
 #
