@@ -34,7 +34,7 @@ import west.configuration
 from west.commands import WestCommand, extension_commands, \
     CommandError, ExtensionCommandError, Verbosity
 from west.app.project import List, ManifestCommand, Compare, Diff, Status, \
-    SelfUpdate, ForAll, Grep, Init, Update, Topdir
+    SelfUpdate, ForAll, Grep, Init, Update, Topdir, Sdk
 from west.app.config import Config
 from west.manifest import Manifest, MalformedConfig, MalformedManifest, \
     ManifestVersionError, ManifestImportFailed, _ManifestImportDepth, \
@@ -1104,6 +1104,7 @@ BUILTIN_COMMAND_GROUPS = {
         Help,
         Config,
         Topdir,
+        Sdk,
     ],
 
     # None is for hidden commands we don't want to show to the user.
