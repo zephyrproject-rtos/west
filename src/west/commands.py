@@ -25,7 +25,7 @@ import pykwalify
 import yaml
 
 from west.configuration import Configuration
-from west.manifest import Manifest, Project
+from west.manifest import Manifest, _ManifestRequired, Project
 from west.util import escapes_directory, quote_sh_list, PathType
 
 '''\
@@ -258,9 +258,7 @@ class WestCommand(ABC):
         Otherwise, a fatal error occurs.
         '''
         if self._manifest is None:
-            self.die(f"can't run west {self.name};",
-                     "it requires the manifest, which was not available.",
-                     'Try "west manifest --validate" to debug.')
+            raise _ManifestRequired
         return self._manifest
 
     def _set_manifest(self, manifest: Optional[Manifest]):
