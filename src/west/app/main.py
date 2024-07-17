@@ -19,6 +19,7 @@ import logging
 import os
 from pathlib import Path, PurePath
 import platform
+import shlex
 import shutil
 import signal
 import sys
@@ -183,6 +184,7 @@ class WestApp:
         self.mle = None             # saved exception if load_manifest() fails
         self.builtins = {}          # command name -> WestCommand instance
         self.extensions = {}        # extension command name -> spec
+        self.aliases = {}           # alias -> WestCommand instance
         self.builtin_groups = OrderedDict()    # group name -> WestCommand list
         self.extension_groups = OrderedDict()  # project path -> ext spec list
         self.west_parser = None     # a WestArgumentParser
@@ -243,6 +245,7 @@ class WestApp:
         # Set self.manifest and self.extensions.
         self.load_manifest()
         self.load_extension_specs()
+        self.load_aliases()
 
         # Set up initial argument parsers. This requires knowing
         # self.extensions, so it can't happen before now.
@@ -402,6 +405,14 @@ class WestApp:
 
             self.extension_groups[path] = filtered
 
+    def load_aliases(self):
+        if not self.config:
+            return
+
+        self.aliases = {
+            k[6:]: Alias(k[6:], v) for k, v in self.config.items() if k.startswith('alias.')
+        }
+
     def handle_extension_command_error(self, ece):
         if self.cmd is not None:
             msg = f"extension command \"{self.cmd.name}\" couldn't be run"
@@ -424,9 +435,11 @@ class WestApp:
         # Set up and install command-line argument parsers.
 
         west_parser, subparser_gen = self.make_parsers()
+        real_command_names = set()
 
         # Add sub-parsers for the built-in commands.
-        for command in self.builtins.values():
+        for name, command in self.builtins.items():
+            real_command_names.add(name)
             command.add_parser(subparser_gen)
 
         # Add stub parsers for extensions.
@@ -436,9 +449,18 @@ class WestApp:
         # extension's code, which we won't do unless parse_known_args()
         # says to run that extension.
         if self.extensions:
-            for path, specs in self.extension_groups.items():
+            for specs in self.extension_groups.values():
                 for spec in specs:
+                    real_command_names.add(spec.name)
                     subparser_gen.add_parser(spec.name, add_help=False)
+
+        # Add aliases, but skip aliases that shadow other commands
+        # The help parser requires unique commands to be added
+        if self.aliases:
+            for name, alias in self.aliases.items():
+                # Advanced users shadowing real commands do not get "alias help"
+                if name not in real_command_names:
+                    alias.add_parser(subparser_gen)
 
         # Save the instance state.
         self.west_parser = west_parser
@@ -490,6 +512,28 @@ class WestApp:
         # Parse command line arguments and run the WestCommand.
         # If we're running an extension, instantiate it from its
         # spec and re-parse arguments before running.
+
+        if not early_args.help and early_args.command_name != "help":
+            # Recursively replace alias command(s) if set
+            aliases = self.aliases.copy()
+            while early_args.command_name in aliases:
+                # Make sure we don't end up in an infinite loop
+                alias = aliases.pop(early_args.command_name)
+
+                self.queued_io.append(lambda cmd, alias=alias: cmd.dbg(
+                    f'Replacing alias {alias.name} with {alias.args}'
+                ))
+
+                if len(alias.args) == 0:
+                    # This loses the cmd.dbg() above - too bad, don't use empty aliases
+                    self.print_usage_and_exit(f'west: empty alias "{alias.name}"')
+
+                # Find and replace the command name. Must skip any other early args like -v
+                for i, arg in enumerate(argv):
+                    if arg == early_args.command_name:
+                        argv = argv[:i] + alias.args + argv[i + 1:]
+                        break
+                early_args = early_args._replace(command_name=alias.args[0])
 
         self.handle_early_arg_errors(early_args)
         args, unknown = self.west_parser.parse_known_args(args=argv)
@@ -825,6 +869,8 @@ class Help(WestCommand):
             # exception handling block in app.run_command is in a
             # parent stack frame.
             app.run_extension(name, [name, '--help'])
+        elif app.aliases is not None and name in app.aliases:
+            app.aliases[name].parser.print_help()
         else:
             self.wrn(f'unknown command "{name}"')
             app.west_parser.print_help(top_level=True)
@@ -832,6 +878,25 @@ class Help(WestCommand):
                 self.wrn('your manifest could not be loaded, '
                          'which may be causing this issue.\n'
                          '  Try running "west update" or fixing the manifest.')
+
+class Alias(WestCommand):
+    # An alias command, it does not run itself
+
+    def __init__(self, cmd, args):
+        super().__init__(cmd, args or '<empty>', f'An alias that expands to: {args}')
+
+        self.args = shlex.split(args)
+
+    # Pseudo-parser that will never actually run except for ".print_help()"
+    def do_add_parser(self, parser_adder):
+        parser = parser_adder.add_parser(
+            self.name, help=self.help, description=self.description, add_help=False,
+            formatter_class=argparse.RawDescriptionHelpFormatter)
+
+        return parser
+
+    def do_run(self, args, ignored):
+        assert False
 
 class WestHelpAction(argparse.Action):
 
@@ -943,6 +1008,12 @@ class WestArgumentParser(argparse.ArgumentParser):
                     for spec in specs:
                         self.format_extension_spec(append, spec, width)
                     append('')
+
+            if self.west_app.aliases:
+                append('aliases:')
+                for alias in self.west_app.aliases.values():
+                    self.format_command(append, alias, width)
+                append('')
 
             if self.epilog:
                 append(self.epilog)
