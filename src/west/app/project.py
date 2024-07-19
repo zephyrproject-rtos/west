@@ -779,6 +779,8 @@ class Diff(_ProjectCommand):
                             defaults to active cloned projects''')
         parser.add_argument('-a', '--all', action='store_true',
                             help='include output for inactive projects')
+        parser.add_argument('-m', '--manifest', action='store_true',
+                            help='show changes relative to the manifest revision')
         return parser
 
     def do_run(self, args, ignored):
@@ -792,9 +794,10 @@ class Diff(_ProjectCommand):
         for project in self._cloned_projects(args, only_active=not args.all):
             # Use paths that are relative to the base directory to make it
             # easier to see where the changes are
+            merge_base = ['--merge-base', project.revision] if args.manifest else []
             cp = project.git(['diff', f'--src-prefix={project.path}/',
                               f'--dst-prefix={project.path}/',
-                              '--exit-code'] + color,
+                              '--exit-code'] + color + merge_base,
                              capture_stdout=True, capture_stderr=True,
                              check=False)
             if cp.returncode == 0:
