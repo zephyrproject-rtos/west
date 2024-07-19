@@ -335,6 +335,7 @@ def test_diff(west_init_tmpdir):
     # Diff with no projects cloned shouldn't fail
 
     cmd('diff')
+    cmd('diff --manifest')
 
     # Neither should it fail after fetching one or both projects
 
