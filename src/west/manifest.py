@@ -1145,6 +1145,7 @@ class ManifestProject(Project):
         self.url: str = ''
         self.submodules = False
         self.revision: str = 'HEAD'
+        self.remote_name: str = ''
         self.clone_depth: Optional[int] = None
         self.groups = []
         self.userdata: Optional[Any] = userdata

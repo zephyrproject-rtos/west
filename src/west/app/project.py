@@ -1598,6 +1598,18 @@ class ForAll(_ProjectCommand):
             Runs a shell (on a Unix OS) or batch (on Windows) command
             within the repository of each of the specified PROJECTs.
 
+            The following variables are set when running your command:
+                WEST_PROJECT_NAME
+                WEST_PROJECT_PATH
+                WEST_PROJECT_ABSPATH (depends on topdir)
+                WEST_PROJECT_REVISION
+                WEST_PROJECT_URL
+                WEST_PROJECT_REMOTE
+
+            Use proper escaping, for example:
+
+                west forall -c "echo \\$WEST_PROJECT_NAME"
+
             If the command has multiple words, you must quote the -c
             option to prevent the shell from splitting it up. Since
             the command is run through the shell, you can use
@@ -1615,6 +1627,9 @@ class ForAll(_ProjectCommand):
                               epilog=ACTIVE_CLONED_PROJECTS_HELP)
         parser.add_argument('-c', dest='subcommand', metavar='COMMAND',
                             required=True)
+        parser.add_argument('-C', dest='cwd',
+                            help='''run commands from this directory;
+                            defaults to each project's paths if omitted''')
         parser.add_argument('-a', '--all', action='store_true',
                             help='include inactive projects'),
         parser.add_argument('-g', '--group', dest='groups',
@@ -1631,13 +1646,24 @@ class ForAll(_ProjectCommand):
     def do_run(self, args, user_args):
         failed = []
         group_set = set(args.groups)
+        env = os.environ.copy()
         for project in self._cloned_projects(args, only_active=not args.all):
             if group_set and not group_set.intersection(set(project.groups)):
                 continue
+
+            env["WEST_PROJECT_NAME"] = project.name
+            env["WEST_PROJECT_PATH"] = project.path
+            env["WEST_PROJECT_ABSPATH"] = project.abspath if project.abspath else ''
+            env["WEST_PROJECT_REVISION"] = project.revision
+            env["WEST_PROJECT_URL"] = project.url
+            env["WEST_PROJECT_REMOTE"] = project.remote_name
+
+            cwd = args.cwd if args.cwd else project.abspath
+
             self.banner(
                 f'running "{args.subcommand}" in {project.name_and_path}:')
-            rc = subprocess.Popen(args.subcommand, shell=True,
-                                  cwd=project.abspath).wait()
+            rc = subprocess.Popen(args.subcommand, shell=True, env=env,
+                                  cwd=cwd).wait()
             if rc:
                 failed.append(project)
         self._handle_failed(args, failed)
