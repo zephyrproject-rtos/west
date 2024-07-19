@@ -16,7 +16,7 @@ from west.manifest import Manifest, ManifestProject, Project, \
 from west.manifest import ImportFlag as MIF
 from conftest import create_branch, create_workspace, create_repo, \
     add_commit, add_tag, check_output, cmd, GIT, rev_parse, \
-    check_proj_consistency
+    check_proj_consistency, WINDOWS
 
 assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
 
@@ -378,6 +378,16 @@ def test_forall(west_init_tmpdir):
         'foo',
         '=== running "echo foo" in net-tools (net-tools):',
         'foo']
+
+    # Use environment variables
+
+    env_var = "%WEST_PROJECT_NAME%" if WINDOWS else "$WEST_PROJECT_NAME"
+
+    assert cmd(f'forall -c "echo {env_var}"').splitlines() == [
+        f'=== running "echo {env_var}" in manifest (zephyr):',
+        'manifest',
+        f'=== running "echo {env_var}" in net-tools (net-tools):',
+        'net-tools']
 
     cmd('update Kconfiglib')
     assert cmd('forall -c "echo foo"').splitlines() == [
