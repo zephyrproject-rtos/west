@@ -336,11 +336,13 @@ def test_diff(west_init_tmpdir):
 
     cmd('diff')
     cmd('diff --manifest')
+    cmd('diff --stat')
 
     # Neither should it fail after fetching one or both projects
 
     cmd('update net-tools')
     cmd('diff')
+    cmd('diff --stat')
 
     cmd('update Kconfiglib')
 
@@ -351,11 +353,13 @@ def test_status(west_init_tmpdir):
     # Status with no projects cloned shouldn't fail
 
     cmd('status')
+    cmd('status --short --branch')
 
     # Neither should it fail after fetching one or both projects
 
     cmd('update net-tools')
     cmd('status')
+    cmd('status --short --branch')
 
     cmd('update Kconfiglib')
 
