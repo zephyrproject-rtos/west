@@ -87,6 +87,8 @@ def inf(*args, colorize=False):
                      the message is printed in green.
     '''
     deprecated()
+    if VERBOSE < 0:
+        return
 
     if not _use_colors():
         colorize = False
@@ -126,6 +128,8 @@ def wrn(*args):
     If the configuration option ``color.ui`` is undefined or true and
     stdout is a terminal, then the message is printed in yellow.'''
     deprecated()
+    if VERBOSE < -1:
+        return
 
     if _use_colors():
         print(WRN_COLOR, end='', file=sys.stderr)

@@ -408,7 +408,7 @@ class WestCommand(ABC):
         :param args: sequence of arguments to print
         :param level: verbosity level of the message
         '''
-        if level > self.verbosity:
+        if self.verbosity < level:
             return
         print(*args, end=end)
 
@@ -422,6 +422,9 @@ class WestCommand(ABC):
                          is undefined or true, and stdout is a terminal, then
                          the message is printed in green.
         '''
+        if self.verbosity < Verbosity.INF:
+            return
+
         if not self.color_ui:
             colorize = False
 
@@ -460,6 +463,9 @@ class WestCommand(ABC):
 
         :param args: sequence of arguments to print.'''
 
+        if self.verbosity < Verbosity.WRN:
+            return
+
         if self.color_ui:
             print(WRN_COLOR, end='', file=sys.stderr)
 
@@ -483,6 +489,9 @@ class WestCommand(ABC):
         :param fatal: if True, the the message is prefixed with
                       "FATAL ERROR: "; otherwise, "ERROR: " is used.
         '''
+
+        if self.verbosity < Verbosity.ERR:
+            return
 
         if self.color_ui:
             print(ERR_COLOR, end='', file=sys.stderr)

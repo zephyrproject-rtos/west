@@ -97,6 +97,9 @@ def parse_early_args(argv: ListType[str]) -> EarlyArgs:
         elif rest.startswith('v'):
             verbosity += 1
             consume_more_args(rest[1:])
+        elif rest.startswith('q'):
+            verbosity -= 1
+            consume_more_args(rest[1:])
         elif rest.startswith('z'):
             if not rest[1:]:
                 expecting_zephyr_base = True
@@ -121,8 +124,13 @@ def parse_early_args(argv: ListType[str]) -> EarlyArgs:
         elif arg.startswith('-v'):
             verbosity += 1
             consume_more_args(arg[2:])
+        elif arg.startswith('-q'):
+            verbosity -= 1
+            consume_more_args(arg[2:])
         elif arg == '--verbose':
             verbosity += 1
+        elif arg == '--quiet':
+            verbosity -= 1
         elif arg.startswith('-z'):
             if arg == '-z':
                 expecting_zephyr_base = True
@@ -465,6 +473,10 @@ class WestApp:
                             help='''Display verbose output. May be given
                             multiple times to increase verbosity.''')
 
+        parser.add_argument('-q', '--quiet', default=0, action='count',
+                            help='''Display less verbose output. May be given
+                            multiple times to decrease verbosity.''')
+
         parser.add_argument('-V', '--version', action='version',
                             version=f'West version: v{__version__}',
                             help='print the program version and exit')
@@ -485,7 +497,7 @@ class WestApp:
         # Set up logging verbosity before running the command, for
         # backwards compatibility. Remove this when we can part ways
         # with the log module.
-        log.set_verbosity(args.verbose)
+        log.set_verbosity(args.verbose - args.quiet)
 
         # If we were run as 'west -h ...' or 'west --help ...',
         # monkeypatch the args namespace so we end up running Help.  The
@@ -594,8 +606,12 @@ class WestApp:
             logger.setLevel(logging.DEBUG)
         elif verbosity == 1:
             logger.setLevel(logging.INFO)
-        else:
+        elif verbosity == 0:
             logger.setLevel(logging.WARNING)
+        elif verbosity == -1:
+            logger.setLevel(logging.ERROR)
+        else:
+            logger.setLevel(logging.CRITICAL)
 
         logger.addHandler(LogHandler())
 
@@ -1070,8 +1086,10 @@ def mie_msg(mie):
     return ret
 
 def adjust_command_verbosity(command, args):
-    command.verbosity = min(command.verbosity + args.verbose,
-                            Verbosity.DBG_EXTREME)
+    command.verbosity = max(
+        min(command.verbosity + args.verbose - args.quiet, Verbosity.DBG_EXTREME),
+        Verbosity.QUIET
+    )
 
 def dump_traceback():
     # Save the current exception to a file and return its path.
