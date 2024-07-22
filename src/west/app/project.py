@@ -769,7 +769,9 @@ class Diff(_ProjectCommand):
         super().__init__(
             'diff',
             '"git diff" for one or more projects',
-            'Runs "git diff" on each of the specified projects.')
+            'Runs "git diff" on each of the specified projects.',
+            accepts_unknown_args=True,
+        )
 
     def do_add_parser(self, parser_adder):
         parser = self._parser(parser_adder,
@@ -781,7 +783,7 @@ class Diff(_ProjectCommand):
                             help='include output for inactive projects')
         return parser
 
-    def do_run(self, args, ignored):
+    def do_run(self, args, user_args):
         self.die_if_no_git()
 
         failed = []
@@ -795,6 +797,7 @@ class Diff(_ProjectCommand):
             cp = project.git(['diff', f'--src-prefix={project.path}/',
                               f'--dst-prefix={project.path}/',
                               '--exit-code'] + color,
+                             extra_args=user_args,
                              capture_stdout=True, capture_stderr=True,
                              check=False)
             if cp.returncode == 0:
@@ -814,7 +817,9 @@ class Status(_ProjectCommand):
         super().__init__(
             'status',
             '"git status" for one or more projects',
-            "Runs 'git status' for each of the specified projects.")
+            "Runs 'git status' for each of the specified projects.",
+            accepts_unknown_args=True,
+        )
 
     def do_add_parser(self, parser_adder):
         parser = self._parser(parser_adder,
