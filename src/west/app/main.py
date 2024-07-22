@@ -61,6 +61,7 @@ class EarlyArgs(NamedTuple):
     version: bool               # True if -V was given
     zephyr_base: Optional[str]  # -z argument value
     verbosity: int              # 0 if not given, otherwise counts
+    quiet: bool                 # True if -q was given
     command_name: Optional[str]
 
     # Other arguments are appended here.
@@ -73,6 +74,7 @@ def parse_early_args(argv: ListType[str]) -> EarlyArgs:
     version = False
     zephyr_base = None
     verbosity = 0
+    quiet = False
     command_name = None
     unexpected_arguments = []
 
@@ -81,7 +83,7 @@ def parse_early_args(argv: ListType[str]) -> EarlyArgs:
     def consume_more_args(rest):
         # Handle the 'Vv' portion of 'west -hVv'.
 
-        nonlocal help, version, zephyr_base, verbosity, command_name
+        nonlocal help, version, zephyr_base, verbosity, quiet, command_name
         nonlocal unexpected_arguments
         nonlocal expecting_zephyr_base
 
@@ -96,6 +98,9 @@ def parse_early_args(argv: ListType[str]) -> EarlyArgs:
             consume_more_args(rest[1:])
         elif rest.startswith('v'):
             verbosity += 1
+            consume_more_args(rest[1:])
+        elif rest.startswith('q'):
+            quiet = True
             consume_more_args(rest[1:])
         elif rest.startswith('z'):
             if not rest[1:]:
@@ -121,6 +126,9 @@ def parse_early_args(argv: ListType[str]) -> EarlyArgs:
         elif arg.startswith('-v'):
             verbosity += 1
             consume_more_args(arg[2:])
+        elif arg.startswith('-q'):
+            quiet = True
+            consume_more_args(arg[2:])
         elif arg == '--verbose':
             verbosity += 1
         elif arg.startswith('-z'):
@@ -136,7 +144,7 @@ def parse_early_args(argv: ListType[str]) -> EarlyArgs:
             command_name = arg
             break
 
-    return EarlyArgs(help, version, zephyr_base, verbosity,
+    return EarlyArgs(help, version, zephyr_base, verbosity, quiet,
                      command_name, unexpected_arguments)
 
 class LogFormatter(logging.Formatter):
@@ -210,7 +218,7 @@ class WestApp:
         logging.getLogger('pykwalify').setLevel(logging.CRITICAL)
 
         # Use verbosity to determine west API log levels
-        self.setup_west_logging(early_args.verbosity)
+        self.setup_west_logging(early_args.verbosity, early_args.quiet)
 
         # Makes ANSI color escapes work on Windows, and strips them when
         # stdout/stderr isn't a terminal
@@ -465,6 +473,9 @@ class WestApp:
                             help='''Display verbose output. May be given
                             multiple times to increase verbosity.''')
 
+        parser.add_argument('-q', '--quiet', action='store_true',
+                            help='quiet mode, display no output')
+
         parser.add_argument('-V', '--version', action='version',
                             version=f'West version: v{__version__}',
                             help='print the program version and exit')
@@ -585,7 +596,7 @@ class WestApp:
         self.west_parser.print_usage(file=sys.stderr)
         sys.exit(message)
 
-    def setup_west_logging(self, verbosity):
+    def setup_west_logging(self, verbosity, quiet):
         logger = logging.getLogger('west.manifest')
 
         if verbosity >= 2:
@@ -594,6 +605,8 @@ class WestApp:
             logger.setLevel(logging.INFO)
         else:
             logger.setLevel(logging.WARNING)
+
+        logger.disabled = bool(quiet)
 
         logger.addHandler(LogHandler())
 
@@ -1068,8 +1081,11 @@ def mie_msg(mie):
     return ret
 
 def adjust_command_verbosity(command, args):
-    command.verbosity = min(command.verbosity + args.verbose,
-                            Verbosity.DBG_EXTREME)
+    if args.quiet:
+        command.verbosity = Verbosity.QUIET
+    else:
+        command.verbosity = min(command.verbosity + args.verbose,
+                                Verbosity.DBG_EXTREME)
 
 def dump_traceback():
     # Save the current exception to a file and return its path.
