@@ -40,7 +40,9 @@ from west.manifest import Manifest, MalformedConfig, MalformedManifest, \
     ManifestVersionError, ManifestImportFailed, _ManifestImportDepth, \
     ManifestProject, MANIFEST_REV_BRANCH
 from west.util import quote_sh_list, west_topdir, WestNotFound
-from west.version import __version__
+import importlib.metadata
+
+__version__ = importlib.metadata.version("west")
 
 class EarlyArgs(NamedTuple):
     # Data type for storing "early" argument parsing results.
