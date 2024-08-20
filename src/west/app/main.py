@@ -573,9 +573,11 @@ class WestApp:
             self.handle_unknown_command(early_args.command_name)
 
     def handle_unknown_command(self, command_name):
+        # "status" needs "-vv" to show git errors like "dubious ownership"; see #726
         if self.topdir:
             extra_help = (f'workspace {self.topdir} does not define '
-                          'this extension command -- try "west help"')
+                          'this extension command -- try "west help"'
+                          ' and "west -vv status"')
         else:
             extra_help = 'do you need to run this inside a workspace?'
         self.print_usage_and_exit(f'west: unknown command "{command_name}"; '
@@ -1060,10 +1062,10 @@ def mie_msg(mie):
         # what west.manifest needs to happen before we can
         # resolve the missing import.
         ret += (f' from revision "{p.revision}"\n'
-                f'  Hint: {p.name} must be cloned and its '
+                f'  Hint: {p.name} must be cloned, owned by the user and its '
                 f'{MANIFEST_REV_BRANCH} ref must point to a '
                 'commit with the import data\n'
-                '  To fix, run "west update"')
+                '  To fix, run "west update. If it still fails, try "west -vv ..."')
 
     return ret
 
