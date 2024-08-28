@@ -1,5 +1,7 @@
+---
 name: Python Test
 
+# yamllint disable-line rule:truthy
 on: [push, pull_request]
 
 jobs:
@@ -12,6 +14,10 @@ jobs:
         python-version: [3.8, 3.9, '3.10']
     steps:
       - uses: actions/checkout@v4
+        # This is enough to find many quoting issues
+        with:
+          path: "./west with spaces"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
