@@ -5,7 +5,6 @@
 import os
 from pathlib import Path, PurePath
 import platform
-import shlex
 import shutil
 import subprocess
 import sys
@@ -227,7 +226,7 @@ def west_init_tmpdir(repos_tmpdir):
     py.path.local, with the current working directory set there.'''
     west_tmpdir = repos_tmpdir / 'workspace'
     manifest = repos_tmpdir / 'repos' / 'zephyr'
-    cmd(f'init -m "{manifest}" "{west_tmpdir}"')
+    cmd(['init', '-m', str(manifest), str(west_tmpdir)])
     west_tmpdir.chdir()
     config.read_config()
     return west_tmpdir
@@ -327,9 +326,11 @@ def cmd(cmd, cwd=None, stderr=None, env=None):
     # stdout from cmd is captured and returned. The command is run in
     # a python subprocess so that program-level setup and teardown
     # happen fresh.
-    cmd = 'west ' + cmd
-    if not WINDOWS:
-        cmd = shlex.split(cmd)
+
+    # If you have quoting issues: do NOT quote. It's not portable.
+    # Instead, pass `cmd` as a list.
+    cmd = ['west'] + (cmd.split() if isinstance(cmd, str) else cmd)
+
     print('running:', cmd)
     if env:
         print('with non-default environment:')

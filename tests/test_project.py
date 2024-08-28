@@ -77,6 +77,10 @@ def west_update_tmpdir(west_init_tmpdir):
 # Test cases
 #
 
+def _list_f(format):
+    return ['list', '-f', format]
+
+
 def test_workspace(west_update_tmpdir):
     # Basic test that west_update_tmpdir bootstrapped correctly. This
     # is a basic test of west init and west update.
@@ -104,7 +108,7 @@ def test_workspace(west_update_tmpdir):
 def test_list(west_update_tmpdir):
     # Projects shall be listed in the order they appear in the manifest.
     # Check the behavior for some format arguments of interest as well.
-    actual = cmd('list -f "{name} {revision} {path} {cloned} {clone_depth}"')
+    actual = cmd(_list_f('{name} {revision} {path} {cloned} {clone_depth}'))
     expected = ['manifest HEAD zephyr cloned None',
                 'Kconfiglib zephyr subdir/Kconfiglib cloned None',
                 'tagged_repo v1.0 tagged_repo cloned None',
@@ -116,16 +120,16 @@ def test_list(west_update_tmpdir):
     klib_rel = os.path.join('subdir', 'Kconfiglib')
     klib_abs = str(west_update_tmpdir.join('subdir', 'Kconfiglib'))
 
-    rel_outside = cmd(f'list -f "{{name}}" {klib_rel}').strip()
+    rel_outside = cmd(_list_f('{name}') + [klib_rel]).strip()
     assert rel_outside == 'Kconfiglib'
 
-    abs_outside = cmd(f'list -f "{{name}}" {klib_abs}').strip()
+    abs_outside = cmd(_list_f('{name}') + [klib_abs]).strip()
     assert abs_outside == 'Kconfiglib'
 
-    rel_inside = cmd('list -f "{name}" .', cwd=klib_abs).strip()
+    rel_inside = cmd('list -f {name} .', cwd=klib_abs).strip()
     assert rel_inside == 'Kconfiglib'
 
-    abs_inside = cmd(f'list -f "{{name}}" {klib_abs}', cwd=klib_abs).strip()
+    abs_inside = cmd(_list_f('{name}') + [klib_abs], cwd=klib_abs).strip()
     assert abs_inside == 'Kconfiglib'
 
     with pytest.raises(subprocess.CalledProcessError):
@@ -143,19 +147,19 @@ def test_list_manifest(west_update_tmpdir):
     shutil.copy('zephyr/west.yml', 'manifest_moved/west.yml')
     cmd('config manifest.path manifest_moved')
 
-    path = cmd('list -f "{path}" manifest').strip()
-    abspath = cmd('list -f "{abspath}" manifest').strip()
-    posixpath = cmd('list -f "{posixpath}" manifest').strip()
+    path = cmd('list -f {path} manifest').strip()
+    abspath = cmd('list -f {abspath} manifest').strip()
+    posixpath = cmd('list -f {posixpath} manifest').strip()
     assert path == 'manifest_moved'
     assert Path(abspath) == west_update_tmpdir / 'manifest_moved'
     assert posixpath == Path(west_update_tmpdir).as_posix() + '/manifest_moved'
 
     path = cmd('list --manifest-path-from-yaml '
-               '-f "{path}" manifest').strip()
+               '-f {path} manifest').strip()
     abspath = cmd('list --manifest-path-from-yaml '
-                  '-f "{abspath}" manifest').strip()
+                  '-f {abspath} manifest').strip()
     posixpath = cmd('list --manifest-path-from-yaml '
-                    '-f "{posixpath}" manifest').strip()
+                    '-f {posixpath} manifest').strip()
     assert path == 'zephyr'
     assert Path(abspath) == Path(str(west_update_tmpdir / 'zephyr'))
     assert posixpath == Path(west_update_tmpdir).as_posix() + '/zephyr'
@@ -187,29 +191,29 @@ def test_list_groups(west_init_tmpdir):
         out_lines = cmd(command_string).splitlines()
         assert out_lines == expected
 
-    check('list -f "{name} .{groups}. {path}"',
+    check(_list_f('{name} .{groups}. {path}'),
           ['manifest .. zephyr',
            'bar .. path-for-bar'])
 
-    check('list -f "{name} .{groups}. {path}" foo',
+    check(_list_f('{name} .{groups}. {path}') + ['foo'],
           ['foo .foo-group-1,foo-group-2. foo'])
 
-    check('list -f "{name} .{groups}. {path}" baz',
+    check(_list_f('{name} .{groups}. {path}') + ['baz'],
           ['baz .baz-group. baz'])
 
-    check('list -f "{name} .{groups}. {path}" foo bar baz',
+    check(_list_f("{name} .{groups}. {path}") + 'foo bar baz'.split(),
           ['foo .foo-group-1,foo-group-2. foo',
            'bar .. path-for-bar',
            'baz .baz-group. baz'])
 
-    check('list --all -f "{name} .{groups}. {path}"',
+    check(_list_f('{name} .{groups}. {path}') + ['--all'],
           ['manifest .. zephyr',
            'foo .foo-group-1,foo-group-2. foo',
            'bar .. path-for-bar',
            'baz .baz-group. baz'])
 
     cmd('config manifest.group-filter +foo-group-1')
-    check('list -f "{name} .{groups}. {path}"',
+    check(_list_f('{name} .{groups}. {path}'),
           ['manifest .. zephyr',
            'foo .foo-group-1,foo-group-2. foo',
            'bar .. path-for-bar'])
@@ -219,7 +223,7 @@ def test_list_sha(west_update_tmpdir):
     # Regression test for listing with {sha}. This should print N/A
     # for the first project, which is the ManifestProject.
 
-    assert cmd('list -f "{sha}"').startswith("N/A")
+    assert cmd('list -f {sha}').startswith("N/A")
 
 
 def test_manifest_freeze(west_update_tmpdir):
@@ -370,14 +374,14 @@ def test_forall(west_init_tmpdir):
 
     # 'forall' with no projects cloned shouldn't fail
 
-    assert cmd('forall -c "echo foo"').splitlines() == [
+    assert cmd(['forall', '-c', 'echo foo']).splitlines() == [
         '=== running "echo foo" in manifest (zephyr):',
         'foo']
 
     # Neither should it fail after cloning one or both projects
 
     cmd('update net-tools')
-    assert cmd('forall -c "echo foo"').splitlines() == [
+    assert cmd(['forall', '-c', 'echo foo']).splitlines() == [
         '=== running "echo foo" in manifest (zephyr):',
         'foo',
         '=== running "echo foo" in net-tools (net-tools):',
@@ -387,14 +391,14 @@ def test_forall(west_init_tmpdir):
 
     env_var = "%WEST_PROJECT_NAME%" if WINDOWS else "$WEST_PROJECT_NAME"
 
-    assert cmd(f'forall -c "echo {env_var}"').splitlines() == [
+    assert cmd(['forall', '-c', f'echo {env_var}']).splitlines() == [
         f'=== running "echo {env_var}" in manifest (zephyr):',
         'manifest',
         f'=== running "echo {env_var}" in net-tools (net-tools):',
         'net-tools']
 
     cmd('update Kconfiglib')
-    assert cmd('forall -c "echo foo"').splitlines() == [
+    assert cmd(['forall', '-c', 'echo foo']).splitlines() == [
         '=== running "echo foo" in manifest (zephyr):',
         'foo',
         '=== running "echo foo" in Kconfiglib (subdir/Kconfiglib):',
@@ -402,7 +406,7 @@ def test_forall(west_init_tmpdir):
         '=== running "echo foo" in net-tools (net-tools):',
         'foo']
 
-    assert cmd('forall --group Kconfiglib-group -c "echo foo"'
+    assert cmd('forall --group Kconfiglib-group -c'.split() + ['echo foo']
                ).splitlines() == [
                    '=== running "echo foo" in Kconfiglib (subdir/Kconfiglib):',
                    'foo',
@@ -605,7 +609,7 @@ def test_update_head_0(west_init_tmpdir):
                     - Kconfiglib
         ''')
 
-    cmd(f"config manifest.path {my_manifest_dir}")
+    cmd(["config", "manifest.path", my_manifest_dir])
 
     # Update the upstream repositories, getting an UpdateResults tuple
     # back.
@@ -664,7 +668,7 @@ def test_update_some_with_imports(repos_tmpdir):
                           url: {net_tools}
                       '''})
 
-    cmd(f'init -l {manifest_repo}')
+    cmd(['init', '-l', manifest_repo])
 
     # Updating unknown projects should fail as always.
 
@@ -739,7 +743,7 @@ def test_update_submodules_list(repos_tmpdir):
                             - name: Kconfiglib
                               path: {kconfiglib_submodule}
                        '''})
-    cmd(f'init -l {manifest_repo}')
+    cmd(['init', '-l', manifest_repo])
 
     # Make tagged_repo to be zephyr project submodule.
     subprocess.check_call(SUBMODULE_ADD +
@@ -834,7 +838,7 @@ def test_update_all_submodules(repos_tmpdir):
                           url: {zephyr}
                           submodules: true
                        '''})
-    cmd(f'init -l {manifest_repo}')
+    cmd(['init', '-l', manifest_repo])
 
     # Make tagged_repo to be zephyr project submodule.
     subprocess.check_call(SUBMODULE_ADD +
@@ -922,7 +926,7 @@ def test_update_no_submodules(repos_tmpdir):
                           url: {zephyr}
                           submodules: false
                        '''})
-    cmd(f'init -l {manifest_repo}')
+    cmd(['init', '-l', manifest_repo])
 
     # Make tagged_repo to be zephyr project submodule.
     subprocess.check_call(SUBMODULE_ADD +
@@ -1006,7 +1010,7 @@ def test_update_submodules_strategy(repos_tmpdir):
                             - name: Kconfiglib
                               path: Kconfiglib
                        '''})
-    cmd(f'init -l {manifest_repo}')
+    cmd(['init', '-l', manifest_repo])
 
     # Make tagged_repo to be zephyr project submodule.
     subprocess.check_call(SUBMODULE_ADD +
@@ -1251,7 +1255,7 @@ def test_update_recovery(tmpdir):
         ''')
 
     # Use west init -l + west update to point p's manifest-rev at rbad.
-    cmd(f'init -l {m}', cwd=workspacestr)
+    cmd(['init', '-l', m], cwd=workspacestr)
     with pytest.raises(subprocess.CalledProcessError):
         cmd('update', cwd=workspacestr)
 
@@ -1317,7 +1321,7 @@ def test_update_name_cache(tmpdir):
     bar = workspace / 'bar'
 
     # Test the command line option.
-    cmd(f'update --name-cache {name_cache_dir}')
+    cmd(['update', '--name-cache', name_cache_dir])
     assert foo.check(dir=1)
     assert bar.check(dir=1)
     assert rev_parse(foo, 'HEAD') == foo_head
@@ -1327,7 +1331,7 @@ def test_update_name_cache(tmpdir):
     # (We can't use shutil.rmtree here because Windows.)
     shutil.move(os.fspath(foo), os.fspath(tmpdir))
     shutil.move(os.fspath(bar), os.fspath(tmpdir))
-    cmd(f'config update.name-cache {name_cache_dir}')
+    cmd(['config', 'update.name-cache', name_cache_dir])
     cmd('update')
     assert foo.check(dir=1)
     assert bar.check(dir=1)
@@ -1354,7 +1358,7 @@ def test_update_path_cache(tmpdir):
     bar = workspace / 'bar'
 
     # Test the command line option.
-    cmd(f'update --path-cache {path_cache_dir}')
+    cmd(['update', '--path-cache', path_cache_dir])
     assert foo.check(dir=1)
     assert bar.check(dir=1)
     assert rev_parse(foo, 'HEAD') == foo_head
@@ -1364,7 +1368,7 @@ def test_update_path_cache(tmpdir):
     # (We can't use shutil.rmtree here because Windows.)
     shutil.move(os.fspath(foo), os.fspath(tmpdir))
     shutil.move(os.fspath(bar), os.fspath(tmpdir))
-    cmd(f'config update.path-cache {path_cache_dir}')
+    cmd(['config', 'update.path-cache', path_cache_dir])
     cmd('update')
     assert foo.check(dir=1)
     assert bar.check(dir=1)
@@ -1475,7 +1479,7 @@ def test_init_local_manifest_project(repos_tmpdir):
     clone(str(repos_tmpdir.join('repos', 'zephyr')),
           str(zephyr_install_dir))
 
-    cmd(f'init -l "{zephyr_install_dir}"')
+    cmd(['init', '-l', zephyr_install_dir])
 
     # Verify Zephyr has been installed during init -l, but not projects.
     zid = repos_tmpdir.join('workspace')
@@ -1537,14 +1541,14 @@ def test_init_local_with_manifest_filename(repos_tmpdir):
 
     # fails because west.yml is missing
     with pytest.raises(subprocess.CalledProcessError):
-        cmd(f'init -l "{zephyr_install_dir}"')
+        cmd(['init', '-l', zephyr_install_dir])
 
     # create a manifest with a syntax error so we can test if it's being parsed
     with open(zephyr_install_dir / 'west.yml', 'w') as f:
         f.write('[')
 
     cwd = os.getcwd()
-    cmd(f'init -l "{zephyr_install_dir}"')
+    cmd(['init', '-l', zephyr_install_dir])
 
     # init with a local manifest doesn't parse the file, so let's access it
     workspace.chdir()
@@ -1555,7 +1559,7 @@ def test_init_local_with_manifest_filename(repos_tmpdir):
     shutil.move(workspace / '.west', workspace / '.west-syntaxerror')
 
     # success
-    cmd(f'init --mf project.yml -l "{zephyr_install_dir}"')
+    cmd(['init', '--mf', 'project.yml', '-l', zephyr_install_dir])
     workspace.chdir()
     config.read_config()
     cmd('update')
@@ -1724,11 +1728,11 @@ def test_init_with_manifest_filename(repos_tmpdir):
 
     # syntax error
     with pytest.raises(subprocess.CalledProcessError):
-        cmd(f'init -m "{manifest}" "{west_tmpdir}"')
+        cmd(['init', '-m', manifest, west_tmpdir])
     shutil.move(west_tmpdir, repos_tmpdir / 'workspace-syntaxerror')
 
     # success
-    cmd(f'init -m "{manifest}" --mf project.yml "{west_tmpdir}"')
+    cmd(['init', '-m', manifest, '--mf', 'project.yml', west_tmpdir])
     west_tmpdir.chdir()
     config.read_config()
     cmd('update')
@@ -1748,7 +1752,7 @@ def test_init_with_manifest_in_subdir(repos_tmpdir):
                       ''')})
 
     workspace = repos_tmpdir / 'workspace'
-    cmd(f'init -m "{manifest}" "{workspace}"')
+    cmd(['init', '-m', manifest, workspace])
     assert (workspace / 'nested' / 'subdirectory').check(dir=1)
 
 def test_extension_command_execution(west_init_tmpdir):
@@ -1820,7 +1824,7 @@ def test_extension_command_multiproject(repos_tmpdir):
                       })
     west_tmpdir = repos_tmpdir / 'workspace'
     zephyr = repos_tmpdir / 'repos' / 'zephyr'
-    cmd(f'init -m "{zephyr}" "{west_tmpdir}"')
+    cmd(['init', '-m', zephyr, west_tmpdir])
     west_tmpdir.chdir()
     config.read_config()
     cmd('update')
@@ -1900,7 +1904,7 @@ def test_extension_command_duplicate(repos_tmpdir):
                       })
     west_tmpdir = repos_tmpdir / 'workspace'
     zephyr = repos_tmpdir / 'repos' / 'zephyr'
-    cmd(f'init -m "{zephyr}" "{west_tmpdir}"')
+    cmd(['init', '-m', zephyr, west_tmpdir])
     west_tmpdir.chdir()
     config.read_config()
     cmd('update')
@@ -2128,7 +2132,7 @@ def test_import_project_release(repos_tmpdir):
     # Create the workspace and verify we can't load the manifest yet
     # (because some imported data is missing).
     ws = repos_tmpdir / 'ws'
-    cmd(f'init -m {manifest_remote} {ws}')
+    cmd(['init', '-m', manifest_remote, ws])
     with pytest.raises(ManifestImportFailed):
         # We can't load this yet, because we haven't cloned zephyr.
         Manifest.from_topdir(topdir=ws)
@@ -2199,7 +2203,7 @@ def test_import_project_release_fork(repos_tmpdir):
                           revision: fork-tag
                       '''})
 
-    cmd(f'init -l {manifest_repo}')
+    cmd(['init', '-l', manifest_repo])
     with pytest.raises(ManifestImportFailed):
         Manifest.from_topdir(topdir=ws)
 
@@ -2276,7 +2280,7 @@ def test_import_project_release_dir(tmpdir):
                           import: test.d
                       '''})
 
-    cmd(f'init -l {manifest_repo}')
+    cmd(['init', '-l', manifest_repo])
     with pytest.raises(ManifestImportFailed):
         Manifest.from_topdir(topdir=ws)
 
@@ -2313,7 +2317,7 @@ def test_import_project_rolling(repos_tmpdir):
                           import: true
                       '''})
 
-    cmd(f'init -l {manifest_repo}')
+    cmd(['init', '-l', manifest_repo])
     with pytest.raises(ManifestImportFailed):
         Manifest.from_topdir(topdir=ws)
 
