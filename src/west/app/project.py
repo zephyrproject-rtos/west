@@ -797,10 +797,10 @@ class Diff(_ProjectCommand):
         for project in self._cloned_projects(args, only_active=not args.all):
             # Use paths that are relative to the base directory to make it
             # easier to see where the changes are
-            merge_base = ['--merge-base', project.revision] if args.manifest else []
+            diff_commit = [project.revision] if args.manifest else []
             cp = project.git(['diff', f'--src-prefix={project.path}/',
                               f'--dst-prefix={project.path}/',
-                              '--exit-code'] + color + merge_base,
+                              '--exit-code'] + color + diff_commit,
                              extra_args=user_args,
                              capture_stdout=True, capture_stderr=True,
                              check=False)
