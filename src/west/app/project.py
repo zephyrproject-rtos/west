@@ -89,6 +89,7 @@ class _ProjectCommand(WestCommand):
         # and report errors if anything failed.
 
         if not failed:
+            self.dbg(f'git {self.name} failed for zero project')
             return
         elif len(failed) < 20:
             s = 's:' if len(failed) > 1 else ''
@@ -804,13 +805,20 @@ class Diff(_ProjectCommand):
                              extra_args=user_args,
                              capture_stdout=True, capture_stderr=True,
                              check=False)
-            if cp.returncode == 0:
+
+            # We cannot trust --exit-code alone, for instance merge
+            # conflicts return 0 with (at least) git version 2.46.0. See
+            # west issue #731
+            some_diff = cp.returncode == 1 or (cp.returncode == 0 and len(cp.stdout) > 0)
+            if not some_diff:
                 no_diff += 1
-            if cp.returncode == 1 or self.verbosity >= Verbosity.DBG:
+            if some_diff or self.verbosity >= Verbosity.DBG:
                 self.banner(f'diff for {project.name_and_path}:')
                 self.inf(cp.stdout.decode('utf-8'))
-            elif cp.returncode:
+                self.inf(cp.stderr.decode('utf-8'))
+            if cp.returncode > 1:
                 failed.append(project)
+
         if failed:
             self._handle_failed(args, failed)
         elif self.verbosity <= Verbosity.INF:
