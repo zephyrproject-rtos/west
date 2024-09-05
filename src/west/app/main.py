@@ -578,7 +578,7 @@ class WestApp:
         # gracefully. This provides more user-friendly output than
         # argparse can do on its own.
 
-        if (early_args.command_name and
+        if (early_args.command_name and not early_args.help and
             (early_args.command_name not in self.builtins and
              (not self.extensions or
               early_args.command_name not in self.extensions))):
