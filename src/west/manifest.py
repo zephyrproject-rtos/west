@@ -13,6 +13,7 @@ import errno
 import logging
 import os
 from pathlib import PurePosixPath, Path
+import platform
 import re
 import shlex
 import subprocess
@@ -67,6 +68,96 @@ SCHEMA_VERSION = '1.2'
 # Internal helpers
 #
 
+# Mapping of the architectures from platofrm.machine() to a common standard
+# provided by CIPD (https://chrome-infra-packages.appspot.com/). While it's
+# not the only naming scheme, it does allow for easy URL generation to a very
+# robust package database.
+_ARCH_MAPPING = {
+    "x86_64": "amd64",
+    "aarch64": "arm64",
+}
+
+class GlobalDefitions(dict):
+    """
+    Lazy constructed dictionary where special keys: os, arch, and platform are
+    only initialized when accessed.
+    """
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._os_value: Union[None, str] = None
+        self._arch_value: Union[None, str] = None
+
+    def __getitem__(self, key):
+        if key == "os":
+            return self._os
+        if key == "arch":
+            return self._arch
+        if key == "platform":
+            return f"{self._os}-{self._arch}"
+        return super().__getitem__(key)
+
+    def __iter__(self):
+        yield "os"
+        yield "arch"
+        yield "platform"
+        yield from super().__iter__()
+
+    def keys(self):
+        keys = ["os", "arch", "platform"]
+        keys.extend(super().keys())
+        return keys
+
+    @property
+    def _os(self) -> str:
+        if self._os_value is not None:
+            return self._os_value
+        current_os = platform.system()
+        if current_os == "Windows":
+            self._os_value = "windows"
+        elif current_os == "Darwin":
+            self._os_value = "mac"
+        elif current_os == "Linux":
+            self._os_value = "linux"
+        else:
+            raise RuntimeError("Unknown OS: " + current_os)
+        return self._os_value
+
+    @property
+    def _arch(self) -> str:
+        if self._arch_value is not None:
+            return self._arch_value
+        arch = platform.machine()
+        self._arch_value = _ARCH_MAPPING.get(arch, arch)
+        return self._arch_value
+
+def _replace_variables(
+    input_str: str,
+    defs: Dict[str, str],
+) -> str:
+    """
+    Given a set of definitions, find all instances in an input string of ${key}
+    and replace the 'key' with the corresponding definition. If a key is not
+    found in the defs dictionary, raise an exception
+
+    Args:
+        input_str The input string to fill
+        defs The key/value mappings to use
+    Returns:
+        A new string with all ${...} resolved
+    """
+    while True:
+        placeholders = re.findall(r"\$\{(.*?)\}", input_str)
+        if not placeholders:
+            return input_str
+
+        key = placeholders[0]
+        input_str = re.sub(r"\$\{" + key + r"\}", defs[key], input_str)
+
+# Values that can be used in the venv string values via their keys.
+# By default, west will include 'os', 'arch', and 'platform' (where
+# platform is always '${os}-${arch}').
+GLOBAL_DEFINITIONS: GlobalDefitions = GlobalDefitions()
+
 # The value of a west-commands as passed around during manifest
 # resolution. It can become a list due to resolving imports, even
 # though it's just a str in each individual file right now.
@@ -88,6 +179,199 @@ GroupFilterType = List[str]
 
 # A list of group names belonging to a project, like ['foo', 'bar']
 GroupsType = List[str]
+
+class PyRequirementType(enum.Enum):
+    """
+    Python requirements must be one of these:
+      - REQUIREMENTS: a requirements file
+      - PACKAGE: a single package string
+      - DIRECTORY: a local python package
+      - CONSTRAINTS: a constraints file
+    """
+
+    # A requirements file that can be passed to pip via a -r flag
+    REQUIREMENTS = 1
+    # A single package that can be installed by pip
+    PACKAGE = 2
+    # A constraints file that can be passed to pip via a -c flag
+    CONSTRAINTS = 3
+    # A local directory containing a pakcage to install
+    DIRECTORY = 4
+
+    @staticmethod
+    def build(string: str) -> 'PyRequirementType':
+        """
+        Convert a string to a PyRequirementType (if possible)
+
+        Args:
+            string The string to convert
+        Returns:
+            PyRequirementType corresponding to the string
+        """
+        for member in PyRequirementType:  # Iterate over the enum members
+            if member.name.lower() == string.lower():
+                return member
+
+        raise RuntimeError(
+            f"Invalid Py requirement type '{string}'. " +
+            f"Must be one of: {[member.name.lower() for member in PyRequirementType]}"
+        )
+
+class VenvPyRequirement(NamedTuple):
+    """
+    Python requirements for the virtual environment
+    """
+
+    # The string pattern used to specify a file name, directory, or package
+    # name
+    pattern: str
+
+    # The type of requirement represented by this object
+    type: PyRequirementType
+
+    @staticmethod
+    def build(spec: Dict[str, str]) -> 'VenvPyRequirement':
+        """
+        Convert a dictionary to a VenvPyRequirement (if possible).
+
+        Args:
+            spec The dictionary to convert
+        Returns:
+            VenvPyRequirement representing the dictionary
+        """
+        return VenvPyRequirement(
+            pattern=spec['pattern'],
+            type=PyRequirementType.build(spec['type'])
+        )
+
+    def as_dict(self) -> Dict:
+        return {
+            "pattern": self.pattern,
+            "type": self.type.name.lower(),
+        }
+
+class BinRequirementUrl(NamedTuple):
+    """
+    A binary requirement that will be needed
+    """
+
+    # The URL used to fetch the requirement
+    url: str
+
+    # One or more paths to be added to the PATH variable in order to make the
+    # binary discoverable
+    paths: List[str]
+
+    @staticmethod
+    def build(
+        spec: Dict[str, Any],
+        defs: Dict[str, str]
+    ) -> 'BinRequirementUrl':
+        """
+        Convert a URL spec and definitions to a requirement URL (if possible)
+
+        Args:
+            spec The URL spec provided to the manifest.
+            defs A union of the global and local definitions
+        Returns:
+            A resolved binary URL requirement.
+        """
+        url = _replace_variables(input_str=spec['url'], defs=defs)
+        paths = [
+            _replace_variables(input_str=path, defs=defs)
+            for path in spec.get("paths", [])
+        ]
+        if not paths:
+            paths = ["."]
+        return BinRequirementUrl(
+            url=url,
+            paths=paths,
+        )
+
+# Shorthand type for mapping a platform expression to a URL
+BinRequirementUrls = Dict[str, BinRequirementUrl]
+
+class Venv(NamedTuple):
+    """
+    Virtual environment used to build Zephyr. Includes both python and binary
+    requirements.
+    """
+
+    # The name of the virtual environment
+    name: str
+
+    # Python requirements
+    py_requirements: List[VenvPyRequirement]
+
+    # Binary requirements
+    bin_requirements: Dict[str, BinRequirementUrls]
+
+    @staticmethod
+    def _resolve_bin_requirement_urls(
+        urls_spec: Dict[str, Any],
+        definitions: Dict[str, str],
+    ) -> BinRequirementUrls:
+        result: BinRequirementUrls = {}
+        for platform_key, url_spec in urls_spec.items():
+            # Resolve the platform key
+            platform_key = platform_key.replace("*", ".*")
+            # Build the requirement URL object by resolving any definitions.
+            result[platform_key] = BinRequirementUrl.build(
+                spec=url_spec,
+                defs=definitions,
+            )
+        return result
+
+    @staticmethod
+    def build(spec: Dict[str, Any]) -> 'Venv':
+        """
+        Construct a Venv from the manifest's 'venv' key.
+
+        Args:
+            spec The value of the 'venv' key in the manifest
+        Returns:
+            A validate Venv object representing the virtual environment
+        """
+        name = spec['name']
+        top_level_definitions: Dict[str, str] = spec.get('definitions', {})
+        py_requirements: List[VenvPyRequirement] = [
+            VenvPyRequirement.build(py_requirement)
+            for py_requirement in spec.get('py-requirements', [])
+        ]
+        bin_requirements: Dict[str, BinRequirementUrls] = {}
+        for bin_req_name, bin_req_spec in spec.get('bin-requirements', {}).items():
+            local_defs = top_level_definitions.copy()
+            local_defs.update(bin_req_spec.get("definitions", {}))
+            local_defs.update(GLOBAL_DEFINITIONS)
+            assert "platform" in local_defs
+
+            bin_requirements[bin_req_name] = Venv._resolve_bin_requirement_urls(
+                urls_spec=bin_req_spec['urls'],
+                definitions=local_defs,
+            )
+        return Venv(
+            name=name,
+            py_requirements=py_requirements,
+            bin_requirements=bin_requirements,
+        )
+
+    def as_dict(self) -> Dict:
+        result: Dict = {
+            "name": self.name,
+            "bin-requirements": {},
+            "py-requirements": [],
+        }
+        for bin_req_name, req in self.bin_requirements.items():
+            for platform_matcher, url in req.items():
+                platform_key = platform_matcher.replace(".*", "*")
+                bin_requirements = result["bin-requirements"]
+                bin_req_entry = bin_requirements.setdefault(bin_req_name, {})
+                bin_req_entry[platform_key] = url._asdict()
+
+        for py_req in self.py_requirements:
+            result["py-requirements"].append(py_req.as_dict())
+
+        return result
 
 class PFR(enum.Enum):
     # "Project filter result": internal type for expressing whether a
@@ -359,6 +643,8 @@ class _import_ctx(NamedTuple):
     # contains a name which is already present here, we ignore that
     # element.
     projects: Dict[str, 'Project']
+
+    venv: Optional[Venv]
 
     # The project filters we should apply while resolving imports. We
     # try to load this only once from the 'manifest.project-filter'
@@ -1457,6 +1743,8 @@ class Manifest:
         # ['-bar'], with filters imported from other manifests applied.
         self.group_filter: GroupFilterType = []
 
+        self.venv: Optional[Venv] = None
+
         # Initialize private state, some of which is also overwritten
         # later as needed.
 
@@ -1601,6 +1889,8 @@ class Manifest:
         r['manifest'] = {}
         if self.group_filter:
             r['manifest']['group-filter'] = self.group_filter
+        if self.venv:
+            r['manifest']['venv'] = self.venv.as_dict()
         r['manifest']['projects'] = project_dicts
         r['manifest']['self'] = self.projects[MANIFEST_PROJECT_INDEX].as_dict()
 
@@ -1883,6 +2173,7 @@ class Manifest:
         current_data = source_data
         current_repo_abspath = None
         project_filter: ProjectFilterType = []
+        venv = None
 
         if topdir_abspath:
             config = config or Configuration(topdir=topdir_abspath)
@@ -1929,6 +2220,7 @@ class Manifest:
                                    config.get('manifest.project-filter'))
 
         return _import_ctx(projects={},
+                           venv=venv,
                            project_filter=project_filter,
                            group_filter_q=deque(),
                            manifest_west_commands=[],
@@ -2005,6 +2297,8 @@ class Manifest:
             self._projects_by_name: Dict[str, Project] = {'manifest': mp}
             self._projects_by_name.update(self._ctx.projects)
             self._projects_by_rpath: Dict[Path, Project] = {}  # resolved paths
+            if 'venv' in manifest_data:
+                self.venv = Venv.build(spec=manifest_data['venv'])
             if self.topdir:
                 for p in self.projects:
                     if TYPE_CHECKING:
