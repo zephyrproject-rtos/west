@@ -982,7 +982,7 @@ class WestArgumentParser(argparse.ArgumentParser):
                     # warn them again.
                     append('Cannot load extension commands; '
                            'help for them is not available.')
-                    append('(To debug, try: "west manifest --validate".)')
+                    append('(To debug, try: "west -vv manifest --validate".)')
                     append('')
             else:
                 # TODO we may want to be more aggressive about loading

@@ -260,7 +260,7 @@ class WestCommand(ABC):
         if self._manifest is None:
             self.die(f"can't run west {self.name};",
                      "it requires the manifest, which was not available.",
-                     'Try "west manifest --validate" to debug.')
+                     'Try "west -vv manifest --validate" to debug.')
         return self._manifest
 
     def _set_manifest(self, manifest: Optional[Manifest]):
