@@ -100,11 +100,16 @@ Pre-release test plan
 Building and uploading the release wheels
 -----------------------------------------
 
-You need the zephyr-project PyPI credentials for the 'twine upload' command. ::
+Creating Pypi releases is done automatically from Github. After publishing
+a release on Github a release build is packaged and uploaded with the
+version specified in pyproject.toml.
+
+To do these steps manually, you need the zephyr-project PyPI credentials
+for the 'twine upload' command. ::
 
   git clean -ffdx
   pip3 install --upgrade build twine
-  pyproject-build
+  python -m build
   twine upload -u zephyr-project dist/*
 
 The 'git clean' step is important. We've anecdotally observed broken wheels
