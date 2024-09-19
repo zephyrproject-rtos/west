@@ -117,16 +117,11 @@ Installing from Source
 ~~~~~~~~~~~~~~~~~~~~~~
 
 You can create and install a wheel package to install west as well.
-The `wheel`_ Python package is required to do this. See "Installing Wheel"
-below if you need to do this.
 
 To build the west wheel file::
 
-  # macOS, Linux
-  python3 setup.py bdist_wheel
-
-  # Windows
-  py -3 setup.py bdist_wheel
+  pip3 install --upgrade build
+  python -m build
 
 This will create a file named ``dist/west-x.y.z-py3-none-any.whl``,
 where ``x.y.z`` is the current version in setup.py.
@@ -137,17 +132,3 @@ To install the wheel::
 
 You can ``pip3 uninstall west`` to remove this wheel before re-installing the
 version from PyPI, etc.
-
-Installing Wheel
-~~~~~~~~~~~~~~~~
-
-On macOS and Windows, you can install wheel with::
-
-  pip3 install wheel
-
-That also works on Linux, but you may want to install wheel from your
-system package manager instead -- e.g. if you installed pip from your
-system package manager. The wheel package is likely named something
-like ``python3-wheel`` in that case.
-
-.. _wheel: https://wheel.readthedocs.io/en/latest/
