@@ -46,6 +46,7 @@ manifest:
       path: subdir/Kconfiglib
       groups:
         - Kconfiglib-group
+      submodules: true
     - name: tagged_repo
       revision: v1.0
     - name: net-tools
@@ -189,6 +190,7 @@ def repos_tmpdir(tmpdir, _session_repos):
         - name: Kconfiglib
           revision: zephyr
           path: subdir/Kconfiglib
+          submodules: true
         - name: tagged_repo
           revision: v1.0
         - name: net-tools

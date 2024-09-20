@@ -81,6 +81,11 @@ def _list_f(format):
     return ['list', '-f', format]
 
 
+def _match_multiline_regex(expected, actual):
+    for eline_re, aline in zip(expected, actual):
+        assert re.match(eline_re, aline) is not None, (aline, eline_re)
+
+
 def test_workspace(west_update_tmpdir):
     # Basic test that west_update_tmpdir bootstrapped correctly. This
     # is a basic test of west init and west update.
@@ -251,6 +256,7 @@ def test_manifest_freeze(west_update_tmpdir):
                     '^    path: subdir/Kconfiglib$',
                     '^    groups:$',
                     '^    - Kconfiglib-group$',
+                    '^    submodules: true$',
                     '^  - name: tagged_repo$',
                     '^    url: .*$',
                     '^    revision: [a-f0-9]{40}$',
@@ -262,10 +268,7 @@ def test_manifest_freeze(west_update_tmpdir):
                     '^    west-commands: scripts/west-commands.yml$',
                     '^  self:$',
                     '^    path: zephyr$']
-
-    for eline_re, aline in zip(expected_res, actual):
-        assert re.match(eline_re, aline) is not None, (aline, eline_re)
-
+    _match_multiline_regex(expected_res, actual)
 
 def test_compare(config_tmpdir, west_init_tmpdir):
     # 'west compare' with no projects cloned should still work,
@@ -806,6 +809,26 @@ def test_update_submodules_list(repos_tmpdir):
                                 capture_stderr=True, capture_stdout=True)
     assert not (res.returncode or res.stdout.strip())
 
+    # Test freeze output with submodules
+    # see test_manifest_freeze for details
+    actual = cmd('manifest --freeze', cwd=ws).splitlines()
+    expected_res = ['^manifest:$',
+                    '^  projects:$',
+                    '^  - name: zephyr$',
+                    f'^    url: {re.escape(str(zephyr))}$',
+                    '^    revision: [a-f0-9]{40}$',
+                    '^    submodules:$',
+                    '^    - path: tagged_repo$',
+                    '^  - name: net-tools$',
+                    f'^    url: {re.escape(str(net_tools))}$',
+                    '^    revision: [a-f0-9]{40}$',
+                    '^    submodules:$',
+                    f'^    - path: {re.escape(str(kconfiglib_submodule))}$',
+                    '^      name: Kconfiglib$',
+                    '^  self:$',
+                    '^    path: mp$']
+    _match_multiline_regex(expected_res, actual)
+
 def test_update_all_submodules(repos_tmpdir):
     # The west update command should not only update projects,
     # but also its submodules. Test verifies whether setting submodules
@@ -899,6 +922,19 @@ def test_update_all_submodules(repos_tmpdir):
                              capture_stderr=True, capture_stdout=True)
     assert not (res.returncode or res.stdout.strip())
 
+    # Test freeze output with submodules
+    # see test_manifest_freeze for details
+    actual = cmd('manifest --freeze', cwd=ws).splitlines()
+    expected_res = ['^manifest:$',
+                    '^  projects:$',
+                    '^  - name: zephyr$',
+                    f'^    url: {re.escape(str(zephyr))}$',
+                    '^    revision: [a-f0-9]{40}$',
+                    '^    submodules: true$',
+                    '^  self:$',
+                    '^    path: mp$']
+    _match_multiline_regex(expected_res, actual)
+
 def test_update_no_submodules(repos_tmpdir):
     # Test verifies whether setting submodules value to boolean False does not
     # result in updating project submodules.
@@ -968,6 +1004,18 @@ def test_update_no_submodules(repos_tmpdir):
                              cwd=os.path.join(ws, 'zephyr', 'net-tools'),
                              capture_stderr=True, capture_stdout=True)
     assert (res.returncode or res.stdout.strip())
+
+    # Test freeze output with submodules
+    # see test_manifest_freeze for details
+    actual = cmd('manifest --freeze', cwd=ws).splitlines()
+    expected_res = ['^manifest:$',
+                    '^  projects:$',
+                    '^  - name: zephyr$',
+                    f'^    url: {re.escape(str(zephyr))}$',
+                    '^    revision: [a-f0-9]{40}$',
+                    '^  self:$',
+                    '^    path: mp$']
+    _match_multiline_regex(expected_res, actual)
 
 def test_update_submodules_strategy(repos_tmpdir):
     # The west update command is able to update submodules using default
@@ -1096,6 +1144,27 @@ def test_update_submodules_strategy(repos_tmpdir):
     # should not drop it.
     assert net_tools_project.sha('HEAD', cwd=kconfiglib_dst_dir) \
            == kconfiglib_new_sha
+
+    # Test freeze output with submodules
+    # see test_manifest_freeze for details
+    actual = cmd('manifest --freeze', cwd=ws).splitlines()
+    expected_res = ['^manifest:$',
+                    '^  projects:$',
+                    '^  - name: zephyr$',
+                    f'^    url: {re.escape(str(zephyr))}$',
+                    '^    revision: [a-f0-9]{40}$',
+                    '^    submodules:$',
+                    '^    - path: tagged_repo$',
+                    '^      name: tagged_repo$',
+                    '^  - name: net-tools$',
+                    f'^    url: {re.escape(str(net_tools))}$',
+                    '^    revision: [a-f0-9]{40}$',
+                    '^    submodules:$',
+                    '^    - path: Kconfiglib$',
+                    '^      name: Kconfiglib$',
+                    '^  self:$',
+                    '^    path: mp$']
+    _match_multiline_regex(expected_res, actual)
 
 @pytest.mark.xfail
 def test_update_submodules_relpath(tmpdir):
