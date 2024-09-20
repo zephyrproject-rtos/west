@@ -882,6 +882,15 @@ class Project:
                 _west_commands_maybe_delist(self.west_commands)
         if self.groups:
             ret['groups'] = self.groups
+        if isinstance(self.submodules, bool) and self.submodules:
+            ret['submodules'] = True
+        elif isinstance(self.submodules, list):
+            ret['submodules'] = []
+            for s in self.submodules:
+                obj: Dict = {'path': s.path}
+                if s.name:
+                    obj['name'] = s.name
+                ret['submodules'].append(obj)
         if self.userdata:
             ret['userdata'] = self.userdata
 
@@ -1143,7 +1152,7 @@ class ManifestProject(Project):
         # Pretending that this is a Project, even though it's not (#327)
         self.description: Optional[str] = None
         self.url: str = ''
-        self.submodules = False
+        self.submodules: SubmodulesType = False
         self.revision: str = 'HEAD'
         self.remote_name: str = ''
         self.clone_depth: Optional[int] = None
