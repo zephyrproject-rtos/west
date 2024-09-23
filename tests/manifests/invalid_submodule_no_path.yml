@@ -1,0 +1,10 @@
+# Submodule entries require a path
+manifest:
+  remotes:
+    - name: remote1
+      url-base: https://example.com
+  projects:
+    - name: project1
+      remote: remote1
+      submodules:
+        - name: project2

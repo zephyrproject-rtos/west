@@ -3176,6 +3176,74 @@ def test_group_filter_imports(manifest_repo):
     assert hasattr(m, '_legacy_group_filter_warned')
 
 
+def test_submodule_manifest():
+    m = M('''\
+    projects:
+    - name: project1
+      url: url
+    - name: project2
+      url: url
+      submodules: true
+    - name: project3
+      url: url
+      submodules:
+      - path: path
+    - name: project4
+      url: url
+      submodules:
+      - path: path
+        name: subproject1
+    - name: project5
+      url: url
+      submodules:
+      - path: path
+        name: subproject1
+      - path: path
+        name: subproject2
+    - name: project6
+      url: url
+      submodules: false
+    ''').as_dict()['manifest']
+
+    mp = m['projects'][0]
+    assert 'submodules' not in mp
+
+    mp = m['projects'][1]
+    assert 'submodules' in mp
+    assert isinstance(mp['submodules'], bool)
+    assert mp['submodules']
+
+    mp = m['projects'][2]
+    assert isinstance(mp['submodules'], list)
+    assert len(mp['submodules']) == 1
+    assert 'path' in mp['submodules'][0]
+    assert mp['submodules'][0]['path'] == 'path'
+    assert 'name' not in mp['submodules'][0]
+
+    mp = m['projects'][3]
+    assert isinstance(mp['submodules'], list)
+    assert len(mp['submodules']) == 1
+    assert 'path' in mp['submodules'][0]
+    assert mp['submodules'][0]['path'] == 'path'
+    assert 'name' in mp['submodules'][0]
+    assert mp['submodules'][0]['name'] == 'subproject1'
+
+    mp = m['projects'][4]
+    assert isinstance(mp['submodules'], list)
+    assert len(mp['submodules']) == 2
+    assert 'path' in mp['submodules'][0]
+    assert mp['submodules'][0]['path'] == 'path'
+    assert 'name' in mp['submodules'][0]
+    assert mp['submodules'][0]['name'] == 'subproject1'
+    assert 'path' in mp['submodules'][1]
+    assert mp['submodules'][1]['path'] == 'path'
+    assert 'name' in mp['submodules'][1]
+    assert mp['submodules'][1]['name'] == 'subproject2'
+
+    mp = m['projects'][5]
+    assert 'submodules' not in mp
+
+
 #########################################
 # Various invalid manifests
 
