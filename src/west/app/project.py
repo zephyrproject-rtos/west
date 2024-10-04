@@ -177,7 +177,7 @@ finalize the deletion until there is no concurrent user left.
             parser_adder,
             usage='''
 
-  %(prog)s [-m URL] [--mr REVISION] [--mf FILE] [directory]
+  %(prog)s [-m URL] [--mr REVISION] [--mf FILE] [-o=GIT_CLONE_OPTION] [directory]
   %(prog)s -l [--mf FILE] directory
 ''')
 
@@ -185,6 +185,10 @@ finalize the deletion until there is no concurrent user left.
 
         parser.add_argument('-m', '--manifest-url',
                             help='''manifest repository URL to clone;
+                            cannot be combined with -l''')
+        parser.add_argument('-o', '--clone-opt', action='append', default=[],
+                            help='''additional option to pass to 'git clone'
+                            (e.g. '-o=--depth=1'); may be given more than once;
                             cannot be combined with -l''')
         parser.add_argument('--mr', '--manifest-rev', dest='manifest_rev',
                             help='''manifest repository branch or tag name
@@ -225,8 +229,8 @@ finalize the deletion until there is no concurrent user left.
 
             self.die_already(self.topdir, msg)
 
-        if args.local and (args.manifest_url or args.manifest_rev):
-            self.die('-l cannot be combined with -m or --mr')
+        if args.local and (args.manifest_url or args.manifest_rev or args.clone_opt):
+            self.die('-l cannot be combined with -m, -o or --mr')
 
         self.die_if_no_git()
 
@@ -302,7 +306,7 @@ finalize the deletion until there is no concurrent user left.
                 f'Cloning manifest repository from {manifest_url}' +
                 (f', rev. {args.manifest_rev}' if args.manifest_rev else ''))
 
-            self.check_call(['git', 'clone'] + branch_opt +
+            self.check_call(['git', 'clone'] + branch_opt + args.clone_opt +
                             [manifest_url, os.fspath(tempdir)])
         except subprocess.CalledProcessError:
             shutil.rmtree(tempdir, ignore_errors=True)
