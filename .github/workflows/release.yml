@@ -30,6 +30,7 @@ jobs:
     - name: Download build artifacts
       uses: actions/download-artifact@v4
       with:
+        name: python-package-distributions
         path: dist/
 
     # The assets can be attached to an existing release, if a matching tag is found
