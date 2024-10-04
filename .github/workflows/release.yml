@@ -20,9 +20,10 @@ jobs:
     # Make the GH environment explicit
     environment: release
 
-    # Mandatory for trusted publishing
     permissions:
+      # Mandatory for attaching assets to releases
       contents: write
+      # Mandatory for trusted publishing
       id-token: write
 
     steps:
@@ -31,6 +32,7 @@ jobs:
       with:
         path: dist/
 
+    # The assets can be attached to an existing release, if a matching tag is found
     - name: Upload release assets
       uses: softprops/action-gh-release@v2
       with:
