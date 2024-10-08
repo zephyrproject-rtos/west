@@ -1647,6 +1647,25 @@ def test_init_local_with_empty_path(repos_tmpdir):
     assert (repos_tmpdir / 'workspace' / 'subdir' / 'Kconfiglib').check(dir=1)
 
 
+def test_init_local_with_clone_option_failure(repos_tmpdir):
+    # Test that 'west init -l -o' errors out
+
+    west_tmpdir = repos_tmpdir / 'workspace'
+
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd(['init', '-l', '-o=--depth=1', west_tmpdir])
+
+
+def test_init_with_clone_option_depth_one(repos_tmpdir):
+    # Test that 'west init -o=--depth=1' only clones depth 1
+
+    west_tmpdir = repos_tmpdir / 'workspace'
+
+    cmd(['init', '-o=--depth=1', west_tmpdir])
+    assert 1 == int(subprocess.check_output([GIT, 'rev-list', '--count', '--max-count=5', 'HEAD'],
+                                            cwd=west_tmpdir / 'zephyr').decode().strip())
+
+
 def test_update_with_groups_enabled(west_init_tmpdir):
     # Test "west update" with increasing numbers of groups enabled.
 
