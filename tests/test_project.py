@@ -350,6 +350,7 @@ def test_diff(west_init_tmpdir):
     cmd('update net-tools')
     cmd('diff')
     cmd('diff --stat')
+    cmd('diff --manifest')
 
     cmd('update Kconfiglib')
 
