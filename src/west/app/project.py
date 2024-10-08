@@ -788,7 +788,7 @@ class Diff(_ProjectCommand):
         parser.add_argument('-a', '--all', action='store_true',
                             help='include output for inactive projects')
         parser.add_argument('-m', '--manifest', action='store_true',
-                            help='show changes relative to the manifest revision')
+                            help='show changes relative to "manifest-rev"')
         return parser
 
     def do_run(self, args, user_args):
@@ -800,9 +800,16 @@ class Diff(_ProjectCommand):
         # which it won't do ordinarily since stdout is not a terminal.
         color = ['--color=always'] if self.color_ui else []
         for project in self._cloned_projects(args, only_active=not args.all):
+            diff_commit = (
+                ['manifest-rev'] # see #719 and #747
+                # Special-case the manifest repository while it's
+                # still showing up in the 'projects' list. Yet
+                # more evidence we should tackle #327.
+                if args.manifest and not isinstance(project, ManifestProject)
+                else []
+            )
             # Use paths that are relative to the base directory to make it
             # easier to see where the changes are
-            diff_commit = [project.revision] if args.manifest else []
             cp = project.git(['diff', f'--src-prefix={project.path}/',
                               f'--dst-prefix={project.path}/',
                               '--exit-code'] + color + diff_commit,
