@@ -29,7 +29,8 @@ from west.manifest import Manifest, Project, ManifestProject, \
 from west.configuration import Configuration, ConfigFile, MalformedConfig
 
 # White box checks for the schema version.
-from west.manifest import _VALID_SCHEMA_VERS
+from west.manifest import _VALID_SCHEMA_VERS, VenvPyRequirement, \
+    PyRequirementType, GLOBAL_DEFINITIONS, BinRequirementUrl
 
 from conftest import create_workspace, create_repo, checkout_branch, \
     create_branch, add_commit, add_tag, rev_parse, GIT, check_proj_consistency
@@ -2945,6 +2946,114 @@ def test_is_active():
           extra_filter=['+ga', '-gb'])
     check((False, False, True), 'group-filter: [-ga]',
           extra_filter=['-gb'])
+
+#########################################
+# Manifest venv tests
+#
+# In schema version 1.3, "manifest: venv:" were added which enable
+# extra information about both python and binary dependencies.
+
+def test_manifest_venv():
+    m = M("""\
+  projects: []
+  venv:
+    name: ".venv"
+    definitions:
+      key0: "val0"
+    py-requirements:
+      - pattern: "scripts/requirements.txt"
+        type: "requirements"
+      - pattern: "pkg-name"
+        type: "package"
+      - pattern: "constraints.c"
+        type: "constraints"
+      - pattern: "path/to/py"
+        type: "directory"
+    bin-requirements:
+      bin_name0:
+        definitions:
+          key1: "val1"
+        urls:
+          linux-amd64:
+            url: "https://path/to/download/${platform}/${key1}"
+          windows-*:
+            url: "https://path/to/windows/download/${os}/${arch}/${key0}"
+            paths: ["win"]
+""")
+    assert m.venv.name == ".venv"
+    assert m.venv.py_requirements == [
+        VenvPyRequirement(
+            pattern="scripts/requirements.txt",
+            type=PyRequirementType.REQUIREMENTS,
+        ),
+        VenvPyRequirement(
+            pattern="pkg-name",
+            type=PyRequirementType.PACKAGE,
+        ),
+        VenvPyRequirement(
+            pattern="constraints.c",
+            type=PyRequirementType.CONSTRAINTS,
+        ),
+        VenvPyRequirement(
+            pattern="path/to/py",
+            type=PyRequirementType.DIRECTORY,
+        ),
+    ]
+    assert m.venv.bin_requirements == {
+        "bin_name0": {
+            "linux-amd64": BinRequirementUrl(
+                url=f"https://path/to/download/{GLOBAL_DEFINITIONS['platform']}/val1",
+                paths=["."],
+            ),
+            "windows-.*": BinRequirementUrl(
+                url=(
+                    "https://path/to/windows/download/" +
+                    f"{GLOBAL_DEFINITIONS['os']}/{GLOBAL_DEFINITIONS['arch']}/val0"
+                ),
+                paths=["win"],
+            ),
+        },
+    }
+    venv_dict = m.as_dict()["manifest"]["venv"]
+    assert venv_dict["name"] == ".venv"
+
+    bin_requirements = venv_dict["bin-requirements"]
+    assert len(bin_requirements) == 1
+
+    bin_name0 = bin_requirements["bin_name0"]
+    assert len(bin_name0) == 2
+
+    assert bin_name0["linux-amd64"] == {
+        "paths": ["."],
+        "url": f"https://path/to/download/{GLOBAL_DEFINITIONS['platform']}/val1",
+    }
+    assert bin_name0["windows-*"] == {
+        "paths": ["win"],
+        "url": (
+            "https://path/to/windows/download/" +
+            f"{GLOBAL_DEFINITIONS['os']}/{GLOBAL_DEFINITIONS['arch']}/val0"
+        ),
+    }
+
+    py_requirements = venv_dict["py-requirements"]
+    assert py_requirements == [
+        {
+            "pattern": "scripts/requirements.txt",
+            "type": "requirements",
+        },
+        {
+            "pattern": "pkg-name",
+            "type": "package",
+        },
+        {
+            "pattern": "constraints.c",
+            "type": "constraints",
+        },
+        {
+            "pattern": "path/to/py",
+            "type": "directory",
+        },
+    ]
 
 #########################################
 # Manifest group-filter + import tests
