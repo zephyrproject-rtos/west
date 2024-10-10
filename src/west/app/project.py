@@ -177,7 +177,7 @@ finalize the deletion until there is no concurrent user left.
             parser_adder,
             usage='''
 
-  %(prog)s [-m URL] [--mr REVISION] [--mf FILE] [directory]
+  %(prog)s [-m URL] [--mr REVISION] [--mf FILE] [-o=GIT_CLONE_OPTION] [directory]
   %(prog)s -l [--mf FILE] directory
 ''')
 
@@ -185,6 +185,10 @@ finalize the deletion until there is no concurrent user left.
 
         parser.add_argument('-m', '--manifest-url',
                             help='''manifest repository URL to clone;
+                            cannot be combined with -l''')
+        parser.add_argument('-o', '--clone-opt', action='append', default=[],
+                            help='''additional option to pass to 'git clone'
+                            (e.g. '-o=--depth=1'); may be given more than once;
                             cannot be combined with -l''')
         parser.add_argument('--mr', '--manifest-rev', dest='manifest_rev',
                             help='''manifest repository branch or tag name
@@ -225,8 +229,8 @@ finalize the deletion until there is no concurrent user left.
 
             self.die_already(self.topdir, msg)
 
-        if args.local and (args.manifest_url or args.manifest_rev):
-            self.die('-l cannot be combined with -m or --mr')
+        if args.local and (args.manifest_url or args.manifest_rev or args.clone_opt):
+            self.die('-l cannot be combined with -m, -o or --mr')
 
         self.die_if_no_git()
 
@@ -302,7 +306,7 @@ finalize the deletion until there is no concurrent user left.
                 f'Cloning manifest repository from {manifest_url}' +
                 (f', rev. {args.manifest_rev}' if args.manifest_rev else ''))
 
-            self.check_call(['git', 'clone'] + branch_opt +
+            self.check_call(['git', 'clone'] + branch_opt + args.clone_opt +
                             [manifest_url, os.fspath(tempdir)])
         except subprocess.CalledProcessError:
             shutil.rmtree(tempdir, ignore_errors=True)
@@ -784,7 +788,7 @@ class Diff(_ProjectCommand):
         parser.add_argument('-a', '--all', action='store_true',
                             help='include output for inactive projects')
         parser.add_argument('-m', '--manifest', action='store_true',
-                            help='show changes relative to the manifest revision')
+                            help='show changes relative to "manifest-rev"')
         return parser
 
     def do_run(self, args, user_args):
@@ -796,9 +800,16 @@ class Diff(_ProjectCommand):
         # which it won't do ordinarily since stdout is not a terminal.
         color = ['--color=always'] if self.color_ui else []
         for project in self._cloned_projects(args, only_active=not args.all):
+            diff_commit = (
+                ['manifest-rev'] # see #719 and #747
+                # Special-case the manifest repository while it's
+                # still showing up in the 'projects' list. Yet
+                # more evidence we should tackle #327.
+                if args.manifest and not isinstance(project, ManifestProject)
+                else []
+            )
             # Use paths that are relative to the base directory to make it
             # easier to see where the changes are
-            diff_commit = [project.revision] if args.manifest else []
             cp = project.git(['diff', f'--src-prefix={project.path}/',
                               f'--dst-prefix={project.path}/',
                               '--exit-code'] + color + diff_commit,
