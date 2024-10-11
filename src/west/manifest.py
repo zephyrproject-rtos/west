@@ -2421,7 +2421,10 @@ class Manifest:
         # symbolic links.
         ret_norm = os.path.normpath(ret.path)
 
-        if os.path.isabs(ret_norm):
+        # To be "really" absolute, a Windows path must include the "drive" like C:\\, D:\\.
+        # But here we also want to block drive-less "half-breeds".
+        # Note this question has confused Python which changed the `.isabs()` behavior in 3.13
+        if ret_norm[0] in '/\\' or os.path.isabs(ret_norm):
             self._malformed(f'project "{ret.name}" has absolute path '
                             f'{ret.path}; this must be relative to the '
                             f'workspace topdir' +
