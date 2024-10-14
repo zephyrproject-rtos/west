@@ -222,7 +222,7 @@ finalize the deletion until there is no concurrent user left.
                     This forces west to search for a workspace there.
                     Try unsetting ZEPHYR_BASE and re-running this command.''')
             else:
-                west_dir = Path(self.topdir) / '.west'
+                west_dir = Path(self.topdir) / WEST_DIR
                 msg = ("\n  Hint: if you do not want a workspace there, \n"
                        "  remove this directory and re-run this command:\n\n"
                        f"  {west_dir}")
@@ -2094,7 +2094,7 @@ def projects_unknown(manifest, projects):
 #
 
 # Top-level west directory, containing west itself and the manifest.
-WEST_DIR = '.west'
+WEST_DIR = util.WEST_DIR
 
 # Default manifest repository URL.
 MANIFEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/zephyr'
