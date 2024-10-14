@@ -1,0 +1,7 @@
+# Project paths can't be .west after normalization.
+
+manifest:
+  projects:
+    - name: nope
+      url: ignore-me
+      path: foo/../.west
