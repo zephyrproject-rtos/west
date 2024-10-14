@@ -2435,6 +2435,10 @@ class Manifest:
                             f'normalizes to {ret_norm}, which escapes '
                             f'the workspace topdir')
 
+        if Path(ret_norm).parts[0] == util.WEST_DIR:
+            self._malformed(f'project "{name}" path {ret.path} '
+                            f'is in the {util.WEST_DIR} directory')
+
         return ret
 
     def _validate_project_groups(self, project_name: str,
