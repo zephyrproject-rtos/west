@@ -20,6 +20,8 @@ from typing import List, Optional, Union
 # otherwise, but it doesn't seem worth it.
 PathType = Union[str, os.PathLike]
 
+WEST_DIR = '.west'
+
 def escapes_directory(path: PathType, directory: PathType) -> bool:
     '''Returns True if `path` escapes parent directory `directory`.
 
@@ -58,7 +60,7 @@ def west_dir(start: Optional[PathType] = None) -> str:
 
     Raises WestNotFound if no .west directory is found.
     '''
-    return os.path.join(west_topdir(start), '.west')
+    return os.path.join(west_topdir(start), WEST_DIR)
 
 def west_topdir(start: Optional[PathType] = None,
                 fall_back: bool = True) -> str:
@@ -69,7 +71,7 @@ def west_topdir(start: Optional[PathType] = None,
     cur_dir = pathlib.Path(start or os.getcwd())
 
     while True:
-        if (cur_dir / '.west').is_dir():
+        if (cur_dir / WEST_DIR).is_dir():
             return os.fspath(cur_dir)
 
         parent_dir = cur_dir.parent

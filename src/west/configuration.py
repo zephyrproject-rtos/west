@@ -43,7 +43,7 @@ from enum import Enum
 from typing import Any, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
 import warnings
 
-from west.util import west_dir, WestNotFound, PathType
+from west.util import WEST_DIR, west_dir, WestNotFound, PathType
 
 class MalformedConfig(Exception):
     '''The west configuration was malformed.
@@ -616,7 +616,7 @@ def _location(cfg: ConfigFile, topdir: Optional[PathType] = None,
             return env['WEST_CONFIG_LOCAL']
 
         if topdir:
-            return os.fspath(Path(topdir) / '.west' / 'config')
+            return os.fspath(Path(topdir) / WEST_DIR / 'config')
 
         if find_local:
             # Might raise WestNotFound!
