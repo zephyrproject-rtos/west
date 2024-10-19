@@ -16,6 +16,7 @@ import shlex
 import subprocess
 import sys
 import textwrap
+import time
 from time import perf_counter
 from urllib.parse import urlparse
 
@@ -163,8 +164,12 @@ temporary files at the same time. For instance, it is required to stop
 Visual Studio Code before running 'west init` on the Windows NTFS
 filesystem. Find other, similar "Access is denied" examples in west
 issue #558.
-This is not required on inode-based, Linux filesystems that wait and
+This is not required with most Linux filesystems that have an inode
+indirection layer and can wait to
 finalize the deletion until there is no concurrent user left.
+If you cannot identify or cannot stop the background scanner
+that is interfering with renames on your system, try the --rename-delay hack
+below.
 ''',
             requires_workspace=False)
 
@@ -201,6 +206,12 @@ finalize the deletion until there is no concurrent user left.
                             MANIFEST_URL; .west is created next to "directory"
                             in this case, and manifest.path points at
                             "directory"''')
+        parser.add_argument('--rename-delay', type=int,
+                            help='''Number of seconds to wait before renaming
+                            some temporary directories. Some filesystems like NTFS
+                            cannot rename files in use; see above. This is a HACK
+                            that may or may not give enough time for some random
+                            background scanner to complete. ''')
 
         parser.add_argument(
             'directory', nargs='?', default=None,
@@ -338,6 +349,13 @@ finalize the deletion until there is no concurrent user left.
             manifest_path = PurePath(urlparse(manifest_url).path).name
 
         manifest_abspath = topdir / manifest_path
+
+        # Some filesystems like NTFS can't rename files in use.
+        # See west issue #558. Will ReFS address this?
+        ren_delay = args.rename_delay
+        if ren_delay is not None:
+            self.inf(f"HACK: waiting {ren_delay} seconds before renaming {tempdir}")
+            time.sleep(ren_delay)
 
         self.dbg('moving', tempdir, 'to', manifest_abspath,
                  level=Verbosity.DBG_EXTREME)
