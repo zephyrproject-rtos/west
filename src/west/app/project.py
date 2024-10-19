@@ -307,11 +307,28 @@ below.
         if not topdir.is_dir():
             self.create(topdir, exist_ok=False)
 
-        # Clone the manifest repository into a temporary directory.
         tempdir: Path = west_dir / 'manifest-tmp'
         if tempdir.is_dir():
             self.dbg('removing existing temporary manifest directory', tempdir)
             shutil.rmtree(tempdir)
+
+        # Test that we can rename and delete directories. For the vast
+        # majority of users this is a no-op but some filesystem
+        # permissions can be weird; see October 2024 example in west
+        # issue #558.  Git cloning can take a long time, so check this
+        # first.  Failing ourselves is not just faster, it's also much
+        # clearer than when git is involved in the mix.
+
+        tempdir.mkdir(parents=True)
+        (tempdir / 'not empty').mkdir()
+        # Ignore the --rename-delay hack here not to double the wait;
+        # we only have a couple directories and no file at this point!
+        tempdir2 = tempdir.parent / 'renamed tempdir'
+        os.rename(tempdir, tempdir2)
+        # No need to delete west_dir parent
+        shutil.rmtree(tempdir2)
+
+        # Clone the manifest repository into a temporary directory.
         try:
             self.small_banner(
                 f'Cloning manifest repository from {manifest_url}' +
