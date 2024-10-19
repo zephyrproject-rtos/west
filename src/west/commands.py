@@ -511,7 +511,11 @@ class WestCommand(ABC):
         Equivalent to ``die(*args, fatal=True)``, followed by an attempt to
         abort with the given *exit_code*.'''
         self.err(*args, fatal=True)
-        sys.exit(exit_code)
+        if self.verbosity >= Verbosity.DBG_EXTREME:
+            raise RuntimeError("die with -vvv or more shows a stack trace. "
+                               "exit_code argument is ignored.")
+        else:
+            sys.exit(exit_code)
 
     @property
     def color_ui(self) -> bool:
