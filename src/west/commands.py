@@ -440,16 +440,16 @@ class WestCommand(ABC):
         if colorize:
             self._reset_colors(sys.stdout)
 
-    def banner(self, *args):
+    def banner(self, *args, end: str = '\n'):
         '''Prints args as a "banner" using inf().
 
         The args are prefixed with '=== ' and colorized by default.'''
-        self.inf('===', *args, colorize=True)
+        self.inf('===', *args, colorize=True, end=end)
 
-    def small_banner(self, *args):
+    def small_banner(self, *args, end: str = '\n'):
         '''Prints args as a smaller banner(), i.e. prefixed with '-- ' and
         not colorized.'''
-        self.inf('---', *args, colorize=False)
+        self.inf('---', *args, colorize=False, end=end)
 
     def wrn(self, *args, end: str = '\n'):
         '''Print a warning.
