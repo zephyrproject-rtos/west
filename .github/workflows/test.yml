@@ -27,4 +27,4 @@ jobs:
       - name: install tox
         run: pip3 install tox
       - name: tox
-        run: tox -c 'check out'
+        run: tox -c 'check out' -- -W error
