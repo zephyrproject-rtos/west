@@ -10,7 +10,6 @@ from pathlib import Path, PurePath
 
 import pytest
 
-from west import configuration as config
 from west.manifest import Manifest, ManifestProject, Project, \
     ManifestImportFailed
 from west.manifest import ImportFlag as MIF
@@ -1631,7 +1630,6 @@ def test_init_local_with_manifest_filename(repos_tmpdir):
     # success
     cmd(['init', '--mf', 'project.yml', '-l', zephyr_install_dir])
     workspace.chdir()
-    config.read_config()
     cmd('update')
 
 
@@ -1823,7 +1821,6 @@ def test_init_with_manifest_filename(repos_tmpdir):
     # success
     cmd(['init', '-m', manifest, '--mf', 'project.yml', west_tmpdir])
     west_tmpdir.chdir()
-    config.read_config()
     cmd('update')
 
 def test_init_with_manifest_in_subdir(repos_tmpdir):
@@ -1915,7 +1912,6 @@ def test_extension_command_multiproject(repos_tmpdir):
     zephyr = repos_tmpdir / 'repos' / 'zephyr'
     cmd(['init', '-m', zephyr, west_tmpdir])
     west_tmpdir.chdir()
-    config.read_config()
     cmd('update')
 
     # The newline shenanigans are for Windows.
@@ -1995,7 +1991,6 @@ def test_extension_command_duplicate(repos_tmpdir):
     zephyr = repos_tmpdir / 'repos' / 'zephyr'
     cmd(['init', '-m', zephyr, west_tmpdir])
     west_tmpdir.chdir()
-    config.read_config()
     cmd('update')
 
     actual = cmd('test-extension', stderr=subprocess.STDOUT).splitlines()
