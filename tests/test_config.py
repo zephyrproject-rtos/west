@@ -4,11 +4,13 @@
 
 import os
 import pathlib
+from typing import Any, Optional
 import subprocess
 
 import pytest
 
 from west import configuration as config
+from west.util import PathType
 
 from conftest import cmd
 
@@ -32,17 +34,17 @@ def cfg(f=ALL, topdir=None):
     cp.read(config._gather_configs(f, topdir), encoding='utf-8')
     return cp
 
-def update_config(*args, **kwargs):
-    # For testing purposes it's easiest to use the deprecated functions
-    # but make these calls explicit.
-    with pytest.deprecated_call():
-        return config.update_config(*args, **kwargs)
+def update_config(section: str, key: str, value: Any,
+                  configfile: config.ConfigFile = LOCAL,
+                  topdir: Optional[PathType] = None) -> None:
+    c = config.Configuration(topdir)
+    c.set(option=f'{section}.{key}', value=value, configfile=configfile)
 
-def delete_config(*args, **kwargs):
-    # For testing purposes it's easiest to use the deprecated functions
-    # but make these calls explicit.
-    with pytest.deprecated_call():
-        return config.delete_config(*args, **kwargs)
+def delete_config(section: str, key: str,
+                  configfile: Optional[config.ConfigFile] = None,
+                  topdir: Optional[PathType] = None) -> None:
+    c = config.Configuration(topdir)
+    c.delete(option=f'{section}.{key}', configfile=configfile)
 
 def test_config_global():
     # Set a global config option via the command interface. Make sure
@@ -251,6 +253,7 @@ def test_delete_all():
 def test_delete_none():
     # Deleting None should delete from lowest-precedence global or
     # local file only.
+    # Only supported with the deprecated call
     update_config('pytest', 'key', 'system', configfile=SYSTEM)
     update_config('pytest', 'key', 'global', configfile=GLOBAL)
     update_config('pytest', 'key', 'local', configfile=LOCAL)
@@ -261,18 +264,24 @@ def test_delete_none():
     assert cfg(f=ALL)['pytest']['key'] == 'global'
     delete_config('pytest', 'key', configfile=None)
     assert cfg(f=ALL)['pytest']['key'] == 'system'
-    with pytest.raises(KeyError):
-        delete_config('pytest', 'key', configfile=None)
+    with pytest.raises(KeyError), pytest.deprecated_call():
+        config.delete_config('pytest', 'key', configfile=None)
+
+    # Using the Configuration Class this does remove from system
+    delete_config('pytest', 'key', configfile=None)
+    assert 'pytest' not in cfg(f=ALL)
 
 def test_delete_list():
     # Test delete of a list of places.
+    # Only supported with the deprecated call
     update_config('pytest', 'key', 'system', configfile=SYSTEM)
     update_config('pytest', 'key', 'global', configfile=GLOBAL)
     update_config('pytest', 'key', 'local', configfile=LOCAL)
     assert cfg(f=SYSTEM)['pytest']['key'] == 'system'
     assert cfg(f=GLOBAL)['pytest']['key'] == 'global'
     assert cfg(f=LOCAL)['pytest']['key'] == 'local'
-    delete_config('pytest', 'key', configfile=[GLOBAL, LOCAL])
+    with pytest.deprecated_call():
+        config.delete_config('pytest', 'key', configfile=[GLOBAL, LOCAL])
     assert cfg(f=SYSTEM)['pytest']['key'] == 'system'
     assert 'pytest' not in cfg(f=GLOBAL)
     assert 'pytest' not in cfg(f=LOCAL)
