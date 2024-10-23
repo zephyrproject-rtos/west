@@ -230,7 +230,6 @@ def west_init_tmpdir(repos_tmpdir):
     manifest = repos_tmpdir / 'repos' / 'zephyr'
     cmd(['init', '-m', str(manifest), str(west_tmpdir)])
     west_tmpdir.chdir()
-    config.read_config()
     return west_tmpdir
 
 @pytest.fixture
