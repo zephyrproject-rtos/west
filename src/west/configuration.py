@@ -40,7 +40,7 @@ import os
 from pathlib import PureWindowsPath, Path
 import platform
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING, Union
 import warnings
 
 from west.util import WEST_DIR, west_dir, WestNotFound, PathType
@@ -491,7 +491,7 @@ def update_config(section: str, key: str, value: Any,
         config.write(f)
 
 def delete_config(section: str, key: str,
-                  configfile: Optional[ConfigFile] = None,
+                  configfile: Union[Optional[ConfigFile], List[ConfigFile]] = None,
                   topdir: Optional[PathType] = None) -> None:
     '''Delete the option section.key from the given file or files.
 
