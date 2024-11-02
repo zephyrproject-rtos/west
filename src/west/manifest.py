@@ -2147,7 +2147,7 @@ class Manifest:
         # system) with a fallback on self._ctx.project_importer.
 
         imptype = type(imp)
-        if imptype == bool:
+        if imptype is bool:
             self._malformed(f'got "self: import: {imp}" of boolean')
         elif self._ctx.import_flags & ImportFlag.IGNORE:
             # If we're ignoring imports altogether, this is fine.
@@ -2171,12 +2171,12 @@ class Manifest:
         self._assert_imports_ok()
         self.has_imports = True
 
-        if imptype == str:
+        if imptype is str:
             self._import_path_from_self(imp)
-        elif imptype == list:
+        elif imptype is list:
             for subimp in imp:
                 self._import_from_self(subimp)
-        elif imptype == dict:
+        elif imptype is dict:
             self._import_map_from_self(imp)
         else:
             self._malformed(
@@ -2505,16 +2505,16 @@ class Manifest:
         self.has_imports = True
 
         imptype = type(imp)
-        if imptype == bool:
+        if imptype is bool:
             # We should not have been called unless the import was truthy.
             assert imp
             self._import_path_from_project(project, _WEST_YML)
-        elif imptype == str:
+        elif imptype is str:
             self._import_path_from_project(project, imp)
-        elif imptype == list:
+        elif imptype is list:
             for subimp in imp:
                 self._import_from_project(project, subimp)
-        elif imptype == dict:
+        elif imptype is dict:
             self._import_map_from_project(project, imp)
         else:
             self._malformed(f'{project.name_and_path}: invalid import {imp} '
