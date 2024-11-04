@@ -40,7 +40,8 @@ import os
 from pathlib import PureWindowsPath, Path
 import platform
 from enum import Enum
-from typing import Any, Iterable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
+from collections.abc import Iterable
 import warnings
 
 from west.util import WEST_DIR, west_dir, WestNotFound, PathType
