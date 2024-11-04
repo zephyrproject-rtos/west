@@ -1920,12 +1920,12 @@ class Manifest:
             current_abspath = topdir_abspath / current_relpath
             try:
                 current_data = current_abspath.read_text(encoding=Manifest.encoding)
-            except FileNotFoundError:
+            except FileNotFoundError as err:
                 raise MalformedConfig(
                     f'file not found: manifest file {current_abspath} '
                     '(from configuration options '
                     f'manifest.path="{manifest_path_option}", '
-                    f'manifest.file="{manifest_file}")')
+                    f'manifest.file="{manifest_file}")') from err
 
             current_repo_abspath = topdir_abspath / manifest_path
 
