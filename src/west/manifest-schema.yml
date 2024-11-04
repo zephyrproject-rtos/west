@@ -66,6 +66,78 @@ mapping:
             required: true
             type: str
 
+  # The venv key specifies requirements for the build environment for Zephyr
+  # West will handle merging any definitions into your binary dependency
+  # strings where allowed.
+  # Example:
+  #
+  #   urls:
+  #     "windows-*":
+  #       url: "https://my.download.server/win/${arch}.zip"
+  #
+  # The above will match any architecture for the windows OS and generate a url
+  # replacing ${arch} with the current machine's underlying architecture. West
+  # will automatically provide a few definitions:
+  # - os: The current OS (one of 'windows', 'linux', or 'mac')
+  # - arch: The current architecture. This value is standardized such that
+  #   x86_64 is represented as amd64 and aarch64 as arm64. All others match
+  #   Python's `platform.machine()`
+  # - platform: A concatenation of ${os}-${arch}
+  venv:
+    required: false
+    type: map
+    mapping:
+      definitions:
+        required: false
+        type: map
+        mapping:
+          regex;(.*):
+            type: str
+      name:
+        required: false
+        type: str
+      bin-requirements:
+        required: false
+        type: map
+        mapping:
+          regex;(.*):
+            type: map
+            mapping:
+              definitions:
+                required: false
+                type: map
+                mapping:
+                  regex;(.*):
+                    type: str
+              urls:
+                required: true
+                type: map
+                mapping:
+                  regex;(.*):
+                    type: map
+                    mapping:
+                      url:
+                        required: true
+                        type: str
+                      paths:
+                        required: false
+                        type: seq
+                        sequence:
+                          - type: str
+      py-requirements:
+        required: false
+        type: seq
+        sequence:
+          - type: map
+            mapping:
+              pattern:
+                required: true
+                type: str
+              type:
+                required: true
+                type: str
+                enum: ['directory', 'constraints', 'package', 'requirements']
+
   # The "projects" key specifies a sequence of "projects", each of which has a
   # remote, and may specify additional configuration.
   #
