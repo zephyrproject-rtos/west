@@ -149,7 +149,7 @@ class WestCommand(ABC):
         self.topdir: Optional[str] = None
         self.manifest = None
         self.config = None
-        self._hooks: list[Callable[['WestCommand'], None]] = []
+        self._hooks: list[Callable[[WestCommand], None]] = []
 
     def add_pre_run_hook(self,
                          hook: Callable[['WestCommand'], None]) -> None:
