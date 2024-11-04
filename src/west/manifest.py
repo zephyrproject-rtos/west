@@ -18,7 +18,7 @@ import shlex
 import subprocess
 import sys
 from typing import Any, Callable, Iterable, NoReturn, \
-    NamedTuple, Optional, Set, TYPE_CHECKING, Union
+    NamedTuple, Optional, TYPE_CHECKING, Union
 
 from packaging.version import parse as parse_version
 import pykwalify.core
@@ -449,7 +449,7 @@ _RESERVED_GROUP_RE = re.compile(r'(^[+-]|[\s,:])')
 _INVALID_PROJECT_NAME_RE = re.compile(r'([/\\])')
 _RESERVED_PROJECT_NAME_RE = re.compile(r'[\s,]')
 
-def _update_disabled_groups(disabled_groups: Set[str],
+def _update_disabled_groups(disabled_groups: set[str],
                             group_filter: GroupFilterType):
     # Update a set of disabled groups in place based on
     # 'group_filter'.
@@ -1474,7 +1474,7 @@ class Manifest:
         # The final set of groups which are explicitly disabled in
         # this manifest data, after resolving imports. This is used
         # as an optimization in is_active().
-        self._disabled_groups: Set[str] = set()
+        self._disabled_groups: set[str] = set()
         # The "raw" (unparsed) manifest.group-filter configuration
         # option in the local configuration file. See
         # _config_group_filter(); only initialized if self._top_level
