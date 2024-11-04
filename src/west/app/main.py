@@ -920,7 +920,7 @@ class Alias(WestCommand):
         return parser
 
     def do_run(self, args, ignored):
-        assert False
+        raise AssertionError("Alias command can't run directly")
 
 class WestHelpAction(argparse.Action):
 
