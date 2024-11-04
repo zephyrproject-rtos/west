@@ -17,7 +17,7 @@ import re
 import shlex
 import subprocess
 import sys
-from typing import Any, Callable, Dict, Iterable, List, NoReturn, \
+from typing import Any, Callable, Dict, Iterable, NoReturn, \
     NamedTuple, Optional, Set, TYPE_CHECKING, Union
 
 from packaging.version import parse as parse_version
@@ -70,11 +70,11 @@ SCHEMA_VERSION = '1.2'
 # The value of a west-commands as passed around during manifest
 # resolution. It can become a list due to resolving imports, even
 # though it's just a str in each individual file right now.
-WestCommandsType = Union[str, List[str]]
+WestCommandsType = Union[str, list[str]]
 
 # Type for the importer callback passed to the manifest constructor.
 # (ImportedContentType is just an alias for what it gives back.)
-ImportedContentType = Optional[Union[str, List[str]]]
+ImportedContentType = Optional[Union[str, list[str]]]
 ImporterType = Callable[['Project', str], ImportedContentType]
 
 # Type for an import map filter function, which takes a Project and
@@ -84,10 +84,10 @@ ImporterType = Callable[['Project', str], ImportedContentType]
 ImapFilterFnType = Optional[Callable[['Project'], bool]]
 
 # A list of group names to enable and disable, like ['+foo', '-bar'].
-GroupFilterType = List[str]
+GroupFilterType = list[str]
 
 # A list of group names belonging to a project, like ['foo', 'bar']
-GroupsType = List[str]
+GroupsType = list[str]
 
 class PFR(enum.Enum):
     # "Project filter result": internal type for expressing whether a
@@ -126,7 +126,7 @@ class ProjectFilterElt(NamedTuple):
 #    ProjectFilterElt(re.compile('hal_my_vendor'), True)]
 #
 # The regular expression must match the entire project name.
-ProjectFilterType = List[ProjectFilterElt]
+ProjectFilterType = list[ProjectFilterElt]
 
 def _update_project_filter(project_filter: ProjectFilterType,
                            option_value: Optional[str]) -> None:
@@ -180,7 +180,7 @@ class Submodule(NamedTuple):
     name: Optional[str] = None
 
 # Submodules may be a list of values or a bool.
-SubmodulesType = Union[List[Submodule], bool]
+SubmodulesType = Union[list[Submodule], bool]
 
 # Manifest locating, parsing, loading, etc.
 
@@ -209,7 +209,7 @@ def _load(data: str) -> Any:
         raise MalformedManifest(data) from e
 
 def _west_commands_list(west_commands: Optional[WestCommandsType]) -> \
-        List[str]:
+        list[str]:
     # Convert the raw data from a manifest file to a list of
     # west_commands locations. (If it's already a list, make a
     # defensive copy.)
@@ -221,7 +221,7 @@ def _west_commands_list(west_commands: Optional[WestCommandsType]) -> \
     else:
         return list(west_commands)
 
-def _west_commands_maybe_delist(west_commands: List[str]) -> WestCommandsType:
+def _west_commands_maybe_delist(west_commands: list[str]) -> WestCommandsType:
     # Convert a west_commands list to a string if there's
     # just one element, otherwise return the list itself.
 
@@ -230,7 +230,7 @@ def _west_commands_maybe_delist(west_commands: List[str]) -> WestCommandsType:
     else:
         return west_commands
 
-def _west_commands_merge(wc1: List[str], wc2: List[str]) -> List[str]:
+def _west_commands_merge(wc1: list[str], wc2: list[str]) -> list[str]:
     # Merge two west_commands lists, filtering out duplicates.
 
     if wc1 and wc2:
@@ -296,10 +296,10 @@ def _manifest_content_at(project: 'Project', path: PathType, mf_encoding: str,
 
 class _import_map(NamedTuple):
     file: str
-    name_allowlist: List[str]
-    path_allowlist: List[str]
-    name_blocklist: List[str]
-    path_blocklist: List[str]
+    name_allowlist: list[str]
+    path_allowlist: list[str]
+    name_blocklist: list[str]
+    path_blocklist: list[str]
     path_prefix: str
 
 def _is_imap_list(value: Any) -> bool:
@@ -320,7 +320,7 @@ def _imap_filter(imap: _import_map) -> ImapFilterFnType:
     else:
         return None
 
-def _ensure_list(item: Union[str, List[str]]) -> List[str]:
+def _ensure_list(item: Union[str, list[str]]) -> list[str]:
     # Converts item to a list containing it if item is a string, or
     # returns item.
 
@@ -376,7 +376,7 @@ class _import_ctx(NamedTuple):
     # repository itself. This is mutable state in the same way
     # 'projects' is. Manifests which are imported earlier get
     # higher precedence here as usual.
-    manifest_west_commands: List[str]
+    manifest_west_commands: list[str]
 
     # The current restrictions on which projects the importing
     # manifest is interested in.
@@ -900,7 +900,7 @@ class Project:
     # Git helpers
     #
 
-    def git(self, cmd: Union[str, List[str]],
+    def git(self, cmd: Union[str, list[str]],
             extra_args: Iterable[str] = (),
             capture_stdout: bool = False,
             capture_stderr: bool = False,
@@ -1069,7 +1069,7 @@ class Project:
 
     def listdir_at(self, path: PathType, rev: Optional[str] = None,
                    cwd: Optional[PathType] = None,
-                   encoding: Optional[str] = None) -> List[str]:
+                   encoding: Optional[str] = None) -> list[str]:
         '''List of directory contents in the project at a specific revision.
 
         The return value is the directory contents as a list of files and
@@ -1470,7 +1470,7 @@ class Manifest:
         # later as needed.
 
         # This backs the projects() property.
-        self._projects: List[Project] = []
+        self._projects: list[Project] = []
         # The final set of groups which are explicitly disabled in
         # this manifest data, after resolving imports. This is used
         # as an optimization in is_active().
@@ -1529,7 +1529,7 @@ class Manifest:
                      # any str name is also a PathType
                      project_ids: Iterable[PathType],
                      allow_paths: bool = True,
-                     only_cloned: bool = False) -> List[Project]:
+                     only_cloned: bool = False) -> list[Project]:
         '''Get a list of `Project` objects in the manifest from
         *project_ids*.
 
@@ -1555,9 +1555,9 @@ class Manifest:
         :param only_cloned: raise an exception for uncloned projects
         '''
         projects = list(self.projects)
-        unknown: List[PathType] = []  # project_ids with no Projects
-        uncloned: List[Project] = []  # if only_cloned, the uncloned Projects
-        ret: List[Project] = []  # result list of resolved Projects
+        unknown: list[PathType] = []  # project_ids with no Projects
+        uncloned: list[Project] = []  # if only_cloned, the uncloned Projects
+        ret: list[Project] = []  # result list of resolved Projects
 
         # If no project_ids are specified, use all projects.
         if not project_ids:
@@ -1689,7 +1689,7 @@ class Manifest:
         return self._dump_yaml(self.as_frozen_dict(), **kwargs)
 
     @property
-    def projects(self) -> List[Project]:
+    def projects(self) -> list[Project]:
         '''Sequence of `Project` objects representing manifest
         projects.
 
@@ -2043,7 +2043,7 @@ class Manifest:
             _logger.debug('group-filter: unset')
             return
 
-        raw_filter: List[RawGroupType] = manifest_data['group-filter']
+        raw_filter: list[RawGroupType] = manifest_data['group-filter']
         if not raw_filter:
             self._malformed('"manifest: group-filter:" may not be empty')
 
@@ -2056,7 +2056,7 @@ class Manifest:
             self._top_level_group_filter = group_filter
 
     def _validated_group_filter(
-            self, source: Optional[str], raw_filter: List[RawGroupType]
+            self, source: Optional[str], raw_filter: list[RawGroupType]
     ) -> GroupFilterType:
         # Helper function for cleaning up nonempty manifest:
         # group-filter: and manifest.group-filter values.
@@ -2442,7 +2442,7 @@ class Manifest:
         return ret
 
     def _validate_project_groups(self, project_name: str,
-                                 raw_groups: List[RawGroupType]):
+                                 raw_groups: list[RawGroupType]):
         for raw_group in raw_groups:
             if not is_group(raw_group):
                 self._malformed(f'project {project_name}: '

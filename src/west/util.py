@@ -9,7 +9,7 @@ import os
 import pathlib
 import shlex
 import textwrap
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 # What west's APIs accept for paths.
 #
@@ -39,11 +39,11 @@ def escapes_directory(path: PathType, directory: PathType) -> bool:
         ret = True
     return ret
 
-def quote_sh_list(cmd: List[str]) -> str:
+def quote_sh_list(cmd: list[str]) -> str:
     '''Transform a command from list into shell string form.'''
     return ' '.join(shlex.quote(s) for s in cmd)
 
-def wrap(text: str, indent: str) -> List[str]:
+def wrap(text: str, indent: str) -> list[str]:
     '''Convenience routine for wrapping text to a consistent indent.'''
     return textwrap.wrap(text, initial_indent=indent,
                          subsequent_indent=indent)

@@ -28,7 +28,6 @@ import tempfile
 import textwrap
 import traceback
 from typing import NamedTuple, Optional
-from typing import List as ListType
 
 from west import log
 import west.configuration
@@ -65,9 +64,9 @@ class EarlyArgs(NamedTuple):
     command_name: Optional[str]
 
     # Other arguments are appended here.
-    unexpected_arguments: ListType[str]
+    unexpected_arguments: list[str]
 
-def parse_early_args(argv: ListType[str]) -> EarlyArgs:
+def parse_early_args(argv: list[str]) -> EarlyArgs:
     # Hand-rolled argument parser for early arguments.
 
     help = False

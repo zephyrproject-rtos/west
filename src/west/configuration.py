@@ -40,7 +40,7 @@ import os
 from pathlib import PureWindowsPath, Path
 import platform
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Dict, Iterable, Optional, Tuple, TYPE_CHECKING, Union
 import warnings
 
 from west.util import WEST_DIR, west_dir, WestNotFound, PathType
@@ -491,7 +491,7 @@ def update_config(section: str, key: str, value: Any,
         config.write(f)
 
 def delete_config(section: str, key: str,
-                  configfile: Union[Optional[ConfigFile], List[ConfigFile]] = None,
+                  configfile: Union[Optional[ConfigFile], list[ConfigFile]] = None,
                   topdir: Optional[PathType] = None) -> None:
     '''Delete the option section.key from the given file or files.
 
@@ -626,7 +626,7 @@ def _location(cfg: ConfigFile, topdir: Optional[PathType] = None,
     else:
         raise ValueError(f'invalid configuration file {cfg}')
 
-def _gather_configs(cfg: ConfigFile, topdir: Optional[PathType]) -> List[str]:
+def _gather_configs(cfg: ConfigFile, topdir: Optional[PathType]) -> list[str]:
     # Find the paths to the given configuration files, in increasing
     # precedence order.
     ret = []
