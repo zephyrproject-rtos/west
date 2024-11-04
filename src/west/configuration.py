@@ -40,7 +40,7 @@ import os
 from pathlib import PureWindowsPath, Path
 import platform
 from enum import Enum
-from typing import Any, Iterable, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Iterable, Optional, TYPE_CHECKING, Union
 import warnings
 
 from west.util import WEST_DIR, west_dir, WestNotFound, PathType
@@ -366,7 +366,7 @@ class Configuration:
             load(self._local)
 
     def items(self, configfile: ConfigFile = ConfigFile.ALL
-              ) -> Iterable[Tuple[str, Any]]:
+              ) -> Iterable[tuple[str, Any]]:
         '''Iterator of option, value pairs.'''
         if configfile == ConfigFile.ALL:
             ret = {}
