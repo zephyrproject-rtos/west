@@ -1658,7 +1658,7 @@ class Manifest:
 
         def mls_representer(dumper, data):
             if '\n' in data:
-                tag = u'tag:yaml.org,2002:str'
+                tag = 'tag:yaml.org,2002:str'
                 return dumper.represent_scalar(tag, data, style="|")
             else:
                 return dumper.represent_str(data)
