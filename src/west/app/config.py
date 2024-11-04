@@ -6,8 +6,8 @@
 
 import argparse
 
+from west.commands import CommandError, WestCommand
 from west.configuration import ConfigFile
-from west.commands import WestCommand, CommandError
 
 CONFIG_DESCRIPTION = '''\
 West configuration file handling.

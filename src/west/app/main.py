@@ -12,35 +12,60 @@ Nothing in here is public API.
 '''
 
 import argparse
-from collections import OrderedDict
-import colorama
-from io import StringIO
 import logging
 import os
-from pathlib import Path, PurePath
 import platform
 import shlex
 import shutil
 import signal
 import sys
-from subprocess import CalledProcessError
 import tempfile
 import textwrap
 import traceback
+from collections import OrderedDict
+from io import StringIO
+from pathlib import Path, PurePath
+from subprocess import CalledProcessError
 from typing import NamedTuple, Optional
 
-from west import log
+import colorama
+
 import west.configuration
-from west.commands import WestCommand, extension_commands, \
-    CommandError, ExtensionCommandError, Verbosity
-from west.app.project import List, ManifestCommand, Compare, Diff, Status, \
-    SelfUpdate, ForAll, Grep, Init, Update, Topdir
+from west import log
 from west.app.config import Config
-from west.manifest import Manifest, MalformedConfig, MalformedManifest, \
-    ManifestVersionError, ManifestImportFailed, _ManifestImportDepth, \
-    ManifestProject, MANIFEST_REV_BRANCH
-from west.util import quote_sh_list, west_topdir, WestNotFound
+from west.app.project import (
+    Compare,
+    Diff,
+    ForAll,
+    Grep,
+    Init,
+    List,
+    ManifestCommand,
+    SelfUpdate,
+    Status,
+    Topdir,
+    Update,
+)
+from west.commands import (
+    CommandError,
+    ExtensionCommandError,
+    Verbosity,
+    WestCommand,
+    extension_commands,
+)
+from west.manifest import (
+    MANIFEST_REV_BRANCH,
+    MalformedConfig,
+    MalformedManifest,
+    Manifest,
+    ManifestImportFailed,
+    ManifestProject,
+    ManifestVersionError,
+    _ManifestImportDepth,
+)
+from west.util import WestNotFound, quote_sh_list, west_topdir
 from west.version import __version__
+
 
 class EarlyArgs(NamedTuple):
     # Data type for storing "early" argument parsing results.

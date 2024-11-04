@@ -4,19 +4,19 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-from abc import ABC, abstractmethod
 import argparse
-from collections import OrderedDict
-from dataclasses import dataclass
-from enum import IntEnum
 import importlib.util
 import itertools
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
+from abc import ABC, abstractmethod
+from collections import OrderedDict
+from dataclasses import dataclass
+from enum import IntEnum
+from pathlib import Path
 from types import ModuleType
 from typing import Callable, NoReturn, Optional
 
@@ -26,7 +26,7 @@ import yaml
 
 from west.configuration import Configuration
 from west.manifest import Manifest, Project
-from west.util import escapes_directory, quote_sh_list, PathType
+from west.util import PathType, escapes_directory, quote_sh_list
 
 '''\
 This package provides WestCommand, which is the common abstraction all

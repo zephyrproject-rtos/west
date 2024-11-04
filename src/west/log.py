@@ -20,12 +20,12 @@ level. These were formerly encouraged for WestCommand instances.
 '''
 
 import sys
-from typing import NoReturn
 import warnings
-
-from west import configuration as config
+from typing import NoReturn
 
 import colorama
+
+from west import configuration as config
 
 VERBOSE_NONE = 0
 '''Default verbosity level, no dbg() messages printed.'''

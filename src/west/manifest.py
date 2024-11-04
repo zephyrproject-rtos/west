@@ -7,27 +7,26 @@
 Parser and abstract data types for west manifests.
 '''
 
-from collections import deque
 import enum
 import errno
 import logging
 import os
-from pathlib import PurePosixPath, Path
 import re
 import shlex
 import subprocess
 import sys
-from typing import Any, Callable, NoReturn, \
-    NamedTuple, Optional, TYPE_CHECKING, Union
+from collections import deque
 from collections.abc import Iterable
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple, NoReturn, Optional, Union
 
-from packaging.version import parse as parse_version
 import pykwalify.core
 import yaml
+from packaging.version import parse as parse_version
 
 from west import util
+from west.configuration import ConfigFile, Configuration, MalformedConfig
 from west.util import PathType
-from west.configuration import Configuration, ConfigFile, MalformedConfig
 
 #
 # Public constants
