@@ -50,11 +50,9 @@ line-length = 100
 
 [tool.ruff.lint]
 extend-select = [
-<<<<<<< HEAD
   "I",   # isort
-=======
+  "B",   # flake8-bugbear
   "E",   # pycodestyle errors
->>>>>>> f20fd71 (project: Extend ruff check with pycodestyle)
   "UP",  # pyupgrade
   "W",   # pycodestyle warnings
 ]
