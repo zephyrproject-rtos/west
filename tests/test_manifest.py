@@ -9,30 +9,49 @@
 # it's particularly inconvenient to test something without a real git
 # repository, go ahead and make one in a temporary directory.
 
-from copy import deepcopy
-from glob import glob
 import logging
 import os
-from pathlib import PurePath, Path
 import platform
 import subprocess
-from unittest.mock import patch
 import textwrap
+from copy import deepcopy
+from glob import glob
+from pathlib import Path, PurePath
+from unittest.mock import patch
 
 import pytest
 import yaml
+from conftest import (
+    GIT,
+    add_commit,
+    add_tag,
+    check_proj_consistency,
+    checkout_branch,
+    create_branch,
+    create_repo,
+    create_workspace,
+    rev_parse,
+)
 
-from west.manifest import Manifest, Project, ManifestProject, \
-    MalformedManifest, ManifestVersionError, ManifestImportFailed, \
-    manifest_path, ImportFlag, validate, MANIFEST_PROJECT_INDEX, \
-    _ManifestImportDepth, is_group, SCHEMA_VERSION
-from west.configuration import Configuration, ConfigFile, MalformedConfig
+from west.configuration import ConfigFile, Configuration, MalformedConfig
 
 # White box checks for the schema version.
-from west.manifest import _VALID_SCHEMA_VERS
-
-from conftest import create_workspace, create_repo, checkout_branch, \
-    create_branch, add_commit, add_tag, rev_parse, GIT, check_proj_consistency
+from west.manifest import (
+    _VALID_SCHEMA_VERS,
+    MANIFEST_PROJECT_INDEX,
+    SCHEMA_VERSION,
+    ImportFlag,
+    MalformedManifest,
+    Manifest,
+    ManifestImportFailed,
+    ManifestProject,
+    ManifestVersionError,
+    Project,
+    _ManifestImportDepth,
+    is_group,
+    manifest_path,
+    validate,
+)
 
 assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
 
