@@ -409,17 +409,17 @@ class WestApp:
             for spec in specs:
                 if spec.name in self.builtins:
                     self.queued_io.append(
-                        lambda cmd: cmd.wrn(
-                            f'ignoring project {spec.project.name} '
-                            f'extension command "{spec.name}"; '
+                        lambda cmd, spec_const=spec: cmd.wrn(
+                            f'ignoring project {spec_const.project.name} '
+                            f'extension command "{spec_const.name}"; '
                             'this is a built in command'))
                     continue
                 if spec.name in extension_names:
                     self.queued_io.append(
-                        lambda cmd: cmd.wrn(
-                            f'ignoring project {spec.project.name} '
-                            f'extension command "{spec.name}"; '
-                            f'command "{spec.name}" is '
+                        lambda cmd, spec_const=spec: cmd.wrn(
+                            f'ignoring project {spec_const.project.name} '
+                            f'extension command "{spec_const.name}"; '
+                            f'command "{spec_const.name}" is '
                             'already defined as extension command'))
                     continue
 
