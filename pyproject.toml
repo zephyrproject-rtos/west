@@ -53,6 +53,7 @@ extend-select = [
   "I",   # isort
   "B",   # flake8-bugbear
   "E",   # pycodestyle errors
+  "F",   # Pyflakes
   "UP",  # pyupgrade
   "W",   # pycodestyle warnings
 ]
