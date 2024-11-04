@@ -18,7 +18,7 @@ import shutil
 import subprocess
 import sys
 from types import ModuleType
-from typing import Callable, Dict, List, NoReturn, Optional
+from typing import Callable, Dict, NoReturn, Optional
 
 import colorama
 import pykwalify
@@ -149,7 +149,7 @@ class WestCommand(ABC):
         self.topdir: Optional[str] = None
         self.manifest = None
         self.config = None
-        self._hooks: List[Callable[['WestCommand'], None]] = []
+        self._hooks: list[Callable[['WestCommand'], None]] = []
 
     def add_pre_run_hook(self,
                          hook: Callable[['WestCommand'], None]) -> None:
@@ -162,7 +162,7 @@ class WestCommand(ABC):
         '''
         self._hooks.append(hook)
 
-    def run(self, args: argparse.Namespace, unknown: List[str],
+    def run(self, args: argparse.Namespace, unknown: list[str],
             topdir: PathType,
             manifest: Optional[Manifest] = None,
             config: Optional[Configuration] = None) -> None:
@@ -229,7 +229,7 @@ class WestCommand(ABC):
         '''
 
     @abstractmethod
-    def do_run(self, args: argparse.Namespace, unknown: List[str]):
+    def do_run(self, args: argparse.Namespace, unknown: list[str]):
         '''Subclasses must implement; called to run the command.
 
         :param args: ``argparse.Namespace`` of parsed arguments
