@@ -647,7 +647,7 @@ def _ext_specs(project):
             continue
 
         # Load the spec file and check the schema.
-        with open(spec_file, 'r') as f:
+        with open(spec_file) as f:
             try:
                 commands_spec = yaml.safe_load(f.read())
             except yaml.YAMLError as e:
