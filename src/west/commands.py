@@ -18,7 +18,7 @@ import shutil
 import subprocess
 import sys
 from types import ModuleType
-from typing import Callable, Dict, NoReturn, Optional
+from typing import Callable, NoReturn, Optional
 
 import colorama
 import pykwalify
@@ -41,7 +41,7 @@ _EXT_SCHEMA_PATH = os.path.join(os.path.dirname(__file__),
 
 # Cache which maps files implementing extension commands to their
 # imported modules.
-_EXT_MODULES_CACHE: Dict[str, ModuleType] = {}
+_EXT_MODULES_CACHE: dict[str, ModuleType] = {}
 # Infinite iterator of "fresh" extension command module names.
 _EXT_MODULES_NAME_IT = (f'west.commands.ext.cmd_{i}'
                         for i in itertools.count(1))
