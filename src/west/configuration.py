@@ -37,14 +37,15 @@ lowest.
 
 import configparser
 import os
-from pathlib import PureWindowsPath, Path
 import platform
-from enum import Enum
-from typing import Any, Optional, TYPE_CHECKING, Union
-from collections.abc import Iterable
 import warnings
+from collections.abc import Iterable
+from enum import Enum
+from pathlib import Path, PureWindowsPath
+from typing import TYPE_CHECKING, Any, Optional, Union
 
-from west.util import WEST_DIR, west_dir, WestNotFound, PathType
+from west.util import WEST_DIR, PathType, WestNotFound, west_dir
+
 
 class MalformedConfig(Exception):
     '''The west configuration was malformed.

@@ -6,30 +6,35 @@
 '''West project commands'''
 
 import argparse
-from functools import partial
 import logging
 import os
-from os.path import abspath, relpath
-from pathlib import PurePath, Path
-import shutil
 import shlex
+import shutil
 import subprocess
 import sys
 import textwrap
 import time
+from functools import partial
+from os.path import abspath, relpath
+from pathlib import Path, PurePath
 from time import perf_counter
 from urllib.parse import urlparse
 
-from west.configuration import Configuration
 from west import util
-from west.commands import WestCommand, CommandError, Verbosity
-from west.manifest import ImportFlag, Manifest, \
-    ManifestProject, _manifest_content_at, ManifestImportFailed
-from west.manifest import is_group as is_project_group
+from west.commands import CommandError, Verbosity, WestCommand
+from west.configuration import Configuration
 from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
-from west.manifest import Submodule
 from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
 from west.manifest import QUAL_REFS_WEST as QUAL_REFS
+from west.manifest import (
+    ImportFlag,
+    Manifest,
+    ManifestImportFailed,
+    ManifestProject,
+    Submodule,
+    _manifest_content_at,
+)
+from west.manifest import is_group as is_project_group
 
 #
 # Project-related or multi-repo commands, like "init", "update",
