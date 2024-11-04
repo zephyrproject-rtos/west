@@ -45,10 +45,18 @@ include-package-data = true
 where = ["src"]
 namespaces = false
 
+[tool.ruff]
+line-length = 100
+
 [tool.ruff.lint]
 extend-select = [
+<<<<<<< HEAD
   "I",   # isort
+=======
+  "E",   # pycodestyle errors
+>>>>>>> f20fd71 (project: Extend ruff check with pycodestyle)
   "UP",  # pyupgrade
+  "W",   # pycodestyle warnings
 ]
 ignore = [
   "UP027", # deprecated pyupgrade rule
