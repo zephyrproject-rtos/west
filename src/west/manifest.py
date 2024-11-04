@@ -17,8 +17,9 @@ import re
 import shlex
 import subprocess
 import sys
-from typing import Any, Callable, Iterable, NoReturn, \
+from typing import Any, Callable, NoReturn, \
     NamedTuple, Optional, TYPE_CHECKING, Union
+from collections.abc import Iterable
 
 from packaging.version import parse as parse_version
 import pykwalify.core
