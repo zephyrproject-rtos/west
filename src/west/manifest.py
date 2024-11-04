@@ -464,11 +464,12 @@ def _update_disabled_groups(disabled_groups: set[str],
         else:
             # We should never get here. This private helper is only
             # meant to be invoked on valid data.
-            assert False, \
-                (f"Unexpected group filter item {item}. "
-                 "This is a west bug. Please report it to the developers "
-                 "along with as much information as you can, such as the "
-                 "stack trace that preceded this message.")
+            raise AssertionError(
+                f"Unexpected group filter item {item}. "
+                "This is a west bug. Please report it to the developers "
+                "along with as much information as you can, such as the "
+                "stack trace that preceded this message."
+            )
 
 def _is_submodule_dict_ok(subm: Any) -> bool:
     # Check whether subm is a dict that contains the expected

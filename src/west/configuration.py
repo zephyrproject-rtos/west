@@ -294,7 +294,7 @@ class Configuration:
             self._system.set(option, value)
         else:
             # Shouldn't happen.
-            assert False, configfile
+            raise AssertionError(configfile)
 
     @staticmethod
     def _create(path: Path) -> _InternalCF:

@@ -546,7 +546,7 @@ def test_update_tag_to_tag(west_init_tmpdir):
                 p.revision = 'v2.0'
                 break
         else:
-            assert False, 'no tagged_repo'
+            raise AssertionError('no tagged_repo')
         with open(west_init_tmpdir / 'zephyr' / 'west.yml', 'w') as f:
             f.write(manifest.as_yaml())  # NOT as_frozen_yaml().
 
