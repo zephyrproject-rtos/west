@@ -3162,15 +3162,15 @@ def test_group_filter_imports(manifest_repo):
     # Schema version 0.9, group-filter is used by an import: warning.
     with open(manifest_repo / 'west.yml', 'w') as f:
         f.write(textwrap.dedent(
-            '''\
+            f'''\
             manifest:
               version: 0.9
               projects:
                 - name: project1
-                  revision: {}
+                  revision: {sha1}
                   url: ignored
                   import: true
-            '''.format(sha1)))
+            '''))
     m = Manifest.from_file()
     assert m.group_filter == []
     assert hasattr(m, '_legacy_group_filter_warned')
