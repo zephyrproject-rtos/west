@@ -3,15 +3,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
-from pathlib import Path, PurePath
 import platform
 import shutil
 import subprocess
 import sys
 import textwrap
+from pathlib import Path, PurePath
+
+import pytest
 
 from west import configuration as config
-import pytest
 
 GIT = shutil.which('git')
 

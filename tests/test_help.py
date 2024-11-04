@@ -1,12 +1,12 @@
 # Copyright (c) 2020, Nordic Semiconductor ASA
 
 import itertools
-
 import os
 import sys
 
-from west.app.main import BUILTIN_COMMAND_GROUPS
 from conftest import cmd
+
+from west.app.main import BUILTIN_COMMAND_GROUPS
 
 assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
 

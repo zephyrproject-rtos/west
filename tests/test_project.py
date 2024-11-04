@@ -9,13 +9,22 @@ import textwrap
 from pathlib import Path, PurePath
 
 import pytest
+from conftest import (
+    GIT,
+    WINDOWS,
+    add_commit,
+    add_tag,
+    check_output,
+    check_proj_consistency,
+    cmd,
+    create_branch,
+    create_repo,
+    create_workspace,
+    rev_parse,
+)
 
-from west.manifest import Manifest, ManifestProject, Project, \
-    ManifestImportFailed
 from west.manifest import ImportFlag as MIF
-from conftest import create_branch, create_workspace, create_repo, \
-    add_commit, add_tag, check_output, cmd, GIT, rev_parse, \
-    check_proj_consistency, WINDOWS
+from west.manifest import Manifest, ManifestImportFailed, ManifestProject, Project
 
 assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
 

@@ -5,15 +5,14 @@
 import configparser
 import os
 import pathlib
-from typing import Any, Optional
 import subprocess
+from typing import Any, Optional
 
 import pytest
+from conftest import cmd
 
 from west import configuration as config
 from west.util import PathType
-
-from conftest import cmd
 
 assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
 
