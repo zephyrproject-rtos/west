@@ -921,7 +921,7 @@ class WestArgumentParser(argparse.ArgumentParser):
         # come first as our override of that method relies on it.
         self.west_optionals = []
         self.west_app = kwargs.pop('west_app', None)
-        super(WestArgumentParser, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def print_help(self, file=None, top_level=False):
         print(self.format_help(top_level=top_level), end='',
@@ -937,7 +937,7 @@ class WestArgumentParser(argparse.ArgumentParser):
         # one of the subcommand parsers, and we delegate to super.
 
         if not top_level:
-            return super(WestArgumentParser, self).format_help()
+            return super().format_help()
 
         # Format the help to be at most 75 columns wide, the maximum
         # generally recommended by typographers for readability.

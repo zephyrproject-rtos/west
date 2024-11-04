@@ -62,7 +62,7 @@ class ExtensionCommandError(CommandError):
 
     def __init__(self, **kwargs):
         self.hint = kwargs.pop('hint', None)
-        super(ExtensionCommandError, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
 def _no_topdir_msg(cwd, name):
     return f'''\
