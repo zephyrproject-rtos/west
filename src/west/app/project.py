@@ -554,7 +554,7 @@ class ManifestCommand(_ProjectCommand):
     # west.manifest.Manifest.
 
     def __init__(self):
-        super(ManifestCommand, self).__init__(
+        super().__init__(
             'manifest',
             'manage the west manifest',
             textwrap.dedent('''\
