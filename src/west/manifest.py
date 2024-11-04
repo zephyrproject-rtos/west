@@ -17,7 +17,7 @@ import re
 import shlex
 import subprocess
 import sys
-from typing import Any, Callable, Dict, Iterable, NoReturn, \
+from typing import Any, Callable, Iterable, NoReturn, \
     NamedTuple, Optional, Set, TYPE_CHECKING, Union
 
 from packaging.version import parse as parse_version
@@ -166,7 +166,7 @@ def _update_project_filter(project_filter: ProjectFilterType,
 
 # The parsed contents of a manifest YAML file as returned by _load(),
 # after sanitychecking with validate().
-ManifestDataType = Union[str, Dict]
+ManifestDataType = Union[str, dict]
 
 # Logging
 
@@ -358,7 +358,7 @@ class _import_ctx(NamedTuple):
     # imported earlier get higher precedence: if a 'projects:' list
     # contains a name which is already present here, we ignore that
     # element.
-    projects: Dict[str, 'Project']
+    projects: dict[str, 'Project']
 
     # The project filters we should apply while resolving imports. We
     # try to load this only once from the 'manifest.project-filter'
@@ -527,7 +527,7 @@ def manifest_path() -> str:
                       os.fspath(ret_path))
     return os.fspath(ret_path)
 
-def validate(data: Any) -> Dict[str, Any]:
+def validate(data: Any) -> dict[str, Any]:
     '''Validate manifest data
 
     Raises an exception if the manifest data is not valid for loading
@@ -863,11 +863,11 @@ class Project:
     def name_and_path(self) -> str:
         return f'{self.name} ({self.path})'
 
-    def as_dict(self) -> Dict:
+    def as_dict(self) -> dict:
         '''Return a representation of this object as a dict, as it
         would be parsed from an equivalent YAML manifest.
         '''
-        ret: Dict = {}
+        ret: dict = {}
         ret['name'] = self.name
         if self.description:
             ret['description'] = _MLS(self.description)
@@ -887,7 +887,7 @@ class Project:
         elif isinstance(self.submodules, list):
             ret['submodules'] = []
             for s in self.submodules:
-                obj: Dict = {'path': s.path}
+                obj: dict = {'path': s.path}
                 if s.name:
                     obj['name'] = s.name
                 ret['submodules'].append(obj)
@@ -1180,10 +1180,10 @@ class ManifestProject(Project):
                                                          self.path))
         return self._abspath
 
-    def as_dict(self) -> Dict:
+    def as_dict(self) -> dict:
         '''Return a representation of this object as a dict, as it would be
         parsed from an equivalent YAML manifest.'''
-        ret: Dict = {}
+        ret: dict = {}
         if self.path:
             ret['path'] = self.path
         if self.west_commands:
@@ -1592,8 +1592,8 @@ class Manifest:
         return ret
 
     def _as_dict_helper(
-            self, pdict: Optional[Callable[[Project], Dict]] = None) \
-            -> Dict:
+            self, pdict: Optional[Callable[[Project], dict]] = None) \
+            -> dict:
         # pdict: returns a Project's dict representation.
         #        By default, it's Project.as_dict.
         if pdict is None:
@@ -1606,7 +1606,7 @@ class Manifest:
         # This relies on insertion-ordered dictionaries for
         # predictability, which is a CPython 3.6 implementation detail
         # and Python 3.7+ guarantee.
-        r: Dict[str, Any] = {}
+        r: dict[str, Any] = {}
         r['manifest'] = {}
         if self.group_filter:
             r['manifest']['group-filter'] = self.group_filter
@@ -1615,7 +1615,7 @@ class Manifest:
 
         return r
 
-    def as_dict(self) -> Dict:
+    def as_dict(self) -> dict:
         '''Returns a dict representing self, fully resolved.
 
         The value is "resolved" in that the result is as if all
@@ -1624,7 +1624,7 @@ class Manifest:
         '''
         return self._as_dict_helper()
 
-    def as_frozen_dict(self) -> Dict:
+    def as_frozen_dict(self) -> dict:
         '''Returns a dict representing self, but frozen.
 
         The value is "frozen" in that all project revisions are the
@@ -1648,7 +1648,7 @@ class Manifest:
 
         return self._as_dict_helper(pdict=pdict)
 
-    def _dump_yaml(self, to_dump: Dict, **kwargs) -> str:
+    def _dump_yaml(self, to_dump: dict, **kwargs) -> str:
         ''' Dumps dictionary to YAML using the multi-line string representer.
 
         :param dict: dictionary to be dumped
@@ -2011,9 +2011,9 @@ class Manifest:
             # that rely on the ManifestProject existing.
             self._projects = list(self._ctx.projects.values())
             self._projects.insert(MANIFEST_PROJECT_INDEX, mp)
-            self._projects_by_name: Dict[str, Project] = {'manifest': mp}
+            self._projects_by_name: dict[str, Project] = {'manifest': mp}
             self._projects_by_name.update(self._ctx.projects)
-            self._projects_by_rpath: Dict[Path, Project] = {}  # resolved paths
+            self._projects_by_rpath: dict[Path, Project] = {}  # resolved paths
             if self.topdir:
                 for p in self.projects:
                     if TYPE_CHECKING:
@@ -2036,7 +2036,7 @@ class Manifest:
 
         _logger.debug(f'loaded {loading_what}')
 
-    def _load_group_filter(self, manifest_data: Dict[str, Any]) -> None:
+    def _load_group_filter(self, manifest_data: dict[str, Any]) -> None:
         # Update self._ctx.group_filter_q from manifest_data.
 
         if 'group-filter' not in manifest_data:
@@ -2086,11 +2086,11 @@ class Manifest:
 
         return ret
 
-    def _load_self(self, manifest_data: Dict[str, Any]) -> None:
+    def _load_self(self, manifest_data: dict[str, Any]) -> None:
         # Handle the "self:" section in the manifest data, including
         # import resolution and extension commands.
 
-        slf: Optional[Dict[str, Any]] = manifest_data.get('self')
+        slf: Optional[dict[str, Any]] = manifest_data.get('self')
 
         if not slf:
             return None
@@ -2224,7 +2224,7 @@ class Manifest:
         except RecursionError as e:
             raise _ManifestImportDepth(None, pathobj) from e
 
-    def _import_map_from_self(self, imp: Dict) -> None:
+    def _import_map_from_self(self, imp: dict) -> None:
         # imap may introduce additional constraints on self._ctx, such
         # as a stricter imap_filter or a longer path_prefix.
         #
@@ -2262,8 +2262,8 @@ class Manifest:
             except RecursionError as e:
                 raise _ManifestImportDepth(None, import_abs) from e
 
-    def _load_defaults(self, defaults: Dict[str, Any],
-                       url_bases: Dict[str, str]) -> _defaults:
+    def _load_defaults(self, defaults: dict[str, Any],
+                       url_bases: dict[str, str]) -> _defaults:
         # md = manifest defaults (dictionary with values parsed from
         # the manifest)
         mdrem: Optional[str] = defaults.get('remote')
@@ -2274,8 +2274,8 @@ class Manifest:
                 self._malformed(f'default remote {mdrem} is not defined')
         return _defaults(mdrem, defaults.get('revision', _DEFAULT_REV))
 
-    def _load_projects(self, manifest: Dict[str, Any],
-                       url_bases: Dict[str, str],
+    def _load_projects(self, manifest: dict[str, Any],
+                       url_bases: dict[str, str],
                        defaults: _defaults) -> None:
         # Load projects and add them to self._ctx.projects.
 
@@ -2317,7 +2317,7 @@ class Manifest:
         for project, imp in have_imports:
             self._import_from_project(project, imp)
 
-    def _load_project(self, pd: Dict, url_bases: Dict[str, str],
+    def _load_project(self, pd: dict, url_bases: dict[str, str],
                       defaults: _defaults) -> Project:
         # pd = project data (dictionary with values parsed from the
         # manifest)
@@ -2537,7 +2537,7 @@ class Manifest:
         _logger.debug(f'done resolving import {path} for {project}')
 
     def _import_map_from_project(self, project: Project,
-                                 imp: Dict) -> None:
+                                 imp: dict) -> None:
         imap = self._load_imap(imp, f'project {project.name}')
 
         _logger.debug(f'resolving import {imap} for {project}')
@@ -2617,7 +2617,7 @@ class Manifest:
 
         return content
 
-    def _load_imap(self, imp: Dict, src: str) -> _import_map:
+    def _load_imap(self, imp: dict, src: str) -> _import_map:
         # Convert a parsed self or project import value from YAML into
         # an _import_map namedtuple.
 
@@ -2709,7 +2709,7 @@ class Manifest:
                     'of west')
 
     def _check_paths_are_unique(self) -> None:
-        ppaths: Dict[Path, Project] = {}
+        ppaths: dict[Path, Project] = {}
         for name, project in self._ctx.projects.items():
             pp = Path(project.path)
             if self._top_level and pp == self._config_path:

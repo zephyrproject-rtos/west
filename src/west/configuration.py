@@ -40,7 +40,7 @@ import os
 from pathlib import PureWindowsPath, Path
 import platform
 from enum import Enum
-from typing import Any, Dict, Iterable, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Iterable, Optional, Tuple, TYPE_CHECKING, Union
 import warnings
 
 from west.util import WEST_DIR, west_dir, WestNotFound, PathType
@@ -399,8 +399,8 @@ class Configuration:
         return self._cf_to_dict(self._local)
 
     @staticmethod
-    def _cf_to_dict(cf: Optional[_InternalCF]) -> Dict[str, Any]:
-        ret: Dict[str, Any] = {}
+    def _cf_to_dict(cf: Optional[_InternalCF]) -> dict[str, Any]:
+        ret: dict[str, Any] = {}
         if cf is None:
             return ret
         for section, contents in cf.cp.items():
