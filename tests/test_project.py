@@ -1805,7 +1805,7 @@ def test_init_with_manifest_filename(repos_tmpdir):
     west_tmpdir = repos_tmpdir / 'workspace'
     manifest = repos_tmpdir / 'repos' / 'zephyr'
 
-    with open(manifest / 'west.yml', 'r') as f:
+    with open(manifest / 'west.yml') as f:
         manifest_data = f.read()
 
     # also creates a west.yml with a syntax error to verify west doesn't even

@@ -3252,7 +3252,7 @@ def test_submodule_manifest():
                          glob(os.path.join(THIS_DIRECTORY, 'manifests',
                                            'invalid_*.yml')))
 def test_invalid(invalid):
-    with open(invalid, 'r') as f:
+    with open(invalid) as f:
         data = yaml.safe_load(f.read())
 
     with pytest.raises(MalformedManifest):
