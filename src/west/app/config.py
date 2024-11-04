@@ -169,11 +169,11 @@ class Config(WestCommand):
             try:
                 self.config.delete(args.name, configfile=configfile)
                 return
-            except KeyError:
+            except KeyError as err:
                 if i == len(configfiles) - 1:
                     self.dbg(
                         f'{args.name} was not set in requested location(s)')
-                    raise CommandError(returncode=1)
+                    raise CommandError(returncode=1) from err
             except PermissionError as pe:
                 self._perm_error(pe, configfile, args.name)
 

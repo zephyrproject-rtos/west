@@ -99,8 +99,8 @@ class _InternalCF:
 
         try:
             return getter(section, key)
-        except (configparser.NoOptionError, configparser.NoSectionError):
-            raise KeyError(option)
+        except (configparser.NoOptionError, configparser.NoSectionError) as err:
+            raise KeyError(option) from err
 
     def set(self, option: str, value: Any):
         section, key = _InternalCF.parse_key(option)
