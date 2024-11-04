@@ -44,3 +44,11 @@ include-package-data = true
 [tool.setuptools.packages.find]
 where = ["src"]
 namespaces = false
+
+[tool.ruff.lint]
+extend-select = [
+  "UP",  # pyupgrade
+]
+ignore = [
+  "UP027", # deprecated pyupgrade rule
+]
