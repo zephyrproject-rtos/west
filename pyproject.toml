@@ -60,3 +60,7 @@ extend-select = [
 ignore = [
   "UP027", # deprecated pyupgrade rule
 ]
+
+[tool.ruff.format]
+quote-style = "preserve"
+line-ending = "lf"
