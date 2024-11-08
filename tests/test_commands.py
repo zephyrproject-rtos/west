@@ -8,6 +8,7 @@ assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
 
 gv = WestCommand._parse_git_version
 
+
 def test_parse_git_version():
     # White box test for git parsing behavior.
     assert gv(b'git version 2.25.1\n') == (2, 25, 1)
