@@ -2350,6 +2350,56 @@ def test_import_map_name_allowlist(manifest_repo):
 
     assert actual == expected
 
+def test_import_map_name_allowlist_empty(manifest_repo):
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''
+        manifest:
+          projects:
+            - name: mainline
+              url: https://git.example.com/mainline/manifest
+              import:
+                name-allowlist: []
+            - name: downstream-app
+              url: https://git.example.com/downstream/app
+            - name: lib3
+              path: libraries/lib3
+              url: https://git.example.com/downstream/lib3
+          self:
+            path: mp
+        ''')
+
+    mainline = manifest_repo.topdir / 'mainline'
+    create_repo(mainline)
+    create_branch(mainline, 'manifest-rev', checkout=True)
+    add_commit(mainline, 'mainline/west.yml',
+               files={'west.yml':
+                      '''
+                      manifest:
+                        projects:
+                          - name: mainline-app
+                            path: examples/app
+                            url: https://git.example.com/mainline/app
+                          - name: lib
+                            path: libraries/lib
+                            url: https://git.example.com/mainline/lib
+                          - name: lib2
+                            path: libraries/lib2
+                            url: https://git.example.com/mainline/lib2
+                      '''})
+    checkout_branch(mainline, 'master')
+
+    actual = [project.name for project in MF().projects]
+
+    expected = [
+        'manifest',
+        'mainline',
+        'downstream-app',
+        'lib3',
+    ]
+
+    assert actual == expected
+
 def test_import_map_name_allowlist_legacy(manifest_repo):
     # This tests the legacy support for blocklists and allowlists
     # through the blacklist and whitelist keywords which cannot
