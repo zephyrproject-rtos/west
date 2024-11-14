@@ -48,6 +48,14 @@ To get a value for <name>, type:
 To set a value for <name>, type:
     west config <name> <value>
 
+To append to a value for <name>, type:
+    west config -a <name> <value>
+A value must exist in the selected configuration file in order to be able
+to append to it. The existing value can be empty.
+Examples:
+    west config -a build.cmake-args -- " -DEXTRA_CFLAGS='-Wextra -g0' -DFOO=BAR"
+    west config -a manifest.group-filter ,+optional
+
 To list all options and their values:
     west config -l
 
@@ -64,7 +72,7 @@ To delete <name> everywhere it's set, including the system file:
 
 CONFIG_EPILOG = '''\
 If the configuration file to use is not set, reads use all three in
-precedence order, and writes use the local file.'''
+precedence order, and writes (including appends) use the local file.'''
 
 ALL = ConfigFile.ALL
 SYSTEM = ConfigFile.SYSTEM
@@ -92,13 +100,14 @@ class Config(WestCommand):
             "action to perform (give at most one)"
         ).add_mutually_exclusive_group()
 
-
         group.add_argument('-l', '--list', action='store_true',
                            help='list all options and their values')
         group.add_argument('-d', '--delete', action='store_true',
                            help='delete an option in one config file')
         group.add_argument('-D', '--delete-all', action='store_true',
                            help="delete an option everywhere it's set")
+        group.add_argument('-a', '--append', action='store_true',
+                           help='append to an existing value')
 
         group = parser.add_argument_group(
             "configuration file to use (give at most one)"
@@ -129,6 +138,9 @@ class Config(WestCommand):
         elif not args.name:
             self.parser.error('missing argument name '
                               '(to list all options and values, use -l)')
+        elif args.append:
+            if args.value is None:
+                self.parser.error('-a requires both name and value')
 
         if args.list:
             self.list(args)
@@ -136,6 +148,8 @@ class Config(WestCommand):
             self.delete(args)
         elif args.value is None:
             self.read(args)
+        elif args.append:
+            self.append(args)
         else:
             self.write(args)
 
@@ -179,6 +193,16 @@ class Config(WestCommand):
         else:
             self.dbg(f'{args.name} is unset')
             raise CommandError(returncode=1)
+
+    def append(self, args):
+        self.check_config(args.name)
+        where = args.configfile or LOCAL
+        value = self.config.get(args.name, configfile=where)
+        if value is None:
+            self.die(f'option {args.name} not found in the {where.name.lower()} '
+                     'configuration file')
+        args.value = value + args.value
+        self.write(args)
 
     def write(self, args):
         self.check_config(args.name)

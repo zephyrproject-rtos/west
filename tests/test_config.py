@@ -229,6 +229,45 @@ def test_local_creation_with_topdir():
     assert 'pytest' not in cfg(f=GLOBAL)
     assert cfg(f=LOCAL, topdir=str(topdir))['pytest']['key'] == 'val'
 
+def test_append():
+    update_testcfg('pytest', 'key', 'system', configfile=SYSTEM)
+    update_testcfg('pytest', 'key', 'global', configfile=GLOBAL)
+    update_testcfg('pytest', 'key', 'local', configfile=LOCAL)
+    # Appending with no configfile specified should modify the local one
+    cmd('config -a pytest.key ,bar')
+
+    # Only the local one will be modified
+    assert cfg(f=SYSTEM)['pytest']['key'] == 'system'
+    assert cfg(f=GLOBAL)['pytest']['key'] == 'global'
+    assert cfg(f=LOCAL)['pytest']['key'] == 'local,bar'
+
+    # Test a more complex one, and at a particular configfile level
+    update_testcfg('build', 'cmake-args', '-DCONF_FILE=foo.conf', configfile=GLOBAL)
+    assert cfg(f=GLOBAL)['build']['cmake-args'] == '-DCONF_FILE=foo.conf'
+
+    # Use a list instead of a string to avoid one level of nested quoting
+    cmd(['config', '--global', '-a', 'build.cmake-args', '--',
+         ' -DEXTRA_CFLAGS=\'-Wextra -g0\' -DFOO=BAR'])
+
+    assert cfg(f=GLOBAL)['build']['cmake-args'] == \
+        '-DCONF_FILE=foo.conf -DEXTRA_CFLAGS=\'-Wextra -g0\' -DFOO=BAR'
+
+def test_append_novalue():
+    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+        cmd('config -a pytest.foo', stderr=subprocess.STDOUT)
+    # Get the output into a variable to simplify pytest error messages
+    err_msg = exc_info.value.output.decode("utf-8")
+    assert '-a requires both name and value' in err_msg
+
+def test_append_notfound():
+    update_testcfg('pytest', 'key', 'val', configfile=LOCAL)
+    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+        cmd('config -a pytest.foo bar', stderr=subprocess.STDOUT)
+    # Get the output into a variable to simplify pytest error messages
+    err_msg = exc_info.value.output.decode("utf-8")
+    assert 'option pytest.foo not found in the local configuration file' in err_msg
+
+
 def test_delete_basic():
     # Basic deletion test: write local, verify global and system deletions
     # don't work, then delete local does work.
