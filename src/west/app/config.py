@@ -71,23 +71,6 @@ SYSTEM = ConfigFile.SYSTEM
 GLOBAL = ConfigFile.GLOBAL
 LOCAL = ConfigFile.LOCAL
 
-class Once(argparse.Action):
-    # For enforcing mutual exclusion of options by ensuring self.dest
-    # can only be set once.
-    #
-    # This sets the 'configfile' attribute depending on the option string,
-    # which must be --system, --global, or --local.
-
-    def __call__(self, parser, namespace, ignored, option_string=None):
-        values = {'--system': SYSTEM, '--global': GLOBAL, '--local': LOCAL}
-        rev = {v: k for k, v in values.items()}
-
-        if getattr(namespace, self.dest):
-            previous = rev[getattr(namespace, self.dest)]
-            parser.error(f"argument {option_string}: "
-                         f"not allowed with argument {previous}")
-
-        setattr(namespace, self.dest, values[option_string])
 
 class Config(WestCommand):
     def __init__(self):
@@ -113,12 +96,17 @@ class Config(WestCommand):
                             help="delete an option everywhere it's set")
 
         group = parser.add_argument_group(
-            'configuration file to use (give at most one)')
-        group.add_argument('--system', dest='configfile', nargs=0, action=Once,
+            "configuration file to use (give at most one)"
+        ).add_mutually_exclusive_group()
+
+        group.add_argument('--system', dest='configfile',
+                           action='store_const', const=SYSTEM,
                            help='system-wide file')
-        group.add_argument('--global', dest='configfile', nargs=0, action=Once,
+        group.add_argument('--global', dest='configfile',
+                           action='store_const', const=GLOBAL,
                            help='global (user-wide) file')
-        group.add_argument('--local', dest='configfile', nargs=0, action=Once,
+        group.add_argument('--local', dest='configfile',
+                           action='store_const', const=LOCAL,
                            help="this workspace's file")
 
         parser.add_argument('name', nargs='?',
