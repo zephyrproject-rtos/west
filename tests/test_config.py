@@ -229,6 +229,10 @@ def test_local_creation_with_topdir():
     assert 'pytest' not in cfg(f=GLOBAL)
     assert cfg(f=LOCAL, topdir=str(topdir))['pytest']['key'] == 'val'
 
+def test_append_basic():
+    pass
+
+
 def test_delete_basic():
     # Basic deletion test: write local, verify global and system deletions
     # don't work, then delete local does work.
