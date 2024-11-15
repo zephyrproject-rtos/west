@@ -88,12 +88,17 @@ class Config(WestCommand):
             description=self.description,
             epilog=CONFIG_EPILOG)
 
-        parser.add_argument('-l', '--list', action='store_true',
-                            help='list all options and their values')
-        parser.add_argument('-d', '--delete', action='store_true',
-                            help='delete an option in one config file')
-        parser.add_argument('-D', '--delete-all', action='store_true',
-                            help="delete an option everywhere it's set")
+        group = parser.add_argument_group(
+            "action to perform (give at most one)"
+        ).add_mutually_exclusive_group()
+
+
+        group.add_argument('-l', '--list', action='store_true',
+                           help='list all options and their values')
+        group.add_argument('-d', '--delete', action='store_true',
+                           help='delete an option in one config file')
+        group.add_argument('-D', '--delete-all', action='store_true',
+                           help="delete an option everywhere it's set")
 
         group = parser.add_argument_group(
             "configuration file to use (give at most one)"
@@ -121,13 +126,9 @@ class Config(WestCommand):
         if args.list:
             if args.name:
                 self.parser.error('-l cannot be combined with name argument')
-            elif delete:
-                self.parser.error('-l cannot be combined with -d or -D')
         elif not args.name:
             self.parser.error('missing argument name '
                               '(to list all options and values, use -l)')
-        elif args.delete and args.delete_all:
-            self.parser.error('-d cannot be combined with -D')
 
         if args.list:
             self.list(args)
