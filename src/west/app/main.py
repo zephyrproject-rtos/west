@@ -1226,4 +1226,5 @@ BUILTIN_COMMAND_GROUPS = {
 }
 
 if __name__ == "__main__":
+    # Test touching a python file
     main()
