@@ -43,8 +43,6 @@ jobs:
     needs: find-changed-files
     if: ${{ needs.find-changed-files.outputs.files != '[]' }}
     runs-on: ubuntu-latest
-    # Allow the workflow run to pass when this job fails
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -55,13 +53,17 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run ruff format check for ${{ matrix.files.path }}
+        id: format-check
         uses: astral-sh/ruff-action@v1
+        # Allow the job run to pass when this step fails
+        continue-on-error: true
         with:
           args: "format --check --diff"
           src: "${{ matrix.files.path }}"
           version: 0.8.1
 
       - name: Annotate unformatted file
-        if: ${{ failure() }}
+        if: ${{ steps.format-check.outcome }} == 'failure'
         run: |
-          echo "::warning file=${{ matrix.files.path }},title=File format check failed::Run 'ruff format ${{ matrix.files.path }}'"
+          JOB_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          echo "::notice file=${{ matrix.files.path }},title=Unformatted file::Consider running 'ruff format ${{ matrix.files.path }}'%0ASee $JOB_URL for more details"
