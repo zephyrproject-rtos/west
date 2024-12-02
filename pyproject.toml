@@ -57,9 +57,6 @@ extend-select = [
   "UP",  # pyupgrade
   "W",   # pycodestyle warnings
 ]
-ignore = [
-  "UP027", # deprecated pyupgrade rule
-]
 
 [tool.ruff.format]
 quote-style = "preserve"
