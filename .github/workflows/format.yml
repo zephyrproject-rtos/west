@@ -59,6 +59,7 @@ jobs:
         with:
           args: "format --check --diff"
           src: "${{ matrix.files.path }}"
+          version: 0.8.1
 
       - name: Annotate unformatted file
         if: ${{ failure() }}
