@@ -204,13 +204,13 @@ below.
                             help='''manifest repository branch or tag name
                             to check out first; cannot be combined with -l''')
         parser.add_argument('--mf', '--manifest-file', dest='manifest_file',
-                            help='manifest file name to use')
+                            help='manifest file name to use, relative to "directory"')
         parser.add_argument('-l', '--local', action='store_true',
-                            help='''use "directory" as an existing local
-                            manifest repository instead of cloning one from
-                            MANIFEST_URL; .west is created next to "directory"
-                            in this case, and manifest.path points at
-                            "directory"''')
+                            help='''use "directory" to create the workspace
+                            from a local manifest directory, instead of cloning
+                            one from MANIFEST_URL; .west is created next to
+                            "directory" in this case, and manifest.path points at
+                            the manifest file location.''')
         parser.add_argument('--rename-delay', type=int,
                             help='''Number of seconds to wait before renaming
                             some temporary directories. Some filesystems like NTFS
@@ -273,7 +273,7 @@ below.
         manifest_filename = args.manifest_file or 'west.yml'
         manifest_file = manifest_dir / manifest_filename
         topdir = manifest_dir.parent
-        rel_manifest = manifest_dir.name
+        rel_manifest = manifest_file.parent.relative_to(topdir)
         west_dir = topdir / WEST_DIR
 
         if not manifest_file.is_file():
@@ -287,7 +287,7 @@ below.
         os.chdir(topdir)
         self.config = Configuration(topdir=topdir)
         self.config.set('manifest.path', os.fspath(rel_manifest))
-        self.config.set('manifest.file', manifest_filename)
+        self.config.set('manifest.file', manifest_file.name)
 
         return topdir
 
