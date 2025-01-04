@@ -351,6 +351,15 @@ def cmd(cmd, cwd=None, stderr=None, env=None):
         print('cmd: west:', shutil.which('west'), file=sys.stderr)
         raise
 
+
+def cmd_raises(cmd_str_or_list, expected_exception_type, cwd=None, env=None):
+    # Similar to 'cmd' but an expected exception is caught.
+    # Returns the output together with stderr data
+    with pytest.raises(expected_exception_type) as exc_info:
+        cmd(cmd_str_or_list, stderr=subprocess.STDOUT, cwd=cwd, env=env)
+    return exc_info.value.output.decode("utf-8")
+
+
 def create_workspace(workspace_dir, and_git=True):
     # Manually create a bare-bones west workspace inside
     # workspace_dir. The manifest.path config option is 'mp'. The

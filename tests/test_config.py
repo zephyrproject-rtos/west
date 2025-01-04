@@ -9,7 +9,7 @@ import subprocess
 from typing import Any, Optional
 
 import pytest
-from conftest import cmd
+from conftest import cmd, cmd_raises
 
 from west import configuration as config
 from west.util import PathType
@@ -253,18 +253,12 @@ def test_append():
         '-DCONF_FILE=foo.conf -DEXTRA_CFLAGS=\'-Wextra -g0\' -DFOO=BAR'
 
 def test_append_novalue():
-    with pytest.raises(subprocess.CalledProcessError) as exc_info:
-        cmd('config -a pytest.foo', stderr=subprocess.STDOUT)
-    # Get the output into a variable to simplify pytest error messages
-    err_msg = exc_info.value.output.decode("utf-8")
+    err_msg = cmd_raises('config -a pytest.foo', subprocess.CalledProcessError)
     assert '-a requires both name and value' in err_msg
 
 def test_append_notfound():
     update_testcfg('pytest', 'key', 'val', configfile=LOCAL)
-    with pytest.raises(subprocess.CalledProcessError) as exc_info:
-        cmd('config -a pytest.foo bar', stderr=subprocess.STDOUT)
-    # Get the output into a variable to simplify pytest error messages
-    err_msg = exc_info.value.output.decode("utf-8")
+    err_msg = cmd_raises('config -a pytest.foo bar', subprocess.CalledProcessError)
     assert 'option pytest.foo not found in the local configuration file' in err_msg
 
 
@@ -446,15 +440,12 @@ def test_delete_cmd_local():
 
 def test_delete_cmd_error():
     # Verify illegal combinations of flags error out.
-    with pytest.raises(subprocess.CalledProcessError) as e:
-        cmd('config -l -d pytest.key')
-        assert '-l cannot be combined with -d or -D' in str(e)
-    with pytest.raises(subprocess.CalledProcessError) as e:
-        cmd('config -l -D pytest.key')
-        assert '-l cannot be combined with -d or -D' in str(e)
-    with pytest.raises(subprocess.CalledProcessError) as e:
-        cmd('config -d -D pytest.key')
-        assert '-d cannot be combined with -D' in str(e)
+    err_msg = cmd_raises('config -l -d pytest.key', subprocess.CalledProcessError)
+    assert 'argument -d/--delete: not allowed with argument -l/--list' in err_msg
+    err_msg = cmd_raises('config -l -D pytest.key', subprocess.CalledProcessError)
+    assert 'argument -D/--delete-all: not allowed with argument -l/--list' in err_msg
+    err_msg = cmd_raises('config -d -D pytest.key', subprocess.CalledProcessError)
+    assert 'argument -D/--delete-all: not allowed with argument -d/--delete' in err_msg
 
 def test_default_config():
     # Writing to a value without a config destination should default
@@ -484,30 +475,26 @@ def test_config_precedence():
     assert cfg(f=LOCAL)['pytest']['precedence'] == 'local'
 
 def test_config_missing_key():
-    with pytest.raises(subprocess.CalledProcessError) as e:
-        cmd('config pytest')
-        assert str(e) == 'west config: error: missing key, please invoke ' \
-            'as: west config <section>.<key>\n'
+    err_msg = cmd_raises('config pytest', subprocess.CalledProcessError)
+    assert 'invalid configuration option "pytest"; expected "section.key" format' in err_msg
+
 
 def test_unset_config():
     # Getting unset configuration options should raise an error.
     # With verbose output, the exact missing option should be printed.
-    with pytest.raises(subprocess.CalledProcessError) as e:
-        cmd('-v config pytest.missing')
-        assert 'pytest.missing is unset' in str(e)
+    err_msg = cmd_raises('-v config pytest.missing', subprocess.CalledProcessError)
+    assert 'pytest.missing is unset' in err_msg
 
 def test_no_args():
-    with pytest.raises(subprocess.CalledProcessError) as e:
-        cmd('config')
-        assert 'missing argument name' in str(e)
+    err_msg = cmd_raises('config', subprocess.CalledProcessError)
+    assert 'missing argument name' in err_msg
 
 def test_list():
     def sorted_list(other_args=''):
         return list(sorted(cmd('config -l ' + other_args).splitlines()))
 
-    with pytest.raises(subprocess.CalledProcessError) as e:
-        cmd('config -l pytest.foo')
-        assert '-l cannot be combined with name argument' in str(e)
+    err_msg = cmd_raises('config -l pytest.foo', subprocess.CalledProcessError)
+    assert '-l cannot be combined with name argument' in err_msg
 
     assert cmd('config -l').strip() == ''
 
