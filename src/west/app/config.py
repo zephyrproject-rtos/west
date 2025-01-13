@@ -191,7 +191,7 @@ class Config(WestCommand):
         if value is not None:
             self.inf(value)
         else:
-            self.dbg(f'{args.name} is unset')
+            self.err(f'{args.name} is unset')
             raise CommandError(returncode=1)
 
     def append(self, args):
