@@ -1941,8 +1941,10 @@ def test_extension_command_multiproject(repos_tmpdir):
 
 
 def test_extension_command_duplicate(repos_tmpdir):
-    # Test to ensure that in case to subprojects introduces same command, it
-    # will print a warning.
+    # West should disregard an extension command if its name is already taken,
+    # either by a built-in command or another extension command added earlier.
+    # A warning should also appear for each such case.
+
     rr = repos_tmpdir.join('repos')
     remote_kconfiglib = str(rr.join('Kconfiglib'))
     remote_zephyr = str(rr.join('zephyr'))
@@ -1972,17 +1974,32 @@ def test_extension_command_duplicate(repos_tmpdir):
                           path: zephyr
                       ''')})
 
-    # Initialize the net-tools repository.
+    # Add extension commands to the Kconfiglib remote.
     add_commit(remote_kconfiglib, 'add west commands',
                files={'scripts/west-commands.yml': textwrap.dedent('''\
                       west-commands:
                         - file: scripts/test.py
                           commands:
+                            - name: list
+                              class: List
                             - name: test-extension
                               class: Test
                       '''),
                       'scripts/test.py': textwrap.dedent('''\
+                      from argparse import REMAINDER
                       from west.commands import WestCommand
+                      class List(WestCommand):
+                          def __init__(self):
+                              super(List, self).__init__(
+                                  'list',
+                                  'test list',
+                                  '')
+                          def do_add_parser(self, parser_adder):
+                              parser = parser_adder.add_parser(self.name)
+                              parser.add_argument('any', nargs=REMAINDER)
+                              return parser
+                          def do_run(self, args, ignored):
+                              print('This must never be printed')
                       class Test(WestCommand):
                           def __init__(self):
                               super(Test, self).__init__(
@@ -2002,13 +2019,20 @@ def test_extension_command_duplicate(repos_tmpdir):
     west_tmpdir.chdir()
     cmd('update')
 
-    actual = cmd('test-extension', stderr=subprocess.STDOUT).splitlines()
-    expected = [
-        'WARNING: ignoring project net-tools extension command "test-extension"; command "test-extension" is already defined as extension command',  # noqa: E501
-        'Testing kconfig test command',
+    expected_warns = [
+        'WARNING: ignoring project Kconfiglib extension command "list"; '
+        'this is a built in command',
+        'WARNING: ignoring project net-tools extension command "test-extension"; '
+        'command "test-extension" is already defined as extension command',
     ]
 
-    assert actual == expected
+    # Expect output from the built-in command, not its Kconfiglib duplicate.
+    actual = cmd('list zephyr -f {name}', stderr=subprocess.STDOUT).splitlines()
+    assert actual == expected_warns + ['manifest']
+
+    # Expect output from the Kconfiglib command, not its net-tools duplicate.
+    actual = cmd('test-extension', stderr=subprocess.STDOUT).splitlines()
+    assert actual == expected_warns + ['Testing kconfig test command']
 
 def test_topdir_none(tmpdir):
     # Running west topdir outside of any workspace ought to fail.
