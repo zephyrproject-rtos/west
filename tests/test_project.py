@@ -1521,6 +1521,28 @@ def test_update_narrow_depth1(tmpdir):
     assert len(refs) == 1
 
 
+def test_update_cloned(west_init_tmpdir):
+    # Manually update a single project
+    cmd('update Kconfiglib')
+
+    cmd('update --cloned')
+    assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=1)
+    assert (west_init_tmpdir / 'tagged_repo').check(dir=0)
+    assert (west_init_tmpdir / 'net-tools').check(dir=0)
+
+    cmd('config update.cloned true')
+    cmd('update')
+    assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=1)
+    assert (west_init_tmpdir / 'tagged_repo').check(dir=0)
+    assert (west_init_tmpdir / 'net-tools').check(dir=0)
+
+    cmd('config update.cloned false')
+    cmd('update')
+    assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=1)
+    assert (west_init_tmpdir / 'tagged_repo').check(dir=1)
+    assert (west_init_tmpdir / 'net-tools').check(dir=1)
+
+
 def test_init_again(west_init_tmpdir):
     # Test that 'west init' on an initialized tmpdir errors out
     # with a message that indicates it's already initialized.
