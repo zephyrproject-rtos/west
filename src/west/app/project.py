@@ -952,6 +952,9 @@ class Update(_ProjectCommand):
         parser.add_argument('--stats', action='store_true',
                             help='''print performance statistics for
                             update operations''')
+        parser.add_argument('--cloned', action='store_true',
+                            help='''update the projects that are already cloned
+                            in the current workspace''')
 
         group = parser.add_argument_group(
             title='local project clone caches',
@@ -1048,6 +1051,7 @@ class Update(_ProjectCommand):
         self.name_cache = args.name_cache or config.get('update.name-cache')
         self.sync_submodules = config.getboolean('update.sync-submodules',
                                                  default=True)
+        self.cloned = args.cloned or config.getboolean('update.cloned')
 
         self.group_filter: List[str] = []
 
@@ -1092,6 +1096,9 @@ class Update(_ProjectCommand):
                     project.name in self.updated):
                 continue
             try:
+                if self.cloned and not project.is_cloned():
+                    self.dbg(f'{project.name}: skipping missing project')
+                    continue
                 if not self.project_is_active(project):
                     self.dbg(f'{project.name}: skipping inactive project')
                     continue
@@ -1163,6 +1170,9 @@ class Update(_ProjectCommand):
             if isinstance(project, ManifestProject):
                 continue
             try:
+                if self.cloned and not project.is_cloned():
+                    self.dbg(f'{project.name}: skipping missing project')
+                    continue
                 self.update(project)
             except subprocess.CalledProcessError:
                 failed.append(project)
