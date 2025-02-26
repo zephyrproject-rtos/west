@@ -1731,8 +1731,7 @@ class ForAll(_ProjectCommand):
 
             self.banner(
                 f'running "{args.subcommand}" in {project.name_and_path}:')
-            rc = subprocess.Popen(args.subcommand, shell=True, env=env,
-                                  cwd=cwd).wait()
+            rc = subprocess.Popen(args.subcommand, env=env, cwd=cwd).wait()
             if rc:
                 failed.append(project)
         self._handle_failed(args, failed)
