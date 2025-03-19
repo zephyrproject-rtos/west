@@ -584,6 +584,13 @@ class ManifestCommand(_ProjectCommand):
               If this file uses imports, it will not contain all the
               manifest data.
 
+            - --untracked print all files and folders inside the workspace that
+              are not tracked or managed by west. This effectively means any
+              file or folder that lays outside all of the projects' folders on
+              disk. This is similar to `git status` for untracked files. The
+              output format is relative to the current working directory and is
+              stable and suitable as input for scripting.
+
             If the manifest file does not use imports, and all project
             revisions are SHAs, the --freeze and --resolve output will
             be identical after a "west update".
@@ -604,6 +611,9 @@ class ManifestCommand(_ProjectCommand):
                            exiting with an error if there are issues''')
         group.add_argument('--path', action='store_true',
                            help="print the top level manifest file's path")
+        group.add_argument('--untracked', action='store_true',
+                           help='''print any files and folders not managed or
+                           tracked by west''')
 
         group = parser.add_argument_group('options for --resolve and --freeze')
         group.add_argument('-o', '--out',
@@ -624,6 +634,8 @@ class ManifestCommand(_ProjectCommand):
         elif args.freeze:
             self._die_if_manifest_project_filter('freeze')
             self._dump(args, manifest.as_frozen_yaml(**dump_kwargs))
+        elif args.untracked:
+            self._untracked()
         elif args.path:
             self.inf(manifest.path)
         else:
@@ -639,6 +651,70 @@ class ManifestCommand(_ProjectCommand):
                      'west developers if you have a use case for resolving '
                      'the manifest while projects are made inactive by the '
                      'project filter.')
+
+    def _untracked(self):
+        ''' "Performs a top-down search of the west topdir,
+        ignoring every folder that corresponds to a west project.
+        '''
+        ppaths = []
+        untracked = []
+        for project in self._projects(None):
+            # We do not check for self.manifest.is_active(project) because
+            # inactive projects are still considered "tracked folders".
+            ppaths.append(Path(project.abspath))
+
+        # Since west tolerates nested projects (i.e. a project inside the folder
+        # of another project) we must sort the project paths to ensure that we
+        # hit the "enclosing" project first when iterating.
+        ppaths.sort()
+
+        def _find_untracked(folder):
+            '''There are three cases for each element in a folder:
+            - It's a project -> Do nothing, ignore the folder.
+            - There are no projects inside -> add to untracked list.
+            - It's not a project folder but there are some projects inside it -> recurse.
+            The folder argument cannot be inside a project, otherwise all bets are off.
+            '''
+            self.dbg(f'looking for untracked files/folders in: {folder}')
+            for e in [e.absolute() for e in folder.iterdir()]:
+                if not e.is_dir() or e.is_symlink():
+                    untracked.append(e)
+                    continue
+                self.dbg(f'processing folder: {e}')
+                for ppath in ppaths:
+                    # We cannot use samefile() because it requires the file
+                    # to exist (not always the case with inactive or even
+                    # uncloned projects).
+                    if ppath == e:
+                        # We hit a project root folder, skip it.
+                        break
+                    elif e in ppath.parents:
+                        self.dbg(f'recursing into: {e}')
+                        _find_untracked(e)
+                        break
+                else:
+                    # This is not a project and there is no project inside.
+                    # Add to untracked elements.
+                    untracked.append(e)
+                    continue
+
+        # Avoid using Path.walk() since that returns all files and folders under
+        # a particular folder, which is overkill in our case. Instead, recurse
+        # only when required.
+        _find_untracked(Path(self.topdir))
+
+        # Remove the .west folder, which is maintained by west
+        try:
+            untracked.remove((Path(self.topdir) / Path(WEST_DIR)).resolve())
+        except ValueError:
+            self.die(f'Folder {WEST_DIR} not found in workspace')
+
+        # Sort the results for displaying to the user.
+        untracked.sort()
+        for u in untracked:
+            # We cannot use Path.relative_to(p, walk_up=True) because the
+            # walk_up parameter was only added in 3.12
+            self.inf(os.path.relpath(u, Path.cwd()))
 
     def _dump(self, args, to_dump):
         if args.out:
@@ -881,7 +957,10 @@ class Status(_ProjectCommand):
             'status',
             '"git status" for one or more projects',
             '''Runs "git status" for each of the specified projects.
-            Unknown arguments are passed to "git status".''',
+            Unknown arguments are passed to "git status".
+
+            Note: If you are looking to find untracked files and folders
+            in the workspace use "west manifest --untracked".''',
             accepts_unknown_args=True,
         )
 
