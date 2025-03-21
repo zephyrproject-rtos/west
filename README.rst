@@ -1,3 +1,7 @@
+.. raw:: html
+
+   <a href="https://scorecard.dev/viewer/?uri=github.com/zephyrproject-rtos/west"><img src="https://api.securityscorecards.dev/projects/github.com/zephyrproject-rtos/west/badge"></a>
+
 This is the Zephyr RTOS meta tool, ``west``.
 
 https://docs.zephyrproject.org/latest/guides/west/index.html
