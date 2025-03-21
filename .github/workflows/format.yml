@@ -57,7 +57,7 @@ jobs:
 
       - name: Run ruff format check for ${{ matrix.files.path }}
         id: format-check
-        uses: astral-sh/ruff-action@d0a0e814ec17e92d33be7d24dd922b479f1bcd38 # v1.1.1
+        uses: astral-sh/ruff-action@9828f49eb4cadf267b40eaa330295c412c68c1f9 # v3.2.2
         # Allow the job run to pass when this step fails
         continue-on-error: true
         with:
