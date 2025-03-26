@@ -17,6 +17,7 @@ from conftest import (
     check_output,
     check_proj_consistency,
     cmd,
+    cmd_raises,
     create_branch,
     create_repo,
     create_workspace,
@@ -224,6 +225,17 @@ def test_list_groups(west_init_tmpdir):
            'foo .foo-group-1,foo-group-2. foo',
            'bar .. path-for-bar',
            'baz .baz-group. baz'])
+
+    check(_list_f('{name} .{groups}. {path}') + ['--inactive'],
+          ['foo .foo-group-1,foo-group-2. foo',
+           'baz .baz-group. baz'])
+
+    check(_list_f("{name} .{groups}. {path}") + ['--all'] + 'foo bar'.split(),
+          ['foo .foo-group-1,foo-group-2. foo',
+           'bar .. path-for-bar'])
+
+    err_msg = cmd_raises('list -i foo bar', subprocess.CalledProcessError)
+    assert '-i cannot be combined with an explicit project list' in err_msg
 
     cmd('config manifest.group-filter +foo-group-1')
     check(_list_f('{name} .{groups}. {path}'),
