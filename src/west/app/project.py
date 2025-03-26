@@ -455,6 +455,7 @@ The following arguments are available:
   that the project has been cloned.
 - cloned: "cloned" if the project has been cloned, "not-cloned"
   otherwise
+- active: "active" if the project is currently active, "inactive" otherwise
 - clone_depth: project clone depth if specified, "None" otherwise
 - groups: project groups, as a comma-separated list
 ''')
@@ -495,6 +496,11 @@ The following arguments are available:
             self.die_if_no_git()
 
             return "cloned" if project.is_cloned() else "not-cloned"
+
+        def active_thunk(project):
+            self.die_if_no_git()
+
+            return "active" if self.manifest.is_active(project) else "inactive"
 
         def delay(func, project):
             return DelayFormat(partial(func, project))
@@ -550,6 +556,7 @@ The following arguments are available:
                     revision=project.revision or 'N/A',
                     clone_depth=project.clone_depth or "None",
                     cloned=delay(cloned_thunk, project),
+                    active=delay(active_thunk, project),
                     sha=delay(sha_thunk, project),
                     groups=','.join(project.groups))
             except KeyError as e:

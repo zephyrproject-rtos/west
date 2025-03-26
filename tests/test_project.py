@@ -226,22 +226,22 @@ def test_list_groups(west_init_tmpdir):
            'bar .. path-for-bar',
            'baz .baz-group. baz'])
 
-    check(_list_f('{name} .{groups}. {path}') + ['--inactive'],
-          ['foo .foo-group-1,foo-group-2. foo',
-           'baz .baz-group. baz'])
+    check(_list_f('{name} .{groups}. {path} {active}') + ['--inactive'],
+          ['foo .foo-group-1,foo-group-2. foo inactive',
+           'baz .baz-group. baz inactive'])
 
-    check(_list_f("{name} .{groups}. {path}") + ['--all'] + 'foo bar'.split(),
-          ['foo .foo-group-1,foo-group-2. foo',
-           'bar .. path-for-bar'])
+    check(_list_f("{name} .{groups}. {path} {active}") + ['--all'] + 'foo bar'.split(),
+          ['foo .foo-group-1,foo-group-2. foo inactive',
+           'bar .. path-for-bar active'])
 
     err_msg = cmd_raises('list -i foo bar', subprocess.CalledProcessError)
     assert '-i cannot be combined with an explicit project list' in err_msg
 
     cmd('config manifest.group-filter +foo-group-1')
-    check(_list_f('{name} .{groups}. {path}'),
-          ['manifest .. zephyr',
-           'foo .foo-group-1,foo-group-2. foo',
-           'bar .. path-for-bar'])
+    check(_list_f('{name} .{groups}. {path} {active}'),
+          ['manifest .. zephyr active',
+           'foo .foo-group-1,foo-group-2. foo active',
+           'bar .. path-for-bar active'])
 
 
 def test_list_sha(west_update_tmpdir):
