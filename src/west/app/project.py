@@ -428,6 +428,8 @@ class List(_ProjectCommand):
             epilog=f'''\
 {ACTIVE_PROJECTS_HELP}
 
+Note: To list only inactive projects you can use --inactive.
+
 FORMAT STRINGS
 --------------
 
@@ -456,8 +458,11 @@ The following arguments are available:
 - clone_depth: project clone depth if specified, "None" otherwise
 - groups: project groups, as a comma-separated list
 ''')
-        parser.add_argument('-a', '--all', action='store_true',
-                            help='include inactive projects'),
+        group = parser.add_mutually_exclusive_group(required=False)
+        group.add_argument('-a', '--all', action='store_true',
+                           help='include inactive projects'),
+        group.add_argument('-i', '--inactive', action='store_true',
+                           help='list only inactive projects'),
         parser.add_argument('--manifest-path-from-yaml', action='store_true',
                             help='''print the manifest repository's path
                             according to the manifest file YAML, which may
@@ -494,12 +499,19 @@ The following arguments are available:
         def delay(func, project):
             return DelayFormat(partial(func, project))
 
+        if args.inactive and args.projects:
+            self.parser.error('-i cannot be combined with an explicit project '
+                              'list')
+
         for project in self._projects(args.projects):
-            # Skip inactive projects unless the user said
+            # Include the project based on the inactive flag. If the flag is
+            # set, include only inactive projects. Otherwise, include only
+            # active ones.
+            include = self.manifest.is_active(project) != bool(args.inactive)
+            # Skip not included projects unless the user said
             # --all or named some projects explicitly.
-            if not (args.all or args.projects or
-                    self.manifest.is_active(project)):
-                self.dbg(f'{project.name}: skipping inactive project')
+            if not (args.all or args.projects or include):
+                self.dbg(f'{project.name}: skipping project')
                 continue
 
             # Spelling out the format keys explicitly here gives us
