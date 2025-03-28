@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import textwrap
 from pathlib import Path, PurePath
 
@@ -250,6 +251,122 @@ def test_list_sha(west_update_tmpdir):
 
     assert cmd('list -f {sha}').startswith("N/A")
 
+
+def test_manifest_untracked(west_update_tmpdir):
+
+    def check(expected, cwd=None):
+        out_lines = cmd("manifest --untracked", cwd=cwd).splitlines()
+        assert out_lines == expected
+
+    # Ensure that all projects are active
+    projs = cmd('list -f {name}').splitlines()
+    assert projs == ['manifest', 'Kconfiglib', 'tagged_repo', 'net-tools']
+
+    # Disable Kconfiglib
+    cmd('config manifest.group-filter -- -Kconfiglib-group')
+
+    # Ensure that Kconfiglib is inactive
+    projs = cmd('list -f {name}').splitlines()
+    assert projs == ['manifest', 'tagged_repo', 'net-tools']
+    projs = cmd('list --all -f {name}').splitlines()
+    assert projs == ['manifest', 'Kconfiglib', 'tagged_repo', 'net-tools']
+
+    topdir = Path(west_update_tmpdir)
+
+    # No untracked files yet
+    check(list())
+
+    (topdir / "dir").mkdir()
+    # Untracked dir
+    check(['dir'])
+
+    (topdir / "unt").mkdir()
+    (topdir / "unt" / "file.yml").touch()
+    # Ensure we show the dir as untracked, not the file
+    check(['dir', 'unt'])
+
+    # Add a file to see it's displayed correctly as untracked
+    (topdir / "file.txt").touch()
+    check(['dir', 'file.txt', 'unt'])
+    (topdir / 'subdir' / "z.py").touch()
+    check(['dir', 'file.txt', str(Path('subdir/z.py')), 'unt'])
+
+    (topdir / "subdir" / "new").mkdir()
+    (topdir / "subdir" / "new" / "afile.txt").touch()
+    check(['dir', 'file.txt', str(Path('subdir/new')),
+           str(Path('subdir/z.py')), 'unt'])
+
+    # Check relative paths
+    check([str(Path('../dir')), str(Path('../file.txt')),
+           str(Path('../subdir/new')), str(Path('../subdir/z.py')), '.'],
+          cwd=str(Path("unt/")))
+
+    # Add a file to an existing project, ignored by --untracked
+    (topdir / "net-tools" / "test_manifest_untracked.file").touch()
+    check(['dir', 'file.txt', str(Path('subdir/new')), str(Path('subdir/z.py')),
+           'unt'])
+
+    kconfiglib = Path(topdir / "subdir" / "Kconfiglib")
+    # Same but with an inactive project
+    (kconfiglib / "test_manifest_untracked.file").touch()
+    check(['dir', 'file.txt', str(Path('subdir/new')), str(Path('subdir/z.py')),
+           'unt'])
+
+    # Copy (via clone) a full Git repo so we verify that those are also
+    # displayed as untracked.
+    clone(topdir / "net-tools", Path('subdir/acopy'))
+    clone(topdir / "net-tools", Path('tmpcopy'))
+
+    check(['dir', 'file.txt', str(Path('subdir/acopy')), str(Path('subdir/new')),
+           str(Path('subdir/z.py')), 'tmpcopy', 'unt'])
+
+    # Empty a project so it's not a Git repo anymore
+    (topdir / "net-tools" / ".git").rename(topdir / "net-tools" / "former-git")
+    # Should make no difference
+    check(['dir', 'file.txt', str(Path('subdir/acopy')), str(Path('subdir/new')),
+           str(Path('subdir/z.py')), 'tmpcopy', 'unt'])
+
+    # Same with an inactive project
+    (kconfiglib / ".git").rename(kconfiglib / "former-git")
+    # Should make no difference
+    check(['dir', 'file.txt', str(Path('subdir/acopy')), str(Path('subdir/new')),
+           str(Path('subdir/z.py')), 'tmpcopy', 'unt'])
+
+    # Even if we make the whole inactive project disappear it should make no
+    # difference at all, except that the renamed dir will show up.
+    (kconfiglib).rename(topdir / "subdir" / "other")
+    check(['dir', 'file.txt', str(Path('subdir/acopy')), str(Path('subdir/new')),
+           str(Path('subdir/other')), str(Path('subdir/z.py')), 'tmpcopy', 'unt'])
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="symbolic links not tested on Windows")
+def test_manifest_untracked_with_symlinks(west_update_tmpdir):
+
+    def check(expected, cwd=None):
+        out_lines = cmd("manifest --untracked", cwd=cwd).splitlines()
+        assert out_lines == expected
+
+    # Disable Kconfiglib to have an inactive project
+    cmd('config manifest.group-filter -- -Kconfiglib-group')
+
+    # Ensure that Kconfiglib is inactive
+    projs = cmd('list -f {name}').splitlines()
+    assert projs == ['manifest', 'tagged_repo', 'net-tools']
+
+    # Create a folder symlink
+    Path('asl').symlink_to(Path('subdir/Kconfiglib'))
+    # Create another one
+    Path('anothersl').symlink_to(Path('../'))
+    # Yet another one
+    Path('subdir/yetanothersl').symlink_to(Path('tagged_repo'))
+    # check that symlinks are displayed like any other regular untracked file or
+    # directory
+    check(['anothersl', 'asl', str(Path('subdir/yetanothersl'))])
+
+    # File symlink tests, should all be displayed as untracked as well
+    Path('filesl.yml').symlink_to(Path('zephyr/west.yml'))
+    Path('subdir/afsl.py').symlink_to(Path('net-tools/scripts/test.py'))
+    check(['anothersl', 'asl', 'filesl.yml', str(Path('subdir/afsl.py')),
+           str(Path('subdir/yetanothersl'))])
 
 def test_manifest_freeze(west_update_tmpdir):
     # We should be able to freeze manifests.
