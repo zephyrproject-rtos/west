@@ -106,8 +106,7 @@ def parse_early_args(argv: list[str]) -> EarlyArgs:
     def consume_more_args(rest):
         # Handle the 'Vv' portion of 'west -hVv'.
 
-        nonlocal help, version, zephyr_base, verbosity, command_name
-        nonlocal unexpected_arguments
+        nonlocal help, version, zephyr_base, verbosity
         nonlocal expecting_zephyr_base
 
         if not rest:
