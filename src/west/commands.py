@@ -696,8 +696,6 @@ def _commands_module_from_file(file):
     # returned from a cache if the same file is ever imported again,
     # to avoid a double import in case the file maintains module-level
     # state or defines multiple commands.
-    global _EXT_MODULES_CACHE
-    global _EXT_MODULES_NAME_IT
 
     # Use an absolute pathobj to handle canonicalization, e.g.:
     #
