@@ -554,6 +554,22 @@ def test_forall(west_init_tmpdir):
                ]
 
 
+@pytest.mark.parametrize("jobs", ["-j 1", "-j 2", "-j"])
+def test_forall_jobs(jobs, west_init_tmpdir):
+    # 'forall' with no projects cloned shouldn't fail
+    output = cmd(['forall', jobs, '-c', '']).splitlines()
+    assert '=== running "" in manifest (zephyr):' in output
+
+    cmd('update net-tools Kconfiglib')
+
+    # print order is no longer guaranteed when there are multiple projects
+    output = cmd(['forall', jobs, '-c', '']).splitlines()
+
+    assert '=== running "" in manifest (zephyr):' in output
+    assert '=== running "" in net-tools (net-tools):' in output
+    assert '=== running "" in Kconfiglib (subdir/Kconfiglib):' in output
+
+
 def test_grep(west_init_tmpdir):
     # Make sure we don't find things we don't expect, and do find
     # things we do.
