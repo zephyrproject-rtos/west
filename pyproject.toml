@@ -23,8 +23,17 @@ dependencies = [
     "colorama",
     "PyYAML>=5.1",
     "pykwalify",
-    "setuptools",
     "packaging",
+]
+
+[dependency-groups]
+lint = ["flake8", "ruff"]
+test = ["pytest", "pytest-cov"]
+type = ["mypy", "types-PyYAML"]
+tox = [
+  {include-group = "lint"},
+  {include-group = "test"},
+  {include-group = "type"},
 ]
 
 [project.license]
