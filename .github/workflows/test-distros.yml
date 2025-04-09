@@ -1,0 +1,79 @@
+name: Python Test on Linux distros
+
+# This workflow should only run when preparing releases to make sure linux distros other than
+# ubuntu work as expected.
+# In pull requests only run if this file has been changed
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/test-distros.yml'
+
+# Running this workflow locally can be done using docker, with the following commands in
+# your local clone of the west repository:
+
+# 1. Start a docker container with (read-only) access to the source files
+# $ docker run -it -v $(pwd):/west:ro <container>
+#
+# 2. Install, depending on the OS, git and python-pip, for example in Arch linux:
+# $ pacman -Syu --noconfirm git python-pip
+#
+# 3. Clone the repository to a temporary directory
+# $ git config --global --add safe.directory /west
+# $ git clone -q /west /west-tmp
+#
+# 4. Install tox
+# $ pip3 install tox --break-system-packages
+#
+# 5. Run tox
+# $ tox -c /west-tmp -- -W error
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        container:
+          - "archlinux:latest"
+          - "debian:stable"
+          - "debian:testing"
+          - "fedora:latest"
+          - "fedora:rawhide"
+          - "opensuse/tumbleweed:latest"
+          - "ubuntu:devel"
+    steps:
+      - if: ${{ startsWith(matrix.container, 'archlinux') }}
+        run: |
+          pacman -Syu --noconfirm git python-pip
+
+      - if: ${{ startsWith(matrix.container, 'debian') || startsWith(matrix.container, 'ubuntu') }}
+        run: |
+          apt-get update
+          apt-get install -y git python3-pip python3-venv
+
+      - if: ${{ startsWith(matrix.container, 'fedora') }}
+        run: |
+          dnf install -y git python3-pip
+
+      - if: ${{ startsWith(matrix.container, 'opensuse') }}
+        run: |
+          zypper -n install git python3-pip python3-sqlite3
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Display Python version
+        run: python3 -c "import sys; print(sys.version); print(sys.platform)"
+
+      - name: Install tox
+        run: pip3 install tox --break-system-packages
+
+      - name: Run tox
+        run: tox -- -W error

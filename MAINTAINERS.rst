@@ -22,21 +22,15 @@ Pre-release test plan
 2. Make tox happy on other popular Linux distributions:
 
    - Arch
-   - the latest Ubuntu LTS release
    - the latest Ubuntu development release
    - Debian stable
    - Debian testing
    - the latest Fedora release
    - the latest Fedora rawhide release
+   - the rolling openSUSE Tumbleweed release
 
-   Automated infrastructure for doing this in docker is in the docker-testing
-   directory. Start by updating the Dockerfiles and compose.yaml in that
-   directory if any newer distribution versions should be tested.
-
-   Then, install docker compose in your host Linux environment and run::
-
-     cd docker-testing
-     ./run-tests.sh
+   Automated infrastructure for doing this using docker is in the
+   test-distros.yml workflow action on Github.
 
    Make sure to check the tox.log files mentioned in the output for any
    anomalous warnings.

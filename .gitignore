@@ -12,4 +12,3 @@ shippable/
 htmlcov/
 .dir-locals.el
 .venv/
-docker-testing/outdir
