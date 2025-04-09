@@ -29,12 +29,15 @@ jobs:
         uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
         with:
           python-version: ${{ matrix.python-version }}
+          # Specify a pip cache for faster installs
+          cache: pip
+          cache-dependency-path: "./check out/requirements-install-tox.txt"
 
       - name: Display Python version
         run: python -c "import sys; print(sys.version); print(sys.platform)"
 
       - name: Install tox
-        run: pip3 install tox
+        run: pip install -r "./check out/requirements-install-tox.txt" --require-hashes
 
       - name: Run tox
         run: tox -c 'check out' -- -W error
