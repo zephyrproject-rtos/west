@@ -45,6 +45,24 @@ include-package-data = true
 where = ["src"]
 namespaces = false
 
+[tool.coverage.run]
+relative_files = true
+omit = [
+  "*/tmp/*",
+]
+
+[tool.coverage.report]
+omit = [
+  "*/tmp/*",
+]
+
+[tool.coverage.paths]
+source = [
+  "src/west",
+  "*/site-packages/west",
+  "*/src/west",
+]
+
 [tool.ruff]
 line-length = 100
 
