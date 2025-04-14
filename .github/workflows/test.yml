@@ -14,7 +14,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         # This is enough to find many quoting issues
         with:
           path: "./check out"
@@ -23,9 +24,55 @@ jobs:
         uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
         with:
           python-version: ${{ matrix.python-version }}
+
       - name: Display Python version
         run: python -c "import sys; print(sys.version); print(sys.platform)"
-      - name: install tox
+
+      - name: Install tox
         run: pip3 install tox
-      - name: tox
+
+      - name: Run tox
         run: tox -c 'check out' -- -W error
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-${{ matrix.os }}-${{ matrix.python-version }}
+          path: "./check out/.coverage"
+          include-hidden-files: true
+
+  coverage-report:
+    runs-on: ubuntu-latest
+    needs: ["build"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
+        with:
+          python-version: '3.13'
+
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+
+      - name: Install coverage
+        run: pip3 install coverage
+
+      - name: Create coverage report
+        run: |
+          coverage combine coverage-*/.coverage
+          coverage xml
+
+      - name: Upload combined coverage report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-combined
+          path: coverage.xml
+
+      - name: Upload coverage to Codecov
+        if: github.repository_owner == 'zephyrproject-rtos'
+        uses: codecov/codecov-action@0565863a31f2c772f9f0395002a31e3f06189574 # v5.4.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: ${{ github.repository_owner }}/west
