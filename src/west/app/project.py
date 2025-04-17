@@ -638,6 +638,8 @@ class ManifestCommand(_ProjectCommand):
         group = parser.add_argument_group('options for --resolve and --freeze')
         group.add_argument('-o', '--out',
                            help='output file, default is standard output')
+        group.add_argument('--active-only', action='store_true',
+                           help='only resolve active projects')
 
         return parser
 
@@ -649,11 +651,13 @@ class ManifestCommand(_ProjectCommand):
         if args.validate:
             pass              # nothing more to do
         elif args.resolve:
-            self._die_if_manifest_project_filter('resolve')
-            self._dump(args, manifest.as_yaml(**dump_kwargs))
+            if not args.active_only:
+                self._die_if_manifest_project_filter('resolve')
+            self._dump(args, manifest.as_yaml(active_only=args.active_only, **dump_kwargs))
         elif args.freeze:
-            self._die_if_manifest_project_filter('freeze')
-            self._dump(args, manifest.as_frozen_yaml(**dump_kwargs))
+            if not args.active_only:
+                self._die_if_manifest_project_filter('freeze')
+            self._dump(args, manifest.as_frozen_yaml(active_only=args.active_only, **dump_kwargs))
         elif args.untracked:
             self._untracked()
         elif args.path:
@@ -666,7 +670,9 @@ class ManifestCommand(_ProjectCommand):
         if self.config.get('manifest.project-filter') is not None:
             self.die(f'"west manifest --{action}" is not (yet) supported '
                      'when the manifest.project-filter option is set. '
-                     'Please clear the project-filter configuration '
+                     f'Add --active-only to {action} only the projects '
+                     'currently active in the workspace. Alternatively, '
+                     'please clear the project-filter configuration '
                      'option and re-run this command, or contact the '
                      'west developers if you have a use case for resolving '
                      'the manifest while projects are made inactive by the '
