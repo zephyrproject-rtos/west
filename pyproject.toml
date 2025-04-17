@@ -55,6 +55,10 @@ omit = [
 omit = [
   "*/tmp/*",
 ]
+exclude_lines = [
+  # Don't complain about type checking imports:
+  "if TYPE_CHECKING:"
+]
 
 [tool.coverage.paths]
 source = [
