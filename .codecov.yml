@@ -9,3 +9,13 @@ comment:
   hide_project_coverage: false
   branches:
     - "main"
+
+# Do not block PRs (yet)
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
