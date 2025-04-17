@@ -1599,16 +1599,20 @@ class Manifest:
         return ret
 
     def _as_dict_helper(
-            self, pdict: Optional[Callable[[Project], dict]] = None) \
-            -> dict:
+        self,
+        pdict: Optional[Callable[[Project], dict]] = None,
+        pfilter: Optional[Callable[[Project], bool]] = None,
+    ) -> dict:
         # pdict: returns a Project's dict representation.
         #        By default, it's Project.as_dict.
+        # pfilter: filter to apply on listing the projects.
+        #          By default, no filter is applied.
         if pdict is None:
             pdict = Project.as_dict
 
         projects = list(self.projects)
         del projects[MANIFEST_PROJECT_INDEX]
-        project_dicts = [pdict(p) for p in projects]
+        project_dicts = [pdict(p) for p in projects if pfilter is None or pfilter(p)]
 
         # This relies on insertion-ordered dictionaries for
         # predictability, which is a CPython 3.6 implementation detail
@@ -1622,22 +1626,26 @@ class Manifest:
 
         return r
 
-    def as_dict(self) -> dict:
+    def as_dict(self, active_only: bool = False) -> dict:
         '''Returns a dict representing self, fully resolved.
 
         The value is "resolved" in that the result is as if all
         projects had been defined in a single manifest without any
         import attributes.
-        '''
-        return self._as_dict_helper()
 
-    def as_frozen_dict(self) -> dict:
+        :param active_only: Do not resolve inactive projects
+        '''
+        return self._as_dict_helper(pfilter=self.is_active if active_only else None)
+
+    def as_frozen_dict(self, active_only: bool = False) -> dict:
         '''Returns a dict representing self, but frozen.
 
         The value is "frozen" in that all project revisions are the
         full SHAs pointed to by `QUAL_MANIFEST_REV_BRANCH` references.
 
         Raises ``RuntimeError`` if a project SHA can't be resolved.
+
+        :param active_only: Do not freeze inactive projects
         '''
         def pdict(p):
             if not p.is_cloned():
@@ -1653,7 +1661,7 @@ class Manifest:
             d['revision'] = sha
             return d
 
-        return self._as_dict_helper(pdict=pdict)
+        return self._as_dict_helper(pdict=pdict, pfilter=self.is_active if active_only else None)
 
     def _dump_yaml(self, to_dump: dict, **kwargs) -> str:
         ''' Dumps dictionary to YAML using the multi-line string representer.
@@ -1672,18 +1680,19 @@ class Manifest:
         yaml.add_representer(_MLS, mls_representer, Dumper=yaml.SafeDumper)
         return yaml.safe_dump(to_dump, **kwargs)
 
-    def as_yaml(self, **kwargs) -> str:
+    def as_yaml(self, active_only: bool = False, **kwargs) -> str:
         '''Returns a YAML representation for self, fully resolved.
 
         The value is "resolved" in that the result is as if all
         projects had been defined in a single manifest without any
         import attributes.
 
+        :param active_only: Do not resolve inactive projects
         :param kwargs: passed to yaml.safe_dump()
         '''
-        return self._dump_yaml(self.as_dict(), **kwargs)
+        return self._dump_yaml(self.as_dict(active_only=active_only), **kwargs)
 
-    def as_frozen_yaml(self, **kwargs) -> str:
+    def as_frozen_yaml(self, active_only: bool = False, **kwargs) -> str:
         '''Returns a YAML representation for self, but frozen.
 
         The value is "frozen" in that all project revisions are the
@@ -1691,9 +1700,10 @@ class Manifest:
 
         Raises ``RuntimeError`` if a project SHA can't be resolved.
 
+        :param active_only: Do not freeze inactive projects
         :param kwargs: passed to yaml.safe_dump()
         '''
-        return self._dump_yaml(self.as_frozen_dict(), **kwargs)
+        return self._dump_yaml(self.as_frozen_dict(active_only=active_only), **kwargs)
 
     @property
     def projects(self) -> list[Project]:
