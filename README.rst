@@ -1,6 +1,11 @@
-.. raw:: html
+.. image:: https://img.shields.io/pypi/pyversions/west?logo=python
+   :target: https://pypi.org/project/west/
 
-   <a href="https://scorecard.dev/viewer/?uri=github.com/zephyrproject-rtos/west"><img src="https://api.securityscorecards.dev/projects/github.com/zephyrproject-rtos/west/badge"></a>
+.. image:: https://api.securityscorecards.dev/projects/github.com/zephyrproject-rtos/west/badge
+   :target: https://scorecard.dev/viewer/?uri=github.com/zephyrproject-rtos/west
+
+.. image:: https://codecov.io/gh/zephyrproject-rtos/west/graph/badge.svg
+   :target: https://codecov.io/gh/zephyrproject-rtos/west
 
 This is the Zephyr RTOS meta tool, ``west``.
 
