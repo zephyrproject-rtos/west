@@ -407,6 +407,77 @@ def test_manifest_freeze(west_update_tmpdir):
                     '^    path: zephyr$']
     _match_multiline_regex(expected_res, actual)
 
+def test_manifest_freeze_active(west_update_tmpdir):
+    # We should be able to freeze manifests with inactive projects.
+    cmd('config manifest.group-filter -- -Kconfiglib-group')
+
+    actual = cmd('manifest --freeze --active-only').splitlines()
+    # Same as test_manifest_freeze but without inactive projects
+    expected_res = ['^manifest:$',
+                    '^  projects:$',
+                    '^  - name: tagged_repo$',
+                    '^    url: .*$',
+                    '^    revision: [a-f0-9]{40}$',
+                    '^  - name: net-tools$',
+                    '^    description: Networking tools.$',
+                    '^    url: .*$',
+                    '^    revision: [a-f0-9]{40}$',
+                    '^    clone-depth: 1$',
+                    '^    west-commands: scripts/west-commands.yml$',
+                    '^  self:$',
+                    '^    path: zephyr$']
+    _match_multiline_regex(expected_res, actual)
+
+def test_manifest_resolve(west_update_tmpdir):
+    # We should be able to resolve manifests.
+    actual = cmd('manifest --resolve').splitlines()
+    # Similar as test_manifest_freeze but with resolved projects
+    expected_res = ['^manifest:$',
+                    '^  projects:$',
+                    '^  - name: Kconfiglib$',
+                    '^    description: |',
+                    '^      Kconfiglib is an implementation of$',
+                    '^      the Kconfig language written in Python.$',
+                    '^    url: .*$',
+                    '^    revision: zephyr$',
+                    '^    path: subdir/Kconfiglib$',
+                    '^    groups:$',
+                    '^    - Kconfiglib-group$',
+                    '^    submodules: true$',
+                    '^  - name: tagged_repo$',
+                    '^    url: .*$',
+                    '^    revision: v1.0$',
+                    '^  - name: net-tools$',
+                    '^    description: Networking tools.$',
+                    '^    url: .*$',
+                    '^    revision: master$',
+                    '^    clone-depth: 1$',
+                    '^    west-commands: scripts/west-commands.yml$',
+                    '^  self:$',
+                    '^    path: zephyr$']
+    _match_multiline_regex(expected_res, actual)
+
+def test_manifest_resolve_active(west_update_tmpdir):
+    # We should be able to resolve manifests with inactive projects.
+    cmd('config manifest.group-filter -- -Kconfiglib-group')
+
+    actual = cmd('manifest --resolve --active-only').splitlines()
+    # Same as test_manifest_resolve but without inactive projects
+    expected_res = ['^manifest:$',
+                    '^  projects:$',
+                    '^  - name: tagged_repo$',
+                    '^    url: .*$',
+                    '^    revision: v1.0$',
+                    '^  - name: net-tools$',
+                    '^    description: Networking tools.$',
+                    '^    url: .*$',
+                    '^    revision: master$',
+                    '^    clone-depth: 1$',
+                    '^    west-commands: scripts/west-commands.yml$',
+                    '^  self:$',
+                    '^    path: zephyr$']
+    _match_multiline_regex(expected_res, actual)
+
 def test_compare(config_tmpdir, west_init_tmpdir):
     # 'west compare' with no projects cloned should still work,
     # and not print anything.
