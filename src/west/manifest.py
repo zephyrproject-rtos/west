@@ -22,6 +22,12 @@ from typing import TYPE_CHECKING, Any, Callable, NamedTuple, NoReturn, Optional,
 
 import pykwalify.core
 import yaml
+
+try:
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:
+    from yaml import SafeLoader  # type: ignore
+
 from packaging.version import parse as parse_version
 
 from west import util
@@ -204,7 +210,7 @@ def _is_yml(path: PathType) -> bool:
 
 def _load(data: str) -> Any:
     try:
-        return yaml.safe_load(data)
+        return yaml.load(data, Loader=SafeLoader)
     except yaml.scanner.ScannerError as e:
         raise MalformedManifest(data) from e
 

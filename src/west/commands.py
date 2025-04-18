@@ -22,6 +22,12 @@ from typing import Callable, NoReturn, Optional
 
 import colorama
 import pykwalify
+
+try:
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:
+    from yaml import SafeLoader  # type: ignore
+
 import yaml
 
 from west.configuration import Configuration
@@ -649,7 +655,7 @@ def _ext_specs(project):
         # Load the spec file and check the schema.
         with open(spec_file) as f:
             try:
-                commands_spec = yaml.safe_load(f.read())
+                commands_spec = yaml.load(f.read(), Loader=SafeLoader)
             except yaml.YAMLError as e:
                 raise ExtensionCommandError from e
         try:
