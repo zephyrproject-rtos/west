@@ -623,9 +623,15 @@ class ManifestCommand(_ProjectCommand):
         group = parser.add_mutually_exclusive_group(required=True)
         group.add_argument('--resolve', action='store_true',
                            help='print the manifest with all imports resolved')
+        group.add_argument('--resolve-active', action='store_true',
+                           help='''print the manifest with imports resolved for
+                           all active projects''')
         group.add_argument('--freeze', action='store_true',
                            help='''print the resolved manifest with SHAs for
                            all project revisions''')
+        group.add_argument('--freeze-active', action='store_true',
+                           help='''print the resolved manifest with SHAs for
+                           all active project revisions''')
         group.add_argument('--validate', action='store_true',
                            help='''validate the current manifest,
                            exiting with an error if there are issues''')
@@ -651,9 +657,13 @@ class ManifestCommand(_ProjectCommand):
         elif args.resolve:
             self._die_if_manifest_project_filter('resolve')
             self._dump(args, manifest.as_yaml(**dump_kwargs))
+        elif args.resolve_active:
+            self._dump(args, manifest.as_yaml(active_only=True, **dump_kwargs))
         elif args.freeze:
             self._die_if_manifest_project_filter('freeze')
             self._dump(args, manifest.as_frozen_yaml(**dump_kwargs))
+        elif args.freeze_active:
+            self._dump(args, manifest.as_frozen_yaml(active_only=True, **dump_kwargs))
         elif args.untracked:
             self._untracked()
         elif args.path:
