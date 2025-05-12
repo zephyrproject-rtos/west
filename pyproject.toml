@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "west"
-version = "1.3.99"
+version = "1.4.0a1"
 authors = [{name = "Zephyr Project", email = "devel@lists.zephyrproject.org"}]
 description = "Zephyr RTOS Project meta-tool"
 classifiers = [
