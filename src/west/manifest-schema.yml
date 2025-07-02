@@ -103,6 +103,7 @@ mapping:
             required: false
             type: str
           # Revision to check out. May be a branch, tag, or SHA.
+          # Default: "master"
           revision:
             required: false
             type: text        # SHAs could be only numbers
