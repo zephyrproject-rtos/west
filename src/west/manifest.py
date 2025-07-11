@@ -2771,7 +2771,7 @@ class Manifest:
                 self._ctx.group_filter_q)
             for group_filter in self._ctx.group_filter_q:
                 _update_disabled_groups(self._disabled_groups, group_filter)
-            ret = [f'-{g}' for g in self._disabled_groups]
+            ret = [f'-{g}' for g in sorted(self._disabled_groups)]
             _logger.debug('final top level group-filter: %s', ret)
             return ret
 
