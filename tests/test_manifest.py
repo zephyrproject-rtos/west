@@ -1177,6 +1177,11 @@ def test_as_dict_and_yaml(manifest_repo):
         path: project-two
         clone-depth: 1
         west-commands: commands.yml
+      group-filter:
+        - -Ddisabled
+        - +Cenabled
+        - -Bdisabled
+        - +Aenabled
     '''
     content_dict = {'manifest':
                     {'projects':
@@ -1189,10 +1194,15 @@ def test_as_dict_and_yaml(manifest_repo):
                        'path': 'project-two',
                        'clone-depth': 1,
                        'west-commands': 'commands.yml'}],
-                     'self': {'path': os.path.basename(manifest_repo)}}}
+                     'self': {'path': os.path.basename(manifest_repo)},
+                     'group-filter': ['-Bdisabled', '-Ddisabled', ],
+                     }}
 
     expected_yaml = '''\
 manifest:
+  group-filter:
+  - -Bdisabled
+  - -Ddisabled
   projects:
   - name: p1
     revision: master
