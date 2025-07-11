@@ -598,6 +598,11 @@ def validate(data: Any) -> dict[str, Any]:
     except pykwalify.errors.SchemaError as se:
         raise MalformedManifest(se.msg) from se
 
+    # Normalize all odd cases to an empty, iterable list (#823)
+    for k in ['projects']:
+        if data.get(k) is None:
+            data[k] = []
+
     return as_dict
 
 # A 'raw' element in a project 'groups:' or manifest 'group-filter:' list,
