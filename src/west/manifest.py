@@ -2301,9 +2301,6 @@ class Manifest:
                        defaults: _defaults) -> None:
         # Load projects and add them to self._ctx.projects.
 
-        if 'projects' not in manifest:
-            return
-
         have_imports = []
         names = set()
         for pd in manifest['projects']:
