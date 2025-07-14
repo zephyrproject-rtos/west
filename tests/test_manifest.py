@@ -692,6 +692,9 @@ def test_no_projects():
     m = Manifest.from_data('manifest: {}')
     assert len(m.projects) == 1  # just ManifestProject
 
+    m = Manifest.from_data('manifest:')
+    assert len(m.projects) == 1
+
     m = M('''
     self:
       path: foo
