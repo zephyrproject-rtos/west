@@ -560,6 +560,9 @@ def validate(data: Any) -> dict[str, Any]:
     if 'manifest' not in as_dict:
         raise MalformedManifest('manifest data contains no "manifest" key')
 
+    if as_dict['manifest'] is None:
+        as_dict['manifest'] = {}
+
     data = as_dict['manifest']
 
     # Make sure this version of west can load this manifest data.
