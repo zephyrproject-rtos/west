@@ -24,6 +24,7 @@ dependencies = [
     "PyYAML>=5.1",
     "pykwalify",
     "packaging",
+    "joblib",
 ]
 
 [project.license]
