@@ -78,6 +78,28 @@ Hacking on West
 
 This section contains notes for getting started developing west itself.
 
+`pip` offers many different ways to (download and) install Python
+software. Below are common ways relevant to `west`; for a complete list
+check `<https://pip.pypa.io/en/stable/topics/>`_
+
+Quick Install
+~~~~~~~~~~~~~
+
+If you are not interested in source code and git history, GitHub offers
+`pip` the ability to download and install a .zip archive of any random
+version with a single command.  This allows testing work in progress
+very quickly. Examples::
+
+  pip3 uninstall west
+  # Pull request 830
+  pip3 install --dry-run https://github.com/zephyrproject-rtos/west/archive/pull/830/head.zip
+  # Release v1.4
+  pip3 install https://github.com/zephyrproject-rtos/west/archive/v1.4-branch.zip
+  # Someone's random version
+  pip3 install https://github.com/someone_you_trust/west/archive/some_branch_or_tag.zip
+
+Warning: never install software from people or locations you do not trust!
+
 Editable Install
 ~~~~~~~~~~~~~~~~
 
@@ -89,10 +111,10 @@ top level directory in the west repository::
 This is useful if you are actively working on west and don't want to re-package
 and install a wheel each time you run it.
 
-Installing from Source
-~~~~~~~~~~~~~~~~~~~~~~
+Creating a wheel package
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-You can create and install a wheel package to install west as well.
+You can create a wheel package and distribute it to others.
 
 To build the west wheel file::
 
