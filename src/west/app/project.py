@@ -6,6 +6,7 @@
 '''West project commands'''
 
 import argparse
+import hashlib
 import logging
 import os
 import shlex
@@ -15,7 +16,7 @@ import sys
 import textwrap
 import time
 from functools import partial
-from os.path import abspath, relpath
+from os.path import abspath, basename, relpath
 from pathlib import Path, PurePath
 from time import perf_counter
 from urllib.parse import urlparse
@@ -1065,10 +1066,19 @@ class Update(_ProjectCommand):
             they can also be cloned from caches on the local file system.'''))
         group.add_argument('--name-cache',
                            help='''cached repositories are in subdirectories
-                           matching the names of projects to update''')
+                           matching the names of projects to update. This cache
+                           has highest priority (Prio 0).''')
         group.add_argument('--path-cache',
                            help='''cached repositories are in the same relative
-                           paths as the workspace being updated''')
+                           paths as the workspace being updated. This cache has
+                           lower priority (Prio 1).''')
+        group.add_argument('--auto-cache',
+                           help='''automatically setup local cache repositories
+                           (analog to --name-cache, but with an additional
+                           subfolder for different remote urls). Each local
+                           cache repository is automatically cloned on first
+                           usage and automatically synced on subsequent runs.
+                           This cache has lowest priority (Prio 2).''')
 
         group = parser.add_argument_group(
             title='fetching behavior',
@@ -1151,6 +1161,7 @@ class Update(_ProjectCommand):
         self.narrow = args.narrow or config.getboolean('update.narrow')
         self.path_cache = args.path_cache or config.get('update.path-cache')
         self.name_cache = args.name_cache or config.get('update.name-cache')
+        self.auto_cache = args.auto_cache or config.get('update.auto-cache')
         self.sync_submodules = config.getboolean('update.sync-submodules',
                                                  default=True)
 
@@ -1501,11 +1512,53 @@ class Update(_ProjectCommand):
             if take_stats:
                 stats['init'] = perf_counter() - start
 
+    def create_auto_cache_info(self, project, cache_dir):
+        # auto-cache helper: Create some short informal file with basic info
+        # about the local cache folder.
+        content = textwrap.dedent(f"""
+        The following local cache directory was automatically created by west:
+        - Local Cache:  {basename(cache_dir)}
+        - Project Url:  {project.url}
+        """)
+        with open(cache_dir + '.info', 'w') as f:
+            f.write(content)
+
+    def handle_auto_cache(self, project):
+        # update() helper. Initialize the specified cache directory if it has
+        # not been cloned yet. If the cache directory is already existing, it
+        # will be synced with remote.
+
+        auto_cache_dir = self.project_auto_cache(project)
+
+        if not auto_cache_dir:
+            # nothing to do: auto-cache directory was not specified
+            return
+
+        cache_dir = self.project_cache(project)
+        if cache_dir != auto_cache_dir:
+            # another cache was specified with higher priority.
+            return
+
+        if not Path(cache_dir).exists():
+            # The cache has not been created yet at the expected location.
+            # Ensure that its parent directory exist before cloning anything.
+            # Then bare-clone the repository into the local cache.
+            cache_dir_parent = Path(cache_dir).parent
+            cache_dir_parent.mkdir(parents=True, exist_ok=True)
+            project.git(['clone', '--bare', '--', project.url, os.fspath(cache_dir)],
+                        cwd=cache_dir_parent)
+            self.create_auto_cache_info(project, cache_dir)
+        else:
+            # The local cache is already existing. Sync it with remote.
+            project.git(['--bare', 'fetch'], cwd=cache_dir)
+
     def init_project(self, project):
         # update() helper. Initialize an uncloned project repository.
         # If there's a local clone available, it uses that. Otherwise,
         # it just creates the local repository and sets up the
         # convenience remote without fetching anything from the network.
+
+        self.handle_auto_cache(project)
 
         cache_dir = self.project_cache(project)
 
@@ -1556,6 +1609,16 @@ class Update(_ProjectCommand):
                 # f'refs/remotes/{project.remote_name}/{branch}'.
                 project.git(['update-ref', '-d', branch])
 
+    def project_auto_cache(self, project):
+        if self.auto_cache is None:
+            return None
+        # get the location of the project within the auto-cache.
+        # Note: The url is hashed and used as a subfolder to accomodate
+        # changes in the manifest. To avoid long paths, only the first 8
+        # characters of the hash are used.
+        subdir_hash = hashlib.md5(project.url.encode('utf-8')).hexdigest()
+        return os.fspath(Path(self.auto_cache) / basename(project.url) / subdir_hash)
+
     def project_cache(self, project):
         # Find the absolute path to a pre-existing local clone of a project
         # and return it. If the search fails, return None.
@@ -1571,7 +1634,7 @@ class Update(_ProjectCommand):
                 self.dbg(
                     f'{project.name} not in --name-cache {self.name_cache}',
                     level=Verbosity.DBG_MORE)
-        elif self.path_cache is not None:
+        if self.path_cache is not None:
             maybe = Path(self.path_cache) / project.path
             if maybe.is_dir():
                 self.dbg(
@@ -1582,6 +1645,12 @@ class Update(_ProjectCommand):
                 self.dbg(
                     f'{project.path} not in --path-cache {self.path_cache}',
                     level=Verbosity.DBG_MORE)
+        if self.auto_cache is not None:
+            project_auto_cache = self.project_auto_cache(project)
+            self.dbg(
+                f'auto-caching {project.path} in {project_auto_cache}',
+                level=Verbosity.DBG_MORE)
+            return os.fspath(project_auto_cache)
 
         return None
 
@@ -1645,6 +1714,9 @@ class Update(_ProjectCommand):
         tags = (['--tags'] if not self.narrow else [])
         clone_depth = (['--depth', str(project.clone_depth)] if
                        project.clone_depth else [])
+        # sync the auto_cache before fetching the project
+        self.handle_auto_cache(project)
+
         # -f is needed to avoid errors in case multiple remotes are
         # present, at least one of which contains refs that can't be
         # fast-forwarded to our local ref space.

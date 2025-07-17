@@ -1559,7 +1559,7 @@ def test_update_recovery(tmpdir):
     assert prev == rgood
 
 
-def setup_cache_workspace(workspace, remote, foo_head, bar_head):
+def setup_cache_workspace(workspace, foo_remote, foo_head, bar_remote, bar_head):
     # Shared helper code that sets up a workspace used to test the
     # 'west update --foo-cache' options.
 
@@ -1572,10 +1572,10 @@ def setup_cache_workspace(workspace, remote, foo_head, bar_head):
           projects:
           - name: foo
             path: subdir/foo
-            url: file://{remote}
+            url: file://{foo_remote}
             revision: {foo_head}
           - name: bar
-            url: file://{remote}
+            url: file://{bar_remote}
             revision: {bar_head}
         ''')
 
@@ -1584,8 +1584,6 @@ def test_update_name_cache(tmpdir):
     # Test that 'west update --name-cache' works and doesn't hit the
     # network if it doesn't have to.
 
-    remote = tmpdir / 'remote'
-    create_repo(remote)
     name_cache_dir = tmpdir / 'name_cache'
     create_repo(name_cache_dir / 'foo')
     create_repo(name_cache_dir / 'bar')
@@ -1593,7 +1591,11 @@ def test_update_name_cache(tmpdir):
     bar_head = rev_parse(name_cache_dir / 'bar', 'HEAD')
 
     workspace = tmpdir / 'workspace'
-    setup_cache_workspace(workspace, remote, foo_head, bar_head)
+    setup_cache_workspace(workspace,
+                          foo_remote=(name_cache_dir / 'foo'),
+                          foo_head=foo_head,
+                          bar_remote=(name_cache_dir / 'bar'),
+                          bar_head=bar_head)
     workspace.chdir()
     foo = workspace / 'subdir' / 'foo'
     bar = workspace / 'bar'
@@ -1617,12 +1619,164 @@ def test_update_name_cache(tmpdir):
     assert rev_parse(bar, 'HEAD') == bar_head
 
 
+def test_update_caches_multiple(tmpdir):
+    # Test that 'west update --name-cache X --path-cache Y --auto-cache Z' is
+    # taking the correct cache.
+
+    auto_cache_dir = tmpdir / 'auto_cache_dir'
+    name_cache_dir = tmpdir / 'name_cache_dir'
+    path_cache_dir = tmpdir / 'path_cache_dir'
+
+    # setup remote repositories for auto cache
+    create_repo(tmpdir / 'auto_cache_remotes' / 'foo')
+    create_repo(tmpdir / 'auto_cache_remotes' / 'bar')
+    auto_cache_foo_head = rev_parse(tmpdir / 'auto_cache_remotes' / 'foo', 'HEAD')
+    auto_cache_bar_head = rev_parse(tmpdir / 'auto_cache_remotes' / 'bar', 'HEAD')
+
+    # setup remote repositories and local cache for --name-cache
+    create_repo(tmpdir / 'name_cache_remotes' / 'foo')
+    create_repo(tmpdir / 'name_cache_remotes' / 'bar')
+    name_cache_foo_head = rev_parse(tmpdir / 'name_cache_remotes' / 'foo', 'HEAD')
+    name_cache_bar_head = rev_parse(tmpdir / 'name_cache_remotes' / 'bar', 'HEAD')
+    subprocess.check_call([GIT, 'clone', '--bare',
+                           os.fspath(tmpdir / 'name_cache_remotes' / 'foo'),
+                           os.fspath(name_cache_dir / "foo")])
+    subprocess.check_call([GIT, 'clone', '--bare',
+                           os.fspath(tmpdir / 'name_cache_remotes' / 'bar'),
+                           os.fspath(name_cache_dir / "bar")])
+
+    # setup remote repositories and local cache for --path-cache
+    create_repo(tmpdir / 'path_cache_remotes' / 'foo')
+    create_repo(tmpdir / 'path_cache_remotes' / 'bar')
+    path_cache_foo_head = rev_parse(tmpdir / 'path_cache_remotes' / 'foo', 'HEAD')
+    path_cache_bar_head = rev_parse(tmpdir / 'path_cache_remotes' / 'bar', 'HEAD')
+    subprocess.check_call([GIT, 'clone', '--bare',
+                           os.fspath(tmpdir / 'path_cache_remotes' / 'foo'),
+                           os.fspath(path_cache_dir / "subdir" / "foo")])
+    subprocess.check_call([GIT, 'clone', '--bare',
+                           os.fspath(tmpdir / 'path_cache_remotes' / 'bar'),
+                           os.fspath(path_cache_dir / "bar")])
+
+    # setup new workspace: --name-cache has highest prio
+    workspace1 = tmpdir / 'workspace1'
+    foo = workspace1 / 'subdir' / 'foo'
+    bar = workspace1 / 'bar'
+    setup_cache_workspace(workspace1,
+                          foo_remote=(tmpdir / 'name_cache_remotes' / 'foo'),
+                          foo_head=name_cache_foo_head,
+                          bar_remote=(tmpdir / 'name_cache_remotes' / 'bar'),
+                          bar_head=name_cache_bar_head)
+    workspace1.chdir()
+    cmd(['update',
+         '--name-cache', os.fspath(name_cache_dir),
+         '--path-cache', os.fspath(path_cache_dir),
+         '--auto-cache', os.fspath(auto_cache_dir)])
+    assert foo.check(dir=1)
+    assert bar.check(dir=1)
+    assert rev_parse(foo, 'HEAD') == name_cache_foo_head
+    assert rev_parse(bar, 'HEAD') == name_cache_bar_head
+
+    # setup new workspace: --path-cache has higher prio than --auto-cache
+    workspace2 = tmpdir / 'workspace2'
+    foo = workspace2 / 'subdir' / 'foo'
+    bar = workspace2 / 'bar'
+    setup_cache_workspace(workspace2,
+                          foo_remote=(tmpdir / 'path_cache_remotes' / 'foo'),
+                          foo_head=path_cache_foo_head,
+                          bar_remote=(tmpdir / 'path_cache_remotes' / 'bar'),
+                          bar_head=path_cache_bar_head)
+    workspace2.chdir()
+    cmd(['update',
+         '--path-cache', os.fspath(path_cache_dir),
+         '--auto-cache', os.fspath(auto_cache_dir)])
+    assert foo.check(dir=1)
+    assert bar.check(dir=1)
+    assert rev_parse(foo, 'HEAD') == path_cache_foo_head
+    assert rev_parse(bar, 'HEAD') == path_cache_bar_head
+
+    # setup new workspace: --path-cache has higher prio than --auto-cache
+    workspace3 = tmpdir / 'workspace3'
+    foo = workspace3 / 'subdir' / 'foo'
+    bar = workspace3 / 'bar'
+    setup_cache_workspace(workspace3,
+                          foo_remote=(tmpdir / 'auto_cache_remotes' / 'foo'),
+                          foo_head=auto_cache_foo_head,
+                          bar_remote=(tmpdir / 'auto_cache_remotes' / 'bar'),
+                          bar_head=auto_cache_bar_head)
+    workspace3.chdir()
+    cmd(['update',
+         '--auto-cache', os.fspath(auto_cache_dir)])
+    assert foo.check(dir=1)
+    assert bar.check(dir=1)
+    assert rev_parse(foo, 'HEAD') == auto_cache_foo_head
+    assert rev_parse(bar, 'HEAD') == auto_cache_bar_head
+
+
+def test_update_auto_cache(tmpdir):
+    # Test that 'west update --auto-cache' works and does set up the local
+    # cache correctly.
+
+    create_repo(tmpdir / 'remotes' / 'foo')
+    create_repo(tmpdir / 'remotes' / 'bar')
+    foo_head = rev_parse(tmpdir / 'remotes' / 'foo', 'HEAD')
+    bar_head = rev_parse(tmpdir / 'remotes' / 'bar', 'HEAD')
+
+    auto_cache_dir = tmpdir / 'auto_cache_dir'
+
+    workspace = tmpdir / 'workspace'
+    setup_cache_workspace(workspace,
+                          foo_remote=(tmpdir / 'remotes' / 'foo'),
+                          foo_head=foo_head,
+                          bar_remote=(tmpdir / 'remotes' / 'bar'),
+                          bar_head=bar_head)
+    workspace.chdir()
+    foo = workspace / 'subdir' / 'foo'
+    bar = workspace / 'bar'
+
+    # Test the command line option.
+    cmd(['update', '--auto-cache', os.fspath(auto_cache_dir)])
+    assert foo.check(dir=1)
+    assert bar.check(dir=1)
+    assert (auto_cache_dir / "foo").check(dir=1)
+    assert (auto_cache_dir / "bar").check(dir=1)
+    assert rev_parse(foo, 'HEAD') == foo_head
+    assert rev_parse(bar, 'HEAD') == bar_head
+
+    # Check that some info file was created with basic info
+    # e.g. /path/to/auto/cache/foo/<hash>.info
+    foo_hash = sorted(os.listdir(auto_cache_dir / 'foo'))[0]
+    expected_info = textwrap.dedent(f"""
+        The following local cache directory was automatically created by west:
+        - Local Cache:  {foo_hash}
+        - Project Url:  file://{tmpdir / 'remotes' / 'foo'}
+    """)
+    with open(auto_cache_dir / 'foo' / foo_hash + '.info') as f:
+        assert f.read() == expected_info
+
+    # Move the repositories out of the way and test the configuration option.
+    # (We can't use shutil.rmtree here because Windows.)
+    shutil.move(os.fspath(foo), os.fspath(foo) + ".moved")
+    shutil.move(os.fspath(bar), os.fspath(bar) + ".moved")
+    shutil.move(os.fspath(auto_cache_dir / "foo"),
+                os.fspath(auto_cache_dir / "foo") + ".moved")
+    shutil.move(os.fspath(auto_cache_dir / "bar"),
+                os.fspath(auto_cache_dir / "bar") + ".moved")
+    cmd(['config', 'update.auto-cache', os.fspath(auto_cache_dir)])
+    cmd(['update', '-f', 'always'])
+    assert foo.check(dir=1)
+    assert bar.check(dir=1)
+    assert (auto_cache_dir / "foo").check(dir=1)
+    assert (auto_cache_dir / "bar").check(dir=1)
+    assert rev_parse(foo, 'HEAD') == foo_head
+    assert rev_parse(bar, 'HEAD') == bar_head
+
+    # Run update again
+    cmd('update')
+
 def test_update_path_cache(tmpdir):
     # Test that 'west update --path-cache' works and doesn't hit the
     # network if it doesn't have to.
 
-    remote = tmpdir / 'remote'
-    create_repo(remote)
     path_cache_dir = tmpdir / 'path_cache_dir'
     create_repo(path_cache_dir / 'subdir' / 'foo')
     create_repo(path_cache_dir / 'bar')
@@ -1630,7 +1784,11 @@ def test_update_path_cache(tmpdir):
     bar_head = rev_parse(path_cache_dir / 'bar', 'HEAD')
 
     workspace = tmpdir / 'workspace'
-    setup_cache_workspace(workspace, remote, foo_head, bar_head)
+    setup_cache_workspace(workspace,
+                          foo_remote=(path_cache_dir / 'subdir' / 'foo'),
+                          foo_head=foo_head,
+                          bar_remote=(path_cache_dir / 'bar'),
+                          bar_head=bar_head)
     workspace.chdir()
     foo = workspace / 'subdir' / 'foo'
     bar = workspace / 'bar'
