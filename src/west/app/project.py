@@ -6,6 +6,7 @@
 '''West project commands'''
 
 import argparse
+import hashlib
 import logging
 import os
 import shlex
@@ -15,7 +16,7 @@ import sys
 import textwrap
 import time
 from functools import partial
-from os.path import abspath, relpath
+from os.path import abspath, basename, relpath
 from pathlib import Path, PurePath
 from time import perf_counter
 from urllib.parse import urlparse
@@ -1071,6 +1072,73 @@ class Update(_ProjectCommand):
                            help='''cached repositories are in the same relative
                            paths as the workspace being updated. This cache has
                            lower priority (Prio 1).''')
+        group.add_argument('--auto-cache',
+                           help='''automatically setup local cache repositories
+                           in a flat folder hierarchy, but with an additional
+                           subfolder (hashed name) for different remote URLs.
+                           Each local cache repository is automatically cloned
+                           on first usage and synced on subsequent clones.
+                           This cache has the lowest priority (Prio 2).''')
+
+        parser.epilog = textwrap.dedent('''\
+        CACHING
+        -------
+        Projects are typically initialized by fetching from remote URLs.
+        However, they can also be cloned from local caches on the file system.
+        Three types of caches are supported, and they may be used together.
+        They are searched in the following order of priority:
+          - Priority 0: --name-cache
+          - Priority 1: --path-cache
+          - Priority 2: --auto-cache
+
+        When using local caches, after the initial setup of a workspace the
+        remote URL of each repo is switched back to its original remote.
+        As a result, subsequent manual updates (git pull) fetch changes
+        directly from the original remote.
+        Also in case of name-cache and path-cache, the local caches are not used
+        during subsequent updates. They are only used during the initial
+        workspace setup.
+        Only in case of auto-cache the 'west update' process updates the local
+        caches first, which then serve as the source for pulling changes into
+        the workspace.
+
+        Example: Assume your manifest describes this workspace structure:
+          (workspace)
+          ├── bar
+          └── subdir
+              └── foo
+
+        The local caches must be structured as follows:
+
+          > Name Cache
+          Repositories should be present in a flat folder hierarchy. The cache is
+          searched by the repository name (according to the workspace manifest).
+            (name cache directory)
+            ├── bar
+            └── foo
+
+          > Path Cache
+          Repositories should be present in a folder hierarchy that matches the
+          workspace's path layout.
+            (path cache directory)
+            ├── bar
+            └── subdir
+                └── foo
+
+          > Auto Cache
+          Use this when you prefer not to manage local caches manually. The complete
+          folder hierarchy is setup automatically. Each repository is stored under a
+          directory named after the basename of its remote URL. To prevent conflicts
+          between repos with same name, a hash of the remote URL is used as subfolder.
+          Note: Each local cache repo is automatically synced on subsequent updates.
+            (auto cache directory)
+            ├── bar.git
+            │   ├── <hash>
+            │   └── <hash>.info  # contains metadata about the hash
+            └── foo.git
+                ├── <hash>
+                └── <hash>.info  # contains metadata about the hash
+    ''')
 
         group = parser.add_argument_group(
             title='fetching behavior',
@@ -1153,6 +1221,7 @@ class Update(_ProjectCommand):
         self.narrow = args.narrow or config.getboolean('update.narrow')
         self.path_cache = args.path_cache or config.get('update.path-cache')
         self.name_cache = args.name_cache or config.get('update.name-cache')
+        self.auto_cache = args.auto_cache or config.get('update.auto-cache')
         self.sync_submodules = config.getboolean('update.sync-submodules',
                                                  default=True)
 
@@ -1363,13 +1432,19 @@ class Update(_ProjectCommand):
                              '--', submodule.path])
             ref = []
             if (cache_dir):
+                # check if the submodule cache is present within the project cache
                 submodule_ref = Path(cache_dir, submodule.path)
-                if any(os.scandir(submodule_ref)):
+                if submodule_ref.is_dir() and any(os.scandir(submodule_ref)):
                     ref = ['--reference', os.fspath(submodule_ref)]
                     self.small_banner(f'using reference from: {submodule_ref}')
                     self.dbg(
                         f'found {submodule.path} in --path-cache {submodule_ref}',
                         level=Verbosity.DBG_MORE)
+                else:
+                    # The submodule is not cached yet, so the original remote
+                    # url is used for updating.
+                    pass
+
             project.git(config_opts +
                         ['submodule', 'update',
                             '--init', submodules_update_strategy,
@@ -1503,11 +1578,52 @@ class Update(_ProjectCommand):
             if take_stats:
                 stats['init'] = perf_counter() - start
 
+    def create_auto_cache_info(self, project, cache_dir):
+        # auto-cache helper: Create some short informal file with basic info
+        # about the local cache folder.
+        content = textwrap.dedent(f"""
+        The following local cache directory was automatically created by west:
+        - Local Cache:  {basename(cache_dir)}
+        - Project Url:  {project.url}
+        """)
+        with open(cache_dir + '.info', 'w') as f:
+            f.write(content)
+
+    def handle_auto_cache(self, project):
+        # update() helper. Initialize the specified cache directory if it has
+        # not been cloned yet. If the cache directory is already existing, it
+        # will be synced with remote.
+        auto_cache_dir = self.project_auto_cache(project)
+
+        if not auto_cache_dir:
+            # nothing to do: auto-cache directory was not specified
+            return
+
+        cache_dir = self.project_cache(project)
+        if cache_dir != auto_cache_dir:
+            # another cache was specified with higher priority.
+            return
+
+        if not Path(cache_dir).exists():
+            # The cache has not been created yet at the expected location.
+            # Ensure that its parent directory exist before cloning anything.
+            # Then clone the repository into the local cache.
+            cache_dir_parent = Path(cache_dir).parent
+            cache_dir_parent.mkdir(parents=True, exist_ok=True)
+            project.git(['clone', '--mirror', '--', project.url, os.fspath(cache_dir)],
+                        cwd=cache_dir_parent)
+            self.create_auto_cache_info(project, cache_dir)
+        else:
+            # The local cache already exists. Sync it with remote.
+            project.git(['remote', 'update', '--prune'], cwd=cache_dir)
+
     def init_project(self, project):
         # update() helper. Initialize an uncloned project repository.
         # If there's a local clone available, it uses that. Otherwise,
         # it just creates the local repository and sets up the
         # convenience remote without fetching anything from the network.
+
+        self.handle_auto_cache(project)
 
         cache_dir = self.project_cache(project)
 
@@ -1558,6 +1674,15 @@ class Update(_ProjectCommand):
                 # f'refs/remotes/{project.remote_name}/{branch}'.
                 project.git(['update-ref', '-d', branch])
 
+    def project_auto_cache(self, project):
+        if self.auto_cache is None:
+            return None
+        # get the location of the project within the auto-cache.
+        # Note: The url is hashed and used as a subfolder to accomodate
+        # changes in the manifest.
+        subdir_hash = hashlib.md5(project.url.encode('utf-8')).hexdigest()
+        return os.fspath(Path(self.auto_cache) / basename(project.url) / subdir_hash)
+
     def project_cache(self, project):
         # Find the absolute path to a pre-existing local clone of a project
         # and return it. If the search fails, return None.
@@ -1584,6 +1709,12 @@ class Update(_ProjectCommand):
                 self.dbg(
                     f'{project.path} not in --path-cache {self.path_cache}',
                     level=Verbosity.DBG_MORE)
+        if self.auto_cache is not None:
+            project_auto_cache = self.project_auto_cache(project)
+            self.dbg(
+                f'auto-caching {project.path} in {project_auto_cache}',
+                level=Verbosity.DBG_MORE)
+            return os.fspath(project_auto_cache)
 
         return None
 
@@ -1647,12 +1778,20 @@ class Update(_ProjectCommand):
         tags = (['--tags'] if not self.narrow else [])
         clone_depth = (['--depth', str(project.clone_depth)] if
                        project.clone_depth else [])
+
+        # automatically fetch the auto-cache so that it is up-to-date
+        self.handle_auto_cache(project)
+
+        # fetch workspace repository from freshly synced auto-cache if
+        # auto-cache is used. Otherwise fetch directly from remote url.
+        fetch_url = self.project_auto_cache(project) or project.url
+
         # -f is needed to avoid errors in case multiple remotes are
         # present, at least one of which contains refs that can't be
         # fast-forwarded to our local ref space.
         project.git(['fetch', '-f'] + tags + clone_depth +
                     self.args.fetch_opt +
-                    ['--', project.url, refspec])
+                    ['--', fetch_url, refspec])
 
         if take_stats:
             stats['fetch'] = perf_counter() - start
