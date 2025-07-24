@@ -2,9 +2,11 @@
 
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from conftest import (
+    GIT,
     cmd,
     create_repo,
     create_workspace,
@@ -154,5 +156,99 @@ def test_update_path_cache(tmpdir):
     assert bar.check(dir=1)
     assert rev_parse(foo, 'HEAD') == foo_head
     assert rev_parse(bar, 'HEAD') == bar_head
+    assert remote_get_url(foo) == "file://" + os.fspath(Path('non-existent') / 'here')
+    assert remote_get_url(bar) == "file://" + os.fspath(Path('non-existent') / 'there')
+
+
+def test_update_caches_priorities(tmpdir):
+    # Test that the correct cache is used if multiple caches are specified
+    # e.g. if 'west update --name-cache X --path-cache Y --auto-cache Z'
+
+    name_cache_dir = tmpdir / 'name_cache_dir'
+    path_cache_dir = tmpdir / 'path_cache_dir'
+
+    # setup local cache for --name-cache
+    # (name_cache)
+    # ├── bar
+    # └── foo
+    create_repo(tmpdir / 'name_cache_remotes' / 'foo')
+    create_repo(tmpdir / 'name_cache_remotes' / 'bar')
+    name_cache_foo_head = rev_parse(tmpdir / 'name_cache_remotes' / 'foo', 'HEAD')
+    name_cache_bar_head = rev_parse(tmpdir / 'name_cache_remotes' / 'bar', 'HEAD')
+    subprocess.check_call([GIT, 'clone', '--bare',
+                           os.fspath(tmpdir / 'name_cache_remotes' / 'foo'),
+                           os.fspath(name_cache_dir / "foo")])
+    subprocess.check_call([GIT, 'clone', '--bare',
+                           os.fspath(tmpdir / 'name_cache_remotes' / 'bar'),
+                           os.fspath(name_cache_dir / "bar")])
+
+    # setup remote repositories and local cache for --path-cache
+    # (path_cache)
+    # ├── bar
+    # └── subdir
+    #     └── foo
+    create_repo(tmpdir / 'path_cache_remotes' / 'foo')
+    create_repo(tmpdir / 'path_cache_remotes' / 'bar')
+    path_cache_foo_head = rev_parse(tmpdir / 'path_cache_remotes' / 'foo', 'HEAD')
+    subprocess.check_call([GIT, 'clone', '--bare',
+                           os.fspath(tmpdir / 'path_cache_remotes' / 'foo'),
+                           os.fspath(path_cache_dir / "subdir" / "foo")])
+    subprocess.check_call([GIT, 'clone', '--bare',
+                           os.fspath(tmpdir / 'path_cache_remotes' / 'bar'),
+                           os.fspath(path_cache_dir / "bar")])
+
+    # Test that foo and bar are created within the workspace. They must be
+    # checked out at correct commit id and their remote url is set to original
+    # remote url (not local cache path).
+    # Note: Remote url can be non-existent since it will clone from local cache
+
+    # setup new workspace and assert that --name-cache is used (highest prio)
+    # (workspace)
+    # ├── bar (cloned from name cache)
+    # └── subdir
+    #     └── foo (cloned from name cache)
+    workspace1 = tmpdir / 'workspace1'
+    foo = workspace1 / 'subdir' / 'foo'
+    bar = workspace1 / 'bar'
+    setup_cache_workspace(workspace1,
+                          foo_remote=(Path('non-existent') / 'here'),
+                          foo_head=name_cache_foo_head,
+                          bar_remote=(Path('non-existent') / 'there'),
+                          bar_head=name_cache_bar_head)
+    workspace1.chdir()
+    cmd(['update',
+         '--name-cache', os.fspath(name_cache_dir),
+         '--path-cache', os.fspath(path_cache_dir)])
+    assert foo.check(dir=1)
+    assert bar.check(dir=1)
+    assert rev_parse(foo, 'HEAD') == name_cache_foo_head
+    assert rev_parse(bar, 'HEAD') == name_cache_bar_head
+    assert remote_get_url(foo) == "file://" + os.fspath(Path('non-existent') / 'here')
+    assert remote_get_url(bar) == "file://" + os.fspath(Path('non-existent') / 'there')
+
+    # setup new workspace: mix --name-cache and --path-cache.
+    # Remove foo from name cache so that foo cannot be found there anymore.
+    # (workspace)
+    # ├── bar (cloned from name cache)
+    # └── subdir
+    #     └── foo (cloned from path cache)
+    shutil.move(os.fspath(name_cache_dir / 'foo'),
+                os.fspath(name_cache_dir / 'foo.moved'))
+    workspace2 = tmpdir / 'workspace2'
+    foo = workspace2 / 'subdir' / 'foo'
+    bar = workspace2 / 'bar'
+    setup_cache_workspace(workspace2,
+                          foo_remote=(Path('non-existent') / 'here'),
+                          foo_head=path_cache_foo_head,
+                          bar_remote=(Path('non-existent') / 'there'),
+                          bar_head=name_cache_bar_head)
+    workspace2.chdir()
+    cmd(['update',
+         '--name-cache', os.fspath(name_cache_dir),
+         '--path-cache', os.fspath(path_cache_dir)])
+    assert foo.check(dir=1)
+    assert bar.check(dir=1)
+    assert rev_parse(foo, 'HEAD') == path_cache_foo_head
+    assert rev_parse(bar, 'HEAD') == name_cache_bar_head
     assert remote_get_url(foo) == "file://" + os.fspath(Path('non-existent') / 'here')
     assert remote_get_url(bar) == "file://" + os.fspath(Path('non-existent') / 'there')
