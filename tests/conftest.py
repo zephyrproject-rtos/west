@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import uuid
 from pathlib import Path, PurePath
 
 import pytest
@@ -397,7 +398,8 @@ def create_repo(path, initial_branch='master'):
                               cwd=path)
 
     config_repo(path)
-    add_commit(path, 'initial')
+    # make an individual commit to ensure a unique commit id
+    add_commit(path, f'initial {uuid.uuid4()}')
 
 
 def config_repo(path):
@@ -468,6 +470,11 @@ def add_tag(repo, tag, commit='HEAD', msg=None):
     # environment has that set to true.
     subprocess.check_call([GIT, 'tag', '-m', msg, '--no-sign', tag, commit],
                           cwd=repo)
+
+def remote_get_url(repo, remote='origin'):
+    repo = os.fspath(repo)
+    out = subprocess.check_output([GIT, 'remote', 'get-url', remote], cwd=repo)
+    return out.decode(sys.getdefaultencoding()).strip()
 
 def rev_parse(repo, revision):
     repo = os.fspath(repo)
