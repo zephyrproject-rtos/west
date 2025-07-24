@@ -1065,10 +1065,12 @@ class Update(_ProjectCommand):
             they can also be cloned from caches on the local file system.'''))
         group.add_argument('--name-cache',
                            help='''cached repositories are in subdirectories
-                           matching the names of projects to update''')
+                           matching the names of projects to update. This cache
+                           has highest priority (Prio 0).''')
         group.add_argument('--path-cache',
                            help='''cached repositories are in the same relative
-                           paths as the workspace being updated''')
+                           paths as the workspace being updated. This cache has
+                           lower priority (Prio 1).''')
 
         group = parser.add_argument_group(
             title='fetching behavior',
@@ -1571,7 +1573,7 @@ class Update(_ProjectCommand):
                 self.dbg(
                     f'{project.name} not in --name-cache {self.name_cache}',
                     level=Verbosity.DBG_MORE)
-        elif self.path_cache is not None:
+        if self.path_cache is not None:
             maybe = Path(self.path_cache) / project.path
             if maybe.is_dir():
                 self.dbg(
