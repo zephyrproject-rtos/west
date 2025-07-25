@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+import contextlib
 import os
 import platform
 import shutil
@@ -301,6 +302,20 @@ def config_tmpdir(tmpdir):
 #
 # Helper functions
 #
+
+@contextlib.contextmanager
+def set_env(env_vars):
+    """
+    Temporarily updates the environment with the key-value pairs which are
+    provided in the env_vars dictionary.
+    """
+    old_environ = dict(os.environ)
+    os.environ.update(env_vars)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(old_environ)
 
 def check_output(*args, **kwargs):
     # Like subprocess.check_output, but returns a string in the

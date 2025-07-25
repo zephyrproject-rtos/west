@@ -12,6 +12,7 @@ from conftest import (
     create_workspace,
     remote_get_url,
     rev_parse,
+    set_env,
 )
 
 assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
@@ -92,10 +93,23 @@ def test_update_name_cache(tmpdir):
 
     # Move the repositories out of the way and test the configuration option.
     # (We can't use shutil.rmtree here because Windows.)
-    shutil.move(os.fspath(foo), os.fspath(tmpdir))
-    shutil.move(os.fspath(bar), os.fspath(tmpdir))
+    shutil.move(os.fspath(foo), os.fspath(tmpdir / 'foo.moved1'))
+    shutil.move(os.fspath(bar), os.fspath(tmpdir / 'bar.moved1'))
     cmd(['config', 'update.name-cache', name_cache_dir])
     cmd('update')
+    assert foo.check(dir=1)
+    assert bar.check(dir=1)
+    assert rev_parse(foo, 'HEAD') == foo_head
+    assert rev_parse(bar, 'HEAD') == bar_head
+    assert remote_get_url(foo) == "file://" + os.fspath(Path('non-existent') / 'here')
+    assert remote_get_url(bar) == "file://" + os.fspath(Path('non-existent') / 'there')
+
+    # Move the repositories out of the way and test the environment variable.
+    # (We can't use shutil.rmtree here because Windows.)
+    shutil.move(os.fspath(foo), os.fspath(tmpdir / 'foo.moved2'))
+    shutil.move(os.fspath(bar), os.fspath(tmpdir / 'bar.moved2'))
+    with set_env({'WEST_NAME_CACHE': os.fspath(name_cache_dir)}):
+        cmd('update')
     assert foo.check(dir=1)
     assert bar.check(dir=1)
     assert rev_parse(foo, 'HEAD') == foo_head
@@ -148,10 +162,23 @@ def test_update_path_cache(tmpdir):
 
     # Move the repositories out of the way and test the configuration option.
     # (We can't use shutil.rmtree here because Windows.)
-    shutil.move(os.fspath(foo), os.fspath(tmpdir))
-    shutil.move(os.fspath(bar), os.fspath(tmpdir))
+    shutil.move(os.fspath(foo), os.fspath(tmpdir / 'foo.moved1'))
+    shutil.move(os.fspath(bar), os.fspath(tmpdir / 'bar.moved1'))
     cmd(['config', 'update.path-cache', path_cache_dir])
     cmd('update')
+    assert foo.check(dir=1)
+    assert bar.check(dir=1)
+    assert rev_parse(foo, 'HEAD') == foo_head
+    assert rev_parse(bar, 'HEAD') == bar_head
+    assert remote_get_url(foo) == "file://" + os.fspath(Path('non-existent') / 'here')
+    assert remote_get_url(bar) == "file://" + os.fspath(Path('non-existent') / 'there')
+
+    # Move the repositories out of the way and test the environment variable.
+    # (We can't use shutil.rmtree here because Windows.)
+    shutil.move(os.fspath(foo), os.fspath(tmpdir / 'foo.moved2'))
+    shutil.move(os.fspath(bar), os.fspath(tmpdir / 'bar.moved2'))
+    with set_env({'WEST_PATH_CACHE': os.fspath(path_cache_dir)}):
+        cmd('update')
     assert foo.check(dir=1)
     assert bar.check(dir=1)
     assert rev_parse(foo, 'HEAD') == foo_head

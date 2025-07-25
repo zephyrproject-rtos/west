@@ -1066,11 +1066,15 @@ class Update(_ProjectCommand):
         group.add_argument('--name-cache',
                            help='''cached repositories are in subdirectories
                            matching the names of projects to update. This cache
-                           has highest priority (Prio 0).''')
+                           has highest priority (Prio 0). If not set, falls
+                           back to the value of west config update.name-cache,
+                           or WEST_NAME_CACHE environment variable.''')
         group.add_argument('--path-cache',
                            help='''cached repositories are in the same relative
                            paths as the workspace being updated. This cache has
-                           lower priority (Prio 1).''')
+                           lower priority (Prio 1). If not set, falls back to
+                           the value of west config update.path-cache, or
+                           WEST_PATH_CACHE environment variable.''')
 
         group = parser.add_argument_group(
             title='fetching behavior',
@@ -1151,8 +1155,16 @@ class Update(_ProjectCommand):
 
         config = self.config
         self.narrow = args.narrow or config.getboolean('update.narrow')
-        self.path_cache = args.path_cache or config.get('update.path-cache')
-        self.name_cache = args.name_cache or config.get('update.name-cache')
+        self.path_cache = (
+            args.path_cache or
+            config.get('update.path-cache') or
+            os.environ.get('WEST_PATH_CACHE')
+        )
+        self.name_cache = (
+            args.name_cache or
+            config.get('update.name-cache') or
+            os.environ.get('WEST_NAME_CACHE')
+        )
         self.sync_submodules = config.getboolean('update.sync-submodules',
                                                  default=True)
 
