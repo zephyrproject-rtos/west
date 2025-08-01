@@ -23,7 +23,7 @@ jobs:
           fetch-depth: 0
 
       - name: Create json diff
-        uses: GrantBirki/git-diff-action@f65a78c343ee50737aebbe653e35f3067752c7b3 # v2.8.0
+        uses: GrantBirki/git-diff-action@7420e4d095c27bb23359787640976d60c94fd216 # v2.8.1
         id: git-diff
         with:
           base_branch: origin/main
@@ -57,7 +57,7 @@ jobs:
 
       - name: Run ruff format check for ${{ matrix.files.path }}
         id: format-check
-        uses: astral-sh/ruff-action@84f83ecf9e1e15d26b7984c7ec9cf73d39ffc946 # v3.3.1
+        uses: astral-sh/ruff-action@0c50076f12c38c3d0115b7b519b54a91cb9cf0ad # v3.5.0
         # Allow the job run to pass when this step fails
         continue-on-error: true
         with:
