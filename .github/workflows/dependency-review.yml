@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   dependency-review:
+    name: Review Dependencies
     runs-on: ubuntu-latest
     steps:
       - name: 'Checkout Repository'
