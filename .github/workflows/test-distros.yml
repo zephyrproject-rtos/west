@@ -35,6 +35,7 @@ permissions:
 
 jobs:
   build:
+    name: Run Python Tests on Linux distros
     runs-on: ubuntu-latest
     container: ${{ matrix.container }}
     strategy:

@@ -12,6 +12,7 @@ concurrency:
 
 jobs:
   build:
+    name: Build python tests
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -48,6 +49,7 @@ jobs:
           include-hidden-files: true
 
   coverage-report:
+    name: Report test coverage
     runs-on: ubuntu-latest
     needs: ["build"]
     steps:
