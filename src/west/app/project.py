@@ -6,6 +6,7 @@
 '''West project commands'''
 
 import argparse
+import asyncio
 import logging
 import os
 import shlex
@@ -1817,16 +1818,15 @@ class ForAll(_ProjectCommand):
         parser.add_argument('projects', metavar='PROJECT', nargs='*',
                             help='''projects (by name or path) to operate on;
                             defaults to active cloned projects''')
+        parser.add_argument('-j', '--jobs', nargs='?', const=-1,
+                            default=1, type=int, action='store',
+                            help='''Use multiple jobs to parallelize commands.
+                            Pass no number or -1 to run commands on all cores.''')
         return parser
 
-    def do_run(self, args, user_args):
-        failed = []
-        group_set = set(args.groups)
-        env = os.environ.copy()
-        for project in self._cloned_projects(args, only_active=not args.all):
-            if group_set and not group_set.intersection(set(project.groups)):
-                continue
-
+    async def run_for_project(self, project, args, semaphore):
+        async with semaphore:
+            env = os.environ.copy()
             env["WEST_PROJECT_NAME"] = project.name
             env["WEST_PROJECT_PATH"] = project.path
             env["WEST_PROJECT_ABSPATH"] = project.abspath if project.abspath else ''
@@ -1836,12 +1836,39 @@ class ForAll(_ProjectCommand):
 
             cwd = args.cwd if args.cwd else project.abspath
 
-            self.banner(
-                f'running "{args.subcommand}" in {project.name_and_path}:')
-            rc = subprocess.Popen(args.subcommand, shell=True, env=env,
-                                  cwd=cwd).wait()
-            if rc:
-                failed.append(project)
+            self.banner(f'running "{args.subcommand}" in {project.name_and_path}:',
+                        end=('\r' if self.jobs > 1 else '\n'))
+            proc = await asyncio.create_subprocess_shell(
+                args.subcommand,
+                cwd=cwd, env=env, shell=True,
+                stdout=asyncio.subprocess.PIPE if self.jobs > 1 else None,
+                stderr=asyncio.subprocess.PIPE if self.jobs > 1 else None)
+
+            if self.jobs > 1:
+                (out, err) = await proc.communicate()
+
+                self.banner(f'finished "{args.subcommand}" in {project.name_and_path}:')
+                sys.stdout.write(out.decode())
+                sys.stderr.write(err.decode())
+
+                return proc.returncode
+
+            return await proc.wait()
+
+    def do_run(self, args, unknown):
+        group_set = set(args.groups)
+        projects = [p for p in self._cloned_projects(args, only_active=not args.all)
+                    if not group_set or group_set.intersection(set(p.groups))]
+
+        asyncio.run(self.do_run_async(args, projects))
+
+    async def do_run_async(self, args, projects):
+        self.jobs = args.jobs if args.jobs > 0 else os.cpu_count() or sys.maxsize
+        sem = asyncio.Semaphore(self.jobs)
+
+        rcs = await asyncio.gather(*[self.run_for_project(p, args, sem) for p in projects])
+
+        failed = [p for (p, rc) in zip(projects, rcs) if rc]
         self._handle_failed(args, failed)
 
 GREP_EPILOG = '''
