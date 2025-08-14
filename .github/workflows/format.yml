@@ -18,13 +18,13 @@ jobs:
     name: Detect added and changed files
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Create json diff
-        uses: GrantBirki/git-diff-action@f65a78c343ee50737aebbe653e35f3067752c7b3 # v2.8.0
+        uses: GrantBirki/git-diff-action@7420e4d095c27bb23359787640976d60c94fd216 # v2.8.1
         id: git-diff
         with:
           base_branch: origin/main
@@ -54,13 +54,13 @@ jobs:
 
     name: Check file ${{ matrix.files.path }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
       - name: Run ruff format check for ${{ matrix.files.path }}
         id: format-check
-        uses: astral-sh/ruff-action@84f83ecf9e1e15d26b7984c7ec9cf73d39ffc946 # v3.3.1
+        uses: astral-sh/ruff-action@57714a7c8a2e59f32539362ba31877a1957dded1 # v3.5.1
         # Allow the job run to pass when this step fails
         continue-on-error: true
         with:
