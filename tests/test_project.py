@@ -28,8 +28,6 @@ from conftest import (
 from west.manifest import ImportFlag as MIF
 from west.manifest import Manifest, ManifestImportFailed, ManifestProject, Project
 
-assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
-
 #
 # Helpers
 #

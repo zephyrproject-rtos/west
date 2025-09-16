@@ -20,10 +20,30 @@ classifiers = [
 ]
 requires-python = ">=3.9"
 dependencies = [
-    "colorama",
-    "PyYAML>=5.1",
-    "pykwalify",
-    "packaging",
+    "colorama~=0.4",
+    "packaging~=25.0",
+    "pykwalify~=1.8",
+    "pyyaml~=6.0",
+]
+
+[dependency-groups]
+lint = [
+    "ruff~=0.13",
+]
+test = [
+    "coverage~=7.10",
+    "pytest~=8.4",
+    "pytest-cov~=7.0",
+]
+types = [
+    "mypy~=1.18",
+    "types-pyyaml~=6.0",
+]
+dev = [
+    "poethepoet~=0.37",
+    {include-group = "lint"},
+    {include-group = "test"},
+    {include-group = "types"},
 ]
 
 [project.license]
@@ -67,6 +87,11 @@ source = [
   "*/src/west",
 ]
 
+# [tool.pytest.ini_options]
+# addopts = [
+#     "--import-mode=importlib",
+# ]
+
 [tool.ruff]
 line-length = 100
 
@@ -83,3 +108,16 @@ extend-select = [
 [tool.ruff.format]
 quote-style = "preserve"
 line-ending = "lf"
+
+[tool.poe.tasks.test]
+cmd = "python -m pytest -W error --junitxml=junit.xml -o junit_family=xunit1 --cov-report=html --cov-config=pyproject.toml --cov=west"
+env = {PYTHONIOENCODING = "utf-8"}
+
+[tool.poe.tasks]
+lint = "ruff check ."
+types = "mypy --package west"
+all = ["test", "lint", "types"]
+
+[tool.mypy]
+mypy_path = "src"
+ignore_missing_imports = true
