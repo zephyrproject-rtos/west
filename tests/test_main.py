@@ -1,10 +1,8 @@
-import os
 import subprocess
 import sys
 
 import west.version
 
-assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
 
 def test_main():
     # A quick check that the package can be executed as a module which

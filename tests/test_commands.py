@@ -1,12 +1,8 @@
 # Copyright (c) 2021, Nordic Semiconductor ASA
 
-import os
-
 import pytest
 
 from west.commands import Verbosity, WestCommand
-
-assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
 
 gv = WestCommand._parse_git_version
 
