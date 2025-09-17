@@ -16,9 +16,9 @@ import shlex
 import subprocess
 import sys
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, Callable, NamedTuple, NoReturn
+from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn
 
 import pykwalify.core
 import yaml
