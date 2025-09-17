@@ -393,7 +393,7 @@ def test_project_revisions():
     ''')
     expected = [Project('p1', 'u1', revision='defaultrev'),
                 Project('p2', 'u2', revision='rev')]
-    for p, e in zip(m.projects[1:], expected):
+    for p, e in zip(m.projects[1:], expected, strict=True):
         check_proj_consistency(p, e)
 
     # The default revision, if not given in a defaults section, is
@@ -776,7 +776,7 @@ def test_self_tag():
                 Project('testproject2', 'https://example2.com/testproject2')]
 
     # Check the projects are as expected.
-    for p, e in zip(m.projects, expected):
+    for p, e in zip(m.projects, expected, strict=True):
         check_proj_consistency(p, e)
 
     # With a "self: path:" value, that will be available in the
@@ -1726,7 +1726,7 @@ def test_import_basics(content):
                 revision='segger-upstream-rev',
                 path='modules/debug/segger')]
 
-    for a, e in zip(actual, expected):
+    for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
 
 def test_import_with_fork_and_proj():
@@ -1766,7 +1766,7 @@ def test_import_with_fork_and_proj():
                 revision='segger-upstream-rev',
                 path='modules/debug/segger')]
 
-    for a, e in zip(actual, expected):
+    for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
 
 def test_import_project_list(manifest_repo):
@@ -1815,7 +1815,7 @@ def test_import_project_list(manifest_repo):
                 Project('p2', 'p2-url', topdir=topdir),
                 Project('p3', 'p3-url', topdir=topdir)]
 
-    for a, e in zip(actual, expected):
+    for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
 
 def test_import_project_directory(manifest_repo):
@@ -1867,7 +1867,7 @@ def test_import_project_directory(manifest_repo):
                 Project('p2', 'p2-url', topdir=topdir),
                 Project('p3', 'p3-url', topdir=topdir)]
 
-    for a, e in zip(actual, expected):
+    for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
 
 def test_import_project_err_malformed(manifest_repo):
@@ -2211,7 +2211,7 @@ def test_import_self_directory(content, tmp_workspace):
     assert [a.name for a in actual] == [e.name for e in expected]
 
     # With the basic check done, do a more detailed check.
-    for a, e in zip(actual, expected):
+    for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
 
 def test_import_self_bool():
@@ -2674,7 +2674,7 @@ def test_import_path_prefix_basics(manifest_repo):
                         path='prefix/2/not-cloned-2', topdir=topdir),
                 Project('not-cloned-3', 'https://example.com/not-cloned-3',
                         path='pre/fix/3/not-cloned-3', topdir=topdir)]
-    for a, e in zip(actual, expected):
+    for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
 
 def test_import_path_prefix_self(manifest_repo):
@@ -2760,7 +2760,7 @@ def test_import_path_prefix_propagation(manifest_repo):
                 Project('project-2', 'https://example.com/project-2',
                         path='prefix/1/prefix-2/project-2',
                         topdir=topdir)]
-    for a, e in zip(actual, expected):
+    for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
 
 def test_import_path_prefix_no_escape(manifest_repo):

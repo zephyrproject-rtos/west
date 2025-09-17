@@ -92,7 +92,7 @@ def _list_f(format):
 
 
 def _match_multiline_regex(expected, actual):
-    for eline_re, aline in zip(expected, actual):
+    for eline_re, aline in zip(expected, actual, strict=True):
         assert re.match(eline_re, aline) is not None, (aline, eline_re)
 
 
@@ -2374,7 +2374,7 @@ def test_import_project_release(repos_tmpdir):
                 Project('net-tools', remotes / 'net-tools',
                         clone_depth=1, topdir=ws,
                         west_commands='scripts/west-commands.yml')]
-    for a, e in zip(actual, expected):
+    for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
 
     # Add a commit in the remote zephyr repository and make sure it
@@ -2389,7 +2389,7 @@ def test_import_project_release(repos_tmpdir):
 
     assert head_before == rev_parse(zephyr_ws, 'HEAD')
     actual = Manifest.from_topdir(topdir=ws).projects
-    for a, e in zip(actual, expected):
+    for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
     assert (zephyr_ws / 'should-not-clone').check(file=0)
 
@@ -2443,7 +2443,7 @@ def test_import_project_release_fork(repos_tmpdir):
                 Project('net-tools', remotes / 'net-tools',
                         clone_depth=1, topdir=ws,
                         west_commands='scripts/west-commands.yml')]
-    for a, e in zip(actual, expected):
+    for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
 
     zephyr_ws = ws / 'zephyr'
@@ -2455,7 +2455,7 @@ def test_import_project_release_fork(repos_tmpdir):
 
     assert head_before == rev_parse(zephyr_ws, 'HEAD')
     actual = Manifest.from_topdir(topdir=ws).projects
-    for a, e in zip(actual, expected):
+    for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
     assert (zephyr_ws / 'should-not-clone').check(file=0)
 
@@ -2514,7 +2514,7 @@ def test_import_project_release_dir(tmpdir):
                 Project('west.d_1.yml-p1', empty_project, topdir=ws),
                 Project('west.d_1.yml-p2', empty_project, topdir=ws),
                 Project('west.d_2.yml-p1', empty_project, topdir=ws)]
-    for a, e in zip(actual, expected):
+    for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
 
 def test_import_project_rolling(repos_tmpdir):
@@ -2557,7 +2557,7 @@ def test_import_project_rolling(repos_tmpdir):
                 Project('net-tools', remotes / 'net-tools',
                         clone_depth=1, topdir=ws,
                         west_commands='scripts/west-commands.yml')]
-    for a, e in zip(actual, expected):
+    for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
 
     # Add a commit in the remote zephyr repository and make sure it
