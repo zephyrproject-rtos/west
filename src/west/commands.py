@@ -14,11 +14,12 @@ import subprocess
 import sys
 from abc import ABC, abstractmethod
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
 from types import ModuleType
-from typing import Callable, NoReturn
+from typing import NoReturn
 
 import colorama
 import pykwalify
