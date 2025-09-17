@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
 from types import ModuleType
-from typing import Callable, NoReturn, Optional
+from typing import Callable, NoReturn
 
 import colorama
 import pykwalify
@@ -152,7 +152,7 @@ class WestCommand(ABC):
         self.accepts_unknown_args: bool = accepts_unknown_args
         self.requires_workspace = requires_workspace
         self.verbosity = verbosity
-        self.topdir: Optional[str] = None
+        self.topdir: str | None = None
         self.manifest = None
         self.config = None
         self._hooks: list[Callable[[WestCommand], None]] = []
@@ -170,8 +170,8 @@ class WestCommand(ABC):
 
     def run(self, args: argparse.Namespace, unknown: list[str],
             topdir: PathType,
-            manifest: Optional[Manifest] = None,
-            config: Optional[Configuration] = None) -> None:
+            manifest: Manifest | None = None,
+            config: Configuration | None = None) -> None:
         '''Run the command.
 
         This raises `west.commands.CommandContextError` if the command
@@ -269,7 +269,7 @@ class WestCommand(ABC):
                      'Try "west -vv manifest --validate" to debug.')
         return self._manifest
 
-    def _set_manifest(self, manifest: Optional[Manifest]):
+    def _set_manifest(self, manifest: Manifest | None):
         self._manifest = manifest
 
     # Do not use @property decorator syntax to avoid a false positive
@@ -294,7 +294,7 @@ class WestCommand(ABC):
                      "variables, which were not available.")
         return self._config
 
-    def _set_config(self, config: Optional[Configuration]):
+    def _set_config(self, config: Configuration | None):
         self._config = config
 
     config = property(_get_config, _set_config)
@@ -602,7 +602,7 @@ class WestExtCommandSpec:
     factory: _ExtFactory
 
 def extension_commands(config: Configuration,
-                       manifest: Optional[Manifest] = None):
+                       manifest: Manifest | None = None):
     # Get descriptions of available extension commands.
     #
     # The return value is an ordered map from project paths to lists of

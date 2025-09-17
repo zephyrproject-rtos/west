@@ -18,7 +18,7 @@ import sys
 from collections import deque
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, Callable, NamedTuple, NoReturn, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple, NoReturn
 
 import pykwalify.core
 import yaml
@@ -76,18 +76,18 @@ SCHEMA_VERSION = '1.2'
 # The value of a west-commands as passed around during manifest
 # resolution. It can become a list due to resolving imports, even
 # though it's just a str in each individual file right now.
-WestCommandsType = Union[str, list[str]]
+WestCommandsType = str | list[str]
 
 # Type for the importer callback passed to the manifest constructor.
 # (ImportedContentType is just an alias for what it gives back.)
-ImportedContentType = Optional[Union[str, list[str]]]
+ImportedContentType = str | list[str] | None
 ImporterType = Callable[['Project', str], ImportedContentType]
 
 # Type for an import map filter function, which takes a Project and
 # returns a bool. The various allowlists and blocklists are used to
 # create these filter functions. A None value is treated as a function
 # which always returns True.
-ImapFilterFnType = Optional[Callable[['Project'], bool]]
+ImapFilterFnType = Callable[['Project'], bool] | None
 
 # A list of group names to enable and disable, like ['+foo', '-bar'].
 GroupFilterType = list[str]
@@ -135,7 +135,7 @@ class ProjectFilterElt(NamedTuple):
 ProjectFilterType = list[ProjectFilterElt]
 
 def _update_project_filter(project_filter: ProjectFilterType,
-                           option_value: Optional[str]) -> None:
+                           option_value: str | None) -> None:
     # Validate a 'manifest.project-filter' configuration option's
     # value. The 'option_value' argument is the raw configuration
     # option. If 'option_value' is invalid, error out. Otherwise,
@@ -172,7 +172,7 @@ def _update_project_filter(project_filter: ProjectFilterType,
 
 # The parsed contents of a manifest YAML file as returned by _load(),
 # after sanitychecking with validate().
-ManifestDataType = Union[str, dict]
+ManifestDataType = str | dict
 
 # Logging
 
@@ -183,15 +183,15 @@ class Submodule(NamedTuple):
     '''Represents a Git submodule within a project.'''
 
     path: str
-    name: Optional[str] = None
+    name: str | None = None
 
 # Submodules may be a list of values or a bool.
-SubmodulesType = Union[list[Submodule], bool]
+SubmodulesType = list[Submodule] | bool
 
 # Manifest locating, parsing, loading, etc.
 
 class _defaults(NamedTuple):
-    remote: Optional[str]
+    remote: str | None
     revision: str
 
 _DEFAULT_REV = 'master'
@@ -214,7 +214,7 @@ def _load(data: str) -> Any:
     except yaml.scanner.ScannerError as e:
         raise MalformedManifest(data) from e
 
-def _west_commands_list(west_commands: Optional[WestCommandsType]) -> \
+def _west_commands_list(west_commands: WestCommandsType | None) -> \
         list[str]:
     # Convert the raw data from a manifest file to a list of
     # west_commands locations. (If it's already a list, make a
@@ -326,7 +326,7 @@ def _imap_filter(imap: _import_map) -> ImapFilterFnType:
     else:
         return None
 
-def _ensure_list(item: Union[str, list[str]]) -> list[str]:
+def _ensure_list(item: str | list[str]) -> list[str]:
     # Converts item to a list containing it if item is a string, or
     # returns item.
 
@@ -403,21 +403,21 @@ class _import_ctx(NamedTuple):
     # - a submanifest file, if loading via "self: import:"
     # - None, if loading from data (either explicitly or recursively
     #   via an import from a "projects:" element)
-    current_abspath: Optional[Path]
+    current_abspath: Path | None
 
     # The relative path to the manifest file we are currently loading.
     # This is relative to the topdir in the absence of symlinks, but
     # symlinks are a pain, so we stash the actual values we read from
     # configuration values like manifest.path/manifest.file
     # to make things simpler.
-    current_relpath: Optional[Path]
+    current_relpath: Path | None
 
     # The actual manifest data we are currently loading
     current_data: Any
 
     # The absolute path to the git repository we are currently loading
     # current_abspath from, or None.
-    current_repo_abspath: Optional[Path]
+    current_repo_abspath: Path | None
 
     # Callable to use when importing from "manifest: projects:".
     project_importer: ImporterType
@@ -610,7 +610,7 @@ def validate(data: Any) -> dict[str, Any]:
 
 # A 'raw' element in a project 'groups:' or manifest 'group-filter:' list,
 # as it is parsed from YAML, before conversion to string.
-RawGroupType = Union[str, int, float]
+RawGroupType = str | int | float
 
 def is_group(raw_group: RawGroupType) -> bool:
     '''Is a 'raw' project group value 'raw_group' valid?
@@ -662,7 +662,7 @@ class ManifestImportFailed(Exception):
     - ``imp``: the parsed YAML data whose import was requested
     '''
 
-    def __init__(self, project: Optional['Project'], imp: Any):
+    def __init__(self, project: 'Project | None', imp: Any):
         super().__init__()
         self.project = project
         self.imp = imp
@@ -683,7 +683,7 @@ class ManifestVersionError(Exception):
     current version.
     '''
 
-    def __init__(self, version: str, file: Optional[PathType] = None):
+    def __init__(self, version: str, file: PathType | None = None):
         super().__init__(version, file)
         self.version = version
         '''The minimum version of west that was required.'''
@@ -803,16 +803,16 @@ class Project:
         return f'<Project {self.name} ({path_repr}) at {self.revision}>'
 
     def __init__(self, name: str, url: str,
-                 description: Optional[str] = None,
-                 revision: Optional[str] = None,
-                 path: Optional[PathType] = None,
+                 description: str | None = None,
+                 revision: str | None = None,
+                 path: PathType | None = None,
                  submodules: SubmodulesType = False,
-                 clone_depth: Optional[int] = None,
-                 west_commands: Optional[WestCommandsType] = None,
-                 topdir: Optional[PathType] = None,
-                 remote_name: Optional[str] = None,
-                 groups: Optional[GroupsType] = None,
-                 userdata: Optional[Any] = None):
+                 clone_depth: int | None = None,
+                 west_commands: WestCommandsType | None = None,
+                 topdir: PathType | None = None,
+                 remote_name: str | None = None,
+                 groups: GroupsType | None = None,
+                 userdata: Any | None = None):
         '''Project constructor.
 
         If *topdir* is ``None``, then absolute path attributes
@@ -858,18 +858,18 @@ class Project:
 
         # Invalidate the absolute path attributes. They'll get
         # computed again next time they're accessed.
-        self._abspath: Optional[str] = None
-        self._posixpath: Optional[str] = None
+        self._abspath: str | None = None
+        self._posixpath: str | None = None
 
     @property
-    def abspath(self) -> Optional[str]:
+    def abspath(self) -> str | None:
         if self._abspath is None and self.topdir:
             self._abspath = os.path.abspath(Path(self.topdir) /
                                             self.path)
         return self._abspath
 
     @property
-    def posixpath(self) -> Optional[str]:
+    def posixpath(self) -> str | None:
         if self._posixpath is None and self.abspath is not None:
             self._posixpath = Path(self.abspath).as_posix()
         return self._posixpath
@@ -915,12 +915,12 @@ class Project:
     # Git helpers
     #
 
-    def git(self, cmd: Union[str, list[str]],
+    def git(self, cmd: str | list[str],
             extra_args: Iterable[str] = (),
             capture_stdout: bool = False,
             capture_stderr: bool = False,
             check: bool = True,
-            cwd: Optional[PathType] = None) -> subprocess.CompletedProcess:
+            cwd: PathType | None = None) -> subprocess.CompletedProcess:
         '''Run a git command in the project repository.
 
         :param cmd: git command as a string (or list of strings)
@@ -981,7 +981,7 @@ class Project:
             return subprocess.CompletedProcess(popen.args, popen.returncode,
                                                stdout, stderr)
 
-    def sha(self, rev: str, cwd: Optional[PathType] = None) -> str:
+    def sha(self, rev: str, cwd: PathType | None = None) -> str:
         '''Get the SHA for a project revision.
 
         :param rev: git revision (HEAD, v2.0.0, etc.) as a string
@@ -998,7 +998,7 @@ class Project:
         return cp.stdout.decode('ascii').strip()
 
     def is_ancestor_of(self, rev1: str, rev2: str,
-                       cwd: Optional[PathType] = None) -> bool:
+                       cwd: PathType | None = None) -> bool:
         '''Check if 'rev1' is an ancestor of 'rev2' in this project.
 
         Returns True if rev1 is an ancestor commit of rev2 in the
@@ -1023,7 +1023,7 @@ class Project:
             raise RuntimeError(f'unexpected git merge-base result {rc}')
 
     def is_up_to_date_with(self, rev: str,
-                           cwd: Optional[PathType] = None) -> bool:
+                           cwd: PathType | None = None) -> bool:
         '''Check if the project is up to date with *rev*, returning
         ``True`` if so.
 
@@ -1037,7 +1037,7 @@ class Project:
         '''
         return self.is_ancestor_of(rev, 'HEAD', cwd=cwd)
 
-    def is_up_to_date(self, cwd: Optional[PathType] = None) -> bool:
+    def is_up_to_date(self, cwd: PathType | None = None) -> bool:
         '''Check if the project HEAD is up to date with the manifest.
 
         This is equivalent to ``is_up_to_date_with(self.revision,
@@ -1048,7 +1048,7 @@ class Project:
         '''
         return self.is_up_to_date_with(self.revision, cwd=cwd)
 
-    def is_cloned(self, cwd: Optional[PathType] = None) -> bool:
+    def is_cloned(self, cwd: PathType | None = None) -> bool:
         '''Returns ``True`` if ``self.abspath`` looks like a git
         repository's top-level directory, and ``False`` otherwise.
 
@@ -1068,8 +1068,8 @@ class Project:
 
         return not (res.returncode or res.stdout.strip())
 
-    def read_at(self, path: PathType, rev: Optional[str] = None,
-                cwd: Optional[PathType] = None) -> bytes:
+    def read_at(self, path: PathType, rev: str | None = None,
+                cwd: PathType | None = None) -> bytes:
         '''Read file contents in the project at a specific revision.
 
         :param path: relative path to file in this project
@@ -1082,9 +1082,9 @@ class Project:
                       capture_stdout=True, capture_stderr=True, cwd=cwd)
         return cp.stdout
 
-    def listdir_at(self, path: PathType, rev: Optional[str] = None,
-                   cwd: Optional[PathType] = None,
-                   encoding: Optional[str] = None) -> list[str]:
+    def listdir_at(self, path: PathType, rev: str | None = None,
+                   cwd: PathType | None = None,
+                   encoding: str | None = None) -> list[str]:
         '''List of directory contents in the project at a specific revision.
 
         The return value is the directory contents as a list of files and
@@ -1147,10 +1147,10 @@ class ManifestProject(Project):
                 f'topdir={repr(self.topdir)}, '
                 f'userdata={repr(self.userdata)})')
 
-    def __init__(self, path: Optional[PathType] = None,
-                 west_commands: Optional[WestCommandsType] = None,
-                 topdir: Optional[PathType] = None,
-                 userdata: Optional[Any] = None):
+    def __init__(self, path: PathType | None = None,
+                 west_commands: WestCommandsType | None = None,
+                 topdir: PathType | None = None,
+                 userdata: Any | None = None):
         '''
         :param path: Relative path to the manifest repository in the
             west workspace, if known.
@@ -1165,14 +1165,14 @@ class ManifestProject(Project):
         self.name: str = 'manifest'
 
         # Pretending that this is a Project, even though it's not (#327)
-        self.description: Optional[str] = None
+        self.description: str | None = None
         self.url: str = ''
         self.submodules: SubmodulesType = False
         self.revision: str = 'HEAD'
         self.remote_name: str = ''
-        self.clone_depth: Optional[int] = None
+        self.clone_depth: int | None = None
         self.groups = []
-        self.userdata: Optional[Any] = userdata
+        self.userdata: Any | None = userdata
 
         # The following type: ignore is necessary since every Project
         # actually has a non-None _path attribute, so the parent class
@@ -1181,15 +1181,15 @@ class ManifestProject(Project):
         self._path = os.fspath(path) if path else None  # type: ignore
 
         # Path related attributes
-        self.topdir: Optional[str] = os.fspath(topdir) if topdir else None
-        self._abspath: Optional[str] = None
-        self._posixpath: Optional[str] = None
+        self.topdir: str | None = os.fspath(topdir) if topdir else None
+        self._abspath: str | None = None
+        self._posixpath: str | None = None
 
         # Extension commands.
         self.west_commands = _west_commands_list(west_commands)
 
     @property
-    def abspath(self) -> Optional[str]:
+    def abspath(self) -> str | None:
         if self._abspath is None and self.topdir and self.path:
             self._abspath = os.path.abspath(os.path.join(self.topdir,
                                                          self.path))
@@ -1216,9 +1216,9 @@ class Manifest:
     encoding: str = 'utf-8'
 
     @staticmethod
-    def from_topdir(topdir: Optional[PathType] = None,
-                    config: Optional[Configuration] = None,
-                    importer: Optional[ImporterType] = None,
+    def from_topdir(topdir: PathType | None = None,
+                    config: Configuration | None = None,
+                    importer: ImporterType | None = None,
                     import_flags: ImportFlag = ImportFlag.DEFAULT
                     ) -> 'Manifest':
         '''Manifest object factory given a workspace topdir.
@@ -1239,8 +1239,8 @@ class Manifest:
                         importer=importer, import_flags=import_flags)
 
     @staticmethod
-    def from_file(source_file: Optional[PathType] = None,
-                  importer: Optional[ImporterType] = None,
+    def from_file(source_file: PathType | None = None,
+                  importer: ImporterType | None = None,
                   import_flags: ImportFlag = ImportFlag.DEFAULT
                   ) -> 'Manifest':
         '''Manifest object factory given a source YAML file.
@@ -1310,7 +1310,7 @@ class Manifest:
 
     @staticmethod
     def from_data(source_data: ManifestDataType,
-                  importer: Optional[ImporterType] = None,
+                  importer: ImporterType | None = None,
                   import_flags: ImportFlag = ImportFlag.DEFAULT
                   ) -> 'Manifest':
         '''Manifest object factory given parsed YAML data.
@@ -1334,12 +1334,12 @@ class Manifest:
                         import_flags=import_flags)
 
     def __init__(self, *,  # All arguments are keyword-only.
-                 source_data: Optional[ManifestDataType] = None,
-                 topdir: Optional[PathType] = None,
-                 config: Optional[Configuration] = None,
-                 importer: Optional[ImporterType] = None,
+                 source_data: ManifestDataType | None = None,
+                 topdir: PathType | None = None,
+                 config: Configuration | None = None,
+                 importer: ImporterType | None = None,
                  import_flags: ImportFlag = ImportFlag.DEFAULT,
-                 internal_import_ctx: Optional[_import_ctx] = None):
+                 internal_import_ctx: _import_ctx | None = None):
         '''Using one of the factory methods may be easier than direct
         instantiation.
 
@@ -1458,16 +1458,16 @@ class Manifest:
         # Initialize public state; these are overwritten later as
         # needed.
 
-        self.abspath: Optional[str] = None
-        self.relative_path: Optional[str] = None
-        self.yaml_path: Optional[str] = None
-        self.repo_path: Optional[str] = None
-        self.repo_abspath: Optional[str] = None
-        self.topdir: Optional[str] = None
+        self.abspath: str | None = None
+        self.relative_path: str | None = None
+        self.yaml_path: str | None = None
+        self.repo_path: str | None = None
+        self.repo_abspath: str | None = None
+        self.topdir: str | None = None
         if topdir:
             topdir = Path(topdir)
             if topdir.is_absolute():
-                topdir_abspath: Optional[Path] = topdir
+                topdir_abspath: Path | None = topdir
             else:
                 topdir_abspath = Path(topdir).resolve()
             if TYPE_CHECKING:
@@ -1494,15 +1494,15 @@ class Manifest:
         # option in the local configuration file. See
         # _config_group_filter(); only initialized if self._top_level
         # is True and if we're loading from a file in a workspace.
-        self._raw_config_group_filter: Optional[str] = None
+        self._raw_config_group_filter: str | None = None
         # A helper attribute we use for schema version v0.9 compatibility.
         self._top_level_group_filter: GroupFilterType = []
         # The manifest.path configuration option in the local
         # configuration file, as a Path.
-        self._config_path: Optional[Path] = None
+        self._config_path: Path | None = None
         # These back the relevant properties.
-        self._posixpath: Optional[str] = None
-        self._repo_posixpath: Optional[str] = None
+        self._posixpath: str | None = None
+        self._repo_posixpath: str | None = None
         # This backs the userdata property
         self.userdata: Any = None
         # Load context needed for import resolution. Do top-level
@@ -1585,7 +1585,7 @@ class Manifest:
         # Otherwise, resolve each of the project_ids to a project,
         # returning the result or raising ValueError.
         for pid in project_ids:
-            project: Optional[Project] = None
+            project: Project | None = None
 
             if isinstance(pid, str):
                 project = self._projects_by_name.get(pid)
@@ -1608,8 +1608,8 @@ class Manifest:
 
     def _as_dict_helper(
         self,
-        pdict: Optional[Callable[[Project], dict]] = None,
-        pfilter: Optional[Callable[[Project], bool]] = None,
+        pdict: Callable[[Project], dict] | None = None,
+        pfilter: Callable[[Project], bool] | None = None,
     ) -> dict:
         # pdict: returns a Project's dict representation.
         #        By default, it's Project.as_dict.
@@ -1726,7 +1726,7 @@ class Manifest:
         return self._projects
 
     def is_active(self, project: Project,
-                  extra_filter: Optional[Iterable[str]] = None) -> bool:
+                  extra_filter: Iterable[str] | None = None) -> bool:
         '''Is a project active?
 
         If the manifest.project-filter configuration option is set,
@@ -1820,7 +1820,7 @@ class Manifest:
         return ret
 
     @property
-    def path(self) -> Optional[str]:  # for compatibility
+    def path(self) -> str | None:  # for compatibility
         '''Deprecated. Use abspath instead.'''
         return self.abspath
 
@@ -1883,7 +1883,7 @@ class Manifest:
         return ret
 
     def _malformed(self, complaint: str,
-                   parent: Optional[Exception] = None) -> NoReturn:
+                   parent: Exception | None = None) -> NoReturn:
         context = (f'file: {self._ctx.current_abspath} '
                    if self._ctx.current_abspath else 'data')
         args = [f'Malformed manifest {context}',
@@ -2081,7 +2081,7 @@ class Manifest:
             self._top_level_group_filter = group_filter
 
     def _validated_group_filter(
-            self, source: Optional[str], raw_filter: list[RawGroupType]
+            self, source: str | None, raw_filter: list[RawGroupType]
     ) -> GroupFilterType:
         # Helper function for cleaning up nonempty manifest:
         # group-filter: and manifest.group-filter values.
@@ -2115,7 +2115,7 @@ class Manifest:
         # Handle the "self:" section in the manifest data, including
         # import resolution and extension commands.
 
-        slf: Optional[dict[str, Any]] = manifest_data.get('self')
+        slf: dict[str, Any] | None = manifest_data.get('self')
 
         if not slf:
             return None
@@ -2291,7 +2291,7 @@ class Manifest:
                        url_bases: dict[str, str]) -> _defaults:
         # md = manifest defaults (dictionary with values parsed from
         # the manifest)
-        mdrem: Optional[str] = defaults.get('remote')
+        mdrem: str | None = defaults.get('remote')
         if mdrem:
             # The default remote name, if provided, must refer to a
             # well-defined remote.
@@ -2574,7 +2574,7 @@ class Manifest:
         _logger.debug(f'done resolving import {imap} for {project}')
 
     def _import_data_from_project(self, project: Project, data: Any,
-                                  imap: Optional[_import_map]) -> None:
+                                  imap: _import_map | None) -> None:
         # Destructively add the imported data into our 'projects' map.
 
         if imap is not None:
