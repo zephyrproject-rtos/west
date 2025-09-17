@@ -12,3 +12,4 @@ shippable/
 htmlcov/
 .dir-locals.el
 .venv/
+junit.xml
