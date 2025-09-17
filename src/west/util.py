@@ -9,7 +9,6 @@ import os
 import pathlib
 import shlex
 import textwrap
-from typing import Optional, Union
 
 # What west's APIs accept for paths.
 #
@@ -18,7 +17,7 @@ from typing import Optional, Union
 # taken in https://github.com/python/mypy/issues/5264 to annotate that
 # as os.PathLike[str] if TYPE_CHECKING and plain os.PathLike
 # otherwise, but it doesn't seem worth it.
-PathType = Union[str, os.PathLike]
+PathType = str | os.PathLike
 
 WEST_DIR = '.west'
 
@@ -51,7 +50,7 @@ def wrap(text: str, indent: str) -> list[str]:
 class WestNotFound(RuntimeError):
     '''Neither the current directory nor any parent has a west workspace.'''
 
-def west_dir(start: Optional[PathType] = None) -> str:
+def west_dir(start: PathType | None = None) -> str:
     '''Returns the absolute path of the workspace's .west directory.
 
     Starts the search from the start directory, and goes to its
@@ -62,7 +61,7 @@ def west_dir(start: Optional[PathType] = None) -> str:
     '''
     return os.path.join(west_topdir(start), WEST_DIR)
 
-def west_topdir(start: Optional[PathType] = None,
+def west_topdir(start: PathType | None = None,
                 fall_back: bool = True) -> str:
     '''
     Like west_dir(), but returns the path to the parent directory of the .west/

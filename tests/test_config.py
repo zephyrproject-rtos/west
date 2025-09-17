@@ -6,7 +6,7 @@ import configparser
 import os
 import pathlib
 import subprocess
-from typing import Any, Optional
+from typing import Any
 
 import pytest
 from conftest import cmd, cmd_raises
@@ -38,13 +38,13 @@ def cfg(f=ALL, topdir=None):
 
 def update_testcfg(section: str, key: str, value: Any,
                    configfile: config.ConfigFile = LOCAL,
-                   topdir: Optional[PathType] = None) -> None:
+                   topdir: PathType | None = None) -> None:
     c = config.Configuration(topdir)
     c.set(option=f'{section}.{key}', value=value, configfile=configfile)
 
 def delete_testcfg(section: str, key: str,
-                   configfile: Optional[config.ConfigFile] = None,
-                   topdir: Optional[PathType] = None) -> None:
+                   configfile: config.ConfigFile | None = None,
+                   topdir: PathType | None = None) -> None:
     c = config.Configuration(topdir)
     c.delete(option=f'{section}.{key}', configfile=configfile)
 
