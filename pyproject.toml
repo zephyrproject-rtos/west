@@ -49,6 +49,7 @@ where = ["src"]
 namespaces = false
 
 [tool.coverage.run]
+patch = ["subprocess"]
 relative_files = true
 omit = [
   "*/tmp/*",
