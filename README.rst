@@ -7,7 +7,7 @@
 .. image:: https://codecov.io/gh/zephyrproject-rtos/west/graph/badge.svg
    :target: https://codecov.io/gh/zephyrproject-rtos/west
 
-This is the Zephyr RTOS meta tool, ``west``.
+This is the Zephyr RTOS meta tool, ``west``, modified for testing.
 
 https://docs.zephyrproject.org/latest/guides/west/index.html
 
