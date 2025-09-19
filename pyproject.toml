@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.2"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -13,7 +13,6 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: Microsoft :: Windows",
@@ -25,9 +24,8 @@ dependencies = [
     "pykwalify",
     "packaging",
 ]
-
-[project.license]
-file = "LICENSE"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 
 [project.readme]
 file = "README.rst"
