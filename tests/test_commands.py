@@ -1,10 +1,6 @@
 # Copyright (c) 2021, Nordic Semiconductor ASA
 
-import os
-
 from west.commands import WestCommand
-
-assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
 
 gv = WestCommand._parse_git_version
 
