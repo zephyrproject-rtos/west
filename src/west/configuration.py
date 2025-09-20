@@ -42,7 +42,7 @@ import warnings
 from collections.abc import Iterable
 from enum import Enum
 from pathlib import Path, PureWindowsPath
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any
 
 from west.util import WEST_DIR, PathType, WestNotFound, west_dir
 
@@ -67,7 +67,7 @@ class _InternalCF:
         return section_child
 
     @staticmethod
-    def from_path(path: Optional[Path]) -> Optional['_InternalCF']:
+    def from_path(path: Path | None) -> '_InternalCF | None':
         return _InternalCF(path) if path and path.exists() else None
 
     def __init__(self, path: Path):
@@ -160,7 +160,7 @@ class Configuration:
 
     '''
 
-    def __init__(self, topdir: Optional[PathType] = None):
+    def __init__(self, topdir: PathType | None = None):
         '''Load the system, global, and workspace configurations and
         make them available for the user.
 
@@ -179,8 +179,8 @@ class Configuration:
         self._local = _InternalCF.from_path(self._local_path)
 
     def get(self, option: str,
-            default: Optional[str] = None,
-            configfile: ConfigFile = ConfigFile.ALL) -> Optional[str]:
+            default: str | None = None,
+            configfile: ConfigFile = ConfigFile.ALL) -> str | None:
         '''Get a configuration option's value as a string.
 
         :param option: option to get, in 'foo.bar' form
@@ -204,8 +204,8 @@ class Configuration:
         return self._get(lambda cf: cf.getboolean(option), default, configfile)
 
     def getint(self, option: str,
-               default: Optional[int] = None,
-               configfile: ConfigFile = ConfigFile.ALL) -> Optional[int]:
+               default: int | None = None,
+               configfile: ConfigFile = ConfigFile.ALL) -> int | None:
         '''Get a configuration option's value as an int.
 
         :param option: option to get, in 'foo.bar' form
@@ -215,8 +215,8 @@ class Configuration:
         return self._get(lambda cf: cf.getint(option), default, configfile)
 
     def getfloat(self, option: str,
-                 default: Optional[float] = None,
-                 configfile: ConfigFile = ConfigFile.ALL) -> Optional[float]:
+                 default: float | None = None,
+                 configfile: ConfigFile = ConfigFile.ALL) -> float | None:
         '''Get a configuration option's value as a float.
 
         :param option: option to get, in 'foo.bar' form
@@ -306,7 +306,7 @@ class Configuration:
         return ret
 
     def delete(self, option: str,
-               configfile: Optional[ConfigFile] = None) -> None:
+               configfile: ConfigFile | None = None) -> None:
         '''Delete an option from the given file or files.
 
         If *option* is not set in the given *configfile*, KeyError is raised.
@@ -401,7 +401,7 @@ class Configuration:
         return self._cf_to_dict(self._local)
 
     @staticmethod
-    def _cf_to_dict(cf: Optional[_InternalCF]) -> dict[str, Any]:
+    def _cf_to_dict(cf: _InternalCF | None) -> dict[str, Any]:
         ret: dict[str, Any] = {}
         if cf is None:
             return ret
@@ -423,9 +423,9 @@ def _deprecated(old_function):
                   'use a west.configuration.Configuration object',
                   DeprecationWarning, stacklevel=2)
 
-def read_config(configfile: Optional[ConfigFile] = None,
+def read_config(configfile: ConfigFile | None = None,
                 config: configparser.ConfigParser = config,
-                topdir: Optional[PathType] = None) -> None:
+                topdir: PathType | None = None) -> None:
     '''Read configuration files into *config*.
 
     Reads the files given by *configfile*, storing the values into the
@@ -458,7 +458,7 @@ def read_config(configfile: Optional[ConfigFile] = None,
 
 def update_config(section: str, key: str, value: Any,
                   configfile: ConfigFile = ConfigFile.LOCAL,
-                  topdir: Optional[PathType] = None) -> None:
+                  topdir: PathType | None = None) -> None:
     '''Sets ``section.key`` to *value* in the given configuration file.
 
     :param section: config section; will be created if it does not exist
@@ -493,8 +493,8 @@ def update_config(section: str, key: str, value: Any,
         config.write(f)
 
 def delete_config(section: str, key: str,
-                  configfile: Union[Optional[ConfigFile], list[ConfigFile]] = None,
-                  topdir: Optional[PathType] = None) -> None:
+                  configfile: ConfigFile | list[ConfigFile] | None = None,
+                  topdir: PathType | None = None) -> None:
     '''Delete the option section.key from the given file or files.
 
     :param section: section whose key to delete
@@ -556,7 +556,7 @@ def delete_config(section: str, key: str,
     if not found:
         raise KeyError(f'{section}.{key}')
 
-def _location(cfg: ConfigFile, topdir: Optional[PathType] = None,
+def _location(cfg: ConfigFile, topdir: PathType | None = None,
               find_local: bool = True) -> str:
     # Making this a function that gets called each time you ask for a
     # configuration file makes it respect updated environment
@@ -628,7 +628,7 @@ def _location(cfg: ConfigFile, topdir: Optional[PathType] = None,
     else:
         raise ValueError(f'invalid configuration file {cfg}')
 
-def _gather_configs(cfg: ConfigFile, topdir: Optional[PathType]) -> list[str]:
+def _gather_configs(cfg: ConfigFile, topdir: PathType | None) -> list[str]:
     # Find the paths to the given configuration files, in increasing
     # precedence order.
     ret = []
@@ -645,7 +645,7 @@ def _gather_configs(cfg: ConfigFile, topdir: Optional[PathType]) -> list[str]:
 
     return ret
 
-def _ensure_config(configfile: ConfigFile, topdir: Optional[PathType]) -> str:
+def _ensure_config(configfile: ConfigFile, topdir: PathType | None) -> str:
     # Ensure the given configfile exists, returning its path. May
     # raise permissions errors, WestNotFound, etc.
     loc = _location(configfile, topdir=topdir)

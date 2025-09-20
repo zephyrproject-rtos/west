@@ -26,7 +26,7 @@ from collections import OrderedDict
 from io import StringIO
 from pathlib import Path, PurePath
 from subprocess import CalledProcessError
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 import colorama
 
@@ -84,9 +84,9 @@ class EarlyArgs(NamedTuple):
     # Expected arguments:
     help: bool                  # True if -h was given
     version: bool               # True if -V was given
-    zephyr_base: Optional[str]  # -z argument value
+    zephyr_base: str | None     # -z argument value
     verbosity: int              # 0 if not given, otherwise counts
-    command_name: Optional[str]
+    command_name: str | None
 
     # Other arguments are appended here.
     unexpected_arguments: list[str]

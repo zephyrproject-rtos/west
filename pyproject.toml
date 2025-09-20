@@ -8,7 +8,6 @@ version = "1.5.99"
 authors = [{name = "Zephyr Project", email = "devel@lists.zephyrproject.org"}]
 description = "Zephyr RTOS Project meta-tool"
 classifiers = [
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -17,7 +16,7 @@ classifiers = [
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: Microsoft :: Windows",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "colorama",
     "PyYAML>=5.1",
