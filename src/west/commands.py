@@ -526,7 +526,7 @@ class WestCommand(ABC):
     @property
     def color_ui(self) -> bool:
         '''Should we colorize output?'''
-        return self.config.getboolean('color.ui', default=True)
+        return self.config.getboolean('color.ui', default=True) if self.has_config else True
 
     #
     # Internal APIs. Not for public consumption.
