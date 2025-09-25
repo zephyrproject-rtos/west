@@ -18,8 +18,6 @@ from conftest import (
     rev_parse,
 )
 
-assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
-
 #
 # Helpers
 #
