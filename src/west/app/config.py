@@ -108,6 +108,9 @@ class Config(WestCommand):
                            help="delete an option everywhere it's set")
         group.add_argument('-a', '--append', action='store_true',
                            help='append to an existing value')
+        group.add_argument('-u', '--update', action='append', metavar='FROM_FILE',
+                           help='''update the config with all options and
+                           values from one or more other config files''')
 
         group = parser.add_argument_group(
             "configuration file to use (give at most one)"
@@ -135,6 +138,9 @@ class Config(WestCommand):
         if args.list:
             if args.name:
                 self.parser.error('-l cannot be combined with name argument')
+        elif args.update:
+            if args.name:
+                self.parser.error('-u cannot be combined with name argument')
         elif not args.name:
             self.parser.error('missing argument name '
                               '(to list all options and values, use -l)')
@@ -146,10 +152,12 @@ class Config(WestCommand):
             self.list(args)
         elif delete:
             self.delete(args)
-        elif args.value is None:
+        elif args.name and args.value is None:
             self.read(args)
         elif args.append:
             self.append(args)
+        elif args.update:
+            self.update(args)
         else:
             self.write(args)
 
@@ -157,6 +165,10 @@ class Config(WestCommand):
         what = args.configfile or ALL
         for option, value in self.config.items(configfile=what):
             self.inf(f'{option}={value}')
+
+    def update(self, args):
+        for path in args.update:
+            self.config.update(other=path, configfile=args.configfile or LOCAL)
 
     def delete(self, args):
         self.check_config(args.name)

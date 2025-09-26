@@ -73,9 +73,16 @@ class _InternalCF:
     def __init__(self, path: Path):
         self.path = path
         self.cp = _configparser()
+        self._read(path)
+
+    def _read(self, path: Path):
         read_files = self.cp.read(path, encoding='utf-8')
         if len(read_files) != 1:
             raise FileNotFoundError(path)
+
+    def _write(self):
+        with open(self.path, 'w', encoding='utf-8') as f:
+            self.cp.write(f)
 
     def __contains__(self, option: str) -> bool:
         section, key = _InternalCF.parse_key(option)
@@ -102,6 +109,10 @@ class _InternalCF:
         except (configparser.NoOptionError, configparser.NoSectionError) as err:
             raise KeyError(option) from err
 
+    def update(self, other: Path):
+        self._read(other)
+        self._write()
+
     def set(self, option: str, value: Any):
         section, key = _InternalCF.parse_key(option)
 
@@ -110,8 +121,7 @@ class _InternalCF:
 
         self.cp[section][key] = value
 
-        with open(self.path, 'w', encoding='utf-8') as f:
-            self.cp.write(f)
+        self._write()
 
     def delete(self, option: str):
         section, key = _InternalCF.parse_key(option)
@@ -123,8 +133,7 @@ class _InternalCF:
         if not self.cp[section].items():
             del self.cp[section]
 
-        with open(self.path, 'w', encoding='utf-8') as f:
-            self.cp.write(f)
+        self._write()
 
 class ConfigFile(Enum):
     '''Types of west configuration file.
@@ -295,6 +304,20 @@ class Configuration:
         else:
             # Shouldn't happen.
             raise AssertionError(configfile)
+
+    def update(self, configfile: Optional[ConfigFile], other: Path) -> None:
+        '''Update configuration with the values from another config file.
+
+        :param configfile: type of config file to set the value in
+        :param other: path to other config file
+        '''
+        if configfile == ConfigFile.ALL:
+            raise RuntimeError(f'configfile {configfile} not allowed for update')
+        configfile = configfile or ConfigFile.LOCAL
+        config, = self._whence(configfile)
+        if not config:
+            raise RuntimeError(f'configfile {configfile} does not exist')
+        config.update(other)
 
     @staticmethod
     def _create(path: Path) -> _InternalCF:

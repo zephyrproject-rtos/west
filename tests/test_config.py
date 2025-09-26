@@ -6,6 +6,7 @@ import configparser
 import os
 import pathlib
 import subprocess
+import textwrap
 from typing import Any, Optional
 
 import pytest
@@ -41,6 +42,7 @@ def update_testcfg(section: str, key: str, value: Any,
                    topdir: Optional[PathType] = None) -> None:
     c = config.Configuration(topdir)
     c.set(option=f'{section}.{key}', value=value, configfile=configfile)
+    return c
 
 def delete_testcfg(section: str, key: str,
                    configfile: Optional[config.ConfigFile] = None,
@@ -193,6 +195,125 @@ def test_local_creation():
     assert 'pytest' not in cfg(f=SYSTEM)
     assert 'pytest' not in cfg(f=GLOBAL)
     assert cfg(f=LOCAL)['pytest']['key'] == 'val'
+
+TEST_CASES_UPDATE = [
+    # configfile
+    (SYSTEM),
+    (GLOBAL),
+    (LOCAL),
+]
+
+@pytest.mark.parametrize('test_case', TEST_CASES_UPDATE)
+def test_update(test_case):
+    # extract test_case data
+    configfile = test_case
+
+    # assert prerequisites
+    assert not os.path.isfile(config._location(SYSTEM))
+    assert not os.path.isfile(config._location(GLOBAL))
+    assert not os.path.isfile(config._location(LOCAL))
+
+    # create initial config
+    test_config = update_testcfg('pytest', 'key', 'val', configfile=configfile)
+
+    # check that the initial config is as expected
+    cfg_items = dict(test_config.items(configfile=configfile))
+    assert len(cfg_items) == 1
+    assert cfg_items['pytest.key'] == 'val'
+
+    # read the initial config file and check that all values are correct
+    cfg_read = cfg(f=configfile)
+    assert len(cfg_read) == 2
+    assert 'pytest' in cfg_read
+    assert 'DEFAULT' in cfg_read
+    assert len(cfg_read['pytest']) == 1
+    assert cfg_read['pytest']['key'] == 'val'
+
+    # update the config with another config file
+    with open('another_config', 'w') as other:
+        other.write(textwrap.dedent('''\
+        [pytest]:
+        key = updated val
+
+        [new_section]:
+        key = added
+        '''))
+    test_config.update(configfile=configfile, other='another_config')
+
+    # check that the updated config items are up-to-date
+    cfg_items = dict(test_config.items(configfile=configfile))
+    assert len(cfg_items) == 2
+    assert cfg_items['pytest.key'] == 'updated val'
+    assert cfg_items['new_section.key'] == 'added'
+
+    # read the updated config file and check that all values are correct
+    cfg_read = cfg(f=configfile)
+    assert len(cfg_read) == 3
+    assert 'pytest' in cfg_read
+    assert 'new_section' in cfg_read
+    assert 'DEFAULT' in cfg_read
+    assert len(cfg_read['pytest']) == 1
+    assert len(cfg_read['new_section']) == 1
+    assert cfg_read['pytest']['key'] == 'updated val'
+    assert cfg_read['new_section']['key'] == 'added'
+
+
+def test_update_invalid():
+    # create initial LOCAL config
+    test_config = update_testcfg('pytest', 'key', 'val', configfile=LOCAL)
+
+    # update ALL is invalid
+    with pytest.raises(RuntimeError) as exc_info:
+        test_config.update(configfile=ALL, other='another_config')
+    msg = "configfile ConfigFile.ALL not allowed for update"
+    assert msg == str(exc_info.value)
+
+    # file is not existing
+    with pytest.raises(FileNotFoundError) as exc_info:
+        test_config.update(configfile=LOCAL, other='another_config')
+    assert "another_config" == str(exc_info.value)
+
+    # create another_config
+    with open('another_config', 'w') as other:
+        other.write(textwrap.dedent('''\
+        [pytest]:
+        key = val
+        '''))
+
+    # GLOBAL/SYSTEM is not existing
+    for configfile in [GLOBAL, SYSTEM]:
+        with pytest.raises(RuntimeError) as exc_info:
+            test_config.update(configfile=configfile, other='another_config')
+        assert f"configfile {configfile} does not exist" == str(exc_info.value)
+
+
+def test_update_cmd():
+    # create another config
+    with open('another_config', 'w') as other:
+        other.write(textwrap.dedent('''\
+        [pytest]:
+        key = updated
+        '''))
+
+    # update should fail since no configuration exists yet
+    with pytest.raises(subprocess.CalledProcessError):
+        cmd("config -u another_config")
+
+    # create initial config
+    with open(os.environ['WEST_CONFIG_LOCAL'], 'w') as f:
+        f.write('')
+
+    # update the config with another config file via command line
+    cmd("config -u another_config")
+
+    # read the updated config file and check that all values are correct
+    cfg_read = cfg(f=LOCAL)
+    assert len(cfg_read) == 2
+    assert 'pytest' in cfg_read
+    assert 'DEFAULT' in cfg_read
+    assert len(cfg_read['pytest']) == 1
+    assert cfg_read['pytest']['key'] == 'updated'
+
 
 def test_local_creation_with_topdir():
     # Like test_local_creation, with a specified topdir.
