@@ -68,14 +68,34 @@ class _InternalCF:
 
     @staticmethod
     def from_path(path: Path | None) -> '_InternalCF | None':
-        return _InternalCF(path) if path and path.exists() else None
+        config = _InternalCF(path) if path and path.exists() else None
+        if not config:
+            return None
+
+        # check if dropin configs exist (in according .d directory)
+        dropins_dir = Path(f'{path}.d')
+        if dropins_dir.exists():
+            # update config with values from dropin config files, whereby the
+            # dropin configs are applied in alphabetical order
+            for conf in sorted(dropins_dir.iterdir()):
+                config.cp.read(dropins_dir / conf, encoding='utf-8')
+            # finally overwrite with values from higher-prior actual config
+            config.cp.read(path, encoding='utf-8')
+        return config
 
     def __init__(self, path: Path):
         self.path = path
         self.cp = _configparser()
+        self._read(path)
+
+    def _read(self, path: Path):
         read_files = self.cp.read(path, encoding='utf-8')
         if len(read_files) != 1:
             raise FileNotFoundError(path)
+
+    def _write(self):
+        with open(self.path, 'w', encoding='utf-8') as f:
+            self.cp.write(f)
 
     def __contains__(self, option: str) -> bool:
         section, key = _InternalCF.parse_key(option)
@@ -110,8 +130,7 @@ class _InternalCF:
 
         self.cp[section][key] = value
 
-        with open(self.path, 'w', encoding='utf-8') as f:
-            self.cp.write(f)
+        self._write()
 
     def delete(self, option: str):
         section, key = _InternalCF.parse_key(option)
@@ -123,8 +142,7 @@ class _InternalCF:
         if not self.cp[section].items():
             del self.cp[section]
 
-        with open(self.path, 'w', encoding='utf-8') as f:
-            self.cp.write(f)
+        self._write()
 
 class ConfigFile(Enum):
     '''Types of west configuration file.
