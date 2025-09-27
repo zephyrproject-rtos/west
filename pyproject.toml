@@ -22,6 +22,7 @@ dependencies = [
     "PyYAML>=5.1",
     "pykwalify",
     "packaging",
+    "joblib",
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
