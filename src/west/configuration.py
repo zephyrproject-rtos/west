@@ -68,63 +68,86 @@ class _InternalCF:
 
     @staticmethod
     def from_path(path: Path | None) -> '_InternalCF | None':
-        return _InternalCF(path) if path and path.exists() else None
+        cf = _InternalCF(path) if path else None
+        if not cf:
+            return None
+        if not cf.path and not cf.dropin_paths:
+            return None
+        return cf
 
     def __init__(self, path: Path):
-        self.path = path
         self.cp = _configparser()
-        read_files = self.cp.read(path, encoding='utf-8')
-        if len(read_files) != 1:
-            raise FileNotFoundError(path)
+        self.dropin_cp = _configparser()
+        self.path = path if path.exists() else None
+        dropin_dir = Path(f'{path}.d')
+        self.dropin_dir = dropin_dir if dropin_dir.exists() else None
+        self.dropin_paths = []
+        if self.dropin_dir:
+            # dropin configs are applied in alphabetical order
+            for conf in sorted(self.dropin_dir.iterdir()):
+                # only consider .conf files
+                if conf.suffix.lower() in ['.conf', '.ini']:
+                    self.dropin_paths.append(self.dropin_dir / conf)
+        self._read()
+
+    def _read(self):
+        if self.path:
+            self.cp.read(self.path, encoding='utf-8')
+        if self.dropin_paths:
+            self.dropin_cp.read(self.dropin_paths, encoding='utf-8')
+
+    def _write(self):
+        if not self.path:
+            raise WestNotFound('No config file exists that can be written')
+        with open(self.path, 'w', encoding='utf-8') as f:
+            self.cp.write(f)
 
     def __contains__(self, option: str) -> bool:
         section, key = _InternalCF.parse_key(option)
 
-        return section in self.cp and key in self.cp[section]
+        if section in self.cp and key in self.cp[section]:
+            return True
+        return section in self.dropin_cp and key in self.dropin_cp[section]
 
     def get(self, option: str):
-        return self._get(option, self.cp.get)
+        return self._get(option, self.cp.get, self.dropin_cp.get)
 
     def getboolean(self, option: str):
-        return self._get(option, self.cp.getboolean)
+        return self._get(option, self.cp.getboolean, self.dropin_cp.getboolean)
 
     def getint(self, option: str):
-        return self._get(option, self.cp.getint)
+        return self._get(option, self.cp.getint, self.dropin_cp.getint)
 
     def getfloat(self, option: str):
-        return self._get(option, self.cp.getfloat)
+        return self._get(option, self.cp.getfloat, self.dropin_cp.getfloat)
 
-    def _get(self, option, getter):
+    def _get(self, option, config_getter, dropin_getter):
         section, key = _InternalCF.parse_key(option)
-
-        try:
-            return getter(section, key)
-        except (configparser.NoOptionError, configparser.NoSectionError) as err:
-            raise KeyError(option) from err
+        if section in self.cp and key in self.cp[section]:
+            getter = config_getter
+        elif section in self.dropin_cp and key in self.dropin_cp[section]:
+            getter = dropin_getter
+        else:
+            raise KeyError(option)
+        return getter(section, key)
 
     def set(self, option: str, value: Any):
         section, key = _InternalCF.parse_key(option)
-
         if section not in self.cp:
             self.cp[section] = {}
-
         self.cp[section][key] = value
-
-        with open(self.path, 'w', encoding='utf-8') as f:
-            self.cp.write(f)
+        self._write()
 
     def delete(self, option: str):
         section, key = _InternalCF.parse_key(option)
-
-        if section not in self.cp:
+        if (section not in self.cp) or (key not in self.cp[section]):
             raise KeyError(option)
 
         del self.cp[section][key]
         if not self.cp[section].items():
             del self.cp[section]
 
-        with open(self.path, 'w', encoding='utf-8') as f:
-            self.cp.write(f)
+        self._write()
 
 class ConfigFile(Enum):
     '''Types of west configuration file.
@@ -362,13 +385,14 @@ class Configuration:
         # function-and-global-state APIs.
 
         def load(cf: _InternalCF):
-            for section, contents in cf.cp.items():
-                if section == 'DEFAULT':
-                    continue
-                if section not in cp:
-                    cp.add_section(section)
-                for key, value in contents.items():
-                    cp[section][key] = value
+            for cp in [cf.dropin_cp, cf.cp]:
+                for section, contents in cp.items():
+                    if section == 'DEFAULT':
+                        continue
+                    if section not in cp:
+                        cp.add_section(section)
+                    for key, value in contents.items():
+                        cp[section][key] = value
 
         if self._system:
             load(self._system)
@@ -415,11 +439,12 @@ class Configuration:
         ret: dict[str, Any] = {}
         if cf is None:
             return ret
-        for section, contents in cf.cp.items():
-            if section == 'DEFAULT':
-                continue
-            for key, value in contents.items():
-                ret[f'{section}.{key}'] = value
+        for cp in [cf.dropin_cp, cf.cp]:
+            for section, contents in cp.items():
+                if section == 'DEFAULT':
+                    continue
+                for key, value in contents.items():
+                    ret[f'{section}.{key}'] = value
         return ret
 
 

@@ -73,6 +73,14 @@ To delete <name> in the global file only:
 
 To delete <name> everywhere it's set, including the system file:
     west config -D <name>
+
+Additionally to the config file a dropin config directory is considered.
+The directory is named as the according config file, but with a '.d' suffix.
+As a result there are three levels for dropin config directories (local, global
+and system), whereby all '.conf' files from each dropin directory are loaded in
+alphabetical order.
+For example:
+    .west/config.d/basics.conf
 '''
 
 CONFIG_EPILOG = '''\

@@ -6,6 +6,7 @@ import configparser
 import os
 import pathlib
 import subprocess
+import textwrap
 from typing import Any
 
 import pytest
@@ -205,6 +206,107 @@ def test_local_creation():
     assert 'pytest' not in cfg(f=SYSTEM)
     assert 'pytest' not in cfg(f=GLOBAL)
     assert cfg(f=LOCAL)['pytest']['key'] == 'val'
+
+TEST_CASES_CONFIG_D = [
+    # (flag, env_var)
+    ('', 'WEST_CONFIG_LOCAL'),
+    ('--local', 'WEST_CONFIG_LOCAL'),
+    ('--system', 'WEST_CONFIG_SYSTEM'),
+    ('--global', 'WEST_CONFIG_GLOBAL'),
+]
+
+@pytest.mark.parametrize("test_case", TEST_CASES_CONFIG_D)
+def test_config_d_local(test_case):
+    flag, env_var = test_case
+    config_path = pathlib.Path(os.environ[env_var])
+    config_d_dir = pathlib.Path(f'{config_path}.d')
+    config_d_dir.mkdir()
+
+    # write value in actual config file
+    cmd(f'config {flag} pytest.key val')
+    cmd(f'config {flag} pytest.config-only val')
+
+    # read config value via command line
+    stdout = cmd(f'config {flag} pytest.key')
+    assert 'val' == stdout.rstrip()
+    stdout = cmd(f'config {flag} pytest.config-only')
+    assert 'val' == stdout.rstrip()
+
+    # read the config file
+    with open(config_path) as config_file:
+        config_file_initial = config_file.read()
+    assert config_file_initial == textwrap.dedent('''\
+        [pytest]
+        key = val
+        config-only = val
+
+        ''')
+
+    # create a dropin config under .d
+    with open(config_d_dir / 'a.conf', 'w') as conf:
+        conf.write(textwrap.dedent('''
+        [pytest]
+        key = from dropin a
+        dropin-only = from dropin a
+        dropin-only-a = from dropin a
+        '''))
+
+    # create a dropin config under .d
+    with open(config_d_dir / 'z.conf', 'w') as conf:
+        conf.write(textwrap.dedent('''
+        [pytest]
+        dropin-only = from dropin z
+        dropin-only-z = from dropin z
+        '''))
+
+    # value from config is prefered over dropin config
+    stdout = cmd(f'config {flag} pytest.key')
+    assert 'val' == stdout.rstrip()
+    stdout = cmd(f'config {flag} pytest.dropin-only-a')
+    assert 'from dropin a' == stdout.rstrip()
+    stdout = cmd(f'config {flag} pytest.dropin-only-z')
+    assert 'from dropin z' == stdout.rstrip()
+    # alphabetical order (z.conf is overwriting a.conf)
+    stdout = cmd(f'config {flag} pytest.dropin-only')
+    assert 'from dropin z' == stdout.rstrip()
+
+    # deletion of a value that is only set in a dropin config should fail
+    cmd_raises(f'config {flag} -d pytest.dropin-only', subprocess.CalledProcessError)
+
+    # deletion of a value that is set in config
+    stdout = cmd(f'config {flag} -d pytest.config-only')
+    assert '' == stdout
+    with open(config_path) as config_file:
+        config_file_edited = config_file.read()
+    assert config_file_edited == textwrap.dedent('''\
+        [pytest]
+        key = val
+
+        ''')
+
+    # remove config file
+    config_path.unlink()
+
+    # values from config are unset now
+    stderr = cmd_raises(f'config {flag} pytest.config-only', subprocess.CalledProcessError)
+    assert 'ERROR: pytest.config-only is unset' == stderr.rstrip()
+
+    # dropin applies now, since config does not exist
+    stdout = cmd(f'config {flag} pytest.key')
+    assert 'from dropin a' == stdout.rstrip()
+    # alphabetical order (z.conf is overwriting a.conf)
+    stdout = cmd(f'config {flag} pytest.dropin-only')
+    assert 'from dropin z' == stdout.rstrip()
+    # other values remain same
+    stdout = cmd(f'config {flag} pytest.dropin-only-a')
+    assert 'from dropin a' == stdout.rstrip()
+    # values specified in only one dropin config remain same
+    stdout = cmd(f'config {flag} pytest.dropin-only-z')
+    assert 'from dropin z' == stdout.rstrip()
+
+    # deletion of a value that is not existing anymore should fail
+    cmd_raises(f'config {flag} -d pytest.config-only', subprocess.CalledProcessError)
+
 
 def test_local_creation_with_topdir():
     # Like test_local_creation, with a specified topdir.
