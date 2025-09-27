@@ -6,6 +6,7 @@ import configparser
 import os
 import pathlib
 import subprocess
+import textwrap
 from typing import Any
 
 import pytest
@@ -81,6 +82,20 @@ def test_config_global():
     assert all['pytest']['global2'] == 'foo2'
     assert glb['pytest']['global2'] == 'foo2'
     assert 'pytest' not in lcl
+
+def test_config_print_path():
+    stdout = cmd('config --local --print-path')
+    assert os.environ["WEST_CONFIG_LOCAL"] == stdout.rstrip()
+
+    stdout = cmd('config --global --print-path')
+    assert os.environ["WEST_CONFIG_GLOBAL"] == stdout.rstrip()
+
+    stdout = cmd('config --system --print-path')
+    assert os.environ["WEST_CONFIG_SYSTEM"] == stdout.rstrip()
+
+    del os.environ['WEST_CONFIG_LOCAL']
+    stdout = cmd('config --local --print-path')
+    assert "" == stdout.rstrip()
 
 def test_config_local():
     # test_config_system for local variables.
@@ -193,6 +208,40 @@ def test_local_creation():
     assert 'pytest' not in cfg(f=SYSTEM)
     assert 'pytest' not in cfg(f=GLOBAL)
     assert cfg(f=LOCAL)['pytest']['key'] == 'val'
+
+TEST_CASES_CONFIG_D = [
+    # (flag, env_var)
+    ('', 'WEST_CONFIG_LOCAL'),
+    ('--local', 'WEST_CONFIG_LOCAL'),
+    ('--system', 'WEST_CONFIG_SYSTEM'),
+    ('--global', 'WEST_CONFIG_GLOBAL'),
+]
+
+@pytest.mark.parametrize("test_case", TEST_CASES_CONFIG_D)
+def test_config_d_local(test_case):
+    flag, env_var = test_case
+    config_path = os.environ[env_var]
+    config_d_dir = pathlib.Path(f'{config_path}.d')
+    config_d_dir.mkdir()
+
+    # write value in actual config file
+    cmd(f'config {flag} pytest.key val')
+    stdout = cmd(f'config {flag} pytest.key')
+    assert 'val' == stdout.rstrip()
+
+    # create a dropin config under .d
+    with open(config_d_dir / 'some-file', 'w') as conf:
+        conf.write(textwrap.dedent('''
+        [pytest]
+        key = from-.d
+        another-key = from-.d
+        '''))
+
+    # dropin config value is only used if option is not set in actual config
+    stdout = cmd(f'config {flag} pytest.key')
+    assert 'val' == stdout.rstrip()
+    stdout = cmd(f'config {flag} pytest.another-key')
+    assert 'from-.d' == stdout.rstrip()
 
 def test_local_creation_with_topdir():
     # Like test_local_creation, with a specified topdir.
