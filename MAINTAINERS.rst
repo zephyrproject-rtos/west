@@ -11,7 +11,7 @@ Pre-release test plan
 
      git checkout vX.Y-branch
 
-1. Make tox happy on the following first-party non-Linux platforms:
+1. Make testing happy on the following first-party non-Linux platforms:
 
    - Windows 10
    - the latest macOS
@@ -19,7 +19,7 @@ Pre-release test plan
    Do this by hand and check for any anomalous warnings in the output.
    Do not just trust CI.
 
-2. Make tox happy on other popular Linux distributions:
+2. Make testing happy on other popular Linux distributions:
 
    - Arch
    - the latest Ubuntu development release
@@ -31,9 +31,6 @@ Pre-release test plan
 
    Automated infrastructure for doing this using docker is in the
    test-distros.yml workflow action on Github.
-
-   Make sure to check the tox.log files mentioned in the output for any
-   anomalous warnings.
 
 3. Build alpha N (N=1 to start, then N=2 if you need more commits, etc.) and
    upload to pypi. See "Building and uploading the release wheels" below for
