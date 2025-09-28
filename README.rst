@@ -118,6 +118,10 @@ You can create a wheel package and distribute it to others.
 
 To build the west wheel file::
 
+  # Using uv
+  uv build
+
+  # Without uv
   pip3 install --upgrade build
   python -m build
 
@@ -134,33 +138,39 @@ version from PyPI, etc.
 Running the Tests
 ~~~~~~~~~~~~~~~~~
 
-First, install tox::
+First, install the dependencies::
 
-  # macOS, Windows
-  pip3 install tox
+  # Using uv
+  uv sync --frozen
 
-  # Linux
-  pip3 install --user tox
+  # Using pip (requires v25.1 or newer)
+  # Recommended in an active virtual environment
+  pip3 install --group dev
 
 Then, run the test suite locally from the top level directory::
 
-  tox
+  # Using uv
+  uv run poe all
 
-You can use ``--`` to tell tox to pass arguments to ``pytest``. This is
-especially useful to focus on specific tests and save time. Examples::
+  # Using poe
+  # Recommended in an active virtual environment
+  poe all
+
+  # Manually
+  pytest
+
+The ``all`` target from ``poe`` runs multiple tasks sequentially. Run ``poe -h``
+to get the list of configured tasks.
+You can pass arguments to the task running ``poe``. This is especially useful
+on specific tests and save time. Examples::
 
   # Run a subset of tests
-  tox  --  tests/test_project.py
+  poe test tests/test_project.py
 
-  # Debug the ``test_update_narrow()`` code with ``pdb`` (but _not_ the
+  # Run the ``test_update_narrow()`` code with ``pdb`` (but _not_ the
   # west code which is running in subprocesses)
-  tox  --  --verbose --exitfirst --trace -k test_update_narrow
+  poe test --exitfirst --trace -k test_update_narrow
 
   # Run all tests with "import" in their name and let them log to the
   # current terminal
-  tox  --  -v -k import --capture=no
-
-The tests cannot be run with ``pytest`` directly, they require the tox
-environment.
-
-See the tox configuration file, tox.ini, for more details.
+  poe test -k import --capture=no
