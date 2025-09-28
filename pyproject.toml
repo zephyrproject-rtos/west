@@ -75,6 +75,8 @@ omit = [
 [tool.coverage.report]
 omit = [
   "*/tmp/*",
+  "net-tools/scripts/test.py",
+  "subdir/Kconfiglib/scripts/test.py",
 ]
 
 [tool.coverage.paths]
