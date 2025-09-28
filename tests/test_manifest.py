@@ -53,8 +53,6 @@ from west.manifest import (
     validate,
 )
 
-assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
-
 FPI = ImportFlag.FORCE_PROJECTS  # to force project imports to use the callback
 
 if platform.system() == 'Windows':

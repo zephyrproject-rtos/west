@@ -14,8 +14,6 @@ from conftest import cmd, cmd_raises
 from west import configuration as config
 from west.util import PathType
 
-assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
-
 SYSTEM = config.ConfigFile.SYSTEM
 GLOBAL = config.ConfigFile.GLOBAL
 LOCAL = config.ConfigFile.LOCAL
