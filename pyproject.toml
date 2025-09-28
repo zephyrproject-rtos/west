@@ -18,10 +18,10 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "colorama",
-    "PyYAML>=5.1",
-    "pykwalify",
-    "packaging",
+    "colorama~=0.4",
+    "packaging~=25.0",
+    "pykwalify~=1.8",
+    "pyyaml~=6.0",
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
