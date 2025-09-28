@@ -75,8 +75,11 @@ jobs:
       - name: Display Python version
         run: python3 -c "import sys; print(sys.version); print(sys.platform)"
 
-      - name: Install tox
-        run: pip3 install tox --break-system-packages
+      - name: Install uv
+        run: pip3 install uv --break-system-packages
 
-      - name: Run tox
-        run: tox -- -W error
+      - name: Install Python dependencies
+        run: uv sync --frozen
+
+      - name: Run tasks
+        run: uv run poe all
