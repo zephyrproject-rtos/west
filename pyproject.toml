@@ -50,6 +50,7 @@ types = [
     "types-pyyaml~=6.0",
 ]
 dev = [
+    "poethepoet~=0.37",
     {include-group = "lint"},
     {include-group = "test"},
     {include-group = "types"},
@@ -103,3 +104,12 @@ line-ending = "lf"
 [tool.mypy]
 mypy_path = "src"
 ignore_missing_imports = true
+
+[tool.poe.tasks.test]
+cmd = "python -m pytest -v -W error --junitxml=junit.xml -o junit_family=xunit1 --cov-report=html --cov-config=pyproject.toml --cov=west"
+env = {PYTHONIOENCODING = "utf-8"}
+
+[tool.poe.tasks]
+lint = "ruff check ."
+types = "mypy --package west"
+all = ["test", "lint", "types"]
