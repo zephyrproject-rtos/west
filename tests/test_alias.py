@@ -2,13 +2,10 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-import os
 import subprocess
 
 import pytest
 from conftest import cmd
-
-assert 'TOXTEMPDIR' in os.environ, "you must run these tests using tox"
 
 
 @pytest.fixture(autouse=True)

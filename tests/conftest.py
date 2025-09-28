@@ -87,12 +87,12 @@ def _check_git_capabilities(tmpdir_factory):
         pass
 
 @pytest.fixture(scope='session')
-def _session_repos():
+def _session_repos(tmp_path_factory):
     '''Just a helper, do not use directly.'''
 
     # It saves time to create repositories once at session scope, then
     # clone the results as needed in per-test fixtures.
-    session_repos = os.path.join(os.environ['TOXTEMPDIR'], 'session_repos')
+    session_repos = str(tmp_path_factory.mktemp('session_repos'))
     print('initializing session repositories in', session_repos)
     shutil.rmtree(session_repos, ignore_errors=True)
 
