@@ -99,3 +99,7 @@ extend-select = [
 [tool.ruff.format]
 quote-style = "preserve"
 line-ending = "lf"
+
+[tool.mypy]
+mypy_path = "src"
+ignore_missing_imports = true
