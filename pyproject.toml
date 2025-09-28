@@ -36,6 +36,25 @@ Homepage = "https://github.com/zephyrproject-rtos/west"
 [project.scripts]
 west = "west.app.main:main"
 
+[dependency-groups]
+lint = [
+    "ruff~=0.13",
+]
+test = [
+    "coverage~=7.10",
+    "pytest~=8.4",
+    "pytest-cov~=7.0",
+]
+types = [
+    "mypy~=1.18",
+    "types-pyyaml~=6.0",
+]
+dev = [
+    {include-group = "lint"},
+    {include-group = "test"},
+    {include-group = "types"},
+]
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 zip-safe = false
