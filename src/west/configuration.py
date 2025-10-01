@@ -90,6 +90,12 @@ class _InternalCF:
                     self.dropin_paths.append(self.dropin_dir / conf)
         self._read()
 
+    def _paths(self) -> list[Path]:
+        ret = [p for p in self.dropin_paths]
+        if self.path:
+            ret.append(self.path)
+        return ret
+
     def _read(self):
         if self.path:
             self.cp.read(self.path, encoding='utf-8')
@@ -210,6 +216,16 @@ class Configuration:
             return self._system_path
         elif configfile == ConfigFile.GLOBAL:
             return self._global_path
+
+    def get_paths(self, configfile: ConfigFile = ConfigFile.ALL):
+        ret = []
+        if self._global and configfile in [ConfigFile.GLOBAL, ConfigFile.ALL]:
+            ret += self._global._paths()
+        if self._system and configfile in [ConfigFile.SYSTEM, ConfigFile.ALL]:
+            ret += self._system._paths()
+        if self._local and configfile in [ConfigFile.LOCAL, ConfigFile.ALL]:
+            ret += self._local._paths()
+        return ret
 
     def get(self, option: str,
             default: str | None = None,
