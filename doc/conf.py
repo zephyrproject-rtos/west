@@ -13,6 +13,7 @@ extensions = [
     "sphinx_rtd_theme",
     "sphinx_tabs.tabs",
     'sphinx.ext.autodoc',
+    "sphinx.ext.intersphinx",
 ]
 
 templates_path = [str(WEST_BASE / 'doc' / '_templates')]
@@ -27,6 +28,10 @@ html_theme_options = {
 html_title = "West Documentation"
 html_logo = str(WEST_BASE / "doc" / "_static" / "images" / "logo.png")
 html_static_path = [str(WEST_BASE / 'doc' / '_static')]
+
+intersphinx_mapping = {
+    "zephyr": ("https://docs.zephyrproject.org/latest/", None),
+}
 
 pygments_style = "sphinx"
 highlight_language = "none"
