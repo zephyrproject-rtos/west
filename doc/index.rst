@@ -1,10 +1,10 @@
 .. _west:
 
-West (Zephyr's meta-tool)
-#########################
+West: an extensible workspace manager
+#####################################
 
-The Zephyr project includes a swiss-army knife command line tool named
-``west``\ [#west-name]_. West is developed in its own `repository`_.
+The Zephyr project developed a swiss-army knife command line tool named
+``west``\ [#west-name]_.
 
 West's built-in commands provide a multiple repository management system with
 features inspired by Google's Repo tool and Git submodules. West is also
