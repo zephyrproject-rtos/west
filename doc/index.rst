@@ -1,10 +1,10 @@
 .. _west:
 
-West (Zephyr's meta-tool)
-#########################
+West: an extensible workspace manager
+#####################################
 
-The Zephyr project includes a swiss-army knife command line tool named
-``west``\ [#west-name]_. West is developed in its own `repository`_.
+The Zephyr project developed a swiss-army knife command line tool named
+``west``\ [#west-name]_.
 
 West's built-in commands provide a multiple repository management system with
 features inspired by Google's Repo tool and Git submodules. West is also
@@ -39,11 +39,7 @@ each command.
    config.rst
    alias.rst
    extensions.rst
-   build-flash-debug.rst
-   sign.rst
-   zephyr-cmds.rst
    why.rst
-   without-west.rst
 
 For details on west's Python APIs, see :ref:`west-apis`.
 
@@ -54,6 +50,3 @@ For details on west's Python APIs, see :ref:`west-apis`.
    Zephyr is an English name for the Latin `Zephyrus
    <https://en.wiktionary.org/wiki/Zephyrus>`_, the ancient Greek god of the
    west wind.
-
-.. _repository:
-   https://github.com/zephyrproject-rtos/west

@@ -96,7 +96,6 @@ details on the west APIs you can use, see :ref:`west-apis`.
        def __init__(self):
            super().__init__(
                'my-command-name',  # gets stored as self.name
-               '', # ignored self.help, will not be required by future west versions
                # self.description:
                description=dedent('''
                A multi-line description of my-command.
