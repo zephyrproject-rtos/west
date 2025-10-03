@@ -77,30 +77,33 @@ class _InternalCF:
 
     def __init__(self, path: Path):
         self.cp = _configparser()
-        self.dropin_cp = _configparser()
         self.path = path if path.exists() else None
-        dropin_dir = Path(f'{path}.d')
-        self.dropin_dir = dropin_dir if dropin_dir.exists() else None
+        if self.path:
+            self.cp.read(self.path, encoding='utf-8')
+
+        # consider dropin configs
+        self.dropin_cp = _configparser()
+        self.dropin_dir = None
         self.dropin_paths = []
-        if self.dropin_dir:
-            # dropin configs are applied in alphabetical order
-            for conf in sorted(self.dropin_dir.iterdir()):
-                # only consider .conf files
-                if conf.suffix.lower() in ['.conf', '.ini']:
-                    self.dropin_paths.append(self.dropin_dir / conf)
-        self._read()
+        # dropin configs must be enabled in config
+        if self.cp.getboolean('config', 'dropins', fallback=False):
+            # dropin dir is the config path with .d suffix
+            dropin_dir = Path(f'{path}.d')
+            self.dropin_dir = dropin_dir if dropin_dir.exists() else None
+            if self.dropin_dir:
+                # dropin configs are applied in alphabetical order
+                for conf in sorted(self.dropin_dir.iterdir()):
+                    # only consider .conf files
+                    if conf.suffix in ['.conf', '.ini']:
+                        self.dropin_paths.append(self.dropin_dir / conf)
+                if self.dropin_paths:
+                    self.dropin_cp.read(self.dropin_paths, encoding='utf-8')
 
     def _paths(self) -> list[Path]:
         ret = [p for p in self.dropin_paths]
         if self.path:
             ret.append(self.path)
         return ret
-
-    def _read(self):
-        if self.path:
-            self.cp.read(self.path, encoding='utf-8')
-        if self.dropin_paths:
-            self.dropin_cp.read(self.dropin_paths, encoding='utf-8')
 
     def _write(self):
         if not self.path:
