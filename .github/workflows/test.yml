@@ -55,7 +55,7 @@ jobs:
         run: echo "import sys; print(sys.version); print(sys.platform)" | uv run -
 
       - name: Run ${{ matrix.task }} on ${{ matrix.os }} - ${{ matrix.python-version }}
-        run: uv run --frozen --directory "./check out/" poe ${{ matrix.task }}
+        run: uv run --frozen --directory "./check out/" --env-file=.github/http_env_block.conf poe ${{ matrix.task }}
 
       - name: Upload coverage reports
         if: ${{ matrix.task == 'test' }}
