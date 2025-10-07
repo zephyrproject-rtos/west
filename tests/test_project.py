@@ -1771,8 +1771,9 @@ def test_init_with_clone_option_depth_one(repos_tmpdir):
     # Test that 'west init -o=--depth=1' only clones depth 1
 
     west_tmpdir = repos_tmpdir / 'workspace'
+    mnft_url = str(repos_tmpdir / 'repos' / 'zephyr')
 
-    cmd(['init', '-o=--depth=1', west_tmpdir])
+    cmd(['init', '-o=--depth=1', '-o=--no-local', '-m', mnft_url, west_tmpdir])
     assert 1 == int(subprocess.check_output([GIT, 'rev-list', '--count', '--max-count=5', 'HEAD'],
                                             cwd=west_tmpdir / 'zephyr').decode().strip())
 
