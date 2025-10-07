@@ -12,13 +12,27 @@ concurrency:
 
 jobs:
   build:
-    name: Build python tests
+    name: Run tasks
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ['3.10', '3.11', '3.12', '3.13']
+        task: [test]
+        # The include map here is actually used to extend the matrix.
+        # By passing all keys used in the matrix we append new unique combinations.
+        # For more information see:
+        # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-adding-configurations
+        include:
+          # Run linter/type checks only on 1 combination
+          - os: ubuntu-latest
+            python-version: '3.13'
+            task: lint
+          - os: ubuntu-latest
+            python-version: '3.13'
+            task: types
+
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -40,10 +54,11 @@ jobs:
       - name: Setup project
         run: uv sync --frozen --directory "./check out/"
 
-      - name: Run tasks
-        run: uv run --frozen --directory "./check out/" poe all
+      - name: Run ${{ matrix.task }} on ${{ matrix.os }} - ${{ matrix.python-version }}
+        run: uv run --frozen --directory "./check out/" poe ${{ matrix.task }}
 
       - name: Upload coverage reports
+        if: ${{ matrix.task == 'test' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-${{ matrix.os }}-${{ matrix.python-version }}
@@ -51,6 +66,7 @@ jobs:
           include-hidden-files: true
 
       - name: Upload test reports
+        if: ${{ matrix.task == 'test' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tests-${{ matrix.os }}-${{ matrix.python-version }}
