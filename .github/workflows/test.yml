@@ -48,11 +48,11 @@ jobs:
           working-directory: './check out/'
           enable-cache: true
 
-      - name: Display Python version
-        run: python -c "import sys; print(sys.version); print(sys.platform)"
-
       - name: Setup project
         run: uv sync --frozen --directory "./check out/"
+
+      - name: Display Python version
+        run: echo "import sys; print(sys.version); print(sys.platform)" | uv run -
 
       - name: Run ${{ matrix.task }} on ${{ matrix.os }} - ${{ matrix.python-version }}
         run: uv run --frozen --directory "./check out/" poe ${{ matrix.task }}
