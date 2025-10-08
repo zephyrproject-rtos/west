@@ -124,6 +124,10 @@ env = {PYTHONIOENCODING = "utf-8"}
 [tool.poe.tasks.test-xdist]
 ref = "test -n auto"
 
+[tool.poe.tasks.build-docs]
+cmd = "sphinx-build -M html . _build"
+cwd = "./doc"
+
 [tool.poe.tasks]
 lint = "ruff check ."
 format = "ruff format"
