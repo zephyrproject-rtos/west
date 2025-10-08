@@ -13,3 +13,4 @@ htmlcov/
 .dir-locals.el
 .venv/
 junit.xml
+doc/_build/
