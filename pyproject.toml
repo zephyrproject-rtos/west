@@ -119,6 +119,10 @@ ignore_missing_imports = true
 cmd = "python -m pytest -v -W error --junitxml=junit.xml -o junit_family=xunit1 --cov-report=html --cov-config=pyproject.toml --cov=west"
 env = {PYTHONIOENCODING = "utf-8"}
 
+[tool.poe.tasks.build-docs]
+cmd = "sphinx-build -M html . _build"
+cwd = "./doc"
+
 [tool.poe.tasks]
 lint = "ruff check ."
 format = "ruff format"
