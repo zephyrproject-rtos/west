@@ -124,6 +124,9 @@ pythonpath = "src"
 cmd = "python -m pytest -W error"
 env = {PYTHONIOENCODING = "utf-8"}
 
+[tool.poe.tasks.build-docs]
+cmd = "sphinx-build -M html . _build"
+cwd = "./doc"
 
 [tool.poe.tasks]
 lint = "ruff check ."
