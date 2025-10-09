@@ -86,3 +86,8 @@ def west_topdir(start: PathType | None = None, fall_back: bool = True) -> str:
                     'Could not find a west workspace in this or any parent directory'
                 )
         cur_dir = parent_dir
+
+
+def expand_path(path: PathType) -> Path:
+    '''Returns an expanded path for the provided path-like argument.'''
+    return Path(path).expanduser()
