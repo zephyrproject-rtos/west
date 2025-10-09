@@ -9,7 +9,7 @@ import subprocess
 from typing import Any
 
 import pytest
-from conftest import cmd, cmd_raises
+from conftest import cmd, cmd_raises, update_env
 
 from west import configuration as config
 from west.util import PathType
@@ -232,19 +232,18 @@ def test_local_creation_with_topdir():
     # The autouse fixture at the top of this file has set up an
     # environment variable for our local config file. Disable it
     # to make sure the API works with a 'real' topdir.
-    del os.environ['WEST_CONFIG_LOCAL']
+    with update_env({'WEST_CONFIG_LOCAL': None}):
+        # We should be able to write into our topdir's config file now.
+        update_testcfg('pytest', 'key', 'val', configfile=LOCAL, topdir=str(topdir))
+        assert not system.exists()
+        assert not glbl.exists()
+        assert not local.exists()
+        assert topdir_config.exists()
 
-    # We should be able to write into our topdir's config file now.
-    update_testcfg('pytest', 'key', 'val', configfile=LOCAL, topdir=str(topdir))
-    assert not system.exists()
-    assert not glbl.exists()
-    assert not local.exists()
-    assert topdir_config.exists()
-
-    assert cfg(f=ALL, topdir=str(topdir))['pytest']['key'] == 'val'
-    assert 'pytest' not in cfg(f=SYSTEM)
-    assert 'pytest' not in cfg(f=GLOBAL)
-    assert cfg(f=LOCAL, topdir=str(topdir))['pytest']['key'] == 'val'
+        assert cfg(f=ALL, topdir=str(topdir))['pytest']['key'] == 'val'
+        assert 'pytest' not in cfg(f=SYSTEM)
+        assert 'pytest' not in cfg(f=GLOBAL)
+        assert cfg(f=LOCAL, topdir=str(topdir))['pytest']['key'] == 'val'
 
 
 def test_append():
