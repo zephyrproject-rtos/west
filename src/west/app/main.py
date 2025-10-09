@@ -30,6 +30,12 @@ from typing import NamedTuple
 
 import colorama
 
+if __name__ == "__main__":
+    # Prepend the project root to sys.path so that running this script
+    # always uses the local 'west' modules instead of any installed ones.
+    project_root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, os.fspath(project_root))
+
 import west.configuration
 from west import log
 from west.app.config import Config

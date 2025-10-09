@@ -1,8 +1,6 @@
 # Copyright (c) 2020, Nordic Semiconductor ASA
 
 import itertools
-import os
-import sys
 
 from conftest import cmd
 
@@ -32,14 +30,6 @@ def test_extension_help_and_dash_h(west_init_tmpdir):
     ext2out = cmd('test-extension -h')
 
     expected = EXTENSION_EXPECTED
-    if sys.platform == 'win32':
-        # Manage gratuitous incompatibilities:
-        #
-        # - multiline python strings are \n separated even on windows
-        # - the windows command help output gets an extra newline
-        expected = [os.linesep.join(case.splitlines()) + os.linesep
-                    for case in EXTENSION_EXPECTED]
-
     assert ext1out == ext2out
     assert ext1out in expected
 
