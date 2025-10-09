@@ -23,6 +23,7 @@ def test_builtin_help_and_dash_h(west_init_tmpdir):
         h2out = cmd(f'{c.name} -h')
         assert h1out == h2out
 
+
 def test_extension_help_and_dash_h(west_init_tmpdir):
     # Test "west help <command>" and "west <command> -h" for extension
     # commands (west_init_tmpdir has a command with one).
@@ -37,21 +38,24 @@ def test_extension_help_and_dash_h(west_init_tmpdir):
         #
         # - multiline python strings are \n separated even on windows
         # - the windows command help output gets an extra newline
-        expected = [os.linesep.join(case.splitlines()) + os.linesep
-                    for case in EXTENSION_EXPECTED]
+        expected = [os.linesep.join(case.splitlines()) + os.linesep for case in EXTENSION_EXPECTED]
 
     assert ext1out == ext2out
     assert ext1out in expected
 
+
 # argparse changed its behavior at some point; patch over that here.
-EXTENSION_EXPECTED = ['''\
+EXTENSION_EXPECTED = [
+    '''\
 usage: west test-extension [-h]
 
 optional arguments:
   -h, --help  show this help message and exit
-''', '''\
+''',
+    '''\
 usage: west test-extension [-h]
 
 options:
   -h, --help  show this help message and exit
-''']
+''',
+]

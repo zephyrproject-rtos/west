@@ -64,6 +64,7 @@ else:
 
 THIS_DIRECTORY = os.path.dirname(__file__)
 
+
 @pytest.fixture
 def tmp_workspace(tmpdir):
     # This fixture creates a skeletal west workspace in a temporary
@@ -82,6 +83,7 @@ def tmp_workspace(tmpdir):
     topdir.chdir()
     return topdir
 
+
 @pytest.fixture
 def manifest_repo(tmp_workspace):
     # This creates a temporary manifest repository, changes directory
@@ -92,26 +94,32 @@ def manifest_repo(tmp_workspace):
     manifest_repo.topdir = Path(tmp_workspace)
     return manifest_repo
 
+
 def nodrive(path):
     return os.path.splitdrive(path)[1]
+
 
 def M(content, **kwargs):
     # A convenience to save typing
     return Manifest.from_data('manifest:\n' + content, **kwargs)
 
+
 def MF(**kwargs):
     # A convenience to save typing
     return Manifest.from_file(**kwargs)
 
+
 def MT(**kwargs):
     # A convenience to save typing
     return Manifest.from_topdir(**kwargs)
+
 
 #########################################
 # The very basics
 #
 # We need to be able to instantiate Projects and parse manifest data
 # from strings or dicts, as well as from the file system.
+
 
 def test_project_init():
     # Basic tests of the Project constructor and public attributes.
@@ -127,13 +135,13 @@ def test_project_init():
     assert p.west_commands == []
     assert p.topdir is None
 
-    p = Project('p', 'some-url', clone_depth=4, west_commands='foo',
-                topdir=TOPDIR)
+    p = Project('p', 'some-url', clone_depth=4, west_commands='foo', topdir=TOPDIR)
     assert p.clone_depth == 4
     assert p.west_commands == ['foo']
     assert p.topdir == TOPDIR
     assert p.abspath == os.path.join(TOPDIR, 'p')
     assert p.posixpath == TOPDIR_POSIX + '/p'
+
 
 def test_manifest_from_data_without_topdir():
     # We can load manifest data as a dict or a string.
@@ -149,12 +157,12 @@ def test_manifest_from_data_without_topdir():
     assert manifest.projects[-1].name == 'foo'
     assert manifest.projects[-1].abspath is None
 
-    manifest = Manifest.from_data({'manifest':
-                                   {'projects':
-                                    [{'name': 'foo',
-                                      'url': 'https:foo.com'}]}})
+    manifest = Manifest.from_data({
+        'manifest': {'projects': [{'name': 'foo', 'url': 'https:foo.com'}]}
+    })
     assert manifest.projects[-1].name == 'foo'
     assert manifest.projects[-1].abspath is None
+
 
 def test_manifest_from_file_with_fall_back(manifest_repo):
     with open(manifest_repo / 'west.yml', 'w') as f:
@@ -170,6 +178,7 @@ def test_manifest_from_file_with_fall_back(manifest_repo):
         assert Path(manifest.repo_abspath) == repo_abspath
     finally:
         del os.environ['ZEPHYR_BASE']
+
 
 def test_validate():
     # Get some coverage for west.manifest.validate.
@@ -210,11 +219,8 @@ def test_validate():
       projects:
       - name: p
         url: u
-    ''') == {
-        'manifest': {
-            'projects': [{'name': 'p', 'url': 'u'}]
-        }
-    }
+    ''') == {'manifest': {'projects': [{'name': 'p', 'url': 'u'}]}}
+
 
 def test_constructor_arg_validation():
     with pytest.raises(ValueError) as e:
@@ -223,6 +229,7 @@ def test_constructor_arg_validation():
     with pytest.raises(ValueError) as e:
         Manifest(source_data='x', config='y')
     assert 'both source_data and config were given' in str(e.value)
+
 
 #########################################
 # Project parsing tests
@@ -236,6 +243,7 @@ def test_constructor_arg_validation():
 # - clone depths
 # - west commands
 # - repr()
+
 
 def test_projects_must_have_name():
     # A project must have a name. Names must be unique.
@@ -265,6 +273,7 @@ def test_projects_must_have_name():
     assert m.projects[1].name == 'foo'
     assert m.projects[2].name == 'bar'
 
+
 def test_no_project_named_manifest():
     # The name 'manifest' is reserved.
 
@@ -275,6 +284,7 @@ def test_no_project_named_manifest():
           url: u
         ''')
 
+
 def test_project_named_west():
     # A project named west is allowed now, even though it was once an error.
 
@@ -284,6 +294,7 @@ def test_project_named_west():
         url: https://foo.com
     ''')
     assert m.projects[1].name == 'west'
+
 
 def test_project_urls():
     # Projects must be initialized with a remote or a URL, but not both.
@@ -374,6 +385,7 @@ def test_project_urls():
           remote: deadbeef
         ''')
 
+
 def test_project_revisions():
     # All projects have revisions.
 
@@ -389,8 +401,7 @@ def test_project_revisions():
       url: u2
       revision: rev
     ''')
-    expected = [Project('p1', 'u1', revision='defaultrev'),
-                Project('p2', 'u2', revision='rev')]
+    expected = [Project('p1', 'u1', revision='defaultrev'), Project('p2', 'u2', revision='rev')]
     for p, e in zip(m.projects[1:], expected, strict=True):
         check_proj_consistency(p, e)
 
@@ -402,6 +413,7 @@ def test_project_revisions():
       url: u1
     ''')
     assert m.projects[1].revision == 'master'
+
 
 def test_project_paths_explicit_implicit():
     # Test project path parsing.
@@ -418,6 +430,7 @@ def test_project_paths_explicit_implicit():
     assert ps[1].path == 'foo'
     assert ps[2].path == 'q'
 
+
 def test_project_paths_absolute():
     # Absolute path attributes should be None when loading from data.
 
@@ -433,6 +446,7 @@ def test_project_paths_absolute():
     assert ps[1].path == 'sub/directory'
     assert ps[1].abspath is None
     assert ps[1].posixpath is None
+
 
 def test_project_paths_unique():
     # No two projects may have the same path.
@@ -452,6 +466,7 @@ def test_project_paths_unique():
         - name: b
           path: p
         ''')
+
 
 def test_project_paths_with_repo_path():
     # The same fetch URL may be checked out under two different
@@ -473,12 +488,11 @@ def test_project_paths_with_repo_path():
 
     # Try this first without providing topdir.
     m = M(content)
-    expected1 = Project('testproject_v1', 'https://url1.com/testproject',
-                        revision='v1.0')
-    expected2 = Project('testproject_v2', 'https://url1.com/testproject',
-                        revision='v2.0')
+    expected1 = Project('testproject_v1', 'https://url1.com/testproject', revision='v1.0')
+    expected2 = Project('testproject_v2', 'https://url1.com/testproject', revision='v2.0')
     check_proj_consistency(m.projects[1], expected1)
     check_proj_consistency(m.projects[2], expected2)
+
 
 def test_project_clone_depth():
     ps = M('''\
@@ -492,6 +506,7 @@ def test_project_clone_depth():
     assert ps[1].clone_depth is None
     assert ps[2].clone_depth == 4
 
+
 def test_project_west_commands():
     # Projects may also specify subdirectories with west commands.
 
@@ -502,6 +517,7 @@ def test_project_west_commands():
       west-commands: some-path/west-commands.yml
     ''')
     assert m.projects[1].west_commands == ['some-path/west-commands.yml']
+
 
 def test_project_git_methods(tmpdir):
     # Test the internal consistency of the various methods that call
@@ -514,8 +530,9 @@ def test_project_git_methods(tmpdir):
 
     # Helper for getting the contents of a.txt at a revision.
     def a_content_at(rev):
-        return p.git(f'show {rev}:a.txt', capture_stderr=True,
-                     capture_stdout=True).stdout.decode('ascii')
+        return p.git(f'show {rev}:a.txt', capture_stderr=True, capture_stdout=True).stdout.decode(
+            'ascii'
+        )
 
     # The project isn't cloned yet.
     assert not p.is_cloned()
@@ -563,6 +580,7 @@ def test_project_git_methods(tmpdir):
     p.git(f'reset --hard {a_sha}')
     assert not p.is_up_to_date()
 
+
 def test_project_repr():
     m = M('''\
     projects:
@@ -571,20 +589,24 @@ def test_project_repr():
       revision: r
       west-commands: some-path/west-commands.yml
     ''')
-    assert repr(m.projects[1]) == \
-        'Project("zephyr", "https://foo.com", revision="r", path=\'zephyr\', clone_depth=None, west_commands=[\'some-path/west-commands.yml\'], topdir=None, groups=[], userdata=None)'  # noqa: E501
+    assert (
+        repr(m.projects[1])
+        == 'Project("zephyr", "https://foo.com", revision="r", path=\'zephyr\', '
+        'clone_depth=None, west_commands=[\'some-path/west-commands.yml\'], '
+        'topdir=None, groups=[], userdata=None)'
+    )  # noqa: E501
+
 
 def test_project_sha(tmpdir):
     tmpdir = Path(os.fspath(tmpdir))
     create_repo(tmpdir)
     add_tag(tmpdir, 'test-tag')
     expected_sha = rev_parse(tmpdir, 'HEAD^{commit}')
-    project = Project('name',
-                      'url-do-not-fetch',
-                      revision='test-tag',
-                      path=tmpdir.name,
-                      topdir=tmpdir.parent)
+    project = Project(
+        'name', 'url-do-not-fetch', revision='test-tag', path=tmpdir.name, topdir=tmpdir.parent
+    )
     assert project.sha(project.revision) == expected_sha
+
 
 def test_project_description(tmpdir):
     m = M('''\
@@ -606,8 +628,7 @@ def test_project_description(tmpdir):
 
     assert foo.description is None
     assert bar.description == 'bar-description'
-    desc = 'This is a long multi-line description\n' \
-           'for project baz.\n'
+    desc = 'This is a long multi-line description\nfor project baz.\n'
 
     assert baz.description == desc
     assert 'description' not in foo.as_dict()
@@ -699,8 +720,10 @@ def test_no_projects():
     ''')
     assert len(m.projects) == 1  # just ManifestProject
 
+
 #########################################
 # Tests for the manifest repository
+
 
 def test_manifest_project():
     # Basic test that the manifest repository, when represented as a project,
@@ -743,6 +766,7 @@ def test_manifest_project():
     assert mp.revision == 'HEAD'
     assert mp.clone_depth is None
 
+
 def test_self_tag():
     # Manifests may contain a self section describing the manifest
     # repository. It should work with multiple projects and remotes as
@@ -767,11 +791,11 @@ def test_self_tag():
       west-commands: scripts/west_commands
     ''')
 
-    expected = [ManifestProject(path='the-manifest-path',
-                                west_commands='scripts/west_commands'),
-                Project('testproject1', 'https://example1.com/testproject1',
-                        revision='rev1'),
-                Project('testproject2', 'https://example2.com/testproject2')]
+    expected = [
+        ManifestProject(path='the-manifest-path', west_commands='scripts/west_commands'),
+        Project('testproject1', 'https://example1.com/testproject1', revision='rev1'),
+        Project('testproject2', 'https://example2.com/testproject2'),
+    ]
 
     # Check the projects are as expected.
     for p, e in zip(m.projects, expected, strict=True):
@@ -801,12 +825,14 @@ def test_self_tag():
           path:''')
     assert 'must be nonempty if present' in str(e.value)
 
+
 #########################################
 # File system tests
 #
 # Parsing manifests from data is the base case that everything else
 # reduces to, but parsing may also be done from files on the file
 # system, or "as if" it were done from files on the file system.
+
 
 def test_from_topdir(tmp_workspace):
     # If you load from topdir along with some source data, you will
@@ -895,6 +921,7 @@ def test_from_topdir(tmp_workspace):
     assert Path(p1.abspath) == topdir / 'project-path'
     assert p1.posixpath == (topdir / 'project-path').as_posix()
 
+
 def test_manifest_path_not_found(tmp_workspace):
     # Make sure manifest_path() raises FileNotFoundError if the
     # manifest file specified in .west/config doesn't exist.
@@ -903,6 +930,7 @@ def test_manifest_path_not_found(tmp_workspace):
     with pytest.raises(FileNotFoundError) as e:
         manifest_path()
     assert e.value.filename == tmp_workspace / 'mp' / 'west.yml'
+
 
 def test_manifest_path_conflicts(tmp_workspace):
     # Project path conflicts with the manifest path are errors. This
@@ -937,6 +965,7 @@ def test_manifest_path_conflicts(tmp_workspace):
     assert m.projects[1].path == 'p'
     assert m.projects[1].abspath is None
 
+
 def test_manifest_repo_discovery(manifest_repo):
     # The API should be able to find a manifest file based on the file
     # system and west configuration. The resulting topdir and abspath
@@ -970,6 +999,7 @@ def test_manifest_repo_discovery(manifest_repo):
     # Manifest.from_topdir() should work similarly.
     manifest = MT()
     assert Path(manifest.topdir) == topdir
+
 
 def test_parse_multiple_manifest_files(manifest_repo):
     # The API should be able to parse multiple manifest files inside a
@@ -1061,12 +1091,14 @@ def test_parse_multiple_manifest_files(manifest_repo):
     mproj = manifest.projects[0]
     assert Path(mproj.abspath) == another_repo
 
+
 def test_bad_topdir_fails(tmp_workspace):
     # Make sure we get expected failure using Manifest.from_topdir()
     # with the topdir kwarg when no west.yml exists.
 
     with pytest.raises(MalformedConfig):
         MT(topdir=tmp_workspace)
+
 
 def test_from_bad_topdir(tmpdir):
     # If we give a bad temporary directory that isn't a workspace
@@ -1076,8 +1108,10 @@ def test_from_bad_topdir(tmpdir):
         MT(topdir=tmpdir)
     assert 'local configuration file not found' in str(e.value)
 
+
 #########################################
 # Miscellaneous tests
+
 
 def test_ignore_west_section():
     # We no longer validate the west section, so things that would
@@ -1085,7 +1119,8 @@ def test_ignore_west_section():
     # should still work as expected regardless of what's in there.
 
     # Parsing manifest only, no exception raised
-    manifest = Manifest.from_data(yaml.safe_load('''\
+    manifest = Manifest.from_data(
+        yaml.safe_load('''\
     west:
       url: https://example.com
       revision: abranch
@@ -1098,10 +1133,12 @@ def test_ignore_west_section():
       - name: testproject
         remote: testremote
         path: sub/directory
-    '''))
+    ''')
+    )
 
     p1 = manifest.projects[1]
     assert PurePath(p1.path) == PurePath('sub', 'directory')
+
 
 def test_get_projects(tmp_workspace):
     # Coverage for get_projects.
@@ -1159,6 +1196,7 @@ def test_get_projects(tmp_workspace):
     assert len(uncloned) == 1
     assert uncloned[0].name == 'foo'
 
+
 def test_as_dict_and_yaml(manifest_repo):
     # coverage for as_dict, as_frozen_dict, as_yaml, as_frozen_yaml.
 
@@ -1181,20 +1219,26 @@ def test_as_dict_and_yaml(manifest_repo):
         - -Bdisabled
         - +Aenabled
     '''
-    content_dict = {'manifest':
-                    {'projects':
-                     [{'name': 'p1',
-                       'url': 'https://example.com/p1',
-                       'revision': 'master'},
-                      {'name': 'p2',
-                       'url': 'https://example.com/p2',
-                       'revision': 'deadbeef',
-                       'path': 'project-two',
-                       'clone-depth': 1,
-                       'west-commands': 'commands.yml'}],
-                     'self': {'path': os.path.basename(manifest_repo)},
-                     'group-filter': ['-Bdisabled', '-Ddisabled', ],
-                     }}
+    content_dict = {
+        'manifest': {
+            'projects': [
+                {'name': 'p1', 'url': 'https://example.com/p1', 'revision': 'master'},
+                {
+                    'name': 'p2',
+                    'url': 'https://example.com/p2',
+                    'revision': 'deadbeef',
+                    'path': 'project-two',
+                    'clone-depth': 1,
+                    'west-commands': 'commands.yml',
+                },
+            ],
+            'self': {'path': os.path.basename(manifest_repo)},
+            'group-filter': [
+                '-Bdisabled',
+                '-Ddisabled',
+            ],
+        }
+    }
 
     expected_yaml = '''\
 manifest:
@@ -1228,8 +1272,7 @@ manifest:
     # produces.
     manifest = MF()
 
-    manifest_topdir = MT(
-        topdir=os.path.dirname(manifest_repo))
+    manifest_topdir = MT(topdir=os.path.dirname(manifest_repo))
 
     # We can always call as_dict() and as_yaml(), regardless of what's
     # cloned.
@@ -1268,22 +1311,21 @@ manifest:
         # Replacement that intentionally fails, but without running
         # git.
         raise subprocess.CalledProcessError(1, 'mocked-out')
-    with patch('west.manifest.Project.is_cloned',
-               side_effect=lambda: True):
+
+    with patch('west.manifest.Project.is_cloned', side_effect=lambda: True):
         manifest = MF()
-        with patch('west.manifest.Project.sha',
-                   side_effect=sha_patch_1):
+        with patch('west.manifest.Project.sha', side_effect=sha_patch_1):
             frozen = manifest.as_frozen_dict()
         assert frozen == frozen_expected
 
-        with patch('west.manifest.Project.sha',
-                   side_effect=sha_patch_2):
+        with patch('west.manifest.Project.sha', side_effect=sha_patch_2):
             with pytest.raises(RuntimeError) as e:
                 manifest.as_frozen_dict()
             assert 'cannot be resolved to a SHA' in str(e.value)
             with pytest.raises(RuntimeError) as e:
                 manifest.as_frozen_yaml()
             assert 'cannot be resolved to a SHA' in str(e.value)
+
 
 def test_as_dict_groups():
     # Make sure groups and group-filter round-trip properly.
@@ -1303,6 +1345,7 @@ def test_as_dict_groups():
     assert actual['group-filter'] == ['-bar']
     assert 'groups' not in actual['projects'][0]
     assert actual['projects'][1]['groups'] == ['g']
+
 
 def test_version_check_failure():
     # Check that the manifest.version key causes manifest parsing to
@@ -1355,8 +1398,8 @@ def test_version_check_failure():
     with pytest.raises(MalformedManifest):
         Manifest.from_data(invalid_fmt.format('0.6.98'))
 
-@pytest.mark.parametrize('ver', sorted(set(['0.6.99', SCHEMA_VERSION] +
-                                           _VALID_SCHEMA_VERS)))
+
+@pytest.mark.parametrize('ver', sorted(set(['0.6.99', SCHEMA_VERSION] + _VALID_SCHEMA_VERS)))
 def test_version_check_success(ver):
     # Test that version checking succeeds when it should.
     # Always quote the version to avoid issues with floating point,
@@ -1371,6 +1414,7 @@ def test_version_check_success(ver):
     ''')
     assert manifest.projects[-1].name == 'foo'
 
+
 def test_project_filter_validation(config_tmpdir):
     # Make sure we error out in the expected way when invalid
     # manifest.project-filter options occur anywhere.
@@ -1384,29 +1428,22 @@ def test_project_filter_validation(config_tmpdir):
         f.write('manifest: {}')
 
     def clean_up_config_files():
-        for configfile in [ConfigFile.SYSTEM,
-                           ConfigFile.GLOBAL,
-                           ConfigFile.LOCAL]:
+        for configfile in [ConfigFile.SYSTEM, ConfigFile.GLOBAL, ConfigFile.LOCAL]:
             try:
-                config.delete('manifest.project-filter',
-                              configfile=configfile)
+                config.delete('manifest.project-filter', configfile=configfile)
             except KeyError:
                 pass
 
     def check_error(project_filter, expected_err_contains):
-        for configfile in [ConfigFile.SYSTEM,
-                           ConfigFile.GLOBAL,
-                           ConfigFile.LOCAL]:
+        for configfile in [ConfigFile.SYSTEM, ConfigFile.GLOBAL, ConfigFile.LOCAL]:
             clean_up_config_files()
-            config.set('manifest.project-filter', project_filter,
-                       configfile=configfile)
+            config.set('manifest.project-filter', project_filter, configfile=configfile)
 
             with pytest.raises(MalformedConfig) as e:
                 MT(topdir=topdir)
 
             err = str(e.value)
-            assert (f'invalid "manifest.project-filter" option value '
-                    f'"{project_filter}":') in err
+            assert (f'invalid "manifest.project-filter" option value "{project_filter}":') in err
             assert expected_err_contains in err
 
     check_error('foo', 'element "foo" does not start with "+" or "-"')
@@ -1415,6 +1452,7 @@ def test_project_filter_validation(config_tmpdir):
     check_error('+', 'a bare "+" or "-" contains no regular expression')
     check_error('-', 'a bare "+" or "-" contains no regular expression')
     check_error('++', 'invalid regular expression "+":')
+
 
 def test_project_filter_matching(config_tmpdir):
     # Test manifest.project-filter matching rules by making
@@ -1474,6 +1512,7 @@ def test_project_filter_matching(config_tmpdir):
     assert not manifest.is_active(foobar)
     assert manifest.is_active(bar)
 
+
 def test_project_filter_precedence(config_tmpdir):
     # Test manifest.project-filter matching rules by making
     # sure that projects can be made active or inactive.
@@ -1503,10 +1542,8 @@ def test_project_filter_precedence(config_tmpdir):
     # we recreate the manifest object every time.
 
     # Global has higher precedence than system.
-    config.set('manifest.project-filter', '-foo,-bar,-baz',
-               configfile=ConfigFile.SYSTEM)
-    config.set('manifest.project-filter', '-foo',
-               configfile=ConfigFile.GLOBAL)
+    config.set('manifest.project-filter', '-foo,-bar,-baz', configfile=ConfigFile.SYSTEM)
+    config.set('manifest.project-filter', '-foo', configfile=ConfigFile.GLOBAL)
     manifest = Manifest.from_topdir(topdir=topdir, config=config)
     foo, bar, baz = manifest.get_projects(['foo', 'bar', 'baz'])
     assert not manifest.is_active(foo)
@@ -1514,13 +1551,13 @@ def test_project_filter_precedence(config_tmpdir):
     assert manifest.is_active(baz)
 
     # Local has higher precedence than either.
-    config.set('manifest.project-filter', '-bar,-f.*',
-               configfile=ConfigFile.LOCAL)
+    config.set('manifest.project-filter', '-bar,-f.*', configfile=ConfigFile.LOCAL)
     manifest = Manifest.from_topdir(topdir=topdir, config=config)
     foo, bar, baz = manifest.get_projects(['foo', 'bar', 'baz'])
     assert not manifest.is_active(foo)
     assert not manifest.is_active(bar)
     assert manifest.is_active(baz)
+
 
 def test_project_filter_inactive_prevents_import(config_tmpdir):
     # West should not try to import from inactive projects.
@@ -1551,6 +1588,7 @@ def test_project_filter_inactive_prevents_import(config_tmpdir):
     config.set('manifest.project-filter', '+foo')
     with pytest.raises(ManifestImportFailed):
         Manifest.from_topdir(topdir=topdir, config=config)
+
 
 def test_project_filter_warnings_and_errors(config_tmpdir, caplog):
     topdir = config_tmpdir / 'test-topdir'
@@ -1586,8 +1624,10 @@ def test_project_filter_warnings_and_errors(config_tmpdir, caplog):
     assert 'project "foo,bar"' in err
     assert 'contains comma (",") or whitespace' in err
 
+
 #########################################
 # Manifest import tests
+
 
 def make_importer(import_map):
     # Helper function for making a simple importer for test cases.
@@ -1602,7 +1642,9 @@ def make_importer(import_map):
 
     def importer(project, file):
         return import_map[(project.name, file)]
+
     return importer
+
 
 def test_import_false_ok():
     # When it would have no effect, it's OK to parse manifest data
@@ -1617,6 +1659,7 @@ def test_import_false_ok():
           import: false
     ''')
     assert manifest.projects[-1].name == 'foo'
+
 
 # A stand-in for zephyr/west.yml to use when testing manifest imports.
 # This feature isn't tied to Zephyr in any way, but we write the tests
@@ -1687,13 +1730,15 @@ _DOWNSTREAM_WYMLS = [
       - name: upstream
         revision: refs/tags/v1.0
         import: west.yml
-    '''
+    ''',
 ]
 
-@pytest.mark.parametrize('content', _DOWNSTREAM_WYMLS,
-                         ids=['url-true', 'url-west',
-                              'remote-true', 'remote-west',
-                              'default-remote'])
+
+@pytest.mark.parametrize(
+    'content',
+    _DOWNSTREAM_WYMLS,
+    ids=['url-true', 'url-west', 'remote-true', 'remote-west', 'default-remote'],
+)
 def test_import_basics(content):
     # Test a downstream manifest, which simply imports a tag from an
     # upstream manifest.
@@ -1710,22 +1755,28 @@ def test_import_basics(content):
     # with the addition of one project (upstream itself).
 
     importer = make_importer({('upstream', 'west.yml'): _UPSTREAM_WYML})
-    actual = Manifest.from_data(content, importer=importer,
-                                import_flags=FPI).projects
+    actual = Manifest.from_data(content, importer=importer, import_flags=FPI).projects
 
     expected = [
         ManifestProject(),
-        Project('upstream', 'upstream.com/upstream', revision='refs/tags/v1.0',
-                path='upstream'),
-        Project('hal_nordic', 'upstream.com/hal_nordic',
-                revision='hal_nordic-upstream-rev',
-                path='modules/hal/nordic'),
-        Project('segger', 'upstream.com/segger',
-                revision='segger-upstream-rev',
-                path='modules/debug/segger')]
+        Project('upstream', 'upstream.com/upstream', revision='refs/tags/v1.0', path='upstream'),
+        Project(
+            'hal_nordic',
+            'upstream.com/hal_nordic',
+            revision='hal_nordic-upstream-rev',
+            path='modules/hal/nordic',
+        ),
+        Project(
+            'segger',
+            'upstream.com/segger',
+            revision='segger-upstream-rev',
+            path='modules/debug/segger',
+        ),
+    ]
 
     for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
+
 
 def test_import_with_fork_and_proj():
     # Downstream of fixed release, one forked project, and one
@@ -1735,7 +1786,8 @@ def test_import_with_fork_and_proj():
     # list, and downstream-only projects are appended onto it.
 
     importer = make_importer({('upstream', 'west.yml'): _UPSTREAM_WYML})
-    actual = Manifest.from_data('''\
+    actual = Manifest.from_data(
+        '''\
     manifest:
       projects:
       - name: hal_nordic
@@ -1749,23 +1801,31 @@ def test_import_with_fork_and_proj():
         revision: refs/tags/v1.0
         import: true
      ''',
-                                importer=importer,
-                                import_flags=FPI).projects
+        importer=importer,
+        import_flags=FPI,
+    ).projects
 
     expected = [
         ManifestProject(),
-        Project('hal_nordic', 'downstream.com/hal_nordic',
-                revision='my-branch', path='modules/hal/nordic'),
-        Project('my-proj', 'downstream.com/my-proj', revision='master',
-                path='my-proj'),
-        Project('upstream', 'upstream.com/upstream', revision='refs/tags/v1.0',
-                path='upstream'),
-        Project('segger', 'upstream.com/segger',
-                revision='segger-upstream-rev',
-                path='modules/debug/segger')]
+        Project(
+            'hal_nordic',
+            'downstream.com/hal_nordic',
+            revision='my-branch',
+            path='modules/hal/nordic',
+        ),
+        Project('my-proj', 'downstream.com/my-proj', revision='master', path='my-proj'),
+        Project('upstream', 'upstream.com/upstream', revision='refs/tags/v1.0', path='upstream'),
+        Project(
+            'segger',
+            'upstream.com/segger',
+            revision='segger-upstream-rev',
+            path='modules/debug/segger',
+        ),
+    ]
 
     for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
+
 
 def test_import_project_list(manifest_repo):
     # We should be able to import a list of files from a project at a
@@ -1788,19 +1848,24 @@ def test_import_project_list(manifest_repo):
     p1 = topdir / 'p1'
     create_repo(p1)
     create_branch(p1, 'manifest-rev', checkout=True)
-    add_commit(p1, 'add m1.yml and m2.yml',
-               files={'m1.yml': '''\
+    add_commit(
+        p1,
+        'add m1.yml and m2.yml',
+        files={
+            'm1.yml': '''\
                                 manifest:
                                   projects:
                                   - name: p2
                                     url: p2-url
                                 ''',
-                      'm2.yml': '''\
+            'm2.yml': '''\
                                 manifest:
                                   projects:
                                   - name: p3
                                     url: p3-url
-                                '''})
+                                ''',
+        },
+    )
     assert (p1 / 'm1.yml').is_file()
     assert (p1 / 'm2.yml').is_file()
     checkout_branch(p1, 'master')
@@ -1808,13 +1873,16 @@ def test_import_project_list(manifest_repo):
     assert not (p1 / 'm2.yml').exists()
 
     actual = MF().projects
-    expected = [ManifestProject(path='mp', topdir=topdir),
-                Project('p1', 'p1-url', topdir=topdir),
-                Project('p2', 'p2-url', topdir=topdir),
-                Project('p3', 'p3-url', topdir=topdir)]
+    expected = [
+        ManifestProject(path='mp', topdir=topdir),
+        Project('p1', 'p1-url', topdir=topdir),
+        Project('p2', 'p2-url', topdir=topdir),
+        Project('p3', 'p3-url', topdir=topdir),
+    ]
 
     for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
+
 
 def test_import_project_directory(manifest_repo):
     # We should be able to import manifest files in a directory from a
@@ -1835,23 +1903,25 @@ def test_import_project_directory(manifest_repo):
     p1 = topdir / 'p1'
     create_repo(p1)
     create_branch(p1, 'manifest-rev', checkout=True)
-    add_commit(p1, 'add directory of submanifests',
-               files={p1 / 'd' / 'ignore-me.txt':
-                      'blah blah blah',
-                      p1 / 'd' / 'm1.yml':
-                      '''\
+    add_commit(
+        p1,
+        'add directory of submanifests',
+        files={
+            p1 / 'd' / 'ignore-me.txt': 'blah blah blah',
+            p1 / 'd' / 'm1.yml': '''\
                       manifest:
                         projects:
                         - name: p2
                           url: p2-url
                       ''',
-                      p1 / 'd' / 'm2.yml':
-                      '''\
+            p1 / 'd' / 'm2.yml': '''\
                       manifest:
                         projects:
                         - name: p3
                           url: p3-url
-                      '''})
+                      ''',
+        },
+    )
     assert (p1 / 'd').is_dir()
     assert (p1 / 'd' / 'ignore-me.txt').is_file()
     assert (p1 / 'd' / 'm1.yml').is_file()
@@ -1860,13 +1930,16 @@ def test_import_project_directory(manifest_repo):
     assert not (p1 / 'd').exists()
 
     actual = MF().projects
-    expected = [ManifestProject(path='mp', topdir=topdir),
-                Project('p1', 'p1-url', topdir=topdir),
-                Project('p2', 'p2-url', topdir=topdir),
-                Project('p3', 'p3-url', topdir=topdir)]
+    expected = [
+        ManifestProject(path='mp', topdir=topdir),
+        Project('p1', 'p1-url', topdir=topdir),
+        Project('p2', 'p2-url', topdir=topdir),
+        Project('p3', 'p3-url', topdir=topdir),
+    ]
 
     for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
+
 
 def test_import_project_err_malformed(manifest_repo):
     # Checks for erroneous or malformed imports from projects.
@@ -1894,12 +1967,10 @@ def test_import_project_err_malformed(manifest_repo):
         MF()
 
     subprocess.check_call([GIT, 'checkout', '--detach', 'HEAD'], cwd=p)
-    subprocess.check_call([GIT, 'update-ref', '-d', 'refs/heads/manifest-rev'],
-                          cwd=p)
+    subprocess.check_call([GIT, 'update-ref', '-d', 'refs/heads/manifest-rev'], cwd=p)
     with pytest.raises(ManifestImportFailed):
         MF()
-    subprocess.check_call([GIT, 'update-ref', 'refs/heads/manifest-rev',
-                           'HEAD'], cwd=p)
+    subprocess.check_call([GIT, 'update-ref', 'refs/heads/manifest-rev', 'HEAD'], cwd=p)
 
     with open(manifest_repo / 'west.yml', 'w') as f:
         f.write('''\
@@ -1924,6 +1995,7 @@ def test_import_project_err_malformed(manifest_repo):
     with pytest.raises(ManifestImportFailed):
         MF()
 
+
 def test_import_project_submanifest_commands(manifest_repo):
     # If a project has no west-commands, but an imported manifest
     # inside it defines some, they should be inherited in the parent.
@@ -1942,8 +2014,11 @@ def test_import_project_submanifest_commands(manifest_repo):
     p1 = manifest_repo / '..' / 'p1'
     create_repo(p1)
     create_branch(p1, 'manifest-rev', checkout=True)
-    add_commit(p1, 'add m1.yml and m2.yml',
-               files={'m1.yml': '''\
+    add_commit(
+        p1,
+        'add m1.yml and m2.yml',
+        files={
+            'm1.yml': '''\
                                 manifest:
                                   projects:
                                   - name: p2
@@ -1951,14 +2026,16 @@ def test_import_project_submanifest_commands(manifest_repo):
                                   self:
                                     west-commands: m1-commands.yml
                                 ''',
-                      'm2.yml': '''\
+            'm2.yml': '''\
                                 manifest:
                                   projects:
                                   - name: p3
                                     url: p3-url
                                   self:
                                     west-commands: m2-commands.yml
-                                '''})
+                                ''',
+        },
+    )
     checkout_branch(p1, 'master')
     assert (p1 / 'm1.yml').check(file=0, dir=0)
     assert (p1 / 'm2.yml').check(file=0, dir=0)
@@ -1966,6 +2043,7 @@ def test_import_project_submanifest_commands(manifest_repo):
     p1 = MF().get_projects(['p1'])[0]
     expected = ['m1-commands.yml', 'm2-commands.yml']
     assert p1.west_commands == expected
+
 
 def test_import_project_submanifest_commands_both(manifest_repo):
     # Like test_import_project_submanifest_commands, but making sure
@@ -1988,8 +2066,11 @@ def test_import_project_submanifest_commands_both(manifest_repo):
     p1 = manifest_repo / '..' / 'p1'
     create_repo(p1)
     create_branch(p1, 'manifest-rev', checkout=True)
-    add_commit(p1, 'add m1.yml and m2.yml',
-               files={'m1.yml': '''\
+    add_commit(
+        p1,
+        'add m1.yml and m2.yml',
+        files={
+            'm1.yml': '''\
                                 manifest:
                                   projects:
                                   - name: p2
@@ -1997,14 +2078,16 @@ def test_import_project_submanifest_commands_both(manifest_repo):
                                   self:
                                     west-commands: m1-commands.yml
                                 ''',
-                      'm2.yml': '''\
+            'm2.yml': '''\
                                 manifest:
                                   projects:
                                   - name: p3
                                     url: p3-url
                                   self:
                                     west-commands: m2-commands.yml
-                                '''})
+                                ''',
+        },
+    )
     checkout_branch(p1, 'master')
     assert (p1 / 'm1.yml').check(file=0, dir=0)
     assert (p1 / 'm2.yml').check(file=0, dir=0)
@@ -2012,6 +2095,7 @@ def test_import_project_submanifest_commands_both(manifest_repo):
     p1 = MF().get_projects(['p1'])[0]
     expected = ['p1-commands.yml', 'm1-commands.yml', 'm2-commands.yml']
     assert p1.west_commands == expected
+
 
 def test_import_map_error_handling():
     # Make sure we handle expected errors when loading import:
@@ -2021,12 +2105,10 @@ def test_import_map_error_handling():
         return None
 
     def make_manifest(import_map):
-        return Manifest.from_data({'manifest':
-                                   {'projects':
-                                    [{'name': 'foo',
-                                      'url': 'ignored',
-                                      'import': import_map}]}},
-                                  importer=importer)
+        return Manifest.from_data(
+            {'manifest': {'projects': [{'name': 'foo', 'url': 'ignored', 'import': import_map}]}},
+            importer=importer,
+        )
 
     def check_error(import_map, expected_err_contains):
         with pytest.raises(MalformedManifest) as e:
@@ -2041,6 +2123,7 @@ def test_import_map_error_handling():
     check_error({'name-blocklist': {}}, 'bad import name-blocklist')
     check_error({'path-blocklist': {}}, 'bad import path-blocklist')
     check_error({'path-prefix': {}}, 'bad import path-prefix')
+
 
 # A manifest repository with a subdirectory containing multiple
 # additional files:
@@ -2101,12 +2184,11 @@ _IMPORT_SELF_MANIFESTS = [
       self:
         import:
           file: west.d
-    '''
+    ''',
 ]
 
 _IMPORT_SELF_SUBMANIFESTS = {
-    'west.d/01-libraries.yml':
-    '''\
+    'west.d/01-libraries.yml': '''\
     manifest:
       defaults:
         remote: my-downstream
@@ -2123,9 +2205,7 @@ _IMPORT_SELF_SUBMANIFESTS = {
         revision: my-2-rev
         path: lib/my-2
     ''',
-
-    'west.d/02-vendor-hals.yml':
-    '''\
+    'west.d/02-vendor-hals.yml': '''\
     manifest:
       projects:
       - name: hal_nordic
@@ -2137,16 +2217,14 @@ _IMPORT_SELF_SUBMANIFESTS = {
         revision: my-down-hal-rev
         path: modules/hal/downstream_only
     ''',
-
-    'west.d/03-applications.yml':
-    '''\
+    'west.d/03-applications.yml': '''\
     manifest:
       projects:
       - name: my-app
         url: downstream.com/my-app
         revision: my-app-rev
         path: applications/my-app
-    '''
+    ''',
 }
 
 
@@ -2157,8 +2235,8 @@ def _setup_import_self(tmp_workspace, manifests):
         with open(str(manifest_repo / path), 'w') as f:
             f.write(content)
 
-@pytest.mark.parametrize('content', _IMPORT_SELF_MANIFESTS,
-                         ids=['dir', 'files'])
+
+@pytest.mark.parametrize('content', _IMPORT_SELF_MANIFESTS, ids=['dir', 'files'])
 def test_import_self_directory(content, tmp_workspace):
     # Test a couple of different equivalent ways to import content
     # from the manifest repository.
@@ -2171,37 +2249,67 @@ def test_import_self_directory(content, tmp_workspace):
 
     # Resolve the manifest. The mp/west.d content comes
     # from the file system in this case.
-    actual = MT(topdir=tmp_workspace,
-                importer=make_importer(call_map),
-                import_flags=FPI).projects
+    actual = MT(topdir=tmp_workspace, importer=make_importer(call_map), import_flags=FPI).projects
 
     expected = [
         ManifestProject(path='mp', topdir=tmp_workspace),
         # Projects from 01-libraries.yml come first.
-        Project('my-1', 'downstream.com/my-lib-1', revision='my-1-rev',
-                path='lib/my-1', topdir=tmp_workspace),
-        Project('my-2', 'downstream.com/my-lib-2', revision='my-2-rev',
-                path='lib/my-2', topdir=tmp_workspace),
+        Project(
+            'my-1',
+            'downstream.com/my-lib-1',
+            revision='my-1-rev',
+            path='lib/my-1',
+            topdir=tmp_workspace,
+        ),
+        Project(
+            'my-2',
+            'downstream.com/my-lib-2',
+            revision='my-2-rev',
+            path='lib/my-2',
+            topdir=tmp_workspace,
+        ),
         # Next, projects from 02-vendor-hals.yml.
-        Project('hal_nordic', 'downstream.com/hal_nordic',
-                revision='my-hal-rev', path='modules/hal/nordic',
-                topdir=tmp_workspace),
-        Project('hal_downstream_sauce', 'downstream.com/hal_downstream_only',
-                revision='my-down-hal-rev', path='modules/hal/downstream_only',
-                topdir=tmp_workspace),
+        Project(
+            'hal_nordic',
+            'downstream.com/hal_nordic',
+            revision='my-hal-rev',
+            path='modules/hal/nordic',
+            topdir=tmp_workspace,
+        ),
+        Project(
+            'hal_downstream_sauce',
+            'downstream.com/hal_downstream_only',
+            revision='my-down-hal-rev',
+            path='modules/hal/downstream_only',
+            topdir=tmp_workspace,
+        ),
         # After that, 03-applications.yml.
-        Project('my-app', 'downstream.com/my-app', revision='my-app-rev',
-                path='applications/my-app', topdir=tmp_workspace),
+        Project(
+            'my-app',
+            'downstream.com/my-app',
+            revision='my-app-rev',
+            path='applications/my-app',
+            topdir=tmp_workspace,
+        ),
         # upstream is the only element of our projects list, so it's
         # after all the self-imports.
-        Project('upstream', 'upstream.com/upstream', revision='refs/tags/v1.0',
-                path='upstream', topdir=tmp_workspace),
+        Project(
+            'upstream',
+            'upstream.com/upstream',
+            revision='refs/tags/v1.0',
+            path='upstream',
+            topdir=tmp_workspace,
+        ),
         # Projects we imported from upstream are last. Projects
         # present upstream which we have already defined should be
         # ignored and not appear here.
-        Project('segger', 'upstream.com/segger',
-                revision='segger-upstream-rev',
-                path='modules/debug/segger', topdir=tmp_workspace),
+        Project(
+            'segger',
+            'upstream.com/segger',
+            revision='segger-upstream-rev',
+            path='modules/debug/segger',
+            topdir=tmp_workspace,
+        ),
     ]
 
     # Since this test is a bit more complicated than some others,
@@ -2211,6 +2319,7 @@ def test_import_self_directory(content, tmp_workspace):
     # With the basic check done, do a more detailed check.
     for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
+
 
 def test_import_self_bool():
     # Importing a boolean from self is an error and must fail.
@@ -2232,6 +2341,7 @@ def test_import_self_bool():
           import: false''')
     assert 'of boolean' in str(e.value)
 
+
 def test_import_self_err_malformed(manifest_repo):
     # Checks for erroneous or malformed imports from self.
 
@@ -2248,6 +2358,7 @@ def test_import_self_err_malformed(manifest_repo):
     str_value = str(e.value)
     assert 'not found' in str_value
     assert 'not-a-file' in str_value
+
 
 def test_import_self_submanifest_commands(manifest_repo):
     # If we import a sub-manifest from 'self' that has west commands
@@ -2276,6 +2387,7 @@ def test_import_self_submanifest_commands(manifest_repo):
 
     mp = MF().projects[MANIFEST_PROJECT_INDEX]
     assert mp.west_commands == ['sub-commands.yml']
+
 
 def test_import_self_submanifest_commands_both(manifest_repo):
     # Like test_import_self_submanifest_commands, but making sure that
@@ -2308,29 +2420,36 @@ def test_import_self_submanifest_commands_both(manifest_repo):
     mp = MF().projects[MANIFEST_PROJECT_INDEX]
     assert mp.west_commands == ['sub-commands.yml', 'top-commands.yml']
 
+
 def test_import_flags_ignore(tmpdir):
     # Test the IGNORE flag by verifying we can create manifest
     # instances that should error out if the import was not ignored.
 
-    m = M('''\
+    m = M(
+        '''\
     projects:
     - name: foo
       url: https://example.com
       import: true
-    ''', import_flags=ImportFlag.IGNORE)
+    ''',
+        import_flags=ImportFlag.IGNORE,
+    )
     assert m.get_projects(['foo'])
 
-    m = M('''\
+    m = M(
+        '''\
     projects:
     - name: foo
       url: https://example.com
     self:
       import: a-file
-    ''', import_flags=ImportFlag.IGNORE)
+    ''',
+        import_flags=ImportFlag.IGNORE,
+    )
     assert m.get_projects(['foo'])
 
-def test_import_map_name_allowlist(manifest_repo):
 
+def test_import_map_name_allowlist(manifest_repo):
     with open(manifest_repo / 'west.yml', 'w') as f:
         f.write('''
         manifest:
@@ -2353,9 +2472,11 @@ def test_import_map_name_allowlist(manifest_repo):
     mainline = manifest_repo.topdir / 'mainline'
     create_repo(mainline)
     create_branch(mainline, 'manifest-rev', checkout=True)
-    add_commit(mainline, 'mainline/west.yml',
-               files={'west.yml':
-                      '''
+    add_commit(
+        mainline,
+        'mainline/west.yml',
+        files={
+            'west.yml': '''
                       manifest:
                         projects:
                           - name: mainline-app
@@ -2367,7 +2488,9 @@ def test_import_map_name_allowlist(manifest_repo):
                           - name: lib2
                             path: libraries/lib2
                             url: https://git.example.com/mainline/lib2
-                      '''})
+                      '''
+        },
+    )
     checkout_branch(mainline, 'master')
 
     actual = [project.name for project in MF().projects]
@@ -2382,6 +2505,7 @@ def test_import_map_name_allowlist(manifest_repo):
     ]
 
     assert actual == expected
+
 
 def test_import_map_name_allowlist_legacy(manifest_repo):
     # This tests the legacy support for blocklists and allowlists
@@ -2411,9 +2535,11 @@ def test_import_map_name_allowlist_legacy(manifest_repo):
     mainline = manifest_repo.topdir / 'mainline'
     create_repo(mainline)
     create_branch(mainline, 'manifest-rev', checkout=True)
-    add_commit(mainline, 'mainline/west.yml',
-               files={'west.yml':
-                      '''
+    add_commit(
+        mainline,
+        'mainline/west.yml',
+        files={
+            'west.yml': '''
                       manifest:
                         projects:
                           - name: mainline-app
@@ -2425,21 +2551,17 @@ def test_import_map_name_allowlist_legacy(manifest_repo):
                           - name: lib2
                             path: libraries/lib2
                             url: https://git.example.com/mainline/lib2
-                      '''})
+                      '''
+        },
+    )
     checkout_branch(mainline, 'master')
 
     actual = [project.name for project in MF().projects]
 
-    expected = [
-        'manifest',
-        'mainline',
-        'downstream-app',
-        'lib3',
-        'mainline-app',
-        'lib2'
-    ]
+    expected = ['manifest', 'mainline', 'downstream-app', 'lib3', 'mainline-app', 'lib2']
 
     assert actual == expected
+
 
 def test_import_map_filter_propagation(manifest_repo):
     # blocklists and allowlists need to propagate down imports.
@@ -2478,9 +2600,7 @@ def test_import_map_filter_propagation(manifest_repo):
     # parametrized test at some point, but this will do.
 
     import_map = {}
-    west_yml = {'manifest':
-                {'projects': [],
-                 'self': {'import': import_map}}}
+    west_yml = {'manifest': {'projects': [], 'self': {'import': import_map}}}
 
     def load_manifest(import_map_vals):
         import_map.clear()
@@ -2498,8 +2618,7 @@ def test_import_map_filter_propagation(manifest_repo):
     assert len(projects) == 2
     assert projects[1].name == 'n1'
 
-    projects = load_manifest({'name-blocklist': 'n2',
-                              'name-allowlist': 'n2'}).projects
+    projects = load_manifest({'name-blocklist': 'n2', 'name-allowlist': 'n2'}).projects
     assert len(projects) == 2
     assert projects[1].name == 'n2'
 
@@ -2509,6 +2628,7 @@ def test_import_map_filter_propagation(manifest_repo):
     projects = load_manifest({'path-blocklist': 'p1'}).projects
     assert len(projects) == 2
     assert projects[1].name == 'n2'
+
 
 def test_import_map_filter_propagation_legacy(manifest_repo):
     # This tests the legacy support for blocklists and allowlists
@@ -2550,9 +2670,7 @@ def test_import_map_filter_propagation_legacy(manifest_repo):
     # parametrized test at some point, but this will do.
 
     import_map = {}
-    west_yml = {'manifest':
-                {'projects': [],
-                 'self': {'import': import_map}}}
+    west_yml = {'manifest': {'projects': [], 'self': {'import': import_map}}}
 
     def load_manifest(import_map_vals):
         import_map.clear()
@@ -2570,8 +2688,7 @@ def test_import_map_filter_propagation_legacy(manifest_repo):
     assert len(projects) == 2
     assert projects[1].name == 'n1'
 
-    projects = load_manifest({'name-blacklist': 'n2',
-                              'name-whitelist': 'n2'}).projects
+    projects = load_manifest({'name-blacklist': 'n2', 'name-whitelist': 'n2'}).projects
     assert len(projects) == 2
     assert projects[1].name == 'n2'
 
@@ -2581,6 +2698,7 @@ def test_import_map_filter_propagation_legacy(manifest_repo):
     projects = load_manifest({'path-blacklist': 'p1'}).projects
     assert len(projects) == 2
     assert projects[1].name == 'n2'
+
 
 def test_import_path_prefix_basics(manifest_repo):
     # The semantics for "import: {path-prefix: ...}" are that the
@@ -2595,33 +2713,34 @@ def test_import_path_prefix_basics(manifest_repo):
 
     # Create some projects to import from and some manifest data
     # inside each.
-    prefixes = {
-        1: 'prefix-1',
-        2: 'prefix/2',
-        3: 'pre/fix/3'
-    }
+    prefixes = {1: 'prefix-1', 2: 'prefix/2', 3: 'pre/fix/3'}
     revs = {}
     for i in [1, 2, 3]:
         p = Path(topdir / prefixes[i] / f'project-{i}')
         create_repo(p)
         create_branch(p, 'manifest-rev', checkout=True)
-        add_commit(p, f'project-{i} manifest',
-                   files={
-                       'west.yml': f'''
+        add_commit(
+            p,
+            f'project-{i} manifest',
+            files={
+                'west.yml': f'''
                        manifest:
                          projects:
                          - name: not-cloned-{i}
                            url: https://example.com/not-cloned-{i}
                        '''
-                   },
-                   reconfigure=False)
+            },
+            reconfigure=False,
+        )
         revs[i] = rev_parse(p, 'HEAD')
 
     # Create the main manifest file, which imports these with
     # different prefixes.
-    add_commit(manifest_repo, 'add main manifest with import',
-               files={
-                   'west.yml': f'''
+    add_commit(
+        manifest_repo,
+        'add main manifest with import',
+        files={
+            'west.yml': f'''
                    manifest:
                      remotes:
                      - name: r
@@ -2643,37 +2762,65 @@ def test_import_path_prefix_basics(manifest_repo):
                        import:
                          path-prefix: {prefixes[3]}
                    '''
-               },
-               reconfigure=False)
+        },
+        reconfigure=False,
+    )
 
     # Check semantics for directly imported projects and nested imports.
     actual = MT(topdir=topdir).projects
-    expected = [ManifestProject(path='mp', topdir=topdir),
-                # Projects in main west.yml with proper path-prefixing
-                # applied.
-                Project('project-1', 'https://example.com/project-1',
-                        revision=revs[1],
-                        path='prefix-1/project-1',
-                        topdir=topdir, remote_name='r'),
-                Project('project-2', 'https://example.com/project-2',
-                        revision=revs[2],
-                        path='prefix/2/project-2',
-                        topdir=topdir, remote_name='r'),
-                Project('project-3', 'https://example.com/project-3',
-                        revision=revs[3],
-                        path='pre/fix/3/project-3',
-                        topdir=topdir, remote_name='r'),
-                # Imported projects from submanifests. These aren't
-                # actually cloned on the file system, but that doesn't
-                # matter for this test.
-                Project('not-cloned-1', 'https://example.com/not-cloned-1',
-                        path='prefix-1/not-cloned-1', topdir=topdir),
-                Project('not-cloned-2', 'https://example.com/not-cloned-2',
-                        path='prefix/2/not-cloned-2', topdir=topdir),
-                Project('not-cloned-3', 'https://example.com/not-cloned-3',
-                        path='pre/fix/3/not-cloned-3', topdir=topdir)]
+    expected = [
+        ManifestProject(path='mp', topdir=topdir),
+        # Projects in main west.yml with proper path-prefixing
+        # applied.
+        Project(
+            'project-1',
+            'https://example.com/project-1',
+            revision=revs[1],
+            path='prefix-1/project-1',
+            topdir=topdir,
+            remote_name='r',
+        ),
+        Project(
+            'project-2',
+            'https://example.com/project-2',
+            revision=revs[2],
+            path='prefix/2/project-2',
+            topdir=topdir,
+            remote_name='r',
+        ),
+        Project(
+            'project-3',
+            'https://example.com/project-3',
+            revision=revs[3],
+            path='pre/fix/3/project-3',
+            topdir=topdir,
+            remote_name='r',
+        ),
+        # Imported projects from submanifests. These aren't
+        # actually cloned on the file system, but that doesn't
+        # matter for this test.
+        Project(
+            'not-cloned-1',
+            'https://example.com/not-cloned-1',
+            path='prefix-1/not-cloned-1',
+            topdir=topdir,
+        ),
+        Project(
+            'not-cloned-2',
+            'https://example.com/not-cloned-2',
+            path='prefix/2/not-cloned-2',
+            topdir=topdir,
+        ),
+        Project(
+            'not-cloned-3',
+            'https://example.com/not-cloned-3',
+            path='pre/fix/3/not-cloned-3',
+            topdir=topdir,
+        ),
+    ]
     for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
+
 
 def test_import_path_prefix_self(manifest_repo):
     # The semantics for "self: import: {path-prefix: ...}" are similar
@@ -2684,9 +2831,11 @@ def test_import_path_prefix_self(manifest_repo):
     topdir = manifest_repo.topdir
 
     # Create the main manifest file.
-    add_commit(manifest_repo, 'add main manifest with import',
-               files={
-                   'west.yml': '''
+    add_commit(
+        manifest_repo,
+        'add main manifest with import',
+        files={
+            'west.yml': '''
                    manifest:
                      projects: []
                      self:
@@ -2695,18 +2844,19 @@ def test_import_path_prefix_self(manifest_repo):
                          file: foo.yml
                          path-prefix: bar
                    ''',
-
-                   'foo.yml': '''
+            'foo.yml': '''
                    manifest:
                      projects: []
-                   '''
-               },
-               reconfigure=False)
+                   ''',
+        },
+        reconfigure=False,
+    )
 
     # Check semantics for directly imported projects and nested imports.
     actual = MT(topdir=topdir).projects[0]
     expected = ManifestProject(path='mp', topdir=topdir)
     check_proj_consistency(actual, expected)
+
 
 def test_import_path_prefix_propagation(manifest_repo):
     # An "import: {path-prefix: foo}" of a manifest which itself
@@ -2717,9 +2867,11 @@ def test_import_path_prefix_propagation(manifest_repo):
     topdir = manifest_repo.topdir
 
     # Create the main manifest file.
-    add_commit(manifest_repo, 'add main manifest with import',
-               files={
-                   'west.yml': '''
+    add_commit(
+        manifest_repo,
+        'add main manifest with import',
+        files={
+            'west.yml': '''
                    manifest:
                      projects: []
                      self:
@@ -2728,8 +2880,7 @@ def test_import_path_prefix_propagation(manifest_repo):
                          file: foo.yml
                          path-prefix: prefix/1
                    ''',
-
-                   'foo.yml': '''
+            'foo.yml': '''
                    manifest:
                      projects: []
                      self:
@@ -2737,8 +2888,7 @@ def test_import_path_prefix_propagation(manifest_repo):
                          file: bar.yml
                          path-prefix: prefix-2
                    ''',
-
-                   'bar.yml': '''
+            'bar.yml': '''
                    manifest:
                      projects:
                      - name: project-1
@@ -2746,20 +2896,30 @@ def test_import_path_prefix_propagation(manifest_repo):
                        url: https://example.com/project-1
                      - name: project-2
                        url: https://example.com/project-2
-                   '''
-               },
-               reconfigure=False)
+                   ''',
+        },
+        reconfigure=False,
+    )
 
     # Check semantics for directly imported projects and nested imports.
     actual = MT(topdir=topdir).projects[1:]
-    expected = [Project('project-1', 'https://example.com/project-1',
-                        path='prefix/1/prefix-2/project-one-path',
-                        topdir=topdir),
-                Project('project-2', 'https://example.com/project-2',
-                        path='prefix/1/prefix-2/project-2',
-                        topdir=topdir)]
+    expected = [
+        Project(
+            'project-1',
+            'https://example.com/project-1',
+            path='prefix/1/prefix-2/project-one-path',
+            topdir=topdir,
+        ),
+        Project(
+            'project-2',
+            'https://example.com/project-2',
+            path='prefix/1/prefix-2/project-2',
+            topdir=topdir,
+        ),
+    ]
     for a, e in zip(actual, expected, strict=True):
         check_proj_consistency(a, e)
+
 
 def test_import_path_prefix_no_escape(manifest_repo):
     # An "import: {path-prefix: ...}" must not escape (or even equal) topdir.
@@ -2780,20 +2940,16 @@ def test_import_path_prefix_no_escape(manifest_repo):
 
     # As a base case, make sure we can parse this manifest with an
     # OK path-prefix.
-    add_commit(manifest_repo, 'OK',
-               files={'west.yml': mfst('ext')},
-               reconfigure=False)
+    add_commit(manifest_repo, 'OK', files={'west.yml': mfst('ext')}, reconfigure=False)
     m = MT(topdir=topdir, import_flags=ImportFlag.IGNORE)
-    assert (Path(m.projects[1].abspath) ==
-            Path(topdir) / 'ext' / 'project')
+    assert Path(m.projects[1].abspath) == Path(topdir) / 'ext' / 'project'
 
     # An invalid path-prefix, all other things equal, should fail.
-    add_commit(manifest_repo, 'NOK 1',
-               files={'west.yml': mfst('..')},
-               reconfigure=False)
+    add_commit(manifest_repo, 'NOK 1', files={'west.yml': mfst('..')}, reconfigure=False)
     with pytest.raises(MalformedManifest) as excinfo:
         MT(topdir=topdir, import_flags=ImportFlag.IGNORE)
     assert 'escapes the workspace topdir' in str(excinfo.value)
+
 
 def test_import_loop_detection_self(manifest_repo):
     # Verify that a self-import which causes an import loop is an error.
@@ -2817,17 +2973,20 @@ def test_import_loop_detection_self(manifest_repo):
     with pytest.raises(_ManifestImportDepth):
         MF()
 
+
 #########################################
 # Manifest project group: basic tests
 #
 # Additional groups of tests follow in later sections.
+
 
 def test_no_groups_and_import():
     def importer(*args, **kwargs):
         raise RuntimeError("this shouldn't be called")
 
     with pytest.raises(MalformedManifest) as e:
-        Manifest.from_data('''
+        Manifest.from_data(
+            '''
         manifest:
           projects:
           - name: p
@@ -2836,9 +2995,11 @@ def test_no_groups_and_import():
             - g
             import: True
         ''',
-                           importer=importer)
+            importer=importer,
+        )
 
     assert '"groups" cannot be combined with "import"' in str(e.value)
+
 
 def test_invalid_groups():
     # Invalid group values must be rejected.
@@ -2888,6 +3049,7 @@ def test_invalid_groups():
         check(fmt, 3, 'is not a list')
         check(fmt, 3.14, 'is not a list')
 
+
 def test_groups():
     # Basic test for valid project groups, which makes sure non-string
     # types are coerced to strings, and a missing 'groups' results
@@ -2903,8 +3065,7 @@ def test_groups():
     def p(arg):
         return M(fmt.format(arg)).get_projects(['p'])[0]
 
-    assert (p('groups: [1,"hello-world",3.14]').groups ==
-            ['1', 'hello-world', '3.14'])
+    assert p('groups: [1,"hello-world",3.14]').groups == ['1', 'hello-world', '3.14']
     assert p('groups: []').groups == []
     assert p('').groups == []
 
@@ -2912,6 +3073,7 @@ def test_groups():
     assert is_group('hello-world')
     assert is_group('hello+world')
     assert is_group(3.14)
+
 
 def test_invalid_manifest_group_filters():
     # Test cases for invalid "manifest: group-filter:" lists.
@@ -2942,6 +3104,7 @@ def test_invalid_manifest_group_filters():
     check2('hello', 'not a list')
     check2(3, 'not a list')
     check2(3.14, 'not a list')
+
 
 def test_is_active():
     # Checks for the results of the 'groups' and 'group-filter' fields on
@@ -2979,24 +3142,24 @@ def test_is_active():
         # changes.
 
         m = manifest(group_filter)
-        assert tuple(m.is_active(p, extra_filter=extra_filter)
-                     for p in m.get_projects(['p1', 'p2', 'p3'])) == expected
+        assert (
+            tuple(
+                m.is_active(p, extra_filter=extra_filter)
+                for p in m.get_projects(['p1', 'p2', 'p3'])
+            )
+            == expected
+        )
 
     check((True, True, True), '')
     check((True, True, True), 'group-filter: [+ga]')
     check((False, True, True), 'group-filter: [-ga]')
-    check((True, True, True), 'group-filter: [-gb]',
-          extra_filter=['+ga'])
-    check((True, True, True), 'group-filter: [-gb]',
-          extra_filter=['+gb'])
-    check((True, True, True), 'group-filter: [-ga]',
-          extra_filter=['+ga'])
-    check((False, True, True), 'group-filter: [-ga]',
-          extra_filter=['+ga', '-ga'])
-    check((True, True, True), 'group-filter: [-ga]',
-          extra_filter=['+ga', '-gb'])
-    check((False, False, True), 'group-filter: [-ga]',
-          extra_filter=['-gb'])
+    check((True, True, True), 'group-filter: [-gb]', extra_filter=['+ga'])
+    check((True, True, True), 'group-filter: [-gb]', extra_filter=['+gb'])
+    check((True, True, True), 'group-filter: [-ga]', extra_filter=['+ga'])
+    check((False, True, True), 'group-filter: [-ga]', extra_filter=['+ga', '-ga'])
+    check((True, True, True), 'group-filter: [-ga]', extra_filter=['+ga', '-gb'])
+    check((False, False, True), 'group-filter: [-ga]', extra_filter=['-gb'])
+
 
 #########################################
 # Manifest group-filter + import tests
@@ -3040,6 +3203,7 @@ def test_is_active():
 # That is unfortunate, but we're going to release 0.10 as quickly as
 # we can after 0.9, so this window will be brief.
 
+
 def test_group_filter_project_import(manifest_repo):
     # Test cases for "manifest: group-filter:" across a project import.
 
@@ -3048,13 +3212,16 @@ def test_group_filter_project_import(manifest_repo):
     create_branch(project, 'manifest-rev', checkout=True)
 
     def project_import_helper(manifest_version_line, expected_group_filter):
-        add_commit(project, 'project.yml',
-                   files={
-                       'project.yml':
-                       '''
+        add_commit(
+            project,
+            'project.yml',
+            files={
+                'project.yml': '''
                        manifest:
                           group-filter: [-foo]
-                       '''})
+                       '''
+            },
+        )
 
         with open(manifest_repo / 'west.yml', 'w') as f:
             f.write(f'''
@@ -3073,6 +3240,7 @@ def test_group_filter_project_import(manifest_repo):
     project_import_helper('version: "0.10"', ['-foo'])
     project_import_helper('', ['-foo'])
     project_import_helper('version: 0.9', [])
+
 
 def test_group_filter_self_import(manifest_repo):
     # Test cases for "manifest: group-filter:" across a self import.
@@ -3099,6 +3267,7 @@ def test_group_filter_self_import(manifest_repo):
     self_import_helper('version: "0.10"', [])
     self_import_helper('', [])
     self_import_helper('version: 0.9', ['-foo'])
+
 
 def test_group_filter_imports(manifest_repo):
     # More complex test that ensures group filters are imported correctly:
@@ -3147,8 +3316,7 @@ def test_group_filter_imports(manifest_repo):
         project = topdir / name
         create_repo(project)
         create_branch(project, 'manifest-rev', checkout=True)
-        add_commit(project, 'setup commit',
-                   files={'west.yml': imported_fmt.format(group_filter)})
+        add_commit(project, 'setup commit', files={'west.yml': imported_fmt.format(group_filter)})
         return rev_parse(project, 'HEAD')
 
     setup_self('self-import.yml', '[-ga,-gb]')
@@ -3190,31 +3358,38 @@ def test_group_filter_imports(manifest_repo):
 
     # Schema version 0.9 and no group-filter is used: no warning.
     with open(manifest_repo / 'west.yml', 'w') as f:
-        f.write(textwrap.dedent(
-            '''\
+        f.write(
+            textwrap.dedent(
+                '''\
             manifest:
               version: 0.9
-            '''))
+            '''
+            )
+        )
     m = Manifest.from_file()
     assert m.group_filter == []
     assert not hasattr(m, '_legacy_group_filter_warned')
 
     # Schema version 0.9, group-filter is used, no imports: still a warning.
     with open(manifest_repo / 'west.yml', 'w') as f:
-        f.write(textwrap.dedent(
-            '''\
+        f.write(
+            textwrap.dedent(
+                '''\
             manifest:
               version: 0.9
               group-filter: [-ga]
-            '''))
+            '''
+            )
+        )
     m = Manifest.from_file()
     assert m.group_filter == ['-ga']
     assert hasattr(m, '_legacy_group_filter_warned')
 
     # Schema version 0.9, group-filter is used by an import: warning.
     with open(manifest_repo / 'west.yml', 'w') as f:
-        f.write(textwrap.dedent(
-            f'''\
+        f.write(
+            textwrap.dedent(
+                f'''\
             manifest:
               version: 0.9
               projects:
@@ -3222,7 +3397,9 @@ def test_group_filter_imports(manifest_repo):
                   revision: {sha1}
                   url: ignored
                   import: true
-            '''))
+            '''
+            )
+        )
     m = Manifest.from_file()
     assert m.group_filter == []
     assert hasattr(m, '_legacy_group_filter_warned')
@@ -3299,10 +3476,11 @@ def test_submodule_manifest():
 #########################################
 # Various invalid manifests
 
+
 # Invalid manifests should raise MalformedManifest.
-@pytest.mark.parametrize('invalid',
-                         glob(os.path.join(THIS_DIRECTORY, 'manifests',
-                                           'invalid_*.yml')))
+@pytest.mark.parametrize(
+    'invalid', glob(os.path.join(THIS_DIRECTORY, 'manifests', 'invalid_*.yml'))
+)
 def test_invalid(invalid):
     with open(invalid) as f:
         data = yaml.safe_load(f.read())
