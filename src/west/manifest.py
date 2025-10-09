@@ -95,6 +95,7 @@ GroupFilterType = list[str]
 # A list of group names belonging to a project, like ['foo', 'bar']
 GroupsType = list[str]
 
+
 class PFR(enum.Enum):
     # "Project filter result": internal type for expressing whether a
     # project has been explicitly made active or inactive via
@@ -103,6 +104,7 @@ class PFR(enum.Enum):
     ACTIVE = 1
     INACTIVE = 2
     NONE = 3
+
 
 # Type for an individual element of a project filter.
 class ProjectFilterElt(NamedTuple):
@@ -115,6 +117,7 @@ class ProjectFilterElt(NamedTuple):
     # made active. If False, projects whose names match the regular
     # expression are made inactive.
     make_active: bool
+
 
 # The internal representation for a 'manifest.project-filter'
 # configuration option's value.
@@ -134,8 +137,8 @@ class ProjectFilterElt(NamedTuple):
 # The regular expression must match the entire project name.
 ProjectFilterType = list[ProjectFilterElt]
 
-def _update_project_filter(project_filter: ProjectFilterType,
-                           option_value: str | None) -> None:
+
+def _update_project_filter(project_filter: ProjectFilterType, option_value: str | None) -> None:
     # Validate a 'manifest.project-filter' configuration option's
     # value. The 'option_value' argument is the raw configuration
     # option. If 'option_value' is invalid, error out. Otherwise,
@@ -147,8 +150,8 @@ def _update_project_filter(project_filter: ProjectFilterType,
 
     def _err(message):
         raise MalformedConfig(
-            f'invalid "manifest.project-filter" option value '
-            f'"{option_value}": {message}')
+            f'invalid "manifest.project-filter" option value "{option_value}": {message}'
+        )
 
     for elt in option_value.split(','):
         elt = elt.strip()
@@ -167,8 +170,8 @@ def _update_project_filter(project_filter: ProjectFilterType,
         except re.error as e:
             _err(f'invalid regular expression "{regexp}": {str(e)}')
 
-        project_filter.append(ProjectFilterElt(pattern=pattern,
-                                               make_active=make_active))
+        project_filter.append(ProjectFilterElt(pattern=pattern, make_active=make_active))
+
 
 # The parsed contents of a manifest YAML file as returned by _load(),
 # after sanitychecking with validate().
@@ -178,6 +181,7 @@ ManifestDataType = str | dict
 
 _logger = logging.getLogger(__name__)
 
+
 # Type for the submodule value passed through the manifest file.
 class Submodule(NamedTuple):
     '''Represents a Git submodule within a project.'''
@@ -185,14 +189,17 @@ class Submodule(NamedTuple):
     path: str
     name: str | None = None
 
+
 # Submodules may be a list of values or a bool.
 SubmodulesType = list[Submodule] | bool
 
 # Manifest locating, parsing, loading, etc.
 
+
 class _defaults(NamedTuple):
     remote: str | None
     revision: str
+
 
 _DEFAULT_REV = 'master'
 _WEST_YML = 'west.yml'
@@ -201,12 +208,20 @@ _SCHEMA_VER = parse_version(SCHEMA_VERSION)
 _EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
 _VALID_SCHEMA_VERS = [
     _EARLIEST_VER_STR,
-    '0.7', '0.8', '0.9', '0.10', '0.12', '0.13', '1.0',
-    SCHEMA_VERSION
+    '0.7',
+    '0.8',
+    '0.9',
+    '0.10',
+    '0.12',
+    '0.13',
+    '1.0',
+    SCHEMA_VERSION,
 ]
+
 
 def _is_yml(path: PathType) -> bool:
     return Path(path).suffix in ['.yml', '.yaml']
+
 
 def _load(data: str) -> Any:
     try:
@@ -214,8 +229,8 @@ def _load(data: str) -> Any:
     except yaml.scanner.ScannerError as e:
         raise MalformedManifest(data) from e
 
-def _west_commands_list(west_commands: WestCommandsType | None) -> \
-        list[str]:
+
+def _west_commands_list(west_commands: WestCommandsType | None) -> list[str]:
     # Convert the raw data from a manifest file to a list of
     # west_commands locations. (If it's already a list, make a
     # defensive copy.)
@@ -227,6 +242,7 @@ def _west_commands_list(west_commands: WestCommandsType | None) -> \
     else:
         return list(west_commands)
 
+
 def _west_commands_maybe_delist(west_commands: list[str]) -> WestCommandsType:
     # Convert a west_commands list to a string if there's
     # just one element, otherwise return the list itself.
@@ -236,6 +252,7 @@ def _west_commands_maybe_delist(west_commands: list[str]) -> WestCommandsType:
     else:
         return west_commands
 
+
 def _west_commands_merge(wc1: list[str], wc2: list[str]) -> list[str]:
     # Merge two west_commands lists, filtering out duplicates.
 
@@ -244,14 +261,17 @@ def _west_commands_merge(wc1: list[str], wc2: list[str]) -> list[str]:
     else:
         return wc1 or wc2
 
+
 # Manifest import handling
+
 
 def _default_importer(project: 'Project', file: str) -> NoReturn:
     raise ManifestImportFailed(project, file)
 
-def _manifest_content_at(project: 'Project', path: PathType, mf_encoding: str,
-                         rev: str = QUAL_MANIFEST_REV_BRANCH) \
-                                -> ImportedContentType:
+
+def _manifest_content_at(
+    project: 'Project', path: PathType, mf_encoding: str, rev: str = QUAL_MANIFEST_REV_BRANCH
+) -> ImportedContentType:
     # Get a list of manifest data from project at path
     #
     # The data are loaded from Git at ref QUAL_MANIFEST_REV_BRANCH,
@@ -268,8 +288,7 @@ def _manifest_content_at(project: 'Project', path: PathType, mf_encoding: str,
     _logger.debug(f'{project.name}: looking up path {path} type at {rev}')
 
     # Returns 'blob', 'tree', etc. for path at revision, if it exists.
-    out = project.git(['ls-tree', rev, path], capture_stdout=True,
-                      capture_stderr=True).stdout
+    out = project.git(['ls-tree', rev, path], capture_stdout=True, capture_stderr=True).stdout
 
     if not out:
         # It's a bit inaccurate to raise FileNotFoundError for
@@ -291,14 +310,16 @@ def _manifest_content_at(project: 'Project', path: PathType, mf_encoding: str,
         # Use a PurePosixPath because that's the form git seems to
         # store internally, even on Windows.
         pathobj = PurePosixPath(path)
-        for f in filter(_is_yml, project.listdir_at(path, rev=rev,
-                                                    encoding=git_filenames_encoding)):
+        for f in filter(
+            _is_yml, project.listdir_at(path, rev=rev, encoding=git_filenames_encoding)
+        ):
             ret.append(project.read_at(pathobj / f, rev=rev).decode(mf_encoding))
         return ret
     else:
-        raise MalformedManifest(f"can't decipher project {project.name} "
-                                f'path {path} revision {rev} '
-                                f'(git type: {ptype})')
+        raise MalformedManifest(
+            f"can't decipher project {project.name} path {path} revision {rev} (git type: {ptype})"
+        )
+
 
 class _import_map(NamedTuple):
     file: str
@@ -308,23 +329,25 @@ class _import_map(NamedTuple):
     path_blocklist: list[str]
     path_prefix: str
 
+
 def _is_imap_list(value: Any) -> bool:
     # Return True if the value is a valid import map 'blocklist' or
     # 'allowlist'. Empty strings and lists are OK, and list nothing.
 
-    return (isinstance(value, str) or
-            (isinstance(value, list) and
-             all(isinstance(item, str) for item in value)))
+    return isinstance(value, str) or (
+        isinstance(value, list) and all(isinstance(item, str) for item in value)
+    )
+
 
 def _imap_filter(imap: _import_map) -> ImapFilterFnType:
     # Returns either None (if no filter is necessary) or a
     # filter function for the given import map.
 
-    if any([imap.name_allowlist, imap.path_allowlist,
-            imap.name_blocklist, imap.path_blocklist]):
+    if any([imap.name_allowlist, imap.path_allowlist, imap.name_blocklist, imap.path_blocklist]):
         return lambda project: _is_imap_ok(imap, project)
     else:
         return None
+
 
 def _ensure_list(item: str | list[str]) -> list[str]:
     # Converts item to a list containing it if item is a string, or
@@ -334,13 +357,20 @@ def _ensure_list(item: str | list[str]) -> list[str]:
         return [item]
     return item
 
+
 def _is_imap_ok(imap: _import_map, project: 'Project') -> bool:
     # Return True if a project passes an import map's filters,
     # and False otherwise.
 
-    nwl, pwl, nbl, pbl = [_ensure_list(lst) for lst in
-                          (imap.name_allowlist, imap.path_allowlist,
-                           imap.name_blocklist, imap.path_blocklist)]
+    nwl, pwl, nbl, pbl = [
+        _ensure_list(lst)
+        for lst in (
+            imap.name_allowlist,
+            imap.path_allowlist,
+            imap.name_blocklist,
+            imap.path_blocklist,
+        )
+    ]
     name = project.name
     path = Path(project.path)
     blocked = (name in nbl) or any(path.match(p) for p in pbl)
@@ -351,6 +381,7 @@ def _is_imap_ok(imap: _import_map, project: 'Project') -> bool:
         return allowed
     else:
         return allowed or no_allowlists
+
 
 class _import_ctx(NamedTuple):
     # Holds shared state that we want to pass around as we
@@ -425,14 +456,16 @@ class _import_ctx(NamedTuple):
     # Bit vector of flags that modify import behavior.
     import_flags: 'ImportFlag'
 
-def _imap_filter_allows(imap_filter: ImapFilterFnType,
-                        project: 'Project') -> bool:
+
+def _imap_filter_allows(imap_filter: ImapFilterFnType, project: 'Project') -> bool:
     # imap_filter(project) if imap_filter is not None; True otherwise.
 
     return (imap_filter is None) or imap_filter(project)
 
-def _compose_imap_filters(imap_filter1: ImapFilterFnType,
-                          imap_filter2: ImapFilterFnType) -> ImapFilterFnType:
+
+def _compose_imap_filters(
+    imap_filter1: ImapFilterFnType, imap_filter2: ImapFilterFnType
+) -> ImapFilterFnType:
     # Return an import map filter which gives back the logical AND of
     # what the two argument filter functions would return.
 
@@ -443,6 +476,7 @@ def _compose_imap_filters(imap_filter1: ImapFilterFnType,
         return lambda project: (fn1(project) and fn2(project))
     else:
         return imap_filter1 or imap_filter2
+
 
 # It's an error if a group name matches this pattern.
 _RESERVED_GROUP_RE = re.compile(r'(^[+-]|[\s,:])')
@@ -455,8 +489,8 @@ _RESERVED_GROUP_RE = re.compile(r'(^[+-]|[\s,:])')
 _INVALID_PROJECT_NAME_RE = re.compile(r'([/\\])')
 _RESERVED_PROJECT_NAME_RE = re.compile(r'[\s,]')
 
-def _update_disabled_groups(disabled_groups: set[str],
-                            group_filter: GroupFilterType):
+
+def _update_disabled_groups(disabled_groups: set[str], group_filter: GroupFilterType):
     # Update a set of disabled groups in place based on
     # 'group_filter'.
 
@@ -476,6 +510,7 @@ def _update_disabled_groups(disabled_groups: set[str],
                 "along with as much information as you can, such as the "
                 "stack trace that preceded this message."
             )
+
 
 def _is_submodule_dict_ok(subm: Any) -> bool:
     # Check whether subm is a dict that contains the expected
@@ -502,9 +537,11 @@ def _is_submodule_dict_ok(subm: Any) -> bool:
 
     return True
 
+
 #
 # Public functions
 #
+
 
 def manifest_path() -> str:
     '''Absolute path of the manifest file in the current workspace.
@@ -530,9 +567,9 @@ def manifest_path() -> str:
     # It's kind of annoying to manually instantiate a FileNotFoundError.
     # This seems to be the best way.
     if not ret_path.is_file():
-        raise OSError(errno.ENOENT, os.strerror(errno.ENOENT),
-                      os.fspath(ret_path))
+        raise OSError(errno.ENOENT, os.strerror(errno.ENOENT), os.fspath(ret_path))
     return os.fspath(ret_path)
+
 
 def validate(data: Any) -> dict[str, Any]:
     '''Validate manifest data
@@ -554,8 +591,9 @@ def validate(data: Any) -> dict[str, Any]:
     elif isinstance(data, dict):
         as_dict = data
     else:
-        raise TypeError(f'{data} has type {type(data)}, '
-                        'expected raw str data or a loaded YAML dict')
+        raise TypeError(
+            f'{data} has type {type(data)}, expected raw str data or a loaded YAML dict'
+        )
 
     if 'manifest' not in as_dict:
         raise MalformedManifest('manifest data contains no "manifest" key')
@@ -588,16 +626,15 @@ def validate(data: Any) -> dict[str, Any]:
         if min_version > _SCHEMA_VER:
             raise ManifestVersionError(min_version_str)
         if min_version_str not in _VALID_SCHEMA_VERS:
-            msg = (f'invalid version {min_version_str}; must be one of: ' +
-                   ', '.join(_VALID_SCHEMA_VERS))
+            msg = f'invalid version {min_version_str}; must be one of: ' + ', '.join(
+                _VALID_SCHEMA_VERS
+            )
             if casted_to_str:
-                msg += ('. Do you need to quote the value '
-                        '(e.g. "0.10" instead of 0.10)?')
+                msg += '. Do you need to quote the value (e.g. "0.10" instead of 0.10)?'
             raise MalformedManifest(msg)
 
     try:
-        pykwalify.core.Core(source_data=data,
-                            schema_files=[_SCHEMA_PATH]).validate()
+        pykwalify.core.Core(source_data=data, schema_files=[_SCHEMA_PATH]).validate()
     except pykwalify.errors.SchemaError as se:
         raise MalformedManifest(se.msg) from se
 
@@ -608,9 +645,11 @@ def validate(data: Any) -> dict[str, Any]:
 
     return as_dict
 
+
 # A 'raw' element in a project 'groups:' or manifest 'group-filter:' list,
 # as it is parsed from YAML, before conversion to string.
 RawGroupType = str | int | float
+
 
 def is_group(raw_group: RawGroupType) -> bool:
     '''Is a 'raw' project group value 'raw_group' valid?
@@ -641,16 +680,21 @@ def is_group(raw_group: RawGroupType) -> bool:
     #       "--group-filter=path-prefix:foo" to create additional logical
     #       groups based on the workspace layout or other metadata
 
-    return ((raw_group >= 0) if isinstance(raw_group, (float, int)) else
-            bool(raw_group and not _RESERVED_GROUP_RE.search(raw_group)))
+    return (
+        (raw_group >= 0)
+        if isinstance(raw_group, (float, int))
+        else bool(raw_group and not _RESERVED_GROUP_RE.search(raw_group))
+    )
+
 
 #
 # Exception types
 #
 
+
 class MalformedManifest(Exception):
-    '''Manifest parsing failed due to invalid data.
-    '''
+    '''Manifest parsing failed due to invalid data.'''
+
 
 class ManifestImportFailed(Exception):
     '''An operation required to resolve a manifest failed.
@@ -670,12 +714,13 @@ class ManifestImportFailed(Exception):
     def __str__(self):
         if self.project is None:
             # This happens when imports fail in the manifest repository
-            return (f'cannot import {self.imp}; is it present '
-                    'in your manifest repository?')
+            return f'cannot import {self.imp}; is it present in your manifest repository?'
         else:
-            return (f'project {self.project.name_and_path}: '
-                    f'cannot import contents of {self.imp}; '
-                    'do you need to run "west update"?')
+            return (
+                f'project {self.project.name_and_path}: '
+                f'cannot import contents of {self.imp}; '
+                'do you need to run "west update"?'
+            )
 
 
 class ManifestVersionError(Exception):
@@ -691,14 +736,17 @@ class ManifestVersionError(Exception):
         self.file = os.fspath(file) if file else None
         '''The file that required this version of west, if any.'''
 
+
 class _ManifestImportDepth(ManifestImportFailed):
     # A hack to signal to main.py what happened.
     pass
+
 
 #
 # The main Manifest class and its public helper types, like Project
 # and ImportFlag.
 #
+
 
 class ImportFlag(enum.IntFlag):
     '''Bit flags for handling imports when resolving a manifest.
@@ -733,6 +781,7 @@ class ImportFlag(enum.IntFlag):
     #: including any projects added via "import:" : in "self:"
     IGNORE_PROJECTS = 4
 
+
 def _flags_ok(flags: ImportFlag) -> bool:
     # Sanity-check the combination of flags.
     F_I = ImportFlag.IGNORE
@@ -746,12 +795,15 @@ def _flags_ok(flags: ImportFlag) -> bool:
     else:
         return True
 
+
 class _MLS(str):
-    ''' Multi-Line String.
-        This class is only used to represent multi-line strings that will be
-        then dumped into YAML using block style literals ("|").
+    '''Multi-Line String.
+    This class is only used to represent multi-line strings that will be
+    then dumped into YAML using block style literals ("|").
     '''
+
     pass
+
 
 class Project:
     '''Represents a project defined in a west manifest.
@@ -790,29 +842,35 @@ class Project:
         return NotImplemented
 
     def __repr__(self):
-        return (f'Project("{self.name}", "{self.url}", '
-                f'revision="{self.revision}", path={repr(self.path)}, '
-                f'clone_depth={self.clone_depth}, '
-                f'west_commands={self.west_commands}, '
-                f'topdir={repr(self.topdir)}, '
-                f'groups={repr(self.groups)}, '
-                f'userdata={repr(self.userdata)})')
+        return (
+            f'Project("{self.name}", "{self.url}", '
+            f'revision="{self.revision}", path={repr(self.path)}, '
+            f'clone_depth={self.clone_depth}, '
+            f'west_commands={self.west_commands}, '
+            f'topdir={repr(self.topdir)}, '
+            f'groups={repr(self.groups)}, '
+            f'userdata={repr(self.userdata)})'
+        )
 
     def __str__(self):
         path_repr = repr(self.abspath or self.path)
         return f'<Project {self.name} ({path_repr}) at {self.revision}>'
 
-    def __init__(self, name: str, url: str,
-                 description: str | None = None,
-                 revision: str | None = None,
-                 path: PathType | None = None,
-                 submodules: SubmodulesType = False,
-                 clone_depth: int | None = None,
-                 west_commands: WestCommandsType | None = None,
-                 topdir: PathType | None = None,
-                 remote_name: str | None = None,
-                 groups: GroupsType | None = None,
-                 userdata: Any | None = None):
+    def __init__(
+        self,
+        name: str,
+        url: str,
+        description: str | None = None,
+        revision: str | None = None,
+        path: PathType | None = None,
+        submodules: SubmodulesType = False,
+        clone_depth: int | None = None,
+        west_commands: WestCommandsType | None = None,
+        topdir: PathType | None = None,
+        remote_name: str | None = None,
+        groups: GroupsType | None = None,
+        userdata: Any | None = None,
+    ):
         '''Project constructor.
 
         If *topdir* is ``None``, then absolute path attributes
@@ -864,8 +922,7 @@ class Project:
     @property
     def abspath(self) -> str | None:
         if self._abspath is None and self.topdir:
-            self._abspath = os.path.abspath(Path(self.topdir) /
-                                            self.path)
+            self._abspath = os.path.abspath(Path(self.topdir) / self.path)
         return self._abspath
 
     @property
@@ -893,8 +950,7 @@ class Project:
         if self.clone_depth:
             ret['clone-depth'] = self.clone_depth
         if self.west_commands:
-            ret['west-commands'] = \
-                _west_commands_maybe_delist(self.west_commands)
+            ret['west-commands'] = _west_commands_maybe_delist(self.west_commands)
         if self.groups:
             ret['groups'] = self.groups
         if isinstance(self.submodules, bool) and self.submodules:
@@ -915,12 +971,15 @@ class Project:
     # Git helpers
     #
 
-    def git(self, cmd: str | list[str],
-            extra_args: Iterable[str] = (),
-            capture_stdout: bool = False,
-            capture_stderr: bool = False,
-            check: bool = True,
-            cwd: PathType | None = None) -> subprocess.CompletedProcess:
+    def git(
+        self,
+        cmd: str | list[str],
+        extra_args: Iterable[str] = (),
+        capture_stdout: bool = False,
+        capture_stderr: bool = False,
+        check: bool = True,
+        cwd: PathType | None = None,
+    ) -> subprocess.CompletedProcess:
         '''Run a git command in the project repository.
 
         :param cmd: git command as a string (or list of strings)
@@ -961,9 +1020,11 @@ class Project:
 
         _logger.debug(f"running '{cmd_str}' in {cwd}")
         popen = subprocess.Popen(
-            args, cwd=cwd,
+            args,
+            cwd=cwd,
             stdout=subprocess.PIPE if capture_stdout else None,
-            stderr=subprocess.PIPE if capture_stderr else None)
+            stderr=subprocess.PIPE if capture_stderr else None,
+        )
 
         stdout, stderr = popen.communicate()
 
@@ -971,15 +1032,16 @@ class Project:
         # potentially expensive overhead of formatting long
         # stdout/stderr strings if the current log level isn't DEBUG,
         # which is the usual case.
-        _logger.debug('"%s" exit code: %d stdout: %r stderr: %r',
-                      cmd_str, popen.returncode, stdout, stderr)
+        _logger.debug(
+            '"%s" exit code: %d stdout: %r stderr: %r', cmd_str, popen.returncode, stdout, stderr
+        )
 
         if check and popen.returncode:
-            raise subprocess.CalledProcessError(popen.returncode, cmd_list,
-                                                output=stdout, stderr=stderr)
+            raise subprocess.CalledProcessError(
+                popen.returncode, cmd_list, output=stdout, stderr=stderr
+            )
         else:
-            return subprocess.CompletedProcess(popen.args, popen.returncode,
-                                               stdout, stderr)
+            return subprocess.CompletedProcess(popen.args, popen.returncode, stdout, stderr)
 
     def sha(self, rev: str, cwd: PathType | None = None) -> str:
         '''Get the SHA for a project revision.
@@ -991,14 +1053,14 @@ class Project:
         # Though we capture stderr, it will be available as the stderr
         # attribute in the CalledProcessError raised by git() in
         # Python 3.5 and above if this call fails.
-        cp = self.git(['rev-parse', f'{rev}^{{commit}}'], capture_stdout=True,
-                      cwd=cwd, capture_stderr=True)
+        cp = self.git(
+            ['rev-parse', f'{rev}^{{commit}}'], capture_stdout=True, cwd=cwd, capture_stderr=True
+        )
         # Assumption: SHAs are hex values and thus safe to decode in ASCII.
         # It'll be fun when we find out that was wrong and how...
         return cp.stdout.decode('ascii').strip()
 
-    def is_ancestor_of(self, rev1: str, rev2: str,
-                       cwd: PathType | None = None) -> bool:
+    def is_ancestor_of(self, rev1: str, rev2: str, cwd: PathType | None = None) -> bool:
         '''Check if 'rev1' is an ancestor of 'rev2' in this project.
 
         Returns True if rev1 is an ancestor commit of rev2 in the
@@ -1012,8 +1074,7 @@ class Project:
         :param cwd: directory to run command in (default:
             ``self.abspath``)
         '''
-        rc = self.git(f'merge-base --is-ancestor {rev1} {rev2}',
-                      check=False, cwd=cwd).returncode
+        rc = self.git(f'merge-base --is-ancestor {rev1} {rev2}', check=False, cwd=cwd).returncode
 
         if rc == 0:
             return True
@@ -1022,8 +1083,7 @@ class Project:
         else:
             raise RuntimeError(f'unexpected git merge-base result {rc}')
 
-    def is_up_to_date_with(self, rev: str,
-                           cwd: PathType | None = None) -> bool:
+    def is_up_to_date_with(self, rev: str, cwd: PathType | None = None) -> bool:
         '''Check if the project is up to date with *rev*, returning
         ``True`` if so.
 
@@ -1063,13 +1123,17 @@ class Project:
         # instead, which prints an empty string (i.e., just a newline,
         # which we strip) for the top-level directory.
         _logger.debug(f'{self.name}: checking if cloned')
-        res = self.git(['rev-parse', '--show-cdup'], check=False, cwd=cwd,
-                       capture_stderr=True, capture_stdout=True)
+        res = self.git(
+            ['rev-parse', '--show-cdup'],
+            check=False,
+            cwd=cwd,
+            capture_stderr=True,
+            capture_stdout=True,
+        )
 
         return not (res.returncode or res.stdout.strip())
 
-    def read_at(self, path: PathType, rev: str | None = None,
-                cwd: PathType | None = None) -> bytes:
+    def read_at(self, path: PathType, rev: str | None = None, cwd: PathType | None = None) -> bytes:
         '''Read file contents in the project at a specific revision.
 
         :param path: relative path to file in this project
@@ -1078,13 +1142,18 @@ class Project:
         '''
         if rev is None:
             rev = self.revision
-        cp = self.git(['show', f'{rev}:{os.fspath(path)}'],
-                      capture_stdout=True, capture_stderr=True, cwd=cwd)
+        cp = self.git(
+            ['show', f'{rev}:{os.fspath(path)}'], capture_stdout=True, capture_stderr=True, cwd=cwd
+        )
         return cp.stdout
 
-    def listdir_at(self, path: PathType, rev: str | None = None,
-                   cwd: PathType | None = None,
-                   encoding: str | None = None) -> list[str]:
+    def listdir_at(
+        self,
+        path: PathType,
+        rev: str | None = None,
+        cwd: PathType | None = None,
+        encoding: str | None = None,
+    ) -> list[str]:
         '''List of directory contents in the project at a specific revision.
 
         The return value is the directory contents as a list of files and
@@ -1103,13 +1172,17 @@ class Project:
         # git-ls-tree -z means we get NUL-separated output with no quoting
         # of the file names. Using 'git-show' or 'git-cat-file -p'
         # wouldn't work for files with special characters in their names.
-        out = self.git(['ls-tree', '-z', f'{rev}:{os.fspath(path)}'], cwd=cwd,
-                       capture_stdout=True, capture_stderr=True).stdout
+        out = self.git(
+            ['ls-tree', '-z', f'{rev}:{os.fspath(path)}'],
+            cwd=cwd,
+            capture_stdout=True,
+            capture_stderr=True,
+        ).stdout
 
         # A tab character separates the SHA from the file name in each
         # NUL-separated entry.
-        return [f.decode(encoding).split('\t', 1)[1]
-                for f in out.split(b'\x00') if f]
+        return [f.decode(encoding).split('\t', 1)[1] for f in out.split(b'\x00') if f]
+
 
 # FIXME: this whole class should just go away. See #327.
 class ManifestProject(Project):
@@ -1142,15 +1215,20 @@ class ManifestProject(Project):
     '''
 
     def __repr__(self):
-        return (f'ManifestProject(path={repr(self.path)}, '
-                f'west_commands={self.west_commands}, '
-                f'topdir={repr(self.topdir)}, '
-                f'userdata={repr(self.userdata)})')
+        return (
+            f'ManifestProject(path={repr(self.path)}, '
+            f'west_commands={self.west_commands}, '
+            f'topdir={repr(self.topdir)}, '
+            f'userdata={repr(self.userdata)})'
+        )
 
-    def __init__(self, path: PathType | None = None,
-                 west_commands: WestCommandsType | None = None,
-                 topdir: PathType | None = None,
-                 userdata: Any | None = None):
+    def __init__(
+        self,
+        path: PathType | None = None,
+        west_commands: WestCommandsType | None = None,
+        topdir: PathType | None = None,
+        userdata: Any | None = None,
+    ):
         '''
         :param path: Relative path to the manifest repository in the
             west workspace, if known.
@@ -1191,8 +1269,7 @@ class ManifestProject(Project):
     @property
     def abspath(self) -> str | None:
         if self._abspath is None and self.topdir and self.path:
-            self._abspath = os.path.abspath(os.path.join(self.topdir,
-                                                         self.path))
+            self._abspath = os.path.abspath(os.path.join(self.topdir, self.path))
         return self._abspath
 
     def as_dict(self) -> dict:
@@ -1202,25 +1279,25 @@ class ManifestProject(Project):
         if self.path:
             ret['path'] = self.path
         if self.west_commands:
-            ret['west-commands'] = \
-                _west_commands_maybe_delist(self.west_commands)
+            ret['west-commands'] = _west_commands_maybe_delist(self.west_commands)
         if self.userdata:
             ret['userdata'] = self.userdata
         return ret
 
+
 class Manifest:
-    '''The parsed contents of a west manifest file.
-    '''
+    '''The parsed contents of a west manifest file.'''
 
     # TODO: make this a new west config: 'manifest.encoding'
     encoding: str = 'utf-8'
 
     @staticmethod
-    def from_topdir(topdir: PathType | None = None,
-                    config: Configuration | None = None,
-                    importer: ImporterType | None = None,
-                    import_flags: ImportFlag = ImportFlag.DEFAULT
-                    ) -> 'Manifest':
+    def from_topdir(
+        topdir: PathType | None = None,
+        config: Configuration | None = None,
+        importer: ImporterType | None = None,
+        import_flags: ImportFlag = ImportFlag.DEFAULT,
+    ) -> 'Manifest':
         '''Manifest object factory given a workspace topdir.
 
         The default behavior if *topdir* is not given is to find the
@@ -1233,16 +1310,15 @@ class Manifest:
         :param import_flags: passed to Manifest()
         '''
         if topdir is None:
-            topdir = Path(util.west_topdir(start=Path.cwd(),
-                                           fall_back=False)).resolve()
-        return Manifest(topdir=topdir, config=config,
-                        importer=importer, import_flags=import_flags)
+            topdir = Path(util.west_topdir(start=Path.cwd(), fall_back=False)).resolve()
+        return Manifest(topdir=topdir, config=config, importer=importer, import_flags=import_flags)
 
     @staticmethod
-    def from_file(source_file: PathType | None = None,
-                  importer: ImporterType | None = None,
-                  import_flags: ImportFlag = ImportFlag.DEFAULT
-                  ) -> 'Manifest':
+    def from_file(
+        source_file: PathType | None = None,
+        importer: ImporterType | None = None,
+        import_flags: ImportFlag = ImportFlag.DEFAULT,
+    ) -> 'Manifest':
         '''Manifest object factory given a source YAML file.
 
         The default behavior if *source_file* is not given is to find
@@ -1283,8 +1359,7 @@ class Manifest:
             fall_back = False
 
         # Find the workspace topdir.
-        topdir = Path(util.west_topdir(start=start,
-                                       fall_back=fall_back)).resolve()
+        topdir = Path(util.west_topdir(start=start, fall_back=fall_back)).resolve()
 
         # Load a Configuration.
         if source_file is None:
@@ -1293,26 +1368,28 @@ class Manifest:
             # Find the git repository we will treat as the
             # manifest.path, chopping off the newline, performing a
             # hopefully-safe decode, and resolving symlinks.
-            manifest_abspath = Path(subprocess.check_output(
-                ['git', 'rev-parse', '--show-toplevel'],
-                cwd=start)[:-1].decode('utf-8')).resolve()
+            manifest_abspath = Path(
+                subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], cwd=start)[
+                    :-1
+                ].decode('utf-8')
+            ).resolve()
             manifest_path = manifest_abspath.relative_to(topdir)
             patch_dict = {
                 'manifest.path': manifest_path,
-                'manifest.file': source_file.relative_to(manifest_abspath)
+                'manifest.file': source_file.relative_to(manifest_abspath),
             }
             # Patch the Configuration object to behave as though
             # source_file was the manifest file, as a special case.
             config = _PatchedConfiguration(patch_dict, topdir=topdir)
 
-        return Manifest(topdir=topdir, config=config,
-                        importer=importer, import_flags=import_flags)
+        return Manifest(topdir=topdir, config=config, importer=importer, import_flags=import_flags)
 
     @staticmethod
-    def from_data(source_data: ManifestDataType,
-                  importer: ImporterType | None = None,
-                  import_flags: ImportFlag = ImportFlag.DEFAULT
-                  ) -> 'Manifest':
+    def from_data(
+        source_data: ManifestDataType,
+        importer: ImporterType | None = None,
+        import_flags: ImportFlag = ImportFlag.DEFAULT,
+    ) -> 'Manifest':
         '''Manifest object factory given parsed YAML data.
 
         This factory does not read any configuration files.
@@ -1330,16 +1407,18 @@ class Manifest:
         '''
         if not source_data:
             raise MalformedManifest('manifest contains no data')
-        return Manifest(source_data=source_data, importer=importer,
-                        import_flags=import_flags)
+        return Manifest(source_data=source_data, importer=importer, import_flags=import_flags)
 
-    def __init__(self, *,  # All arguments are keyword-only.
-                 source_data: ManifestDataType | None = None,
-                 topdir: PathType | None = None,
-                 config: Configuration | None = None,
-                 importer: ImporterType | None = None,
-                 import_flags: ImportFlag = ImportFlag.DEFAULT,
-                 internal_import_ctx: _import_ctx | None = None):
+    def __init__(
+        self,
+        *,  # All arguments are keyword-only.
+        source_data: ManifestDataType | None = None,
+        topdir: PathType | None = None,
+        config: Configuration | None = None,
+        importer: ImporterType | None = None,
+        import_flags: ImportFlag = ImportFlag.DEFAULT,
+        internal_import_ctx: _import_ctx | None = None,
+    ):
         '''Using one of the factory methods may be easier than direct
         instantiation.
 
@@ -1510,12 +1589,14 @@ class Manifest:
         # but otherwise just get self._ctx from the caller.
         if internal_import_ctx is None:
             self._top_level: bool = True
-            self._ctx = self._top_level_init(source_data,
-                                             topdir,
-                                             topdir_abspath,
-                                             config,
-                                             importer or _default_importer,
-                                             import_flags)
+            self._ctx = self._top_level_init(
+                source_data,
+                topdir,
+                topdir_abspath,
+                config,
+                importer or _default_importer,
+                import_flags,
+            )
         else:
             self._top_level = False
             self._recursive_init(internal_import_ctx)
@@ -1526,11 +1607,9 @@ class Manifest:
         # file in case of errors, to help debugging.
 
         try:
-            self._ctx = self._ctx._replace(
-                current_data=validate(self._ctx.current_data))
+            self._ctx = self._ctx._replace(current_data=validate(self._ctx.current_data))
         except ManifestVersionError as mv:
-            raise ManifestVersionError(mv.version,
-                                       file=self._ctx.current_abspath) from mv
+            raise ManifestVersionError(mv.version, file=self._ctx.current_abspath) from mv
         except MalformedManifest as mm:
             self._malformed(mm.args[0], parent=mm)
         except TypeError as te:
@@ -1540,11 +1619,13 @@ class Manifest:
 
         self._load_validated()
 
-    def get_projects(self,
-                     # any str name is also a PathType
-                     project_ids: Iterable[PathType],
-                     allow_paths: bool = True,
-                     only_cloned: bool = False) -> list[Project]:
+    def get_projects(
+        self,
+        # any str name is also a PathType
+        project_ids: Iterable[PathType],
+        allow_paths: bool = True,
+        only_cloned: bool = False,
+    ) -> list[Project]:
         '''Get a list of `Project` objects in the manifest from
         *project_ids*.
 
@@ -1655,16 +1736,18 @@ class Manifest:
 
         :param active_only: Do not freeze inactive projects
         '''
+
         def pdict(p):
             if not p.is_cloned():
-                raise RuntimeError(f'cannot freeze; project {p.name} '
-                                   'is uncloned')
+                raise RuntimeError(f'cannot freeze; project {p.name} is uncloned')
             try:
                 sha = p.sha(QUAL_MANIFEST_REV_BRANCH)
             except subprocess.CalledProcessError as e:
-                raise RuntimeError(f'cannot freeze; project {p.name} '
-                                   f'ref {QUAL_MANIFEST_REV_BRANCH} '
-                                   'cannot be resolved to a SHA') from e
+                raise RuntimeError(
+                    f'cannot freeze; project {p.name} '
+                    f'ref {QUAL_MANIFEST_REV_BRANCH} '
+                    'cannot be resolved to a SHA'
+                ) from e
             d = p.as_dict()
             d['revision'] = sha
             return d
@@ -1672,7 +1755,7 @@ class Manifest:
         return self._as_dict_helper(pdict=pdict, pfilter=self.is_active if active_only else None)
 
     def _dump_yaml(self, to_dump: dict, **kwargs) -> str:
-        ''' Dumps dictionary to YAML using the multi-line string representer.
+        '''Dumps dictionary to YAML using the multi-line string representer.
 
         :param dict: dictionary to be dumped
         :param kwargs: passed to yaml.safe_dump()
@@ -1725,8 +1808,7 @@ class Manifest:
         '''
         return self._projects
 
-    def is_active(self, project: Project,
-                  extra_filter: Iterable[str] | None = None) -> bool:
+    def is_active(self, project: Project, extra_filter: Iterable[str] | None = None) -> bool:
         '''Is a project active?
 
         If the manifest.project-filter configuration option is set,
@@ -1796,8 +1878,7 @@ class Manifest:
             if cfg_gf:
                 _update_disabled_groups(disabled_groups, cfg_gf)
             if extra_filter is not None:
-                extra_filter = self._validated_group_filter(None,
-                                                            list(extra_filter))
+                extra_filter = self._validated_group_filter(None, list(extra_filter))
                 _update_disabled_groups(disabled_groups, extra_filter)
         else:
             disabled_groups = self._disabled_groups
@@ -1871,23 +1952,22 @@ class Manifest:
             if not stripped[0].startswith(('-', '+')):
                 _logger.warning(
                     f'ignoring invalid manifest.group-filter item {item}; '
-                    'this must start with "-" or "+"')
+                    'this must start with "-" or "+"'
+                )
                 continue
             if not is_group(stripped[1:]):
                 _logger.warning(
                     f'ignoring invalid manifest.group-filter item {item}; '
-                    f'"{stripped[1:]}" is not a group name')
+                    f'"{stripped[1:]}" is not a group name'
+                )
                 continue
             ret.append(stripped)
 
         return ret
 
-    def _malformed(self, complaint: str,
-                   parent: Exception | None = None) -> NoReturn:
-        context = (f'file: {self._ctx.current_abspath} '
-                   if self._ctx.current_abspath else 'data')
-        args = [f'Malformed manifest {context}',
-                f'Schema file: {_SCHEMA_PATH}']
+    def _malformed(self, complaint: str, parent: Exception | None = None) -> NoReturn:
+        context = f'file: {self._ctx.current_abspath} ' if self._ctx.current_abspath else 'data'
+        args = [f'Malformed manifest {context}', f'Schema file: {_SCHEMA_PATH}']
         if complaint:
             args.append('Hint: ' + complaint)
         exc = MalformedManifest(*args)
@@ -1896,9 +1976,9 @@ class Manifest:
         else:
             raise exc
 
-    def _top_level_init(self, source_data, topdir, topdir_abspath,
-                        config, project_importer,
-                        import_flags) -> _import_ctx:
+    def _top_level_init(
+        self, source_data, topdir, topdir_abspath, config, project_importer, import_flags
+    ) -> _import_ctx:
         # Validate the top-level arguments, perform some
         # top-level-only early initialization, and set up the initial
         # _import_ctx, returning it.
@@ -1923,20 +2003,17 @@ class Manifest:
 
             def get_option(option, default=None):
                 # Gets a ConfigFile.LOCAL option from 'config'.
-                return config.get(option, default=default,
-                                  configfile=ConfigFile.LOCAL)
+                return config.get(option, default=default, configfile=ConfigFile.LOCAL)
 
             manifest_path_option = get_option('manifest.path')
 
             if manifest_path_option is None:
-                raise MalformedConfig(
-                    'no local "manifest.path" config option is set')
+                raise MalformedConfig('no local "manifest.path" config option is set')
 
             manifest_path = Path(manifest_path_option)
 
             if manifest_path.is_absolute():
-                _logger.warning('"manifest.path" should not be absolute: %s',
-                                manifest_path_option)
+                _logger.warning('"manifest.path" should not be absolute: %s', manifest_path_option)
 
             manifest_file = get_option('manifest.file', _WEST_YML)
 
@@ -1949,7 +2026,8 @@ class Manifest:
                     f'file not found: manifest file {current_abspath} '
                     '(from configuration options '
                     f'manifest.path="{manifest_path_option}", '
-                    f'manifest.file="{manifest_file}")') from err
+                    f'manifest.file="{manifest_file}")'
+                ) from err
 
             current_repo_abspath = topdir_abspath / manifest_path
 
@@ -1959,21 +2037,22 @@ class Manifest:
             self.repo_abspath = os.fspath(current_repo_abspath)
             self._raw_config_group_filter = get_option('manifest.group-filter')
             self._config_path = manifest_path
-            _update_project_filter(project_filter,
-                                   config.get('manifest.project-filter'))
+            _update_project_filter(project_filter, config.get('manifest.project-filter'))
 
-        return _import_ctx(projects={},
-                           project_filter=project_filter,
-                           group_filter_q=deque(),
-                           manifest_west_commands=[],
-                           imap_filter=None,
-                           path_prefix=Path('.'),
-                           current_abspath=current_abspath,
-                           current_relpath=current_relpath,
-                           current_data=current_data,
-                           current_repo_abspath=current_repo_abspath,
-                           project_importer=project_importer,
-                           import_flags=import_flags)
+        return _import_ctx(
+            projects={},
+            project_filter=project_filter,
+            group_filter_q=deque(),
+            manifest_west_commands=[],
+            imap_filter=None,
+            path_prefix=Path('.'),
+            current_abspath=current_abspath,
+            current_relpath=current_relpath,
+            current_data=current_data,
+            current_repo_abspath=current_repo_abspath,
+            project_importer=project_importer,
+            import_flags=import_flags,
+        )
 
     def _recursive_init(self, ctx: _import_ctx):
         # Set up any required state that we need while recursively
@@ -2014,10 +2093,8 @@ class Manifest:
 
         # Add this manifest's projects to the map, and handle imported
         # projects and group-filter values.
-        url_bases = {r['name']: r['url-base'] for r in
-                     manifest_data.get('remotes', [])}
-        defaults = self._load_defaults(manifest_data.get('defaults', {}),
-                                       url_bases)
+        url_bases = {r['name']: r['url-base'] for r in manifest_data.get('remotes', [])}
+        defaults = self._load_defaults(manifest_data.get('defaults', {}), url_bases)
         self._load_projects(manifest_data, url_bases, defaults)
 
         # The manifest is resolved; perform post-resolution validation.
@@ -2030,7 +2107,9 @@ class Manifest:
             mp = ManifestProject(
                 path=self._config_path if self.topdir else self.yaml_path,
                 west_commands=self._ctx.manifest_west_commands,
-                topdir=self.topdir, userdata=self.userdata)
+                topdir=self.topdir,
+                userdata=self.userdata,
+            )
 
             # Save the resulting projects and initialize lookup tables
             # that rely on the ManifestProject existing.
@@ -2081,7 +2160,7 @@ class Manifest:
             self._top_level_group_filter = group_filter
 
     def _validated_group_filter(
-            self, source: str | None, raw_filter: list[RawGroupType]
+        self, source: str | None, raw_filter: list[RawGroupType]
     ) -> GroupFilterType:
         # Helper function for cleaning up nonempty manifest:
         # group-filter: and manifest.group-filter values.
@@ -2099,13 +2178,15 @@ class Manifest:
             if (not item) or (item[0] not in ('+', '-')):
                 self._malformed(
                     f'{source}group filter contains invalid item "{item}"; '
-                    'this must begin with "+" or "-"')
+                    'this must begin with "+" or "-"'
+                )
 
             group = item[1:]
             if not is_group(group):
                 self._malformed(
                     f'{source}group filter contains invalid item "{item}"; '
-                    f'"{group}" is an invalid group name')
+                    f'"{group}" is an invalid group name'
+                )
 
             ret.append(item)
 
@@ -2122,8 +2203,7 @@ class Manifest:
 
         yaml_path = slf.get('path')
         if 'path' in slf and not yaml_path:
-            self._malformed(f'self: path: is {yaml_path}; this value '
-                            'must be nonempty if present')
+            self._malformed(f'self: path: is {yaml_path}; this value must be nonempty if present')
         self.yaml_path = yaml_path
 
         imp = slf.get('import')
@@ -2146,7 +2226,8 @@ class Manifest:
         else:
             west_commands = []
         self._ctx.manifest_west_commands[:] = _west_commands_merge(
-            self._ctx.manifest_west_commands, west_commands)
+            self._ctx.manifest_west_commands, west_commands
+        )
 
     def _assert_imports_ok(self) -> None:
         # Sanity check that we aren't calling code that does importing
@@ -2204,8 +2285,7 @@ class Manifest:
         elif imptype is dict:
             self._import_map_from_self(imp)
         else:
-            self._malformed(
-                f'"self: import: {imp}" has invalid type {imptype}')
+            self._malformed(f'"self: import: {imp}" has invalid type {imptype}')
 
     def _import_path_from_self(self, imp: str) -> None:
         pathobj = Path(imp)
@@ -2230,8 +2310,7 @@ class Manifest:
                 hint = 'file not found'
             self._malformed(f'"self: import: {imp}": {hint}')
 
-    def _import_pathobj_from_self(self, pathobj_abs: Path,
-                                  pathobj: Path) -> None:
+    def _import_pathobj_from_self(self, pathobj_abs: Path, pathobj: Path) -> None:
         # - pathobj_abs: the resolved path to the manifest file
         # - pathobj: same, but relative to self.repo_abspath as obtained
         #   from the import data
@@ -2242,7 +2321,7 @@ class Manifest:
         child_ctx = self._ctx._replace(
             current_abspath=pathobj_abs,
             current_relpath=pathobj,
-            current_data=pathobj_abs.read_text(encoding=Manifest.encoding)
+            current_data=pathobj_abs.read_text(encoding=Manifest.encoding),
         )
         try:
             Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
@@ -2256,8 +2335,7 @@ class Manifest:
         # We therefore need to compose them during the recursive import.
 
         imap = self._load_imap(imp, f'manifest file {self.abspath}')
-        imap_filter = _compose_imap_filters(self._ctx.imap_filter,
-                                            _imap_filter(imap))
+        imap_filter = _compose_imap_filters(self._ctx.imap_filter, _imap_filter(imap))
         path_prefix = self._ctx.path_prefix / imap.path_prefix
 
         pathobj = Path(imap.file)
@@ -2269,8 +2347,7 @@ class Manifest:
         pathobj_abs = self.repo_abspath / pathobj
         if pathobj_abs.is_dir():
             # Use an iterator in case there are a lot of files in there.
-            to_import: Any = (f for f in sorted(pathobj_abs.iterdir())
-                              if _is_yml(f))
+            to_import: Any = (f for f in sorted(pathobj_abs.iterdir()) if _is_yml(f))
         else:
             to_import = iter([pathobj_abs])
 
@@ -2280,15 +2357,14 @@ class Manifest:
                 path_prefix=path_prefix,
                 current_abspath=import_abs,
                 current_relpath=pathobj / import_abs.name,
-                current_data=import_abs.read_text(encoding=Manifest.encoding)
+                current_data=import_abs.read_text(encoding=Manifest.encoding),
             )
             try:
                 Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
             except RecursionError as e:
                 raise _ManifestImportDepth(None, import_abs) from e
 
-    def _load_defaults(self, defaults: dict[str, Any],
-                       url_bases: dict[str, str]) -> _defaults:
+    def _load_defaults(self, defaults: dict[str, Any], url_bases: dict[str, str]) -> _defaults:
         # md = manifest defaults (dictionary with values parsed from
         # the manifest)
         mdrem: str | None = defaults.get('remote')
@@ -2299,9 +2375,9 @@ class Manifest:
                 self._malformed(f'default remote {mdrem} is not defined')
         return _defaults(mdrem, defaults.get('revision', _DEFAULT_REV))
 
-    def _load_projects(self, manifest: dict[str, Any],
-                       url_bases: dict[str, str],
-                       defaults: _defaults) -> None:
+    def _load_projects(
+        self, manifest: dict[str, Any], url_bases: dict[str, str], defaults: _defaults
+    ) -> None:
         # Load projects and add them to self._ctx.projects.
 
         have_imports = []
@@ -2311,15 +2387,18 @@ class Manifest:
             name = project.name
 
             if not _imap_filter_allows(self._ctx.imap_filter, project):
-                _logger.debug(f'project {name} in file {self.abspath} ' +
-                              'ignored: an importing manifest blocked or '
-                              'did not allow it')
+                _logger.debug(
+                    f'project {name} in file {self.abspath} '
+                    + 'ignored: an importing manifest blocked or '
+                    'did not allow it'
+                )
                 continue
 
             if name in names:
                 # Project names must be unique within a manifest.
-                self._malformed(f'project name {name} used twice in ' +
-                                (self.abspath or 'the same manifest'))
+                self._malformed(
+                    f'project name {name} used twice in ' + (self.abspath or 'the same manifest')
+                )
             names.add(name)
 
             # Add the project to the map if it's new.
@@ -2328,10 +2407,8 @@ class Manifest:
                 # Track project imports unless we are ignoring those.
                 imp = pd.get('import')
                 if imp:
-                    if self._ctx.import_flags & (ImportFlag.IGNORE |
-                                                 ImportFlag.IGNORE_PROJECTS):
-                        _logger.debug(
-                            f'project {project}: ignored import ({imp})')
+                    if self._ctx.import_flags & (ImportFlag.IGNORE | ImportFlag.IGNORE_PROJECTS):
+                        _logger.debug(f'project {project}: ignored import ({imp})')
                     else:
                         have_imports.append((project, imp))
 
@@ -2339,8 +2416,7 @@ class Manifest:
         for project, imp in have_imports:
             self._import_from_project(project, imp)
 
-    def _load_project(self, pd: dict, url_bases: dict[str, str],
-                      defaults: _defaults) -> Project:
+    def _load_project(self, pd: dict, url_bases: dict[str, str], defaults: _defaults) -> Project:
         # pd = project data (dictionary with values parsed from the
         # manifest)
 
@@ -2362,24 +2438,19 @@ class Manifest:
         remote = pd.get('remote')
         repo_path = pd.get('repo-path')
         if remote and url:
-            self._malformed(f'project {name} has both "remote: {remote}" '
-                            f'and "url: {url}"')
+            self._malformed(f'project {name} has both "remote: {remote}" and "url: {url}"')
         if defaults.remote and not (remote or url):
             remote = defaults.remote
 
         if url:
             if repo_path:
-                self._malformed(f'project {name} has "repo_path: {repo_path}" '
-                                f'and "url: {url}"')
+                self._malformed(f'project {name} has "repo_path: {repo_path}" and "url: {url}"')
         elif remote:
             if remote not in url_bases:
-                self._malformed(f'project {name} remote {remote} '
-                                'is not defined')
+                self._malformed(f'project {name} remote {remote} is not defined')
             url = url_bases[remote] + '/' + (repo_path or name)
         else:
-            self._malformed(
-                f'project {name} '
-                'has no remote or url and no default remote is set')
+            self._malformed(f'project {name} has no remote or url and no default remote is set')
 
         # The project's path needs to respect any import: path-prefix,
         # regardless of self._ctx.import_flags. The 'ignore' type flags
@@ -2415,21 +2486,24 @@ class Manifest:
             # but it's not clear what it is. Let's avoid weird edge cases
             # like "what do I do about a project whose group is disabled
             # that I need to import data from?".
-            self._malformed(
-                f'project {name}: "groups" cannot be combined with "import"')
+            self._malformed(f'project {name}: "groups" cannot be combined with "import"')
 
         userdata = pd.get('userdata')
 
-        ret = Project(name, url, description=pd.get('description'),
-                      revision=pd.get('revision', defaults.revision),
-                      path=path,
-                      submodules=self._load_submodules(pd.get('submodules'),
-                                                       f'project {name}'),
-                      clone_depth=pd.get('clone-depth'),
-                      west_commands=pd.get('west-commands'),
-                      topdir=self.topdir, remote_name=remote,
-                      groups=groups,
-                      userdata=userdata)
+        ret = Project(
+            name,
+            url,
+            description=pd.get('description'),
+            revision=pd.get('revision', defaults.revision),
+            path=path,
+            submodules=self._load_submodules(pd.get('submodules'), f'project {name}'),
+            clone_depth=pd.get('clone-depth'),
+            west_commands=pd.get('west-commands'),
+            topdir=self.topdir,
+            remote_name=remote,
+            groups=groups,
+            userdata=userdata,
+        )
 
         # Make sure the return Project's path does not escape the
         # workspace. We can't use escapes_directory() as that
@@ -2447,28 +2521,28 @@ class Manifest:
         # But here we also want to block drive-less "half-breeds".
         # Note this question has confused Python which changed the `.isabs()` behavior in 3.13
         if ret_norm[0] in '/\\' or os.path.isabs(ret_norm):
-            self._malformed(f'project "{ret.name}" has absolute path '
-                            f'{ret.path}; this must be relative to the '
-                            f'workspace topdir' +
-                            (f' ({self.topdir})' if self.topdir else ''))
+            self._malformed(
+                f'project "{ret.name}" has absolute path '
+                f'{ret.path}; this must be relative to the '
+                f'workspace topdir' + (f' ({self.topdir})' if self.topdir else '')
+            )
 
         if ret_norm.startswith('..'):
-            self._malformed(f'project "{name}" path {ret.path} '
-                            f'normalizes to {ret_norm}, which escapes '
-                            f'the workspace topdir')
+            self._malformed(
+                f'project "{name}" path {ret.path} '
+                f'normalizes to {ret_norm}, which escapes '
+                f'the workspace topdir'
+            )
 
         if Path(ret_norm).parts[0] == util.WEST_DIR:
-            self._malformed(f'project "{name}" path {ret.path} '
-                            f'is in the {util.WEST_DIR} directory')
+            self._malformed(f'project "{name}" path {ret.path} is in the {util.WEST_DIR} directory')
 
         return ret
 
-    def _validate_project_groups(self, project_name: str,
-                                 raw_groups: list[RawGroupType]):
+    def _validate_project_groups(self, project_name: str, raw_groups: list[RawGroupType]):
         for raw_group in raw_groups:
             if not is_group(raw_group):
-                self._malformed(f'project {project_name}: '
-                                f'invalid group "{raw_group}"')
+                self._malformed(f'project {project_name}: invalid group "{raw_group}"')
 
     def _load_submodules(self, submodules: Any, src: str) -> SubmodulesType:
         # Gets a list of Submodules objects or boolean from the manifest
@@ -2503,13 +2577,14 @@ class Manifest:
                 if _is_submodule_dict_ok(value):
                     ret.append(Submodule(**value))
                 else:
-                    self._malformed(f'{src}: invalid submodule element '
-                                    f'{value} at index {index}')
+                    self._malformed(f'{src}: invalid submodule element {value} at index {index}')
             return ret
 
-        self._malformed(f'{src}: invalid submodules: {submodules} '
-                        f'has type {type(submodules)}; '
-                        'expected a list or boolean')
+        self._malformed(
+            f'{src}: invalid submodules: {submodules} '
+            f'has type {type(submodules)}; '
+            'expected a list or boolean'
+        )
 
     def _import_from_project(self, project: Project, imp: Any):
         # Recursively resolve a manifest import from 'project'.
@@ -2519,8 +2594,10 @@ class Manifest:
 
         pfr = self._pfr(project)
         if pfr == PFR.INACTIVE:
-            _logger.debug(f'project {project.name} is inactive due to '
-                          'manifest.project-filter; ignoring its "import:"')
+            _logger.debug(
+                f'project {project.name} is inactive due to '
+                'manifest.project-filter; ignoring its "import:"'
+            )
             return
 
         self._assert_imports_ok()
@@ -2539,8 +2616,7 @@ class Manifest:
         elif imptype is dict:
             self._import_map_from_project(project, imp)
         else:
-            self._malformed(f'{project.name_and_path}: invalid import {imp} '
-                            f'type: {imptype}')
+            self._malformed(f'{project.name_and_path}: invalid import {imp} type: {imptype}')
 
     def _import_path_from_project(self, project: Project, path: str) -> None:
         # Import data from git at the given path at revision manifest-rev.
@@ -2558,8 +2634,7 @@ class Manifest:
 
         _logger.debug(f'done resolving import {path} for {project}')
 
-    def _import_map_from_project(self, project: Project,
-                                 imp: dict) -> None:
+    def _import_map_from_project(self, project: Project, imp: dict) -> None:
         imap = self._load_imap(imp, f'project {project.name}')
 
         _logger.debug(f'resolving import {imap} for {project}')
@@ -2573,13 +2648,13 @@ class Manifest:
 
         _logger.debug(f'done resolving import {imap} for {project}')
 
-    def _import_data_from_project(self, project: Project, data: Any,
-                                  imap: _import_map | None) -> None:
+    def _import_data_from_project(
+        self, project: Project, data: Any, imap: _import_map | None
+    ) -> None:
         # Destructively add the imported data into our 'projects' map.
 
         if imap is not None:
-            imap_filter = _compose_imap_filters(self._ctx.imap_filter,
-                                                _imap_filter(imap))
+            imap_filter = _compose_imap_filters(self._ctx.imap_filter, _imap_filter(imap))
             imap_path_prefix = imap.path_prefix
         else:
             imap_filter = self._ctx.imap_filter
@@ -2591,31 +2666,26 @@ class Manifest:
             current_abspath=None,
             current_relpath=None,
             current_data=data,
-            current_repo_abspath=(Path(project.abspath) if project.abspath
-                                  else None),
+            current_repo_abspath=(Path(project.abspath) if project.abspath else None),
             # If the manifest data we imported from the project has
             # west commands, they logically belong to 'project'.
             # We therefore use a separate list for tracking them
             # from our current list.
-            manifest_west_commands=[]
+            manifest_west_commands=[],
         )
         try:
-            submanifest = Manifest(topdir=self.topdir,
-                                   internal_import_ctx=child_ctx)
+            submanifest = Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
         except RecursionError as e:
-            raise _ManifestImportDepth(None, imap.file if imap else None) \
-                from e
+            raise _ManifestImportDepth(None, imap.file if imap else None) from e
 
         # Patch up any extension commands in the imported data
         # by allocating them to the project.
         project.west_commands = _west_commands_merge(
-            project.west_commands,
-            submanifest._ctx.manifest_west_commands)
+            project.west_commands, submanifest._ctx.manifest_west_commands
+        )
 
-    def _import_content_from_project(self, project: Project,
-                                     path: str) -> ImportedContentType:
-        if not (self._ctx.import_flags & ImportFlag.FORCE_PROJECTS) and \
-           project.is_cloned():
+    def _import_content_from_project(self, project: Project, path: str) -> ImportedContentType:
+        if not (self._ctx.import_flags & ImportFlag.FORCE_PROJECTS) and project.is_cloned():
             try:
                 content = _manifest_content_at(project, path, Manifest.encoding)
             except MalformedManifest as mm:
@@ -2646,25 +2716,19 @@ class Manifest:
         # Work on a copy in case the caller needs the full value.
         copy = dict(imp)
         # Preserve deprecated whitelist/blacklist terms
-        name_allowlist = copy.pop(
-            'name-allowlist', copy.pop('name-whitelist', [])
-        )
-        path_allowlist = copy.pop(
-            'path-allowlist', copy.pop('path-whitelist', [])
-        )
-        name_blocklist = copy.pop(
-            'name-blocklist', copy.pop('name-blacklist', [])
-        )
-        path_blocklist = copy.pop(
-            'path-blocklist', copy.pop('path-blacklist', [])
-        )
+        name_allowlist = copy.pop('name-allowlist', copy.pop('name-whitelist', []))
+        path_allowlist = copy.pop('path-allowlist', copy.pop('path-whitelist', []))
+        name_blocklist = copy.pop('name-blocklist', copy.pop('name-blacklist', []))
+        path_blocklist = copy.pop('path-blocklist', copy.pop('path-blacklist', []))
 
-        ret = _import_map(copy.pop('file', _WEST_YML),
-                          name_allowlist,
-                          path_allowlist,
-                          name_blocklist,
-                          path_blocklist,
-                          copy.pop('path-prefix', ''))
+        ret = _import_map(
+            copy.pop('file', _WEST_YML),
+            name_allowlist,
+            path_allowlist,
+            name_blocklist,
+            path_blocklist,
+            copy.pop('path-prefix', ''),
+        )
 
         # Check that the value is OK.
         #
@@ -2674,21 +2738,19 @@ class Manifest:
             # We popped out all of the valid keys already.
             self._malformed(f'{src}: invalid import contents: {copy}')
         elif not _is_imap_list(ret.name_allowlist):
-            self._malformed(f'{src}: bad import name-allowlist '
-                            f'{ret.name_allowlist}')
+            self._malformed(f'{src}: bad import name-allowlist {ret.name_allowlist}')
         elif not _is_imap_list(ret.path_allowlist):
-            self._malformed(f'{src}: bad import path-allowlist '
-                            f'{ret.path_allowlist}')
+            self._malformed(f'{src}: bad import path-allowlist {ret.path_allowlist}')
         elif not _is_imap_list(ret.name_blocklist):
-            self._malformed(f'{src}: bad import name-blocklist '
-                            f'{ret.name_blocklist}')
+            self._malformed(f'{src}: bad import name-blocklist {ret.name_blocklist}')
         elif not _is_imap_list(ret.path_blocklist):
-            self._malformed(f'{src}: bad import path-blocklist '
-                            f'{ret.path_blocklist}')
+            self._malformed(f'{src}: bad import path-blocklist {ret.path_blocklist}')
         elif not isinstance(ret.path_prefix, str):
-            self._malformed(f'{src}: bad import path-prefix '
-                            f'{ret.path_prefix}; expected str, not '
-                            f'{type(ret.path_prefix)}')
+            self._malformed(
+                f'{src}: bad import path-prefix '
+                f'{ret.path_prefix}; expected str, not '
+                f'{type(ret.path_prefix)}'
+            )
 
         return ret
 
@@ -2699,11 +2761,14 @@ class Manifest:
         if project.name not in self._ctx.projects:
             self._check_project_name(project)
             self._ctx.projects[project.name] = project
-            _logger.debug('added project %s path %s revision %s%s%s',
-                          project.name, project.path, project.revision,
-                          (f' from {self.abspath}' if self.abspath else ''),
-                          (f' groups {project.groups}' if project.groups
-                           else ''))
+            _logger.debug(
+                'added project %s path %s revision %s%s%s',
+                project.name,
+                project.path,
+                project.revision,
+                (f' from {self.abspath}' if self.abspath else ''),
+                (f' groups {project.groups}' if project.groups else ''),
+            )
             return True
         else:
             return False
@@ -2723,24 +2788,28 @@ class Manifest:
                     'whitespace; this is incompatible with use of the '
                     'manifest.project-filter option. '
                     '(These characters will be forbidden entirely in a '
-                    'future version of west.)')
+                    'future version of west.)'
+                )
             else:
                 _logger.warning(
                     f'project "{name}"{context} contains comma (",") or '
                     'whitespace; this will be forbidden in a future version '
-                    'of west')
+                    'of west'
+                )
 
     def _check_paths_are_unique(self) -> None:
         ppaths: dict[Path, Project] = {}
         for name, project in self._ctx.projects.items():
             pp = Path(project.path)
             if self._top_level and pp == self._config_path:
-                self._malformed(f'project {name} path "{project.path}" '
-                                'is taken by the manifest repository')
+                self._malformed(
+                    f'project {name} path "{project.path}" is taken by the manifest repository'
+                )
             other = ppaths.get(pp)
             if other:
-                self._malformed(f'project {name} path "{project.path}" '
-                                f'is taken by project {other.name}')
+                self._malformed(
+                    f'project {name} path "{project.path}" is taken by project {other.name}'
+                )
             ppaths[pp] = project
 
     def _final_group_filter(self, schema_version: str):
@@ -2758,7 +2827,8 @@ class Manifest:
                     "providing deprecated group-filter semantics "
                     "due to explicit 'manifest: version: 0.9'; "
                     "for the new semantics, use "
-                    "'manifest: version: \"0.10\"' or later")
+                    "'manifest: version: \"0.10\"' or later"
+                )
 
                 # Set attribute for white-box testing the above warning.
                 self._legacy_group_filter_warned = True
@@ -2767,13 +2837,14 @@ class Manifest:
 
         else:
             _logger.debug(
-                'group filters in precedence order (later is higher): %s',
-                self._ctx.group_filter_q)
+                'group filters in precedence order (later is higher): %s', self._ctx.group_filter_q
+            )
             for group_filter in self._ctx.group_filter_q:
                 _update_disabled_groups(self._disabled_groups, group_filter)
             ret = [f'-{g}' for g in sorted(self._disabled_groups)]
             _logger.debug('final top level group-filter: %s', ret)
             return ret
+
 
 class _PatchedConfiguration(Configuration):
     # Internal helper class that fakes out manifest.path and manifest.file
