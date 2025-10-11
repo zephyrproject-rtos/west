@@ -59,11 +59,12 @@ manifest:
     path: zephyr
 '''
 
-WINDOWS = (platform.system() == 'Windows')
+WINDOWS = platform.system() == 'Windows'
 
 #
 # Test fixtures
 #
+
 
 @pytest.fixture(scope='session', autouse=True)
 def _check_git_capabilities(tmpdir_factory):
@@ -78,13 +79,16 @@ def _check_git_capabilities(tmpdir_factory):
     tmpdir = tmpdir_factory.mktemp("west-check-git-caps-tmpdir")
 
     try:
-        subprocess.run([GIT, 'init', '--initial-branch', 'foo',
-                        os.fspath(tmpdir)],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                       check=True)
+        subprocess.run(
+            [GIT, 'init', '--initial-branch', 'foo', os.fspath(tmpdir)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
         GIT_INIT_HAS_BRANCH = True
     except subprocess.CalledProcessError:
         pass
+
 
 @pytest.fixture(scope='session')
 def _session_repos(tmp_path_factory):
@@ -97,7 +101,7 @@ def _session_repos(tmp_path_factory):
     shutil.rmtree(session_repos, ignore_errors=True)
 
     # Create the repositories.
-    rp = {}      # individual repository paths
+    rp = {}  # individual repository paths
     for repo in 'Kconfiglib', 'tagged_repo', 'net-tools', 'zephyr':
         path = os.path.join(session_repos, repo)
         rp[repo] = path
@@ -105,25 +109,35 @@ def _session_repos(tmp_path_factory):
 
     # Initialize the "zephyr" repository.
     # The caller needs to add west.yml with the right url-base.
-    add_commit(rp['zephyr'], 'base zephyr commit',
-               files={'CODEOWNERS': '',
-                      'include/header.h': '#pragma once\n',
-                      'subsys/bluetooth/code.c': 'void foo(void) {}\n'})
+    add_commit(
+        rp['zephyr'],
+        'base zephyr commit',
+        files={
+            'CODEOWNERS': '',
+            'include/header.h': '#pragma once\n',
+            'subsys/bluetooth/code.c': 'void foo(void) {}\n',
+        },
+    )
 
     # Initialize the Kconfiglib repository.
     create_branch(rp['Kconfiglib'], 'zephyr', checkout=True)
-    add_commit(rp['Kconfiglib'], 'test kconfiglib commit',
-               files={'kconfiglib.py': 'print("hello world kconfiglib")\n'})
+    add_commit(
+        rp['Kconfiglib'],
+        'test kconfiglib commit',
+        files={'kconfiglib.py': 'print("hello world kconfiglib")\n'},
+    )
 
     # Initialize the tagged_repo repository.
-    add_commit(rp['tagged_repo'], 'tagged_repo commit',
-               files={'test.txt': 'hello world'})
+    add_commit(rp['tagged_repo'], 'tagged_repo commit', files={'test.txt': 'hello world'})
     add_tag(rp['tagged_repo'], 'v1.0')
 
     # Initialize the net-tools repository.
-    add_commit(rp['net-tools'], 'test net-tools commit',
-               files={'qemu-script.sh': 'echo hello world net-tools\n',
-                      'scripts/west-commands.yml': textwrap.dedent('''\
+    add_commit(
+        rp['net-tools'],
+        'test net-tools commit',
+        files={
+            'qemu-script.sh': 'echo hello world net-tools\n',
+            'scripts/west-commands.yml': textwrap.dedent('''\
                       west-commands:
                         - file: scripts/test.py
                           commands:
@@ -131,7 +145,7 @@ def _session_repos(tmp_path_factory):
                               class: TestExtension
                               help: test-extension-help
                       '''),
-                      'scripts/test.py': textwrap.dedent('''\
+            'scripts/test.py': textwrap.dedent('''\
                       from west.commands import WestCommand
                       class TestExtension(WestCommand):
                           def __init__(self):
@@ -144,12 +158,14 @@ def _session_repos(tmp_path_factory):
                           def do_run(self, args, ignored):
                               print('Testing test command 1')
                       '''),
-                      })
+        },
+    )
 
     # Return the top-level temporary directory. Don't clean it up on
     # teardown, so the contents can be inspected post-portem.
     print('finished initializing session repositories')
     return session_repos
+
 
 @pytest.fixture
 def repos_tmpdir(tmpdir, _session_repos):
@@ -203,18 +219,18 @@ def repos_tmpdir(tmpdir, _session_repos):
 
     '''
     kconfiglib, tagged_repo, net_tools, zephyr = [
-        os.path.join(_session_repos, x) for x in
-        ['Kconfiglib', 'tagged_repo', 'net-tools', 'zephyr']]
+        os.path.join(_session_repos, x)
+        for x in ['Kconfiglib', 'tagged_repo', 'net-tools', 'zephyr']
+    ]
     repos = tmpdir.mkdir('repos')
     repos.chdir()
     for r in [kconfiglib, tagged_repo, net_tools, zephyr]:
         subprocess.check_call([GIT, 'clone', r])
 
-    manifest = MANIFEST_TEMPLATE.replace('THE_URL_BASE',
-                                         str(tmpdir.join('repos')))
-    add_commit(str(repos.join('zephyr')), 'add manifest',
-               files={'west.yml': manifest})
+    manifest = MANIFEST_TEMPLATE.replace('THE_URL_BASE', str(tmpdir.join('repos')))
+    add_commit(str(repos.join('zephyr')), 'add manifest', files={'west.yml': manifest})
     return tmpdir
+
 
 @pytest.fixture
 def west_init_tmpdir(repos_tmpdir):
@@ -233,6 +249,7 @@ def west_init_tmpdir(repos_tmpdir):
     cmd(['init', '-m', str(manifest), str(west_tmpdir)])
     west_tmpdir.chdir()
     return west_tmpdir
+
 
 @pytest.fixture
 def config_tmpdir(tmpdir):
@@ -272,9 +289,7 @@ def config_tmpdir(tmpdir):
         (td / '.west').ensure(dir=True)
         (td / '.west' / 'config').ensure(file=True)
         assert config._location(config.ConfigFile.LOCAL) == str(local)
-        assert (config._location(config.ConfigFile.LOCAL,
-                                 topdir=str(td)) ==
-                str(local))
+        assert config._location(config.ConfigFile.LOCAL, topdir=str(td)) == str(local)
         td.remove(rec=1)
         assert not td.exists()
 
@@ -298,9 +313,11 @@ def config_tmpdir(tmpdir):
         if 'WEST_CONFIG_LOCAL' in os.environ:
             del os.environ['WEST_CONFIG_LOCAL']
 
+
 #
 # Helper functions
 #
+
 
 def check_output(*args, **kwargs):
     # Like subprocess.check_output, but returns a string in the
@@ -308,14 +325,13 @@ def check_output(*args, **kwargs):
     try:
         out_bytes = subprocess.check_output(*args, **kwargs)
     except subprocess.CalledProcessError as e:
-        print('*** check_output: nonzero return code', e.returncode,
-              file=sys.stderr)
-        print('cwd =', os.getcwd(), 'args =', args,
-              'kwargs =', kwargs, file=sys.stderr)
+        print('*** check_output: nonzero return code', e.returncode, file=sys.stderr)
+        print('cwd =', os.getcwd(), 'args =', args, 'kwargs =', kwargs, file=sys.stderr)
         print('subprocess output:', file=sys.stderr)
         print(e.output.decode(), file=sys.stderr)
         raise
     return out_bytes.decode(sys.getdefaultencoding())
+
 
 def cmd(cmd, cwd=None, stderr=None, env=None):
     # Run a west command in a directory (cwd defaults to os.getcwd()).
@@ -371,12 +387,12 @@ def create_workspace(workspace_dir, and_git=True):
     dot_west = workspace_dir / '.west'
     dot_west.mkdir()
     with open(dot_west / 'config', 'w') as f:
-        f.write('[manifest]\n'
-                'path = mp')
+        f.write('[manifest]\npath = mp')
     mp = workspace_dir / 'mp'
     mp.mkdir()
     if and_git:
         create_repo(mp)
+
 
 def create_repo(path, initial_branch='master'):
     # Initializes a Git repository in 'path', and adds an initial
@@ -386,16 +402,14 @@ def create_repo(path, initial_branch='master'):
     path = os.fspath(path)
 
     if GIT_INIT_HAS_BRANCH:
-        subprocess.check_call([GIT, 'init', '--initial-branch', initial_branch,
-                               path])
+        subprocess.check_call([GIT, 'init', '--initial-branch', initial_branch, path])
     else:
         subprocess.check_call([GIT, 'init', path])
         # -B instead of -b because on some versions of git (at
         # least 2.25.1 as shipped by Ubuntu 20.04), if 'git init path'
         # created an 'initial_branch' already, we get errors that it
         # already exists with plain '-b'.
-        subprocess.check_call([GIT, 'checkout', '-B', initial_branch],
-                              cwd=path)
+        subprocess.check_call([GIT, 'checkout', '-B', initial_branch], cwd=path)
 
     config_repo(path)
     # make an individual commit to ensure a unique commit id
@@ -406,19 +420,19 @@ def config_repo(path):
     # Set name and email. This avoids a "Please tell me who you are" error when
     # there's no global default.
     subprocess.check_call([GIT, 'config', 'user.name', 'West Test'], cwd=path)
-    subprocess.check_call([GIT, 'config', 'user.email',
-                           'west-test@example.com'],
-                          cwd=path)
+    subprocess.check_call([GIT, 'config', 'user.email', 'west-test@example.com'], cwd=path)
+
 
 def create_branch(path, branch, checkout=False):
     subprocess.check_call([GIT, 'branch', branch], cwd=path)
     if checkout:
         checkout_branch(path, branch)
 
+
 def checkout_branch(path, branch, detach=False):
     detach = ['--detach'] if detach else []
-    subprocess.check_call([GIT, 'checkout', branch] + detach,
-                          cwd=path)
+    subprocess.check_call([GIT, 'checkout', branch] + detach, cwd=path)
+
 
 def add_commit(repo, msg, files=None, reconfigure=True):
     # Adds a commit with message 'msg' to the repo in 'repo'
@@ -457,8 +471,20 @@ def add_commit(repo, msg, files=None, reconfigure=True):
     # intervention or fail in environments where Git isn't
     # configured.
     subprocess.check_call(
-        [GIT, 'commit', '-a', '--allow-empty', '-m', msg, '--no-verify',
-         '--no-gpg-sign', '--no-post-rewrite'], cwd=repo)
+        [
+            GIT,
+            'commit',
+            '-a',
+            '--allow-empty',
+            '-m',
+            msg,
+            '--no-verify',
+            '--no-gpg-sign',
+            '--no-post-rewrite',
+        ],
+        cwd=repo,
+    )
+
 
 def add_tag(repo, tag, commit='HEAD', msg=None):
     repo = os.fspath(repo)
@@ -468,23 +494,26 @@ def add_tag(repo, tag, commit='HEAD', msg=None):
 
     # Override tag.gpgSign with --no-sign, in case the test
     # environment has that set to true.
-    subprocess.check_call([GIT, 'tag', '-m', msg, '--no-sign', tag, commit],
-                          cwd=repo)
+    subprocess.check_call([GIT, 'tag', '-m', msg, '--no-sign', tag, commit], cwd=repo)
+
 
 def remote_get_url(repo, remote='origin'):
     repo = os.fspath(repo)
     out = subprocess.check_output([GIT, 'remote', 'get-url', remote], cwd=repo)
     return out.decode(sys.getdefaultencoding()).strip()
 
+
 def rev_parse(repo, revision):
     repo = os.fspath(repo)
     out = subprocess.check_output([GIT, 'rev-parse', revision], cwd=repo)
     return out.decode(sys.getdefaultencoding()).strip()
 
+
 def rev_list(repo):
     repo = os.fspath(repo)
     out = subprocess.check_output([GIT, 'rev-list', '--all'], cwd=repo)
     return out.decode(sys.getdefaultencoding()).strip()
+
 
 def check_proj_consistency(actual, expected):
     # Check equality of all project fields (projects themselves are
@@ -513,9 +542,9 @@ def check_proj_consistency(actual, expected):
         assert a_abs == e_abs
         assert a_psx == e_psx
 
-    assert (actual.url == expected.url or
-            (WINDOWS and Path(expected.url).is_dir() and
-             (PurePath(actual.url) == PurePath(expected.url))))
+    assert actual.url == expected.url or (
+        WINDOWS and Path(expected.url).is_dir() and (PurePath(actual.url) == PurePath(expected.url))
+    )
     assert actual.clone_depth == expected.clone_depth
     assert actual.revision == expected.revision
     assert actual.west_commands == expected.west_commands

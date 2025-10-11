@@ -28,7 +28,10 @@ jobs:
           # Run linter/type checks only on 1 combination
           - os: ubuntu-latest
             python-version: '3.13'
-            task: lint
+            task: gh-lint
+          - os: ubuntu-latest
+            python-version: '3.13'
+            task: gh-format
           - os: ubuntu-latest
             python-version: '3.13'
             task: types

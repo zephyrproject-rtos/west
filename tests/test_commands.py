@@ -23,6 +23,7 @@ class WestCommandImpl(WestCommand):
     def do_run(self):
         pass
 
+
 cmd = WestCommandImpl(name="x", help="y", description="z")
 
 TEST_STR = "This is some test string"
@@ -67,6 +68,7 @@ TEST_CASES_LOG = [
     (Verbosity.QUIET, cmd.err, '', ''),
 ]
 
+
 @pytest.mark.parametrize("test_case", TEST_CASES_LOG)
 def test_log(capsys, test_case):
     max_log_level, log_cmd, exp_out, exp_err = test_case
@@ -81,10 +83,13 @@ def test_log(capsys, test_case):
 
 TEST_CASES_DIE = [
     # max_log_level, exp_out, exp_err, exp_exit, exp_exc
-    (Verbosity.DBG_EXTREME, '', EXPECTED_LOG_FATAL_ERROR, None,
-        RuntimeError('die with -vvv or more shows a stack trace. '
-                     'exit_code argument is ignored.'
-                     '')),
+    (
+        Verbosity.DBG_EXTREME,
+        '',
+        EXPECTED_LOG_FATAL_ERROR,
+        None,
+        RuntimeError('die with -vvv or more shows a stack trace. exit_code argument is ignored.'),
+    ),
     (Verbosity.DBG_MORE, '', EXPECTED_LOG_FATAL_ERROR, SystemExit(1), None),
     (Verbosity.DBG, '', EXPECTED_LOG_FATAL_ERROR, SystemExit(1), None),
     (Verbosity.INF, '', EXPECTED_LOG_FATAL_ERROR, SystemExit(1), None),
@@ -92,6 +97,7 @@ TEST_CASES_DIE = [
     (Verbosity.ERR, '', EXPECTED_LOG_FATAL_ERROR, SystemExit(1), None),
     (Verbosity.QUIET, '', '', SystemExit(1), None),
 ]
+
 
 @pytest.mark.parametrize("test_case", TEST_CASES_DIE)
 def test_die(capsys, test_case):

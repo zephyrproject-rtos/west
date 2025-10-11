@@ -2,8 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-'''Miscellaneous utilities.
-'''
+'''Miscellaneous utilities.'''
 
 import os
 import pathlib
@@ -20,6 +19,7 @@ import textwrap
 PathType = str | os.PathLike
 
 WEST_DIR = '.west'
+
 
 def escapes_directory(path: PathType, directory: PathType) -> bool:
     '''Returns True if `path` escapes parent directory `directory`.
@@ -38,17 +38,20 @@ def escapes_directory(path: PathType, directory: PathType) -> bool:
         ret = True
     return ret
 
+
 def quote_sh_list(cmd: list[str]) -> str:
     '''Transform a command from list into shell string form.'''
     return ' '.join(shlex.quote(s) for s in cmd)
 
+
 def wrap(text: str, indent: str) -> list[str]:
     '''Convenience routine for wrapping text to a consistent indent.'''
-    return textwrap.wrap(text, initial_indent=indent,
-                         subsequent_indent=indent)
+    return textwrap.wrap(text, initial_indent=indent, subsequent_indent=indent)
+
 
 class WestNotFound(RuntimeError):
     '''Neither the current directory nor any parent has a west workspace.'''
+
 
 def west_dir(start: PathType | None = None) -> str:
     '''Returns the absolute path of the workspace's .west directory.
@@ -61,8 +64,8 @@ def west_dir(start: PathType | None = None) -> str:
     '''
     return os.path.join(west_topdir(start), WEST_DIR)
 
-def west_topdir(start: PathType | None = None,
-                fall_back: bool = True) -> str:
+
+def west_topdir(start: PathType | None = None, fall_back: bool = True) -> str:
     '''
     Like west_dir(), but returns the path to the parent directory of the .west/
     directory instead, where project repositories are stored
@@ -77,9 +80,9 @@ def west_topdir(start: PathType | None = None,
         if cur_dir == parent_dir:
             # At the root. Should we fall back?
             if fall_back and os.environ.get('ZEPHYR_BASE'):
-                return west_topdir(os.environ['ZEPHYR_BASE'],
-                                   fall_back=False)
+                return west_topdir(os.environ['ZEPHYR_BASE'], fall_back=False)
             else:
-                raise WestNotFound('Could not find a west workspace '
-                                   'in this or any parent directory')
+                raise WestNotFound(
+                    'Could not find a west workspace in this or any parent directory'
+                )
         cur_dir = parent_dir

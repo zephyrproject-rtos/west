@@ -43,15 +43,14 @@ This package also provides support for extension commands.'''
 
 __all__ = ['CommandContextError', 'CommandError', 'WestCommand']
 
-_EXT_SCHEMA_PATH = os.path.join(os.path.dirname(__file__),
-                                'west-commands-schema.yml')
+_EXT_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'west-commands-schema.yml')
 
 # Cache which maps files implementing extension commands to their
 # imported modules.
 _EXT_MODULES_CACHE: dict[str, ModuleType] = {}
 # Infinite iterator of "fresh" extension command module names.
-_EXT_MODULES_NAME_IT = (f'west.commands.ext.cmd_{i}'
-                        for i in itertools.count(1))
+_EXT_MODULES_NAME_IT = (f'west.commands.ext.cmd_{i}' for i in itertools.count(1))
+
 
 class CommandError(RuntimeError):
     '''Indicates that a command failed.'''
@@ -60,8 +59,10 @@ class CommandError(RuntimeError):
         super().__init__()
         self.returncode = returncode
 
+
 class CommandContextError(CommandError):
     '''Indicates that a context-dependent command could not be run.'''
+
 
 class ExtensionCommandError(CommandError):
     '''Exception class indicating an extension command was badly
@@ -70,6 +71,7 @@ class ExtensionCommandError(CommandError):
     def __init__(self, **kwargs):
         self.hint = kwargs.pop('hint', None)
         super().__init__(**kwargs)
+
 
 def _no_topdir_msg(cwd, name):
     return f'''\
@@ -80,6 +82,7 @@ Things to try:
   - Run "west init" to set up a workspace here.
   - Run "west init -h" for additional information.
 '''
+
 
 class Verbosity(IntEnum):
     '''Verbosity levels for WestCommand instances.'''
@@ -111,6 +114,7 @@ class Verbosity(IntEnum):
     #: output is also printed.
     DBG_EXTREME = 6
 
+
 #: Color used (when applicable) for printing with inf()
 INF_COLOR = colorama.Fore.LIGHTGREEN_EX
 
@@ -120,13 +124,19 @@ WRN_COLOR = colorama.Fore.LIGHTYELLOW_EX
 #: Color used (when applicable) for printing with err() and die()
 ERR_COLOR = colorama.Fore.LIGHTRED_EX
 
+
 class WestCommand(ABC):
     '''Abstract superclass for a west command.'''
 
-    def __init__(self, name: str, help: str, description: str,
-                 accepts_unknown_args: bool = False,
-                 requires_workspace: bool = True,
-                 verbosity: Verbosity = Verbosity.INF):
+    def __init__(
+        self,
+        name: str,
+        help: str,
+        description: str,
+        accepts_unknown_args: bool = False,
+        requires_workspace: bool = True,
+        verbosity: Verbosity = Verbosity.INF,
+    ):
         '''Abstract superclass for a west command.
 
         Some fields, such as *name*, *help*, and *description*,
@@ -158,8 +168,7 @@ class WestCommand(ABC):
         self.config = None
         self._hooks: list[Callable[[WestCommand], None]] = []
 
-    def add_pre_run_hook(self,
-                         hook: Callable[['WestCommand'], None]) -> None:
+    def add_pre_run_hook(self, hook: Callable[['WestCommand'], None]) -> None:
         '''Add a hook which will be called right before do_run().
 
         This can be useful to defer work that needs a fully set up
@@ -169,10 +178,14 @@ class WestCommand(ABC):
         '''
         self._hooks.append(hook)
 
-    def run(self, args: argparse.Namespace, unknown: list[str],
-            topdir: PathType,
-            manifest: Manifest | None = None,
-            config: Configuration | None = None) -> None:
+    def run(
+        self,
+        args: argparse.Namespace,
+        unknown: list[str],
+        topdir: PathType,
+        manifest: Manifest | None = None,
+        config: Configuration | None = None,
+    ) -> None:
         '''Run the command.
 
         This raises `west.commands.CommandContextError` if the command
@@ -254,8 +267,7 @@ class WestCommand(ABC):
 
     @property
     def has_manifest(self) -> bool:
-        '''Property which is True if self.manifest is safe to access.
-        '''
+        '''Property which is True if self.manifest is safe to access.'''
         return self._manifest is not None
 
     def _get_manifest(self) -> Manifest:
@@ -265,9 +277,11 @@ class WestCommand(ABC):
         Otherwise, a fatal error occurs.
         '''
         if self._manifest is None:
-            self.die(f"can't run west {self.name};",
-                     "it requires the manifest, which was not available.",
-                     'Try "west -vv manifest --validate" to debug.')
+            self.die(
+                f"can't run west {self.name};",
+                "it requires the manifest, which was not available.",
+                'Try "west -vv manifest --validate" to debug.',
+            )
         return self._manifest
 
     def _set_manifest(self, manifest: Manifest | None):
@@ -280,8 +294,7 @@ class WestCommand(ABC):
 
     @property
     def has_config(self) -> bool:
-        '''Property which is True if self.config is safe to access.
-        '''
+        '''Property which is True if self.config is safe to access.'''
         return self._config is not None
 
     def _get_config(self) -> Configuration:
@@ -291,8 +304,10 @@ class WestCommand(ABC):
         Otherwise, a fatal error occurs.
         '''
         if self._config is None:
-            self.die(f"can't run west {self.name}; it requires config "
-                     "variables, which were not available.")
+            self.die(
+                f"can't run west {self.name}; it requires config "
+                "variables, which were not available."
+            )
         return self._config
 
     def _set_config(self, config: Configuration | None):
@@ -301,9 +316,10 @@ class WestCommand(ABC):
     config = property(_get_config, _set_config)
 
     def _log_subproc(self, args, **kwargs):
-        self.dbg(f"running '{quote_sh_list(args)}' in "
-                 f"{kwargs.get('cwd') or os.getcwd()}",
-                 level=Verbosity.DBG_MORE)
+        self.dbg(
+            f"running '{quote_sh_list(args)}' in {kwargs.get('cwd') or os.getcwd()}",
+            level=Verbosity.DBG_MORE,
+        )
 
     #
     # Other public methods
@@ -331,8 +347,7 @@ class WestCommand(ABC):
         return subprocess.run(args, errors='backslashreplace', **kwargs)
 
     def die_if_no_git(self):
-        '''Abort if git is not installed on PATH.
-        '''
+        '''Abort if git is not installed on PATH.'''
         if not hasattr(self, '_git'):
             self._git = shutil.which('git')
         if self._git is None:
@@ -396,12 +411,13 @@ class WestCommand(ABC):
 
         match = re.search(
             r'\s(?P<major>\d+)\.(?P<minor>\d+)(\.(?P<patch>\d+))?',
-            raw_version.decode(), flags=re.ASCII)
+            raw_version.decode(),
+            flags=re.ASCII,
+        )
         if not match:
             return None
 
-        major, minor, patch = (match.group('major'), match.group('minor'),
-                               match.group('patch'))
+        major, minor, patch = (match.group('major'), match.group('minor'), match.group('patch'))
         version = int(major), int(minor)
         if patch is None:
             return version
@@ -519,8 +535,9 @@ class WestCommand(ABC):
         abort with the given *exit_code*.'''
         self.err(*args, fatal=True)
         if self.verbosity >= Verbosity.DBG_EXTREME:
-            raise RuntimeError("die with -vvv or more shows a stack trace. "
-                               "exit_code argument is ignored.")
+            raise RuntimeError(
+                "die with -vvv or more shows a stack trace. exit_code argument is ignored."
+            )
         else:
             sys.exit(exit_code)
 
@@ -547,9 +564,9 @@ class WestCommand(ABC):
 # implementation detail.
 #
 
+
 @dataclass
 class _ExtFactory:
-
     py_file: str
     name: str
     attr: str
@@ -565,22 +582,20 @@ class _ExtFactory:
         try:
             mod = _commands_module_from_file(self.py_file)
         except ImportError as ie:
-            raise ExtensionCommandError(
-                hint=f'could not import {self.py_file}') from ie
+            raise ExtensionCommandError(hint=f'could not import {self.py_file}') from ie
 
         # Get the attribute which provides the WestCommand subclass.
         try:
             cls = getattr(mod, self.attr)
         except AttributeError as ae:
-            raise ExtensionCommandError(
-                hint=f'no attribute {self.attr} in {self.py_file}') from ae
+            raise ExtensionCommandError(hint=f'no attribute {self.attr} in {self.py_file}') from ae
 
         # Create the command instance and return it.
         try:
             return cls()
         except Exception as e:
-            raise ExtensionCommandError(
-                hint='command constructor threw an exception') from e
+            raise ExtensionCommandError(hint='command constructor threw an exception') from e
+
 
 @dataclass
 class WestExtCommandSpec:
@@ -602,8 +617,8 @@ class WestExtCommandSpec:
     # the command) before constructing it, however.
     factory: _ExtFactory
 
-def extension_commands(config: Configuration,
-                       manifest: Manifest | None = None):
+
+def extension_commands(config: Configuration, manifest: Manifest | None = None):
     # Get descriptions of available extension commands.
     #
     # The return value is an ordered map from project paths to lists of
@@ -617,8 +632,7 @@ def extension_commands(config: Configuration,
     # :param manifest: a parsed ``west.manifest.Manifest`` object, or None
     #                  to reload a new one.
 
-    allow_extensions = config.getboolean('commands.allow_extensions',
-                                         default=True)
+    allow_extensions = config.getboolean('commands.allow_extensions', default=True)
     if not allow_extensions:
         return {}
 
@@ -630,6 +644,7 @@ def extension_commands(config: Configuration,
         if project.west_commands:
             specs[project.path] = _ext_specs(project)
     return specs
+
 
 def _ext_specs(project):
     # Get a list of WestExtCommandSpec objects for the given
@@ -644,8 +659,8 @@ def _ext_specs(project):
         # outside of the project.
         if escapes_directory(spec_file, project.abspath):
             raise ExtensionCommandError(
-                hint=f'west-commands file {cmd} '
-                f'escapes project path {project.path}')
+                hint=f'west-commands file {cmd} escapes project path {project.path}'
+            )
 
         # The project may not be cloned yet, or this might be coming
         # from a manifest that was copy/pasted into a self import
@@ -661,14 +676,15 @@ def _ext_specs(project):
                 raise ExtensionCommandError from e
         try:
             pykwalify.core.Core(
-                source_data=commands_spec,
-                schema_files=[_EXT_SCHEMA_PATH]).validate()
+                source_data=commands_spec, schema_files=[_EXT_SCHEMA_PATH]
+            ).validate()
         except pykwalify.errors.SchemaError as e:
             raise ExtensionCommandError from e
 
         for commands_desc in commands_spec['west-commands']:
             ret.extend(_ext_specs_from_desc(project, commands_desc))
     return ret
+
 
 def _ext_specs_from_desc(project, commands_desc):
     py_file = os.path.join(project.abspath, commands_desc['file'])
@@ -677,20 +693,21 @@ def _ext_specs_from_desc(project, commands_desc):
     if escapes_directory(py_file, project.abspath):
         raise ExtensionCommandError(
             hint=f'extension command python file "{commands_desc["file"]}" '
-            f'escapes project path {project.path}')
+            f'escapes project path {project.path}'
+        )
 
     # Create the command thunks.
     thunks = []
     for command_desc in commands_desc['commands']:
         name = command_desc['name']
         attr = command_desc.get('class', name)
-        help = command_desc.get('help',
-                                f'(no help provided; try "west {name} -h")')
+        help = command_desc.get('help', f'(no help provided; try "west {name} -h")')
         factory = _ExtFactory(py_file, name, attr)
         thunks.append(WestExtCommandSpec(name, project, help, factory))
 
     # Return the thunks for this project.
     return thunks
+
 
 def _commands_module_from_file(file):
     # Python magic for importing a module containing west extension

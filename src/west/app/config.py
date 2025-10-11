@@ -83,10 +83,8 @@ LOCAL = ConfigFile.LOCAL
 class Config(WestCommand):
     def __init__(self):
         super().__init__(
-            'config',
-            'get or set config file values',
-            CONFIG_DESCRIPTION,
-            requires_workspace=False)
+            'config', 'get or set config file values', CONFIG_DESCRIPTION, requires_workspace=False
+        )
 
     def do_add_parser(self, parser_adder):
         parser = parser_adder.add_parser(
@@ -94,38 +92,58 @@ class Config(WestCommand):
             help=self.help,
             formatter_class=argparse.RawDescriptionHelpFormatter,
             description=self.description,
-            epilog=CONFIG_EPILOG)
+            epilog=CONFIG_EPILOG,
+        )
 
         group = parser.add_argument_group(
             "action to perform (give at most one)"
         ).add_mutually_exclusive_group()
 
-        group.add_argument('-l', '--list', action='store_true',
-                           help='list all options and their values')
-        group.add_argument('-d', '--delete', action='store_true',
-                           help='delete an option in one config file')
-        group.add_argument('-D', '--delete-all', action='store_true',
-                           help="delete an option everywhere it's set")
-        group.add_argument('-a', '--append', action='store_true',
-                           help='append to an existing value')
+        group.add_argument(
+            '-l', '--list', action='store_true', help='list all options and their values'
+        )
+        group.add_argument(
+            '-d', '--delete', action='store_true', help='delete an option in one config file'
+        )
+        group.add_argument(
+            '-D', '--delete-all', action='store_true', help="delete an option everywhere it's set"
+        )
+        group.add_argument(
+            '-a', '--append', action='store_true', help='append to an existing value'
+        )
 
         group = parser.add_argument_group(
             "configuration file to use (give at most one)"
         ).add_mutually_exclusive_group()
 
-        group.add_argument('--system', dest='configfile',
-                           action='store_const', const=SYSTEM,
-                           help='system-wide file')
-        group.add_argument('--global', dest='configfile',
-                           action='store_const', const=GLOBAL,
-                           help='global (user-wide) file')
-        group.add_argument('--local', dest='configfile',
-                           action='store_const', const=LOCAL,
-                           help="this workspace's file")
+        group.add_argument(
+            '--system',
+            dest='configfile',
+            action='store_const',
+            const=SYSTEM,
+            help='system-wide file',
+        )
+        group.add_argument(
+            '--global',
+            dest='configfile',
+            action='store_const',
+            const=GLOBAL,
+            help='global (user-wide) file',
+        )
+        group.add_argument(
+            '--local',
+            dest='configfile',
+            action='store_const',
+            const=LOCAL,
+            help="this workspace's file",
+        )
 
-        parser.add_argument('name', nargs='?',
-                            help='''config option in section.key format;
-                            e.g. "foo.bar" is section "foo", key "bar"''')
+        parser.add_argument(
+            'name',
+            nargs='?',
+            help='''config option in section.key format;
+                    e.g. "foo.bar" is section "foo", key "bar"''',
+        )
         parser.add_argument('value', nargs='?', help='value to set "name" to')
 
         return parser
@@ -136,8 +154,7 @@ class Config(WestCommand):
             if args.name:
                 self.parser.error('-l cannot be combined with name argument')
         elif not args.name:
-            self.parser.error('missing argument name '
-                              '(to list all options and values, use -l)')
+            self.parser.error('missing argument name (to list all options and values, use -l)')
         elif args.append:
             if args.value is None:
                 self.parser.error('-a requires both name and value')
@@ -174,16 +191,14 @@ class Config(WestCommand):
                 return
             except KeyError as err:
                 if i == len(configfiles) - 1:
-                    self.dbg(
-                        f'{args.name} was not set in requested location(s)')
+                    self.dbg(f'{args.name} was not set in requested location(s)')
                     raise CommandError(returncode=1) from err
             except PermissionError as pe:
                 self._perm_error(pe, configfile, args.name)
 
     def check_config(self, option):
         if '.' not in option:
-            self.die(f'invalid configuration option "{option}"; '
-                     'expected "section.key" format')
+            self.die(f'invalid configuration option "{option}"; expected "section.key" format')
 
     def read(self, args):
         self.check_config(args.name)
@@ -199,8 +214,7 @@ class Config(WestCommand):
         where = args.configfile or LOCAL
         value = self.config.get(args.name, configfile=where)
         if value is None:
-            self.die(f'option {args.name} not found in the {where.name.lower()} '
-                     'configuration file')
+            self.die(f'option {args.name} not found in the {where.name.lower()} configuration file')
         args.value = value + args.value
         self.write(args)
 
@@ -213,7 +227,5 @@ class Config(WestCommand):
             self._perm_error(pe, what, args.name)
 
     def _perm_error(self, pe, what, name):
-        rootp = ('; are you root/administrator?' if what in [SYSTEM, ALL]
-                 else '')
-        self.die(f"can't update {name}: "
-                 f"permission denied when writing {pe.filename}{rootp}")
+        rootp = '; are you root/administrator?' if what in [SYSTEM, ALL] else ''
+        self.die(f"can't update {name}: permission denied when writing {pe.filename}{rootp}")
