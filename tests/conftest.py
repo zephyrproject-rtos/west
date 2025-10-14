@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+import contextlib
 import os
 import platform
 import shutil
@@ -12,8 +13,6 @@ import uuid
 from pathlib import Path, PurePath
 
 import pytest
-
-from west import configuration as config
 
 GIT = shutil.which('git')
 
@@ -62,7 +61,56 @@ manifest:
 WINDOWS = platform.system() == 'Windows'
 
 #
-# Test fixtures
+# Contextmanager
+#
+
+
+@contextlib.contextmanager
+def update_env(env: dict[str, str | None]):
+    """
+    Temporarily update the process environment variables.
+    This context manager updates `os.environ` with the key-value pairs
+    provided in the `env` dictionary for the duration of the `with` block.
+    The existing environment is preserved and fully restored when the block
+    exits. If the value is set to None, the environment variable is unset.
+    """
+    env_bak = dict(os.environ)
+    env_vars = {}
+    for k, v in env.items():
+        # unset if value is None
+        if v is None and k in os.environ:
+            del os.environ[k]
+        # set env variable to new value only if v is not None
+        elif v is not None:
+            env_vars[k] = v
+    # apply the new environment
+    os.environ.update(env_vars)
+    try:
+        yield
+    finally:
+        # reset to previous environment
+        os.environ.clear()
+        os.environ.update(env_bak)
+
+
+@contextlib.contextmanager
+def chdir(path):
+    """
+    Temporarily change the current working directory.
+    This context manager changes the current working directory to `path`
+    for the duration of the `with` block. After the block exits, the
+    working directory is restored to its original value.
+    """
+    oldpwd = os.getcwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(oldpwd)
+
+
+#
+# Test fixtures (autouse=True)
 #
 
 
@@ -88,6 +136,35 @@ def _check_git_capabilities(tmpdir_factory):
         GIT_INIT_HAS_BRANCH = True
     except subprocess.CalledProcessError:
         pass
+
+
+@pytest.fixture(autouse=True)
+def independent_global_and_system_config(tmpdir_factory):
+    # Fixture to ensure that the user's actual global and system configuration
+    # files are neither used nor touched during test.
+    #
+    # We also set ZEPHYR_BASE (to avoid complaints in subcommand
+    # stderr), but to a spurious location (so that attempts to read
+    # from inside of it are caught here).
+    #
+    tmpdir = Path(tmpdir_factory.mktemp("test-configs"))
+
+    # config paths
+    system = tmpdir / 'config.system'
+    glbl = tmpdir / 'config.global'
+
+    # run with environment variables set
+    with update_env({
+        'WEST_CONFIG_SYSTEM': str(system),
+        'WEST_CONFIG_GLOBAL': str(glbl),
+        'ZEPHYR_BASE': str(tmpdir / 'no-zephyr-here'),
+    }):
+        yield
+
+
+#
+# Test fixtures
+#
 
 
 @pytest.fixture(scope='session')
@@ -254,64 +331,20 @@ def west_init_tmpdir(repos_tmpdir):
 @pytest.fixture
 def config_tmpdir(tmpdir):
     # Fixture for running from a temporary directory with
-    # environmental overrides in place so all configuration files
-    # live inside of it. This makes sure we don't touch
-    # the user's actual files.
-    #
-    # We also set ZEPHYR_BASE (to avoid complaints in subcommand
-    # stderr), but to a spurious location (so that attempts to read
-    # from inside of it are caught here).
+    # environmental overrides in place so local configuration file
+    # live inside of it. This ensures we don't touch the user's local config.
     #
     # Using this makes the tests run faster than if we used
     # west_init_tmpdir from conftest.py, and also ensures that the
     # configuration code doesn't depend on features like the existence
     # of a manifest file, helping separate concerns.
-    system = tmpdir / 'config.system'
-    glbl = tmpdir / 'config.global'
-    local = tmpdir / 'config.local'
 
-    os.environ['ZEPHYR_BASE'] = str(tmpdir.join('no-zephyr-here'))
-    os.environ['WEST_CONFIG_SYSTEM'] = str(system)
-    os.environ['WEST_CONFIG_GLOBAL'] = str(glbl)
-    os.environ['WEST_CONFIG_LOCAL'] = str(local)
+    # determine a local config in tmp dir
+    local_config = tmpdir / 'config.local'
 
-    # Make sure our environment variables (as well as other topdirs)
-    # are respected from tmpdir, and we aren't going to touch the
-    # user's real files.
-    start_dir = os.getcwd()
-    tmpdir.chdir()
-
-    try:
-        assert config._location(config.ConfigFile.SYSTEM) == str(system)
-        assert config._location(config.ConfigFile.GLOBAL) == str(glbl)
-        td = tmpdir / 'test-topdir'
-        td.ensure(dir=True)
-        (td / '.west').ensure(dir=True)
-        (td / '.west' / 'config').ensure(file=True)
-        assert config._location(config.ConfigFile.LOCAL) == str(local)
-        assert config._location(config.ConfigFile.LOCAL, topdir=str(td)) == str(local)
-        td.remove(rec=1)
-        assert not td.exists()
-
-        assert not local.exists()
-
-        # All clear: switch to the temporary directory and run the test.
+    # run the test within tmpdir and with env variable set
+    with chdir(tmpdir), update_env({'WEST_CONFIG_LOCAL': str(local_config)}):
         yield tmpdir
-    finally:
-        # Go back to where we started, for repeatability of results.
-        os.chdir(start_dir)
-
-        # Clean up after ourselves so other test cases don't know
-        # about this tmpdir. It's OK if test cases deleted these
-        # settings already.
-        if 'ZEPHYR_BASE' in os.environ:
-            del os.environ['ZEPHYR_BASE']
-        if 'WEST_CONFIG_SYSTEM' in os.environ:
-            del os.environ['WEST_CONFIG_SYSTEM']
-        if 'WEST_CONFIG_GLOBAL' in os.environ:
-            del os.environ['WEST_CONFIG_GLOBAL']
-        if 'WEST_CONFIG_LOCAL' in os.environ:
-            del os.environ['WEST_CONFIG_LOCAL']
 
 
 #
