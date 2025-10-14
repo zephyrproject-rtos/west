@@ -58,6 +58,8 @@ class _InternalCF:
     # For internal use only; convenience interface for reading and
     # writing INI-style [section] key = value configuration files,
     # but presenting a west-style section.key = value style API.
+    # Unlike the higher level and public "Configuration" class, there is
+    # one _InternalCF object for each location: LOCAL, GLOBAL,...
 
     @staticmethod
     def parse_key(dotted_name: str):
@@ -225,8 +227,9 @@ class Configuration:
         '''
         return self._get(lambda cf: cf.getfloat(option), default, configfile)
 
-    def _get(self, getter, default, configfile):
-        for cf in self._whence(configfile):
+    def _get(self, getter, default, locations: ConfigFile):
+        # Search requested location(s) from higher to lower precedence
+        for cf in self._whence(locations):
             if cf is None:
                 continue
             try:
@@ -236,21 +239,21 @@ class Configuration:
 
         return default
 
-    def _whence(self, configfile):
-        if configfile == ConfigFile.ALL:
+    def _whence(self, locations: ConfigFile) -> list[_InternalCF | None]:
+        if locations == ConfigFile.ALL:
             if self._local is not None:
                 return [self._local, self._global, self._system]
             return [self._global, self._system]
-        elif configfile == ConfigFile.SYSTEM:
+        elif locations == ConfigFile.SYSTEM:
             return [self._system]
-        elif configfile == ConfigFile.GLOBAL:
+        elif locations == ConfigFile.GLOBAL:
             return [self._global]
-        elif configfile == ConfigFile.LOCAL:
+        elif locations == ConfigFile.LOCAL:
             if self._local is None:
                 raise MalformedConfig('local configuration file not found')
             return [self._local]
         else:
-            raise ValueError(configfile)
+            raise ValueError(locations)
 
     def set(self, option: str, value: Any,
             configfile: ConfigFile = ConfigFile.LOCAL) -> None:
