@@ -93,6 +93,21 @@ def test_config_global():
     assert 'pytest' not in lcl
 
 
+def test_config_print_path():
+    stdout = cmd('config --local --print-path')
+    assert os.environ["WEST_CONFIG_LOCAL"] == stdout.rstrip()
+
+    stdout = cmd('config --global --print-path')
+    assert os.environ["WEST_CONFIG_GLOBAL"] == stdout.rstrip()
+
+    stdout = cmd('config --system --print-path')
+    assert os.environ["WEST_CONFIG_SYSTEM"] == stdout.rstrip()
+
+    del os.environ['WEST_CONFIG_LOCAL']
+    stdout = cmd('config --local --print-path')
+    assert "" == stdout.rstrip()
+
+
 def test_config_local():
     # test_config_system for local variables.
     cmd('config --local pytest.local foo')

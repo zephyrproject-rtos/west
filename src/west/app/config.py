@@ -42,6 +42,11 @@ Configuration values from later configuration files override configuration
 from earlier ones. Local values have highest precedence, and system values
 lowest.
 
+To get the according config file path:
+    west config --local --print-path
+    west config --global --print-path
+    west config --system --print-path
+
 To get a value for <name>, type:
     west config <name>
 
@@ -100,6 +105,12 @@ class Config(WestCommand):
         ).add_mutually_exclusive_group()
 
         group.add_argument(
+            '-p',
+            '--print-path',
+            action='store_true',
+            help='print file path from according west config(--system, --global, --local)',
+        )
+        group.add_argument(
             '-l', '--list', action='store_true', help='list all options and their values'
         )
         group.add_argument(
@@ -153,13 +164,15 @@ class Config(WestCommand):
         if args.list:
             if args.name:
                 self.parser.error('-l cannot be combined with name argument')
-        elif not args.name:
+        elif not args.name and not args.print_path:
             self.parser.error('missing argument name (to list all options and values, use -l)')
         elif args.append:
             if args.value is None:
                 self.parser.error('-a requires both name and value')
 
-        if args.list:
+        if args.print_path:
+            self.print_path(args)
+        elif args.list:
             self.list(args)
         elif delete:
             self.delete(args)
@@ -169,6 +182,11 @@ class Config(WestCommand):
             self.append(args)
         else:
             self.write(args)
+
+    def print_path(self, args):
+        config_path = self.config.get_path(args.configfile or LOCAL)
+        if config_path:
+            print(config_path)
 
     def list(self, args):
         what = args.configfile or ALL
