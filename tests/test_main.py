@@ -1,3 +1,8 @@
+import runpy
+import sys
+from pathlib import Path
+
+import pytest
 from conftest import cmd, cmd_subprocess
 
 import west.version
@@ -21,3 +26,25 @@ def test_main():
 
     # output must be same in both cases
     assert output_subprocess.rstrip() == output_directly.rstrip()
+
+
+def test_module_run(tmp_path, monkeypatch):
+    actual_path = ['initial-path']
+
+    # mock sys.argv and sys.path
+    monkeypatch.setattr(sys, 'path', actual_path)
+    monkeypatch.setattr(sys, 'argv', ['west', '--version'])
+
+    # ensure that west.app.main is freshly loaded
+    sys.modules.pop('west.app.main', None)
+
+    # run west.app.main as module
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_module('west.app.main', run_name='__main__')
+
+    # check that exit code is 0
+    assert exit_info.value.code == 0
+
+    # check that that the sys.path was correctly inserted
+    expected_path = Path(__file__).parents[1] / 'src'
+    assert actual_path == [f'{expected_path}', 'initial-path']
