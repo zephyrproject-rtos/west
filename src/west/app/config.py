@@ -35,17 +35,28 @@ Local files:
 
 - Linux, macOS, Windows: <workspace-root-directory>/.west/config
 
-You can override these files' locations with the WEST_CONFIG_SYSTEM,
-WEST_CONFIG_GLOBAL, and WEST_CONFIG_LOCAL environment variables.
-
 Configuration values from later configuration files override configuration
 from earlier ones. Local values have highest precedence, and system values
 lowest.
 
-To get a value for <name>, type:
+The config file location for each according config level can be changed with
+environment variables:
+- WEST_CONFIG_SYSTEM
+- WEST_CONFIG_GLOBAL
+- WEST_CONFIG_LOCAL
+
+All `west config` commands can be applied for a specific configuration level by
+providing one of the following arguments:
+    --local | --system | --global
+
+The following command prints a list of all configuration files currently
+considered and existing (listed in the order as they are loaded):
+    west config --list-paths
+
+To get the value for config option <name>, type:
     west config <name>
 
-To set a value for <name>, type:
+To set a value for config option <name>, type:
     west config <name> <value>
 
 To append to a value for <name>, type:
@@ -100,6 +111,11 @@ class Config(WestCommand):
         ).add_mutually_exclusive_group()
 
         group.add_argument(
+            '--list-paths',
+            action='store_true',
+            help='list all config files that are currently considered by west config',
+        )
+        group.add_argument(
             '-l', '--list', action='store_true', help='list all options and their values'
         )
         group.add_argument(
@@ -153,13 +169,15 @@ class Config(WestCommand):
         if args.list:
             if args.name:
                 self.parser.error('-l cannot be combined with name argument')
-        elif not args.name:
+        elif not args.name and not args.list_paths:
             self.parser.error('missing argument name (to list all options and values, use -l)')
         elif args.append:
             if args.value is None:
                 self.parser.error('-a requires both name and value')
 
-        if args.list:
+        if args.list_paths:
+            self.list_paths(args)
+        elif args.list:
             self.list(args)
         elif delete:
             self.delete(args)
@@ -169,6 +187,11 @@ class Config(WestCommand):
             self.append(args)
         else:
             self.write(args)
+
+    def list_paths(self, args):
+        config_paths = self.config.get_paths(args.configfile or ALL)
+        for config_path in config_paths:
+            self.inf(config_path)
 
     def list(self, args):
         what = args.configfile or ALL

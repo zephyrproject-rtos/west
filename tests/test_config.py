@@ -6,6 +6,7 @@ import configparser
 import os
 import pathlib
 import subprocess
+import textwrap
 from typing import Any
 
 import pytest
@@ -91,6 +92,77 @@ def test_config_global():
     assert all['pytest']['global2'] == 'foo2'
     assert glb['pytest']['global2'] == 'foo2'
     assert 'pytest' not in lcl
+
+
+TEST_CASES_CONFIG_LIST_PATHS = [
+    # (flag, env_var)
+    ('--local', 'WEST_CONFIG_LOCAL'),
+    ('--system', 'WEST_CONFIG_SYSTEM'),
+    ('--global', 'WEST_CONFIG_GLOBAL'),
+]
+
+
+@pytest.mark.parametrize("test_case", TEST_CASES_CONFIG_LIST_PATHS)
+def test_config_list_paths_env(test_case):
+    '''Test that --list-paths considers the env variables'''
+    flag, env_var = test_case
+
+    # create the config
+    cmd(f'config {flag} pytest.key val')
+
+    # check that the config is listed now
+    stdout = cmd(f'config {flag} --list-paths')
+    config_path = pathlib.Path(os.environ[env_var])
+    assert f'{config_path}' == stdout.rstrip()
+
+    # config is only listed if it exists
+    config_path.unlink()
+    stdout = cmd(f'config {flag} --list-paths')
+    assert '' == stdout.rstrip()
+
+
+def test_config_list_paths():
+    WEST_CONFIG_LOCAL = os.environ['WEST_CONFIG_LOCAL']
+    WEST_CONFIG_GLOBAL = os.environ['WEST_CONFIG_GLOBAL']
+    WEST_CONFIG_SYSTEM = os.environ['WEST_CONFIG_SYSTEM']
+
+    # create the configs
+    cmd('config --local pytest.key val')
+    cmd('config --global pytest.key val')
+    cmd('config --system pytest.key val')
+
+    # list the configs
+    stdout = cmd('config --list-paths')
+    assert (
+        stdout.splitlines()
+        == textwrap.dedent(f'''\
+        {WEST_CONFIG_GLOBAL}
+        {WEST_CONFIG_SYSTEM}
+        {WEST_CONFIG_LOCAL}
+        ''').splitlines()
+    )
+
+    # do not list any configs if no config files currently exist
+    # (Note: even no local config exists, same as outside any west workspace)
+    pathlib.Path(WEST_CONFIG_GLOBAL).unlink()
+    pathlib.Path(WEST_CONFIG_SYSTEM).unlink()
+    pathlib.Path(WEST_CONFIG_LOCAL).unlink()
+    stdout = cmd('config --list-paths')
+    assert stdout.splitlines() == []
+
+    # list local config as it exists (determined from filesystem, not from env)
+    del os.environ['WEST_CONFIG_LOCAL']
+    default_config = pathlib.Path('.west') / 'config'
+    default_config.parent.mkdir()
+    default_config.write_text(
+        textwrap.dedent('''\
+        [manifest]
+        path = any
+        file = west.yml
+    ''')
+    )
+    stdout = cmd('config --list-paths')
+    assert stdout.splitlines() == [str(default_config.absolute())]
 
 
 def test_config_local():

@@ -183,6 +183,16 @@ class Configuration:
         self._global = _InternalCF.from_path(self._global_path)
         self._local = _InternalCF.from_path(self._local_path)
 
+    def get_paths(self, location: ConfigFile = ConfigFile.ALL):
+        ret = []
+        if self._global and location in [ConfigFile.GLOBAL, ConfigFile.ALL]:
+            ret.append(self._global.path)
+        if self._system and location in [ConfigFile.SYSTEM, ConfigFile.ALL]:
+            ret.append(self._system.path)
+        if self._local and location in [ConfigFile.LOCAL, ConfigFile.ALL]:
+            ret.append(self._local.path)
+        return ret
+
     def get(
         self, option: str, default: str | None = None, configfile: ConfigFile = ConfigFile.ALL
     ) -> str | None:
