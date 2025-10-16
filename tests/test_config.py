@@ -6,6 +6,7 @@ import configparser
 import os
 import pathlib
 import subprocess
+import textwrap
 from typing import Any
 
 import pytest
@@ -91,6 +92,62 @@ def test_config_global():
     assert all['pytest']['global2'] == 'foo2'
     assert glb['pytest']['global2'] == 'foo2'
     assert 'pytest' not in lcl
+
+
+TEST_CASES_CONFIG_LIST_PATHS = [
+    # (flag, env_var)
+    ('--local', 'WEST_CONFIG_LOCAL'),
+    ('--system', 'WEST_CONFIG_SYSTEM'),
+    ('--global', 'WEST_CONFIG_GLOBAL'),
+]
+
+
+@pytest.mark.parametrize("test_case", TEST_CASES_CONFIG_LIST_PATHS)
+def test_config_list_paths(test_case):
+    flag, env_var = test_case
+
+    # create the config
+    cmd(f'config {flag} pytest.key val')
+
+    # check that the config is listed now
+    stdout = cmd(f'config {flag} --list-paths')
+    config_path = pathlib.Path(os.environ[env_var])
+    assert f'{config_path}' == stdout.rstrip()
+
+    # no config is listed (since it does not exist)
+    config_path.unlink()
+    stdout = cmd(f'config {flag} --list-paths')
+    assert '' == stdout.rstrip()
+
+
+def test_config_list_paths_extended():
+    WEST_CONFIG_LOCAL = os.environ['WEST_CONFIG_LOCAL']
+    WEST_CONFIG_GLOBAL = os.environ['WEST_CONFIG_GLOBAL']
+    WEST_CONFIG_SYSTEM = os.environ['WEST_CONFIG_SYSTEM']
+
+    # create the configs
+    cmd('config --local pytest.key val')
+    cmd('config --global pytest.key val')
+    cmd('config --system pytest.key val')
+
+    # list the configs
+    stdout = cmd('config --list-paths')
+    assert (
+        stdout.splitlines()
+        == textwrap.dedent(f'''\
+        {WEST_CONFIG_GLOBAL}
+        {WEST_CONFIG_SYSTEM}
+        {WEST_CONFIG_LOCAL}
+        ''').splitlines()
+    )
+
+    # do not list any configs if no config files exist
+    # (Note: even no local config exists, same as outside any west workspace)
+    pathlib.Path(WEST_CONFIG_GLOBAL).unlink()
+    pathlib.Path(WEST_CONFIG_SYSTEM).unlink()
+    pathlib.Path(WEST_CONFIG_LOCAL).unlink()
+    stdout = cmd('config --list-paths')
+    assert stdout.splitlines() == []
 
 
 def test_config_local():
@@ -516,6 +573,81 @@ def test_config_precedence():
     assert 'pytest' not in cfg(f=SYSTEM)
     assert cfg(f=GLOBAL)['pytest']['precedence'] == 'global'
     assert cfg(f=LOCAL)['pytest']['precedence'] == 'local'
+
+
+def test_config_multiple(config_tmpdir):
+    # Verify that local settings take precedence over global ones,
+    # but that both values are still available, and that setting
+    # either doesn't affect system settings.
+    def write_config(config_file, section, key1, value1, key2, value2):
+        config_file.parent.mkdir(exist_ok=True)
+
+        content = textwrap.dedent(f'''
+        [{section}]
+        {key1} = {value1}
+        {key2} = {value2}
+        ''')
+
+        with open(config_file, 'w') as conf:
+            conf.write(content)
+
+    # config file paths
+    config_dir = pathlib.Path(config_tmpdir) / 'configs'
+    config_s1 = config_dir / 'system1'
+    config_s2 = config_dir / 'system2'
+    config_g1 = config_dir / 'global1'
+    config_g2 = config_dir / 'global2'
+    config_l1 = config_dir / 'local1'
+    config_l2 = config_dir / 'local2'
+
+    # create some configs with
+    # - some individual option per config file
+    # - the same option defined in multiple configs
+    write_config(config_s1, 'sec', 's', 1, 's1', 1)
+    write_config(config_s2, 'sec', 's', 2, 's2', 2)
+    write_config(config_g1, 'sec', 'g', 1, 'g1', 1)
+    write_config(config_g2, 'sec', 'g', 2, 'g2', 2)
+    write_config(config_l1, 'sec', 'l', 1, 'l1', 1)
+    write_config(config_l2, 'sec', 'l', 2, 'l2', 2)
+
+    # specify multiple configs for each config level (separated by os.pathsep)
+    os.environ["WEST_CONFIG_GLOBAL"] = f'{config_g1}{os.pathsep}{config_g2}'
+    os.environ["WEST_CONFIG_SYSTEM"] = f'{config_s1}{os.pathsep}{config_s2}'
+    os.environ["WEST_CONFIG_LOCAL"] = f'{config_l1}{os.pathsep}{config_l2}'
+
+    # check that all individual options are applied
+    stdout = cmd('config --system sec.s1').rstrip()
+    assert stdout == '1'
+    stdout = cmd('config --system sec.s2').rstrip()
+    assert stdout == '2'
+    stdout = cmd('config --global sec.g1').rstrip()
+    assert stdout == '1'
+    stdout = cmd('config --global sec.g2').rstrip()
+    assert stdout == '2'
+    stdout = cmd('config --local sec.l1').rstrip()
+    assert stdout == '1'
+    stdout = cmd('config --local sec.l2').rstrip()
+    assert stdout == '2'
+
+    # check that options from latest config overrides
+    stdout = cmd('config --system sec.s').rstrip()
+    assert stdout == '2'
+    stdout = cmd('config --global sec.g').rstrip()
+    assert stdout == '2'
+    stdout = cmd('config --local sec.l').rstrip()
+    assert stdout == '2'
+
+    # check that list-paths gives correct output
+    stdout = cmd('config --global --list-paths')
+    assert [str(config_g1), str(config_g2)] == stdout.rstrip().splitlines()
+    stdout = cmd('config --system --list-paths')
+    assert [str(config_s1), str(config_s2)] == stdout.rstrip().splitlines()
+    stdout = cmd('config --local --list-paths')
+    assert [str(config_l1), str(config_l2)] == stdout.rstrip().splitlines()
+
+    # writing not possible if multiple configs are used
+    err_msg = cmd_raises('config --local sec.l3 3', subprocess.CalledProcessError)
+    assert 'Cannot write if multiple configs in use' in err_msg
 
 
 def test_config_missing_key():

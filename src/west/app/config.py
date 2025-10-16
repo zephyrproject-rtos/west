@@ -7,7 +7,7 @@
 import argparse
 
 from west.commands import CommandError, WestCommand
-from west.configuration import ConfigFile
+from west.configuration import ConfigFile, Configuration
 
 CONFIG_DESCRIPTION = '''\
 West configuration file handling.
@@ -35,12 +35,31 @@ Local files:
 
 - Linux, macOS, Windows: <workspace-root-directory>/.west/config
 
-You can override these files' locations with the WEST_CONFIG_SYSTEM,
-WEST_CONFIG_GLOBAL, and WEST_CONFIG_LOCAL environment variables.
-
 Configuration values from later configuration files override configuration
 from earlier ones. Local values have highest precedence, and system values
 lowest.
+
+You can override the config file location for the according config level
+with the environment variables:
+- WEST_CONFIG_SYSTEM,
+- WEST_CONFIG_GLOBAL
+- WEST_CONFIG_LOCAL
+
+Note: west will NOT fail if a specified config file does not exist, but it
+will ignore this file.
+
+For each configuration level (local, global, and system) also multiple config
+file locations can be specified. To do so, set according environment variable
+to contain all paths (separated by 'os.pathsep', which is ';' on Windows or
+':' otherwise)
+
+You can list all existing configuration files that are currently considered
+(existing files) via the following command, which prints them in the exact
+order as they are loaded (so later values override earlier ones):
+    west config --list-paths
+    west config --local --list-paths
+    west config --global --list-paths
+    west config --system --list-paths
 
 To get a value for <name>, type:
     west config <name>
@@ -100,6 +119,11 @@ class Config(WestCommand):
         ).add_mutually_exclusive_group()
 
         group.add_argument(
+            '--list-paths',
+            action='store_true',
+            help='list all config files that are currently considered by west config',
+        )
+        group.add_argument(
             '-l', '--list', action='store_true', help='list all options and their values'
         )
         group.add_argument(
@@ -153,13 +177,15 @@ class Config(WestCommand):
         if args.list:
             if args.name:
                 self.parser.error('-l cannot be combined with name argument')
-        elif not args.name:
+        elif not args.name and not args.list_paths:
             self.parser.error('missing argument name (to list all options and values, use -l)')
         elif args.append:
             if args.value is None:
                 self.parser.error('-a requires both name and value')
 
-        if args.list:
+        if args.list_paths:
+            self.list_paths(args)
+        elif args.list:
             self.list(args)
         elif delete:
             self.delete(args)
@@ -169,6 +195,11 @@ class Config(WestCommand):
             self.append(args)
         else:
             self.write(args)
+
+    def list_paths(self, args):
+        config_paths = Configuration().get_paths(args.configfile or ALL)
+        for config_path in config_paths:
+            print(config_path)
 
     def list(self, args):
         what = args.configfile or ALL
