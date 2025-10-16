@@ -82,6 +82,20 @@ To delete <name> in the global file only:
 To delete <name> everywhere it's set, including the system file:
     west config -D <name>
 
+For each configuration type (local, global, and system), an additional
+drop-in config directory is supported. This directory is named as the
+according config file, but with a '.d' suffix, whereby all '.conf' and
+'.ini' files are loaded in alphabetical order.
+
+All files inside a drop-in directory must use `.conf` extension and are
+loaded in **alphabetical order**.
+For example:
+    .west/config.d/basics.conf
+
+Note: It is not possible to modify dropin configs.via 'west config' commands.
+When config option values are set/appended/deleted via 'west config' commands,
+always the config file is modified (never the dropin config files).
+
 To list the configuration files that are loaded (both the main config file
 and all drop-ins) in the exact order they were applied (where later values
 override earlier ones):
