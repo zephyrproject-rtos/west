@@ -1,5 +1,4 @@
-import subprocess
-import sys
+from conftest import cmd, cmd_subprocess
 
 import west.version
 
@@ -11,7 +10,14 @@ def test_main():
     # sane (i.e. the actual version number is printed instead of
     # simply an error message to stderr).
 
-    output_as_module = subprocess.check_output([sys.executable, '-m', 'west', '--version']).decode()
-    output_directly = subprocess.check_output(['west', '--version']).decode()
-    assert west.version.__version__ in output_as_module
-    assert output_as_module == output_directly
+    expected_version = west.version.__version__
+
+    # call west executable directly
+    output_directly = cmd(['--version'])
+    assert expected_version in output_directly
+
+    output_subprocess = cmd_subprocess('--version')
+    assert expected_version in output_subprocess
+
+    # output must be same in both cases
+    assert output_subprocess.rstrip() == output_directly.rstrip()
