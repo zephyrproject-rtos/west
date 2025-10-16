@@ -185,6 +185,8 @@ class Configuration:
         if configfile == ConfigFile.ALL:
             raise RuntimeError(f'{configfile} not allowed for get_path')
         elif configfile == ConfigFile.LOCAL:
+            if not self._local_path:
+                raise MalformedConfig('local configuration cannot be determined')
             return self._local_path
         elif configfile == ConfigFile.SYSTEM:
             return self._system_path

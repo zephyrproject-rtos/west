@@ -42,10 +42,18 @@ Configuration values from later configuration files override configuration
 from earlier ones. Local values have highest precedence, and system values
 lowest.
 
-To get the according config file path:
+The path of each configuration file currently being considered can be printed:
     west config --local --print-path
     west config --global --print-path
     west config --system --print-path
+
+Note that '--print-path' may display default configuration paths for system and
+global configurations. The local configuration must either exist or be specified
+via environment variable, since it cannot be determined otherwise.
+
+may print a considered default config paths in case
+of system and global configurations, whereby the local configuration must
+either exist or explicitly specified via environment variable.
 
 To get a value for <name>, type:
     west config <name>

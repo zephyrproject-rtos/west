@@ -94,18 +94,46 @@ def test_config_global():
 
 
 def test_config_print_path():
+    # create the configs
+    cmd('config --local pytest.key val')
+    cmd('config --global pytest.key val')
+    cmd('config --system pytest.key val')
+
+    # print the path while config files exist
+    stdout = cmd('config --print-path')
+    assert os.environ["WEST_CONFIG_LOCAL"] == stdout.rstrip()
     stdout = cmd('config --local --print-path')
     assert os.environ["WEST_CONFIG_LOCAL"] == stdout.rstrip()
-
     stdout = cmd('config --global --print-path')
     assert os.environ["WEST_CONFIG_GLOBAL"] == stdout.rstrip()
-
     stdout = cmd('config --system --print-path')
     assert os.environ["WEST_CONFIG_SYSTEM"] == stdout.rstrip()
 
-    del os.environ['WEST_CONFIG_LOCAL']
+    # print the path while config files do NOT exist
+    pathlib.Path(os.environ["WEST_CONFIG_LOCAL"]).unlink()
+    pathlib.Path(os.environ["WEST_CONFIG_GLOBAL"]).unlink()
+    pathlib.Path(os.environ["WEST_CONFIG_SYSTEM"]).unlink()
+
+    # error if local config does not exist as there does no default exist
+    stdout = cmd('config --print-path')
+    assert os.environ["WEST_CONFIG_LOCAL"] == stdout.rstrip()
     stdout = cmd('config --local --print-path')
-    assert "" == stdout.rstrip()
+    assert os.environ["WEST_CONFIG_LOCAL"] == stdout.rstrip()
+    stdout = cmd('config --global --print-path')
+    assert os.environ["WEST_CONFIG_GLOBAL"] == stdout.rstrip()
+    stdout = cmd('config --system --print-path')
+    assert os.environ["WEST_CONFIG_SYSTEM"] == stdout.rstrip()
+
+    # Local config cannot be determined if not specified via env
+    del os.environ['WEST_CONFIG_LOCAL']
+    stderr = cmd_raises('config --local --print-path', subprocess.CalledProcessError)
+    assert "local configuration cannot be determined" in stderr.rstrip()
+
+    # for global/system configuration it works as a default path is printed
+    del os.environ['WEST_CONFIG_GLOBAL']
+    del os.environ['WEST_CONFIG_SYSTEM']
+    cmd('config --global --print-path')
+    cmd('config --system --print-path')
 
 
 def test_config_local():
