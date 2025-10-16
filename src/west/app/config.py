@@ -7,7 +7,7 @@
 import argparse
 
 from west.commands import CommandError, WestCommand
-from west.configuration import ConfigFile
+from west.configuration import ConfigFile, Configuration
 
 CONFIG_DESCRIPTION = '''\
 West configuration file handling.
@@ -81,6 +81,14 @@ To delete <name> in the global file only:
 
 To delete <name> everywhere it's set, including the system file:
     west config -D <name>
+
+To list the configuration files that are loaded (both the main config file
+and all drop-ins) in the exact order they were applied (where later values
+override earlier ones):
+    west config --list-paths
+    west config --local --list-paths
+    west config --global --list-paths
+    west config --system --list-paths
 '''
 
 CONFIG_EPILOG = '''\
@@ -113,10 +121,16 @@ class Config(WestCommand):
         ).add_mutually_exclusive_group()
 
         group.add_argument(
-            '-p',
             '--print-path',
             action='store_true',
-            help='print file path from according west config(--system, --global, --local)',
+            help='print the file path from according west '
+            'config (--local [default], --global, --system)',
+        )
+        group.add_argument(
+            '--list-paths',
+            action='store_true',
+            help='list all config files and dropin files that '
+            'are currently considered by west config',
         )
         group.add_argument(
             '-l', '--list', action='store_true', help='list all options and their values'
@@ -172,7 +186,7 @@ class Config(WestCommand):
         if args.list:
             if args.name:
                 self.parser.error('-l cannot be combined with name argument')
-        elif not args.name and not args.print_path:
+        elif not any([args.name, args.print_path, args.list_paths]):
             self.parser.error('missing argument name (to list all options and values, use -l)')
         elif args.append:
             if args.value is None:
@@ -180,6 +194,8 @@ class Config(WestCommand):
 
         if args.print_path:
             self.print_path(args)
+        elif args.list_paths:
+            self.list_paths(args)
         elif args.list:
             self.list(args)
         elif delete:
@@ -194,6 +210,11 @@ class Config(WestCommand):
     def print_path(self, args):
         config_path = self.config.get_path(args.configfile or LOCAL)
         if config_path:
+            print(config_path)
+
+    def list_paths(self, args):
+        config_paths = Configuration().get_paths(args.configfile or ALL)
+        for config_path in config_paths:
             print(config_path)
 
     def list(self, args):

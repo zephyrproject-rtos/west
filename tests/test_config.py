@@ -136,6 +136,86 @@ def test_config_print_path():
     cmd('config --system --print-path')
 
 
+TEST_CASES_CONFIG_LIST_PATHS = [
+    # (flag, env_var)
+    ('--local', 'WEST_CONFIG_LOCAL'),
+    ('--system', 'WEST_CONFIG_SYSTEM'),
+    ('--global', 'WEST_CONFIG_GLOBAL'),
+]
+
+
+@pytest.mark.parametrize("test_case", TEST_CASES_CONFIG_LIST_PATHS)
+def test_config_list_paths(test_case):
+    flag, env_var = test_case
+
+    # no config is listed (since it does not exist)
+    stdout = cmd(f'config {flag} --list-paths')
+    assert '' == stdout.rstrip()
+
+    # create the config
+    cmd(f'config {flag} pytest.key val')
+
+    # check that the config is listed now
+    stdout = cmd(f'config {flag} --list-paths')
+    config_path = pathlib.Path(os.environ[env_var])
+    assert f'{config_path}' == stdout.rstrip()
+
+
+def test_config_list_paths_extended():
+    WEST_CONFIG_LOCAL = os.environ['WEST_CONFIG_LOCAL']
+    WEST_CONFIG_GLOBAL = os.environ['WEST_CONFIG_GLOBAL']
+    WEST_CONFIG_SYSTEM = os.environ['WEST_CONFIG_SYSTEM']
+
+    # create the configs
+    cmd('config --local pytest.key val')
+    cmd('config --global pytest.key val')
+    cmd('config --system pytest.key val')
+
+    # list the configs
+    stdout = cmd('config --list-paths')
+    assert (
+        stdout.splitlines()
+        == textwrap.dedent(f'''\
+        {WEST_CONFIG_GLOBAL}
+        {WEST_CONFIG_SYSTEM}
+        {WEST_CONFIG_LOCAL}
+        ''').splitlines()
+    )
+
+    # create some dropins files
+    dropin_files = [
+        pathlib.Path(WEST_CONFIG_GLOBAL + '.d') / 'a.conf',
+        pathlib.Path(WEST_CONFIG_GLOBAL + '.d') / 'z.conf',
+        pathlib.Path(WEST_CONFIG_SYSTEM + '.d') / 'a.conf',
+        pathlib.Path(WEST_CONFIG_SYSTEM + '.d') / 'z.conf',
+        pathlib.Path(WEST_CONFIG_LOCAL + '.d') / 'a.conf',
+        pathlib.Path(WEST_CONFIG_LOCAL + '.d') / 'z.conf',
+    ]
+    for dropin_file in dropin_files:
+        dropin_file.parent.mkdir(exist_ok=True)
+        dropin_file.touch()
+
+    # list the configs
+    stdout = cmd('config --list-paths')
+    assert (
+        stdout.splitlines()
+        == textwrap.dedent(f'''\
+        {dropin_files[0]}
+        {dropin_files[1]}
+        {WEST_CONFIG_GLOBAL}
+        {dropin_files[2]}
+        {dropin_files[3]}
+        {WEST_CONFIG_SYSTEM}
+        {dropin_files[4]}
+        {dropin_files[5]}
+        {WEST_CONFIG_LOCAL}
+        ''').splitlines()
+    )
+
+    # print nothing if local config does not exist (exit code 0)
+    del os.environ['WEST_CONFIG_LOCAL']
+
+
 def test_config_local():
     # test_config_system for local variables.
     cmd('config --local pytest.local foo')

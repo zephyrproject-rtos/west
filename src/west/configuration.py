@@ -193,6 +193,16 @@ class Configuration:
         elif configfile == ConfigFile.GLOBAL:
             return self._global_path
 
+    def get_paths(self, configfile: ConfigFile = ConfigFile.ALL):
+        ret = []
+        if self._global and configfile in [ConfigFile.GLOBAL, ConfigFile.ALL]:
+            ret += self._global._paths()
+        if self._system and configfile in [ConfigFile.SYSTEM, ConfigFile.ALL]:
+            ret += self._system._paths()
+        if self._local and configfile in [ConfigFile.LOCAL, ConfigFile.ALL]:
+            ret += self._local._paths()
+        return ret
+
     def get(
         self, option: str, default: str | None = None, configfile: ConfigFile = ConfigFile.ALL
     ) -> str | None:
