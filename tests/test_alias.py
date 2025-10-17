@@ -2,10 +2,8 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-import subprocess
-
 import pytest
-from conftest import cmd
+from conftest import cmd, cmd_raises
 
 
 @pytest.fixture(autouse=True)
@@ -50,10 +48,8 @@ def test_alias_infinite_recursion():
     cmd('config alias.test2 test3')
     cmd('config alias.test3 test1')
 
-    with pytest.raises(subprocess.CalledProcessError) as excinfo:
-        cmd('test1', stderr=subprocess.STDOUT)
-
-    assert 'unknown command "test1";' in str(excinfo.value.stdout)
+    exc, _ = cmd_raises('test1', SystemExit)
+    assert 'unknown command "test1";' in str(exc.value)
 
 
 def test_alias_empty():
@@ -62,10 +58,8 @@ def test_alias_empty():
     # help command shouldn't fail
     cmd('help')
 
-    with pytest.raises(subprocess.CalledProcessError) as excinfo:
-        cmd('empty', stderr=subprocess.STDOUT)
-
-    assert 'empty alias "empty"' in str(excinfo.value.stdout)
+    exc, _ = cmd_raises('empty', SystemExit)
+    assert 'empty alias "empty"' in str(exc.value)
 
 
 def test_alias_early_args():

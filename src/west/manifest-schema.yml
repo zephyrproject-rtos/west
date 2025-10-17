@@ -66,6 +66,25 @@ mapping:
             required: true
             type: str
 
+  # allow some modification of imported projects by downstream projects
+  import-modifications:
+    required: false
+    type: map
+    mapping:
+      # search-replace within URLs (e.g. to use mirror URLs)
+      url-replace:
+        required: false
+        type: seq
+        sequence:
+          - type: map
+            mapping:
+              old:
+                required: true
+                type: str
+              new:
+                required: true
+                type: str
+
   # The "projects" key specifies a sequence of "projects", each of which has a
   # remote, and may specify additional configuration.
   #

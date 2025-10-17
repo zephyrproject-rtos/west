@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import contextlib
+import io
 import os
 import platform
 import shutil
@@ -13,6 +14,8 @@ import uuid
 from pathlib import Path, PurePath
 
 import pytest
+
+from west.app import main
 
 GIT = shutil.which('git')
 
@@ -366,48 +369,69 @@ def check_output(*args, **kwargs):
     return out_bytes.decode(sys.getdefaultencoding())
 
 
+def _cmd(cmd, cwd=None, env=None):
+    # Executes a west command by invoking the `main()` function with the
+    # provided command arguments.
+    # Parameters:
+    #   cwd: The working directory in which to execute the command.
+    #   env: A dictionary of extra environment variables to apply temporarily
+    #        during execution.
+
+    # ensure that cmd is a list of strings
+    cmd = cmd.split() if isinstance(cmd, str) else cmd
+    cmd = [str(c) for c in cmd]
+
+    # run main()
+    with (
+        chdir(cwd or Path.cwd()),
+        update_env(env or {}),
+    ):
+        try:
+            main.main(cmd)
+        except SystemExit as e:
+            if e.code:
+                raise e
+        except Exception as e:
+            print(f'Uncaught exception type {e}', file=sys.stderr)
+            raise e
+
+
 def cmd(cmd, cwd=None, stderr=None, env=None):
-    # Run a west command in a directory (cwd defaults to os.getcwd()).
-    #
-    # This helper takes the command as a string.
-    #
-    # This helper relies on the test environment to ensure that the
-    # 'west' executable is a bootstrapper installed from the current
-    # west source code.
-    #
-    # stdout from cmd is captured and returned. The command is run in
-    # a python subprocess so that program-level setup and teardown
-    # happen fresh.
-
-    # If you have quoting issues: do NOT quote. It's not portable.
-    # Instead, pass `cmd` as a list.
-    cmd = ['west'] + (cmd.split() if isinstance(cmd, str) else cmd)
-
-    print('running:', cmd)
-    if env:
-        print('with non-default environment:')
-        for k in env:
-            if k not in os.environ or env[k] != os.environ[k]:
-                print(f'\t{k}={env[k]}')
-        for k in os.environ:
-            if k not in env:
-                print(f'\t{k}: deleted, was: {os.environ[k]}')
-    if cwd is not None:
-        cwd = os.fspath(cwd)
-        print(f'in {cwd}')
-    try:
-        return check_output(cmd, cwd=cwd, stderr=stderr, env=env)
-    except subprocess.CalledProcessError:
-        print('cmd: west:', shutil.which('west'), file=sys.stderr)
-        raise
+    # Same as _cmd(), but it captures and returns stdout.
+    # Optionally stderr is captured into given stderr (io.StringIO)
+    stdout_buf = io.StringIO()
+    stderr_buf = stderr or sys.stderr
+    with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
+        _cmd(cmd, cwd, env)
+    return stdout_buf.getvalue()
 
 
-def cmd_raises(cmd_str_or_list, expected_exception_type, cwd=None, env=None):
-    # Similar to 'cmd' but an expected exception is caught.
-    # Returns the output together with stderr data
-    with pytest.raises(expected_exception_type) as exc_info:
-        cmd(cmd_str_or_list, stderr=subprocess.STDOUT, cwd=cwd, env=env)
-    return exc_info.value.output.decode("utf-8")
+def cmd_raises(cmd_str_or_list, expected_exception_type, stdout=None, cwd=None, env=None):
+    # Similar to '_cmd' but an expected exception is caught.
+    # The exception is returned together with stderr.
+    # Optionally stdout is captured into given stdout (io.StringIO)
+    stdout_buf = stdout or sys.stdout
+    stderr_buf = io.StringIO()
+    with (
+        contextlib.redirect_stdout(stdout_buf),
+        contextlib.redirect_stderr(stderr_buf),
+        pytest.raises(expected_exception_type) as exc_info,
+    ):
+        _cmd(cmd_str_or_list, cwd=cwd, env=env)
+    return exc_info, stderr_buf.getvalue()
+
+
+def cmd_subprocess(cmd, *args, **kwargs):
+    # This function is similar to `cmd()`, but runs the command in a separate
+    # Python subprocess. This ensures that both Python-level stdout and any
+    # subprocess output invoked by `main` are captured together in a single
+    # string and also, that program-level setup and teardown in `main` happen
+    # fresh for each call.
+    cmd = cmd.split() if isinstance(cmd, str) else cmd
+    cmd = [sys.executable, main.__file__] + cmd
+    print('running (subprocess):', cmd)
+    ret = check_output(cmd, *args, **kwargs)
+    return ret
 
 
 def create_workspace(workspace_dir, and_git=True):
