@@ -10,6 +10,7 @@ import textwrap
 from pathlib import Path, PurePath
 
 import pytest
+import yaml
 from conftest import (
     GIT,
     WINDOWS,
@@ -19,6 +20,7 @@ from conftest import (
     check_proj_consistency,
     cmd,
     cmd_raises,
+    cmd_subprocess,
     create_branch,
     create_repo,
     create_workspace,
@@ -148,10 +150,10 @@ def test_list(west_update_tmpdir):
     abs_inside = cmd(_list_f('{name}') + [klib_abs], cwd=klib_abs).strip()
     assert abs_inside == 'Kconfiglib'
 
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(SystemExit):
         cmd('list NOT_A_PROJECT', cwd=klib_abs)
 
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(SystemExit):
         cmd('list NOT_A_PROJECT')
 
 
@@ -235,7 +237,7 @@ def test_list_groups(west_init_tmpdir):
         ['foo .foo-group-1,foo-group-2. foo inactive', 'bar .. path-for-bar active'],
     )
 
-    err_msg = cmd_raises('list -i foo bar', subprocess.CalledProcessError)
+    _, err_msg = cmd_raises('list -i foo bar', SystemExit)
     assert '-i cannot be combined with an explicit project list' in err_msg
 
     cmd('config manifest.group-filter +foo-group-1')
@@ -548,7 +550,7 @@ def test_compare(config_tmpdir, west_init_tmpdir):
     assert 'foo' in actual
 
     # --exit-code should work for the manifest repository too.
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(SystemExit):
         cmd('compare --exit-code')
 
     # Remove the file and verify compare output is empty again.
@@ -577,7 +579,7 @@ def test_compare(config_tmpdir, west_init_tmpdir):
     cmd('config -d manifest.group-filter')
 
     # Verify --exit-code works as advertised, and clean up again.
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(SystemExit):
         cmd('compare --exit-code')
     os.unlink(bar)
     assert cmd('compare --exit-code') == ''
@@ -639,7 +641,7 @@ def test_forall(west_init_tmpdir):
 
     # 'forall' with no projects cloned shouldn't fail
 
-    assert cmd(['forall', '-c', 'echo foo']).splitlines() == [
+    assert cmd_subprocess(['forall', '-c', 'echo foo']).splitlines() == [
         '=== running "echo foo" in manifest (zephyr):',
         'foo',
     ]
@@ -647,7 +649,7 @@ def test_forall(west_init_tmpdir):
     # Neither should it fail after cloning one or both projects
 
     cmd('update net-tools')
-    assert cmd(['forall', '-c', 'echo foo']).splitlines() == [
+    assert cmd_subprocess(['forall', '-c', 'echo foo']).splitlines() == [
         '=== running "echo foo" in manifest (zephyr):',
         'foo',
         '=== running "echo foo" in net-tools (net-tools):',
@@ -658,7 +660,7 @@ def test_forall(west_init_tmpdir):
 
     env_var = "%WEST_PROJECT_NAME%" if WINDOWS else "$WEST_PROJECT_NAME"
 
-    assert cmd(['forall', '-c', f'echo {env_var}']).splitlines() == [
+    assert cmd_subprocess(['forall', '-c', f'echo {env_var}']).splitlines() == [
         f'=== running "echo {env_var}" in manifest (zephyr):',
         'manifest',
         f'=== running "echo {env_var}" in net-tools (net-tools):',
@@ -666,7 +668,7 @@ def test_forall(west_init_tmpdir):
     ]
 
     cmd('update Kconfiglib')
-    assert cmd(['forall', '-c', 'echo foo']).splitlines() == [
+    assert cmd_subprocess(['forall', '-c', 'echo foo']).splitlines() == [
         '=== running "echo foo" in manifest (zephyr):',
         'foo',
         '=== running "echo foo" in Kconfiglib (subdir/Kconfiglib):',
@@ -675,9 +677,42 @@ def test_forall(west_init_tmpdir):
         'foo',
     ]
 
-    assert cmd('forall --group Kconfiglib-group -c'.split() + ['echo foo']).splitlines() == [
+    assert cmd_subprocess(
+        'forall --group Kconfiglib-group -c'.split() + ['echo foo']
+    ).splitlines() == [
         '=== running "echo foo" in Kconfiglib (subdir/Kconfiglib):',
         'foo',
+    ]
+
+
+TEST_CASES_FORALL_ENV_VARS = [
+    # (env_var, expected_zephyr, expected_net_tools)
+    ('WEST_PROJECT_NAME', 'manifest', 'net-tools'),
+    ('WEST_PROJECT_PATH', 'zephyr', 'net-tools'),
+    ('WEST_PROJECT_ABSPATH', 'zephyr', 'net-tools'),
+    ('WEST_PROJECT_REVISION', 'HEAD', 'master'),
+]
+
+
+@pytest.mark.parametrize("test_case", TEST_CASES_FORALL_ENV_VARS)
+def test_forall_env_vars(west_init_tmpdir, test_case):
+    west_init_tmpdir = Path(west_init_tmpdir)
+    cmd('update net-tools')
+    env_var, expected_zephyr, expected_net_tools = test_case
+    # convert expected to absolute path
+    if env_var == 'WEST_PROJECT_ABSPATH':
+        expected_zephyr = west_init_tmpdir / expected_zephyr
+        expected_net_tools = west_init_tmpdir / expected_net_tools
+
+    # Windows vs. Linux
+    env_var = f'%{env_var}%' if WINDOWS else f'${env_var}'
+
+    stdout = cmd_subprocess(['forall', '-c', f'echo {env_var}'])
+    assert stdout.splitlines() == [
+        f'=== running "echo {env_var}" in manifest (zephyr):',
+        f'{expected_zephyr}',
+        f'=== running "echo {env_var}" in net-tools (net-tools):',
+        f'{expected_net_tools}',
     ]
 
 
@@ -939,13 +974,13 @@ def test_update_some_with_imports(repos_tmpdir):
 
     # Updating unknown projects should fail as always.
 
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(SystemExit):
         cmd('update unknown-project', cwd=ws)
 
     # Updating a list of projects when some are resolved via project
     # imports must fail.
 
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(SystemExit):
         cmd('update Kconfiglib net-tools', cwd=ws)
 
     # Updates of projects defined in the manifest repository or all
@@ -1642,7 +1677,7 @@ def test_update_recovery(tmpdir):
 
     # Use west init -l + west update to point p's manifest-rev at rbad.
     cmd(['init', '-l', m], cwd=workspacestr)
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(SystemExit):
         cmd('update', cwd=workspacestr)
 
     # Make sure p's manifest-rev points to the bad revision as expected.
@@ -1745,33 +1780,24 @@ def test_init_again(west_init_tmpdir):
     # Test that 'west init' on an initialized tmpdir errors out
     # with a message that indicates it's already initialized.
 
-    popen = subprocess.Popen(
-        'west init'.split(), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, cwd=west_init_tmpdir
-    )
-    _, stderr = popen.communicate()
-    assert popen.returncode
-    assert b'already initialized' in stderr
+    expected_msg = f'FATAL ERROR: already initialized in {west_init_tmpdir}'
 
-    popen = subprocess.Popen(
-        'west init -m http://example.com'.split(),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        cwd=west_init_tmpdir,
-    )
-    _, stderr = popen.communicate()
-    assert popen.returncode
-    assert b'already initialized' in stderr
+    exc, stderr = cmd_raises('init', SystemExit, cwd=west_init_tmpdir)
+    assert exc.value.code == 1
+    assert expected_msg in stderr
+
+    exc, stderr = cmd_raises('init -m http://example.com', SystemExit, cwd=west_init_tmpdir)
+    assert exc.value.code == 1
+    assert expected_msg in stderr
 
     manifest = west_init_tmpdir / '..' / 'repos' / 'zephyr'
-    popen = subprocess.Popen(
-        ['west', '-vvv', 'init', '-m', str(manifest), 'workspace'],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        cwd=west_init_tmpdir.dirname,
+    exc, stderr = cmd_raises(
+        f'-vvv init -m {manifest} workspace', RuntimeError, cwd=west_init_tmpdir.dirname
     )
-    _, stderr = popen.communicate()
-    assert popen.returncode
-    assert b'already initialized' in stderr
+    assert expected_msg in stderr
+
+    expected_msg = "die with -vvv or more shows a stack trace. exit_code argument is ignored"
+    assert expected_msg in str(exc.value)
 
 
 def test_init_local_manifest_project(repos_tmpdir):
@@ -1810,7 +1836,7 @@ def test_init_local_manifest_project(repos_tmpdir):
 
 def test_init_local_already_initialized_failure(west_init_tmpdir):
     # Test that 'west init -l' on an initialized tmpdir errors out
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(SystemExit):
         cmd(f'init -l "{west_init_tmpdir}"')
 
 
@@ -1822,7 +1848,7 @@ def test_init_local_missing_west_yml_failure(repos_tmpdir):
     clone(str(repos_tmpdir.join('repos', 'zephyr')), str(zephyr_install_dir))
     os.remove(str(zephyr_install_dir.join('west.yml')))
 
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(SystemExit):
         cmd(f'init -l "{zephyr_install_dir}"')
 
 
@@ -1838,7 +1864,7 @@ def test_init_local_with_manifest_filename(repos_tmpdir):
     os.rename(str(zephyr_install_dir / 'west.yml'), str(zephyr_install_dir / 'project.yml'))
 
     # fails because west.yml is missing
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(SystemExit):
         cmd(['init', '-l', zephyr_install_dir])
 
     # create a manifest with a syntax error so we can test if it's being parsed
@@ -1850,7 +1876,7 @@ def test_init_local_with_manifest_filename(repos_tmpdir):
 
     # init with a local manifest doesn't parse the file, so let's access it
     workspace.chdir()
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(yaml.parser.ParserError):
         cmd('list')
 
     os.chdir(cwd)
@@ -1880,7 +1906,7 @@ def test_init_local_with_clone_option_failure(repos_tmpdir):
 
     west_tmpdir = repos_tmpdir / 'workspace'
 
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(SystemExit):
         cmd(['init', '-l', '-o=--depth=1', west_tmpdir])
 
 
@@ -2051,7 +2077,7 @@ def test_init_with_manifest_filename(repos_tmpdir):
     )
 
     # syntax error
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(yaml.parser.ParserError):
         cmd(['init', '-m', manifest, west_tmpdir])
     shutil.move(west_tmpdir, repos_tmpdir / 'workspace-syntaxerror')
 
@@ -2085,7 +2111,7 @@ def test_init_with_manifest_in_subdir(repos_tmpdir):
 
 
 def test_extension_command_execution(west_init_tmpdir):
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(SystemExit):
         cmd('test-extension')
 
     cmd('update')
@@ -2279,11 +2305,11 @@ def test_extension_command_duplicate(repos_tmpdir):
     ]
 
     # Expect output from the built-in command, not its Kconfiglib duplicate.
-    actual = cmd('list zephyr -f {name}', stderr=subprocess.STDOUT).splitlines()
+    actual = cmd('list zephyr -f {name}').splitlines()
     assert actual == expected_warns + ['manifest']
 
     # Expect output from the Kconfiglib command, not its net-tools duplicate.
-    actual = cmd('test-extension', stderr=subprocess.STDOUT).splitlines()
+    actual = cmd('test-extension').splitlines()
     assert actual == expected_warns + ['Testing kconfig test command']
 
 
@@ -2291,7 +2317,7 @@ def test_topdir_none(tmpdir):
     # Running west topdir outside of any workspace ought to fail.
 
     tmpdir.chdir()
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(SystemExit):
         cmd('topdir')
 
 
@@ -2372,7 +2398,7 @@ def update_helper(west_tmpdir, updater=default_updater):
     def output_or_none(*args, **kwargs):
         try:
             ret = check_output(*args, **kwargs)
-        except (FileNotFoundError, NotADirectoryError, subprocess.CalledProcessError):
+        except (FileNotFoundError, NotADirectoryError, SystemExit):
             ret = None
         return ret
 
