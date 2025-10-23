@@ -202,6 +202,7 @@ class _defaults(NamedTuple):
 
 
 _DEFAULT_REV = 'master'
+_DEFAULT_N_A = 'N/A'
 _WEST_YML = 'west.yml'
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
 _SCHEMA_VER = parse_version(SCHEMA_VERSION)
@@ -288,6 +289,8 @@ def _manifest_content_at(
     _logger.debug(f'{project.name}: looking up path {path} type at {rev}')
 
     # Returns 'blob', 'tree', etc. for path at revision, if it exists.
+    if project.is_local():
+        return (Path(project.abspath or project.path) / path).read_text()
     out = project.git(['ls-tree', rev, path], capture_stdout=True, capture_stderr=True).stdout
 
     if not out:
@@ -897,7 +900,6 @@ class Project:
         self.description = description
         self.url = url
         self.submodules = submodules
-        self.revision = revision or _DEFAULT_REV
         self.clone_depth = clone_depth
         self.path = os.fspath(path or name)
         self.west_commands = _west_commands_list(west_commands)
@@ -905,6 +907,10 @@ class Project:
         self.remote_name = remote_name or 'origin'
         self.groups: GroupsType = groups or []
         self.userdata: Any = userdata
+        if self.is_local():
+            self.revision = _DEFAULT_N_A
+        else:
+            self.revision = revision or _DEFAULT_REV
 
     @property
     def path(self) -> str:
@@ -1083,6 +1089,9 @@ class Project:
         else:
             raise RuntimeError(f'unexpected git merge-base result {rc}')
 
+    def is_local(self):
+        return self.url in ['local']
+
     def is_up_to_date_with(self, rev: str, cwd: PathType | None = None) -> bool:
         '''Check if the project is up to date with *rev*, returning
         ``True`` if so.
@@ -1117,6 +1126,9 @@ class Project:
         '''
         if not self.abspath or not os.path.isdir(self.abspath):
             return False
+
+        if self.is_local():
+            return True
 
         # --is-inside-work-tree doesn't require that the directory is
         # the top-level directory of a Git repository. Use --show-cdup
@@ -2094,6 +2106,9 @@ class Manifest:
         # Add this manifest's projects to the map, and handle imported
         # projects and group-filter values.
         url_bases = {r['name']: r['url-base'] for r in manifest_data.get('remotes', [])}
+        if 'local' in url_bases:
+            self._malformed("remote 'local' is a special remote and cannot be overridden")
+
         defaults = self._load_defaults(manifest_data.get('defaults', {}), url_bases)
         self._load_projects(manifest_data, url_bases, defaults)
 
@@ -2445,6 +2460,8 @@ class Manifest:
         if url:
             if repo_path:
                 self._malformed(f'project {name} has "repo_path: {repo_path}" and "url: {url}"')
+        elif remote == "local":
+            url = 'local'
         elif remote:
             if remote not in url_bases:
                 self._malformed(f'project {name} remote {remote} is not defined')
@@ -2472,7 +2489,17 @@ class Manifest:
         # to POSIX style in all circumstances. If this breaks
         # anything, we can always revisit, maybe adding a 'nativepath'
         # attribute or something like that.
-        path = (self._ctx.path_prefix / pfx / pd.get('path', name)).as_posix()
+        path = self._ctx.path_prefix / pfx / pd.get('path', name)
+
+        if remote == 'local':
+            # handle relative paths from local projects
+            if self.repo_path:
+                # path in the manifest project is relative to repo_path
+                path = Path(self.repo_path) / path
+            else:
+                # the path of a local project is relative to the current manifest
+                path = self._ctx.current_relpath / path
+            path = Path(os.path.normpath(path))
 
         raw_groups = pd.get('groups')
         if raw_groups:
@@ -2495,7 +2522,7 @@ class Manifest:
             url,
             description=pd.get('description'),
             revision=pd.get('revision', defaults.revision),
-            path=path,
+            path=path.as_posix(),
             submodules=self._load_submodules(pd.get('submodules'), f'project {name}'),
             clone_depth=pd.get('clone-depth'),
             west_commands=pd.get('west-commands'),
@@ -2527,7 +2554,7 @@ class Manifest:
                 f'workspace topdir' + (f' ({self.topdir})' if self.topdir else '')
             )
 
-        if ret_norm.startswith('..'):
+        if ret_norm.startswith('..') and not ret.is_local():
             self._malformed(
                 f'project "{name}" path {ret.path} '
                 f'normalizes to {ret_norm}, which escapes '
@@ -2655,16 +2682,16 @@ class Manifest:
 
         if imap is not None:
             imap_filter = _compose_imap_filters(self._ctx.imap_filter, _imap_filter(imap))
-            imap_path_prefix = imap.path_prefix
+            path_prefix = self._ctx.path_prefix / imap.path_prefix
         else:
             imap_filter = self._ctx.imap_filter
-            imap_path_prefix = '.'
+            path_prefix = self._ctx.path_prefix
 
         child_ctx = self._ctx._replace(
             imap_filter=imap_filter,
-            path_prefix=self._ctx.path_prefix / imap_path_prefix,
+            path_prefix=path_prefix,
             current_abspath=None,
-            current_relpath=None,
+            current_relpath=Path(project.path),
             current_data=data,
             current_repo_abspath=(Path(project.abspath) if project.abspath else None),
             # If the manifest data we imported from the project has
@@ -2699,6 +2726,9 @@ class Manifest:
                 # We may need a new manifest-rev, e.g. if revision is
                 # a SHA we don't have yet.
                 content = self._ctx.project_importer(project, path)
+        elif project.is_local():
+            manifest_file = Path(project.path) / path
+            content = manifest_file.read_text()
         else:
             # We need to clone this project, or we were specifically
             # asked to use the importer.
