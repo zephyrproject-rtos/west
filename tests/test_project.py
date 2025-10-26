@@ -103,6 +103,8 @@ def test_workspace(west_update_tmpdir):
     # places.
     wct = west_update_tmpdir
     assert wct.check(dir=1)
+    assert wct.join('.west').check(dir=1)
+    assert wct.join('.west', 'config').check(file=1)
     assert wct.join('subdir', 'Kconfiglib').check(dir=1)
     assert wct.join('subdir', 'Kconfiglib', '.git').check(dir=1)
     assert wct.join('subdir', 'Kconfiglib', 'kconfiglib.py').check(file=1)
@@ -117,6 +119,174 @@ def test_workspace(west_update_tmpdir):
     assert wct.join('zephyr', 'CODEOWNERS').check(file=1)
     assert wct.join('zephyr', 'include', 'header.h').check(file=1)
     assert wct.join('zephyr', 'subsys', 'bluetooth', 'code.c').check(file=1)
+
+
+def test_workspace_local(repos_tmpdir):
+    remote_repos = repos_tmpdir / 'repos'
+    projects_dir = repos_tmpdir / 'projects'
+    projects_dir.mkdir()
+
+    # create a local base project with a west.yml
+    project_base = projects_dir / 'base'
+    project_base.mkdir()
+    with open(project_base / 'west.yml', 'w') as f:
+        f.write(
+            textwrap.dedent(f'''\
+            manifest:
+              remotes:
+                - name: upstream
+                  url-base: {os.path.dirname(remote_repos / 'zephyr')}
+              projects:
+              - name: zephyr
+                remote: upstream
+                path: zephyr-rtos
+                import: True
+        ''')
+        )
+
+    # create another project with another west.yml (stacked on base)
+    project_middle = projects_dir / 'middle'
+    project_middle.mkdir()
+    with open(project_middle / 'west.yml', 'w') as f:
+        f.write(
+            textwrap.dedent('''\
+            manifest:
+              projects:
+              - name: base
+                remote: local
+                path: ../base
+                import: true
+        ''')
+        )
+
+    # create another project with another west.yml (stacked on base)
+    project_app = projects_dir / 'app'
+    project_app.mkdir()
+    with open(project_app / 'west.yml', 'w') as f:
+        f.write(
+            textwrap.dedent('''\
+            manifest:
+              projects:
+              - name: middle
+                remote: local
+                path: ../middle
+                import: true
+        ''')
+        )
+
+    # init workspace in projects_dir (project_app's parent)
+    cmd(['init', '-l', project_app])
+
+    # update workspace in projects_dir
+    cmd('update', cwd=projects_dir)
+
+    ws = projects_dir
+    # zephyr projects from base are cloned
+    for project_subdir in [
+        Path('subdir') / 'Kconfiglib',
+        'tagged_repo',
+        'net-tools',
+        'zephyr-rtos',
+    ]:
+        assert (ws / project_subdir).check(dir=1)
+        assert (ws / project_subdir / '.git').check(dir=1)
+
+    # list projects
+    stdout = cmd('list', cwd=projects_dir)
+    stdout_split = [line.split() for line in stdout.splitlines()]
+    expected = [
+        ['manifest', 'app', 'HEAD', 'N/A'],
+        ['middle', 'middle', 'N/A', 'N/A'],
+        ['base', 'base', 'N/A', 'N/A'],
+        ['zephyr', 'zephyr-rtos', 'master', f'{remote_repos}/zephyr'],
+        ['Kconfiglib', 'subdir/Kconfiglib', 'zephyr', f'{remote_repos}/Kconfiglib'],
+        ['tagged_repo', 'tagged_repo', 'v1.0', f'{remote_repos}/tagged_repo'],
+        ['net-tools', 'net-tools', 'master', f'{remote_repos}/net-tools'],
+    ]
+    assert str(stdout_split) == str(expected)
+
+    # -----------------------------
+    # Test "forall"
+    # -----------------------------
+    exp_forall_remote = [
+        '=== running "" in zephyr (zephyr-rtos):',
+        '=== running "" in Kconfiglib (subdir/Kconfiglib):',
+        '=== running "" in tagged_repo (tagged_repo):',
+        '=== running "" in net-tools (net-tools):',
+    ]
+    exp_forall_local = [
+        '=== running "" in middle (middle):',
+        '=== running "" in base (base):',
+    ]
+
+    # run forall (default)
+    stdout = cmd(['forall', '-c', ''], cwd=projects_dir)
+    assert stdout.splitlines() == exp_forall_local + exp_forall_remote
+
+    # run forall --no-remote
+    stdout = cmd(['forall', '--no-remote', '-c', ''], cwd=projects_dir)
+    assert stdout.splitlines() == exp_forall_local
+
+    # run forall --no-local
+    stdout = cmd(['forall', '--no-local', '-c', ''], cwd=projects_dir)
+    assert stdout.splitlines() == exp_forall_remote
+
+    # run forall --local
+    stdout = cmd(['forall', '--local', '-c', ''], cwd=projects_dir)
+    assert stdout.splitlines() == exp_forall_local
+
+    # run forall --remote
+    stdout = cmd(['forall', '--remote', '-c', ''], cwd=projects_dir)
+    assert stdout.splitlines() == exp_forall_remote
+
+    # run forall --no-remote --no-local
+    stdout = cmd(['forall', '--no-remote', '--no-local', '-c', ''], cwd=projects_dir)
+    assert stdout.splitlines() == []
+
+    # -----------------------------
+    # Test "status"
+    # -----------------------------
+    stdout = cmd(['status'], cwd=projects_dir)
+    assert stdout == ''
+
+    # -----------------------------
+    # Test "compare"
+    # -----------------------------
+    stdout = cmd(['compare'], cwd=projects_dir)
+    assert stdout == ''
+
+    # -----------------------------
+    # Test "diff"
+    # -----------------------------
+    stdout = cmd(['diff'], cwd=projects_dir)
+    assert stdout.rstrip() == 'Empty diff in 4 projects.'
+
+    # -----------------------------
+    # Test "grep"
+    # -----------------------------
+    stdout = cmd(['grep', 'dummy string to grep'], cwd=projects_dir)
+    assert stdout == ""
+
+    # -----------------------------
+    # Test "get_projects()"
+    # -----------------------------
+    manifest = Manifest.from_topdir(topdir=ws)
+    projects = manifest.get_projects([])
+    assert len(projects) == 7
+    mp, p1, p2, p3, p4, p5, p6 = projects
+    for p in projects:
+        assert Path(p.abspath).exists()
+    assert mp.name == 'manifest'
+    assert p1.name == 'middle'
+    assert p2.name == 'base'
+    assert p3.name == 'zephyr'
+    assert p4.name == 'Kconfiglib'
+    assert p5.name == 'tagged_repo'
+    assert p6.name == 'net-tools'
+    for p in [p1, p2]:
+        assert p.is_local()
+    for p in [mp, p3, p4, p5, p6]:
+        assert not p.is_local()
 
 
 def test_list(west_update_tmpdir):
