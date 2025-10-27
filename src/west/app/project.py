@@ -1833,14 +1833,14 @@ class Update(_ProjectCommand):
         # Note: The url is hashed and used as a subfolder to accomodate
         # changes in the manifest.
         subdir_hash = hashlib.md5(project.url.encode('utf-8')).hexdigest()
-        return os.fspath(Path(self.auto_cache) / basename(project.url) / subdir_hash)
+        return os.fspath(Path(self.auto_cache).expanduser() / basename(project.url) / subdir_hash)
 
     def project_cache(self, project):
         # Find the absolute path to a pre-existing local clone of a project
         # and return it. If the search fails, return None.
 
         if self.name_cache is not None:
-            maybe = Path(self.name_cache) / project.name
+            maybe = Path(self.name_cache).expanduser() / project.name
             if maybe.is_dir():
                 self.dbg(
                     f'found {project.name} in --name-cache {self.name_cache}',
@@ -1853,7 +1853,7 @@ class Update(_ProjectCommand):
                     level=Verbosity.DBG_MORE,
                 )
         if self.path_cache is not None:
-            maybe = Path(self.path_cache) / project.path
+            maybe = Path(self.path_cache).expanduser() / project.path
             if maybe.is_dir():
                 self.dbg(
                     f'found {project.path} in --path-cache {self.path_cache}',
