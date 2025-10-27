@@ -79,6 +79,10 @@ omit = [
   "*/net-tools/scripts/test.py",
   "*/subdir/Kconfiglib/scripts/test.py",
 ]
+exclude_lines = [
+  # Don't complain about type checking imports:
+  "if TYPE_CHECKING:"
+]
 
 [tool.coverage.paths]
 source = [
