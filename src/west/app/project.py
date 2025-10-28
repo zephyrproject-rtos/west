@@ -24,10 +24,8 @@ from urllib.parse import urlparse
 from west import util
 from west.commands import CommandError, Verbosity, WestCommand
 from west.configuration import Configuration
-from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
-from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
-from west.manifest import QUAL_REFS_WEST as QUAL_REFS
 from west.manifest import (
+    _WEST_YML,
     ImportFlag,
     Manifest,
     ManifestImportFailed,
@@ -35,6 +33,9 @@ from west.manifest import (
     Submodule,
     _manifest_content_at,
 )
+from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
+from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
+from west.manifest import QUAL_REFS_WEST as QUAL_REFS
 from west.manifest import is_group as is_project_group
 
 #
@@ -155,19 +156,60 @@ class Init(_ProjectCommand):
             'init',
             'create a west workspace',
             f'''\
-Creates a west workspace.
+Initialize a west workspace (topdir) around a west manifest (`west.yml`) by
+creating a `.west` directory in the topdir and a local configuration file
+`.west/config`.
+The West manifest can come from either a remote repository (that will be cloned
+during workspace initialization) or from an already existing local directory.
+Config option `manifest.path` is set accordingly (see below).
 
-With -l, creates a workspace around an existing local repository;
-without -l, creates a workspace by cloning a manifest repository
-by URL.
+Arguments
+---------
+--mf / --manifest-file
+    The relative path to the manifest file within the manifest repository
+    or directory. Config option manifest.file will be set to this value.
+    Defaults to `{_WEST_YML}` if not provided.
 
-With -m, clones the repository at that URL and uses it as the
-manifest repository. If --mr is not given, the remote's default
-branch will be used, if it exists.
+-t / --topdir
+    Specifies the directory where west should create the workspace.
+    The `.west` folder will be created inside this directory.
 
-With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
 
-Warning: 'west init' renames and/or deletes temporary files inside the
+1. Remote Manifest Repository (default)
+---------------------------------------
+West clones a remote repository (provided via `-m / --manifest-url`) into a
+folder in the west workspace. Config option `manifest.path` is set to point to
+this git clone. The repository must contain a west manifest.
+
+If no `-m / --manifest-url` is provided, west uses Zephyr URL by default:
+  {MANIFEST_URL_DEFAULT}.
+
+The topdir (where `.west` is created) is determined as follows:
+- argument `-t / --topdir` if provided
+- otherwise: argument `directory` if provided
+- otherwise: the current working directory
+
+If both `-t / --topdir` and `directory` are provided, `-t / --topdir`
+specifies the workspace directory, while `directory` specifies the subfolder
+within the workspace where the remote repository is cloned during
+initialization (e.g. it results in <directory>/zephyr/.git).
+With `--mr`, the revision (branch, tag, or sha) of the remote repository can be
+specified that will be cloned. It defaults to the repository's default branch.
+
+2. Local Manifest
+-----------------
+If `-l / --local` is given, west initializes a workspace around an already
+existing `west.yml`, which is located in `manifest_directory` (defaults to
+current working directory). Config option `manifest.path` is set to point to
+`manifest_directory`.
+
+The topdir (where `.west` is created) is determined as follows:
+- argument `-t / --topdir` if provided
+- otherwise: `manifest_directory`'s parent
+
+Known Issues
+------------
+'west init' renames and/or deletes temporary files inside the
 workspace being created. This fails on some filesystems when some
 development tool or any other program is trying to read/index these
 temporary files at the same time. For instance, it is required to stop
@@ -192,9 +234,10 @@ below.
         parser = self._parser(
             parser_adder,
             usage='''
-
-  %(prog)s [-m URL] [--mr REVISION] [--mf FILE] [-o=GIT_CLONE_OPTION] [directory]
-  %(prog)s -l [--mf FILE] directory
+  remote repository:
+  %(prog)s [-m URL] [--mr REVISION] [--mf FILE] [-o=GIT_CLONE_OPTION] [-t WORKSPACE_DIR] [directory]
+  local manifest:
+  %(prog)s -l [-t WORKSPACE_DIR] [--mf FILE] [manifest_directory]
 ''',
         )
 
@@ -203,7 +246,8 @@ below.
         parser.add_argument(
             '-m',
             '--manifest-url',
-            help='''manifest repository URL to clone;
+            metavar='URL',
+            help='''remote manifest repository URL to clone;
                     cannot be combined with -l''',
         )
         parser.add_argument(
@@ -211,6 +255,7 @@ below.
             '--clone-opt',
             action='append',
             default=[],
+            metavar='GIT_CLONE_OPTION',
             help='''additional option to pass to 'git clone'
                     (e.g. '-o=--depth=1'); may be given more than once;
                     cannot be combined with -l''',
@@ -219,21 +264,33 @@ below.
             '--mr',
             '--manifest-rev',
             dest='manifest_rev',
+            metavar='REVISION',
             help='''manifest repository branch or tag name
                     to check out first; cannot be combined with -l''',
-        )
-        parser.add_argument(
-            '--mf', '--manifest-file', dest='manifest_file', help='manifest file name to use'
         )
         parser.add_argument(
             '-l',
             '--local',
             action='store_true',
-            help='''use "directory" as an existing local
-                    manifest repository instead of cloning one from
-                    MANIFEST_URL; .west is created next to "directory"
-                    in this case, and manifest.path points at
-                    "directory"''',
+            help='''initialize workspace around an already existing local
+                    manifest instead of cloning a remote manifest.''',
+        )
+        parser.add_argument(
+            '--mf',
+            '--manifest-file',
+            dest='manifest_file',
+            metavar='FILE',
+            help=f'''manifest file to use. It is the relative
+                     path of the manifest file within the repository
+                     (remote or local). Defaults to {_WEST_YML}.''',
+        )
+        parser.add_argument(
+            '-t',
+            '--topdir',
+            dest='topdir',
+            metavar='WORKSPACE_DIR',
+            help='''the directory of the west workspace, where
+                    .west will be created in.''',
         )
         parser.add_argument(
             '--rename-delay',
@@ -249,9 +306,13 @@ below.
             'directory',
             nargs='?',
             default=None,
-            help='''with -l, the path to the local manifest repository;
-            without it, the directory to create the workspace in (defaulting
-            to the current working directory in this case)''',
+            metavar='directory',
+            help='''With --local: the path to the local manifest repository
+                    containing a west.yml;
+                    Otherwise: it depends whether --topdir is used or not.
+                    It is either the workspace directory being created (if no
+                    --topdir is provided), or the directory where west will
+                    clone the remote manifest (<directory>/<name>/.git)''',
         )
 
         return parser
@@ -302,16 +363,28 @@ below.
         #
         # https://docs.python.org/3/library/pathlib.html#pathlib.PurePath.parent
         manifest_dir = Path(args.directory or os.getcwd()).resolve()
-        manifest_filename = args.manifest_file or 'west.yml'
+        manifest_filename = args.manifest_file or _WEST_YML
         manifest_file = manifest_dir / manifest_filename
-        topdir = manifest_dir.parent
-        rel_manifest = manifest_dir.name
-        west_dir = topdir / WEST_DIR
-
         if not manifest_file.is_file():
             self.die(f'can\'t init: no {manifest_filename} found in {manifest_dir}')
 
-        self.banner('Initializing from existing manifest repository', rel_manifest)
+        if args.topdir:
+            topdir = Path(args.topdir).resolve()
+            try:
+                already = util.west_topdir(topdir, fall_back=False)
+                self.die_already(already)
+            except util.WestNotFound:
+                pass
+        else:
+            topdir = manifest_dir.parent.resolve()
+
+        if not manifest_file.is_relative_to(topdir):
+            self.die(f'{manifest_file} must be relative to west topdir')
+
+        rel_manifest = manifest_dir.relative_to(topdir)
+        west_dir = topdir / WEST_DIR
+
+        self.banner('Initializing around existing manifest', rel_manifest)
         self.small_banner(f'Creating {west_dir} and local configuration file')
         self.create(west_dir)
         os.chdir(topdir)
@@ -322,8 +395,21 @@ below.
         return topdir
 
     def bootstrap(self, args) -> Path:
-        topdir = Path(abspath(args.directory or os.getcwd()))
-        self.banner('Initializing in', topdir)
+        subdir = '.'
+        if args.topdir:
+            topdir = Path(abspath(args.topdir))
+            if args.directory:
+                if not Path(abspath(args.directory)).is_relative_to(topdir):
+                    self.die(
+                        f"directory '{args.directory}' must be relative "
+                        f"to west topdir '{args.topdir}'"
+                    )
+                subdir = os.path.relpath(args.directory, topdir)
+        elif args.directory:
+            topdir = Path(abspath(args.directory))
+        else:
+            topdir = Path(abspath(os.getcwd()))
+        self.banner(f'Initializing in {topdir}')
 
         manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
         if args.manifest_rev:
@@ -378,7 +464,7 @@ below.
             raise
 
         # Verify the manifest file exists.
-        temp_manifest_filename = args.manifest_file or 'west.yml'
+        temp_manifest_filename = args.manifest_file or _WEST_YML
         temp_manifest = tempdir / temp_manifest_filename
         if not temp_manifest.is_file():
             self.die(
@@ -404,6 +490,7 @@ below.
             # is PurePosixPath.
             manifest_path = PurePath(urlparse(manifest_url).path).name
 
+        manifest_path = str(Path(subdir) / manifest_path)
         manifest_abspath = topdir / manifest_path
 
         # Some filesystems like NTFS can't rename files in use.
