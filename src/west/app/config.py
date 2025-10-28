@@ -49,6 +49,11 @@ All `west config` commands can be applied for a specific configuration level by
 providing one of the following arguments:
     --local | --system | --global
 
+For each configuration level (local, global, and system) also multiple config
+file locations can be specified. To do so, set according environment variable
+to contain all paths (separated by 'os.pathsep', which is ';' on Windows or
+':' otherwise): Latter configuration files have precedence in such lists.
+
 The following command prints a list of all configuration files currently
 considered and existing (listed in the order as they are loaded):
     west config --list-paths

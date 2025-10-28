@@ -44,7 +44,7 @@ from enum import Enum
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any
 
-from west.util import WEST_DIR, PathType, WestNotFound, west_dir
+from west.util import WEST_DIR, PathType, WestNotFound, paths_to_str, str_to_paths, west_dir
 
 
 class MalformedConfig(Exception):
@@ -70,19 +70,32 @@ class _InternalCF:
         return section_child
 
     @staticmethod
-    def from_path(path: Path | None) -> '_InternalCF | None':
-        return _InternalCF(path) if path and path.exists() else None
+    def from_paths(paths: list[Path] | None) -> '_InternalCF | None':
+        paths = paths or []
+        if not paths:
+            return None
+        if not all(p.is_absolute() for p in paths):
+            raise WestNotFound(f"config file path(s) must be absolute: '{paths_to_str(paths)}'")
+        paths = [p for p in paths if p.exists()]
+        return _InternalCF(paths) if paths else None
 
-    def __init__(self, path: Path):
-        self.path = path
+    def __init__(self, paths: list[Path]):
         self.cp = _configparser()
-        read_files = self.cp.read(path, encoding='utf-8')
-        if len(read_files) != 1:
-            raise FileNotFoundError(path)
+        self.paths = paths
+        read_files = self.cp.read(self.paths, encoding='utf-8')
+        if len(read_files) != len(self.paths):
+            raise WestNotFound(f"Error while reading one of '{paths_to_str(paths)}'")
+
+    def _write(self):
+        if not self.paths:
+            raise WestNotFound('No config file exists that can be written')
+        if len(self.paths) > 1:
+            raise ValueError(f'Cannot write if multiple configs in use: {paths_to_str(self.paths)}')
+        with open(self.paths[0], 'w', encoding='utf-8') as f:
+            self.cp.write(f)
 
     def __contains__(self, option: str) -> bool:
         section, key = _InternalCF.parse_key(option)
-
         return section in self.cp and key in self.cp[section]
 
     def get(self, option: str):
@@ -99,7 +112,6 @@ class _InternalCF:
 
     def _get(self, option, getter):
         section, key = _InternalCF.parse_key(option)
-
         try:
             return getter(section, key)
         except (configparser.NoOptionError, configparser.NoSectionError) as err:
@@ -107,27 +119,21 @@ class _InternalCF:
 
     def set(self, option: str, value: Any):
         section, key = _InternalCF.parse_key(option)
-
         if section not in self.cp:
             self.cp[section] = {}
-
         self.cp[section][key] = value
-
-        with open(self.path, 'w', encoding='utf-8') as f:
-            self.cp.write(f)
+        self._write()
 
     def delete(self, option: str):
         section, key = _InternalCF.parse_key(option)
-
-        if section not in self.cp:
+        if option not in self:
             raise KeyError(option)
 
         del self.cp[section][key]
         if not self.cp[section].items():
             del self.cp[section]
 
-        with open(self.path, 'w', encoding='utf-8') as f:
-            self.cp.write(f)
+        self._write()
 
 
 class ConfigFile(Enum):
@@ -173,24 +179,26 @@ class Configuration:
         :param topdir: workspace location; may be None
         '''
 
-        local_path = _location(ConfigFile.LOCAL, topdir=topdir, find_local=False) or None
+        local_paths = _location(ConfigFile.LOCAL, topdir=topdir, find_local=False) or None
 
-        self._system_path = Path(_location(ConfigFile.SYSTEM))
-        self._global_path = Path(_location(ConfigFile.GLOBAL))
-        self._local_path = Path(local_path) if local_path is not None else None
+        self._system_paths = str_to_paths(_location(ConfigFile.SYSTEM))
+        self._global_paths = str_to_paths(_location(ConfigFile.GLOBAL))
+        self._local_paths = str_to_paths(local_paths)
 
-        self._system = _InternalCF.from_path(self._system_path)
-        self._global = _InternalCF.from_path(self._global_path)
-        self._local = _InternalCF.from_path(self._local_path)
+        self._system = _InternalCF.from_paths(self._system_paths)
+        self._global = _InternalCF.from_paths(self._global_paths)
+        self._local = _InternalCF.from_paths(self._local_paths)
 
-    def get_paths(self, location: ConfigFile = ConfigFile.ALL):
+    def get_paths(self, location: ConfigFile = ConfigFile.ALL, only_existing=True) -> list[Path]:
         ret = []
-        if self._global and location in [ConfigFile.GLOBAL, ConfigFile.ALL]:
-            ret.append(self._global.path)
-        if self._system and location in [ConfigFile.SYSTEM, ConfigFile.ALL]:
-            ret.append(self._system.path)
-        if self._local and location in [ConfigFile.LOCAL, ConfigFile.ALL]:
-            ret.append(self._local.path)
+        if location in [ConfigFile.GLOBAL, ConfigFile.ALL]:
+            ret.extend(self._global_paths)
+        if location in [ConfigFile.SYSTEM, ConfigFile.ALL]:
+            ret.extend(self._system_paths)
+        if location in [ConfigFile.LOCAL, ConfigFile.ALL]:
+            ret.extend(self._local_paths)
+        if only_existing:
+            ret = [p for p in ret if p.exists()]
         return ret
 
     def get(
@@ -283,28 +291,45 @@ class Configuration:
         :param configfile: type of config file to set the value in
         '''
 
+        def check_configfile(location: ConfigFile):
+            '''
+            check that exactly one configfile is in use (even if it not exists yet).
+            Return its path.
+            '''
+            configs = self.get_paths(location, only_existing=False)
+            if not configs:
+                raise WestNotFound(f'{configfile}: Cannot determine any config file')
+            if len(configs) > 1:
+                raise ValueError(
+                    f'Cannot set value if multiple configs in use: {paths_to_str(configs)}'
+                )
+            return configs[0]
+
         if configfile == ConfigFile.ALL:
             # We need a real configuration file; ALL doesn't make sense here.
             raise ValueError(configfile)
         elif configfile == ConfigFile.LOCAL:
-            if self._local_path is None:
+            if not self._local_paths:
                 raise ValueError(
                     f'{configfile}: file not found; retry in a workspace or set WEST_CONFIG_LOCAL'
                 )
-            if not self._local_path.exists():
-                self._local = self._create(self._local_path)
+            config_file = check_configfile(configfile)
+            if not config_file.exists():
+                self._local = self._create(config_file)
             if TYPE_CHECKING:
                 assert self._local
             self._local.set(option, value)
         elif configfile == ConfigFile.GLOBAL:
-            if not self._global_path.exists():
-                self._global = self._create(self._global_path)
+            config_file = check_configfile(configfile)
+            if not config_file.exists():
+                self._global = self._create(config_file)
             if TYPE_CHECKING:
                 assert self._global
             self._global.set(option, value)
         elif configfile == ConfigFile.SYSTEM:
-            if not self._system_path.exists():
-                self._system = self._create(self._system_path)
+            config_file = check_configfile(configfile)
+            if not config_file.exists():
+                self._system = self._create(config_file)
             if TYPE_CHECKING:
                 assert self._system
             self._system.set(option, value)
@@ -316,7 +341,7 @@ class Configuration:
     def _create(path: Path) -> _InternalCF:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch(exist_ok=True)
-        ret = _InternalCF.from_path(path)
+        ret = _InternalCF.from_paths([path])
         if TYPE_CHECKING:
             assert ret
         return ret
@@ -554,18 +579,27 @@ def delete_config(
     _deprecated('delete_config')
 
     stop = False
+    considered_locations = []
     if configfile is None:
-        to_check = [_location(x, topdir=topdir) for x in [ConfigFile.LOCAL, ConfigFile.GLOBAL]]
+        considered_locations = [ConfigFile.LOCAL, ConfigFile.GLOBAL]
         stop = True
     elif configfile == ConfigFile.ALL:
-        to_check = [
-            _location(x, topdir=topdir)
-            for x in [ConfigFile.SYSTEM, ConfigFile.GLOBAL, ConfigFile.LOCAL]
-        ]
+        considered_locations = [ConfigFile.SYSTEM, ConfigFile.GLOBAL, ConfigFile.LOCAL]
     elif isinstance(configfile, ConfigFile):
-        to_check = [_location(configfile, topdir=topdir)]
+        considered_locations = [configfile]
     else:
-        to_check = [_location(x, topdir=topdir) for x in configfile]
+        considered_locations = configfile
+
+    # ensure that only one config file is in use
+    config_files = [str_to_paths(_location(cfg, topdir=topdir)) for cfg in considered_locations]
+    for config_file_list in config_files:
+        if len(config_file_list) > 1:
+            raise ValueError(
+                f'Error: Multiple config paths in use: {paths_to_str(config_file_list)}'
+            )
+
+    # determine config file paths
+    to_check = [c for config_file_list in config_files for c in config_file_list]
 
     found = False
     for path in to_check:
@@ -637,10 +671,12 @@ def _location(cfg: ConfigFile, topdir: PathType | None = None, find_local: bool 
         raise ValueError('unsupported platform ' + plat)
     elif cfg == ConfigFile.GLOBAL:
         if 'WEST_CONFIG_GLOBAL' in env:
-            return env['WEST_CONFIG_GLOBAL']
+            path = env['WEST_CONFIG_GLOBAL']
+            return path
 
         if platform.system() == 'Linux' and 'XDG_CONFIG_HOME' in env:
-            return os.path.join(env['XDG_CONFIG_HOME'], 'west', 'config')
+            path = os.path.join(env['XDG_CONFIG_HOME'], 'west', 'config')
+            return path
 
         return os.fspath(Path.home() / '.westconfig')
     elif cfg == ConfigFile.LOCAL:
@@ -648,7 +684,8 @@ def _location(cfg: ConfigFile, topdir: PathType | None = None, find_local: bool 
             return env['WEST_CONFIG_LOCAL']
 
         if topdir:
-            return os.fspath(Path(topdir) / WEST_DIR / 'config')
+            path = os.fspath(Path(topdir) / WEST_DIR / 'config')
+            return path
 
         if find_local:
             # Might raise WestNotFound!
@@ -659,32 +696,37 @@ def _location(cfg: ConfigFile, topdir: PathType | None = None, find_local: bool 
         raise ValueError(f'invalid configuration file {cfg}')
 
 
-def _gather_configs(cfg: ConfigFile, topdir: PathType | None) -> list[str]:
+def _gather_configs(cfg: ConfigFile, topdir: PathType | None) -> list[Path]:
     # Find the paths to the given configuration files, in increasing
     # precedence order.
-    ret = []
+    ret: list[Path] = []
 
     if cfg == ConfigFile.ALL or cfg == ConfigFile.SYSTEM:
-        ret.append(_location(ConfigFile.SYSTEM, topdir=topdir))
+        paths = str_to_paths(_location(ConfigFile.SYSTEM, topdir=topdir))
+        ret.extend(paths)
     if cfg == ConfigFile.ALL or cfg == ConfigFile.GLOBAL:
-        ret.append(_location(ConfigFile.GLOBAL, topdir=topdir))
+        paths = str_to_paths(_location(ConfigFile.GLOBAL, topdir=topdir))
+        ret.extend(paths)
     if cfg == ConfigFile.ALL or cfg == ConfigFile.LOCAL:
         try:
-            ret.append(_location(ConfigFile.LOCAL, topdir=topdir))
+            paths = str_to_paths(_location(ConfigFile.LOCAL, topdir=topdir))
+            ret.extend(paths)
         except WestNotFound:
             pass
-
     return ret
 
 
 def _ensure_config(configfile: ConfigFile, topdir: PathType | None) -> str:
     # Ensure the given configfile exists, returning its path. May
     # raise permissions errors, WestNotFound, etc.
-    loc = _location(configfile, topdir=topdir)
-    path = Path(loc)
-
+    config_file = str_to_paths(_location(configfile, topdir=topdir))
+    if not config_file:
+        raise ValueError(f"no config found for configfile '{configfile}'")
+    if len(config_file) > 1:
+        raise ValueError(f'Cannot write if multiple configs in use: {paths_to_str(config_file)}')
+    path: Path = config_file[0]
     if path.is_file():
-        return loc
+        return os.fspath(path)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.touch(exist_ok=True)

@@ -9,10 +9,10 @@ import textwrap
 from typing import Any
 
 import pytest
-from conftest import cmd, cmd_raises, update_env
+from conftest import WINDOWS, cmd, cmd_raises, update_env
 
 from west import configuration as config
-from west.util import PathType
+from west.util import PathType, WestNotFound
 
 SYSTEM = config.ConfigFile.SYSTEM
 GLOBAL = config.ConfigFile.GLOBAL
@@ -587,6 +587,116 @@ def test_config_precedence():
     assert 'pytest' not in cfg(f=SYSTEM)
     assert cfg(f=GLOBAL)['pytest']['precedence'] == 'global'
     assert cfg(f=LOCAL)['pytest']['precedence'] == 'local'
+
+
+TEST_CASES_CONFIG_RELATIVE = [
+    # (flag, env_var)
+    ('--local', 'WEST_CONFIG_LOCAL'),
+    ('--system', 'WEST_CONFIG_SYSTEM'),
+    ('--global', 'WEST_CONFIG_GLOBAL'),
+]
+
+
+@pytest.mark.parametrize("test_case", TEST_CASES_CONFIG_RELATIVE)
+def test_config_relative_paths(test_case, config_tmpdir):
+    flag, env_var = test_case
+
+    # one relative config file path is specified
+    os.environ[env_var] = 'config1'
+    _, stderr = cmd_raises(f'config {flag} some.key', WestNotFound)
+    assert f"config file path(s) must be absolute: '{os.environ[env_var]}'" in stderr
+
+    # one of multiple config file paths is relative
+    os.environ[env_var] = f'config1{os.pathsep}config2'
+    _, stderr = cmd_raises(f'config {flag} some.key', WestNotFound)
+    assert f"config file path(s) must be absolute: '{os.environ[env_var]}'" in stderr
+
+
+def test_config_multiple(config_tmpdir):
+    # Verify that local settings take precedence over global ones,
+    # but that both values are still available, and that setting
+    # either doesn't affect system settings.
+    def write_config(config_file, section, key1, value1, key2, value2):
+        config_file.parent.mkdir(exist_ok=True)
+
+        content = textwrap.dedent(f'''
+        [{section}]
+        {key1} = {value1}
+        {key2} = {value2}
+        ''')
+
+        with open(config_file, 'w') as conf:
+            conf.write(content)
+
+    # config file paths
+    config_dir = pathlib.Path(config_tmpdir) / 'configs'
+    config_s1 = config_dir / 'system 1'
+    config_s2 = config_dir / 'system 2'
+    config_g1 = config_dir / 'global 1'
+    config_g2 = config_dir / 'global 2'
+    config_l1 = config_dir / 'local 1'
+    config_l2 = config_dir / 'local 2'
+
+    # create some configs with
+    # - some individual option per config file
+    # - the same option defined in multiple configs
+    write_config(config_s1, 'sec', 's', '1 !"$&/()=?', 's1', '1 !"$&/()=?')
+    write_config(config_s2, 'sec', 's', '2', 's2', '2')
+    write_config(config_g1, 'sec', 'g', '1', 'g1', '1')
+    write_config(config_g2, 'sec', 'g', '2', 'g2', '2')
+    write_config(config_l1, 'sec', 'l', '1', 'l1', '1')
+    write_config(config_l2, 'sec', 'l', '2', 'l2', '2')
+
+    # use a non-readable config file (does not work on Windows)
+    if not WINDOWS:
+        config_non_readable = config_dir / 'non-readable'
+        config_non_readable.touch()
+        config_non_readable.chmod(0o000)
+        os.environ["WEST_CONFIG_GLOBAL"] = f'{config_g1}{os.pathsep}{config_non_readable}'
+        _, stderr = cmd_raises('config --global some.section', WestNotFound)
+        expected = f"Error while reading one of '{config_g1}{os.pathsep}{config_non_readable}'"
+        assert expected in stderr
+
+    # specify multiple configs for each config level (separated by os.pathsep)
+    os.environ["WEST_CONFIG_GLOBAL"] = f'{config_g1}{os.pathsep}{config_g2}'
+    os.environ["WEST_CONFIG_SYSTEM"] = f'{config_s1}{os.pathsep}{config_s2}'
+    os.environ["WEST_CONFIG_LOCAL"] = f'{config_l1}{os.pathsep}{config_l2}'
+
+    # check that all individual options are applied
+    stdout = cmd('config --system sec.s1').rstrip()
+    assert stdout == '1 !"$&/()=?'
+    stdout = cmd('config --system sec.s2').rstrip()
+    assert stdout == '2'
+    stdout = cmd('config --global sec.g1').rstrip()
+    assert stdout == '1'
+    stdout = cmd('config --global sec.g2').rstrip()
+    assert stdout == '2'
+    stdout = cmd('config --local sec.l1').rstrip()
+    assert stdout == '1'
+    stdout = cmd('config --local sec.l2').rstrip()
+    assert stdout == '2'
+
+    # check that options from latest config overrides
+    stdout = cmd('config --system sec.s').rstrip()
+    assert stdout == '2'
+    stdout = cmd('config --global sec.g').rstrip()
+    assert stdout == '2'
+    stdout = cmd('config --local sec.l').rstrip()
+    assert stdout == '2'
+
+    # check that list-paths gives correct output
+    stdout = cmd('config --global --list-paths')
+    assert [str(config_g1), str(config_g2)] == stdout.rstrip().splitlines()
+    stdout = cmd('config --system --list-paths')
+    assert [str(config_s1), str(config_s2)] == stdout.rstrip().splitlines()
+    stdout = cmd('config --local --list-paths')
+    assert [str(config_l1), str(config_l2)] == stdout.rstrip().splitlines()
+
+    # writing derrnot possible if multiple configs are used
+    _, stderr = cmd_raises('config --local sec.l3 3', ValueError)
+    assert (
+        f'Cannot set value if multiple configs in use: {config_l1}{os.pathsep}{config_l2}' in stderr
+    )
 
 
 def test_config_missing_key():
