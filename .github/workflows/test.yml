@@ -45,7 +45,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4 # v6.7.0
+        uses: astral-sh/setup-uv@85856786d1ce8acfbcc2f13a5f3fbd6b938f9f41 # v7.1.2
         with:
           python-version: ${{ matrix.python-version }}
           working-directory: './check out/'
@@ -62,7 +62,7 @@ jobs:
 
       - name: Upload coverage reports
         if: ${{ matrix.task == 'test' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: coverage-${{ matrix.os }}-${{ matrix.python-version }}
           path: "./check out/.coverage"
@@ -70,7 +70,7 @@ jobs:
 
       - name: Upload test reports
         if: ${{ matrix.task == 'test' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: tests-${{ matrix.os }}-${{ matrix.python-version }}
           path: "./check out/junit.xml"
@@ -91,7 +91,7 @@ jobs:
           python-version: '3.13'
 
       - name: Download all artifacts
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
 
       - name: Install coverage
         run: pip3 install coverage
@@ -102,7 +102,7 @@ jobs:
           coverage xml
 
       - name: Upload combined coverage report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: coverage-combined
           path: coverage.xml
