@@ -5,9 +5,9 @@
 '''Miscellaneous utilities.'''
 
 import os
-import pathlib
 import shlex
 import textwrap
+from pathlib import Path
 
 # What west's APIs accept for paths.
 #
@@ -29,8 +29,8 @@ def escapes_directory(path: PathType, directory: PathType) -> bool:
 
     Verifies `path` is inside of `directory`, after resolving
     both.'''
-    path_resolved = pathlib.Path(path).resolve()
-    dir_resolved = pathlib.Path(directory).resolve()
+    path_resolved = Path(path).resolve()
+    dir_resolved = Path(directory).resolve()
     try:
         path_resolved.relative_to(dir_resolved)
         ret = False
@@ -70,7 +70,7 @@ def west_topdir(start: PathType | None = None, fall_back: bool = True) -> str:
     Like west_dir(), but returns the path to the parent directory of the .west/
     directory instead, where project repositories are stored
     '''
-    cur_dir = pathlib.Path(start or os.getcwd())
+    cur_dir = Path(start or os.getcwd())
 
     while True:
         if (cur_dir / WEST_DIR).is_dir():
