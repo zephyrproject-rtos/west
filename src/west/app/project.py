@@ -2352,7 +2352,7 @@ class Grep(_ProjectCommand):
 
         config_option = self.config.get(f'grep.{tool}-path')
         if config_option:
-            return config_option
+            return str(expand_path(config_option))
 
         if tool == 'git-grep':
             self.die_if_no_git()
