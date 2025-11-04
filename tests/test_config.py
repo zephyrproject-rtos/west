@@ -9,10 +9,10 @@ import textwrap
 from typing import Any
 
 import pytest
-from conftest import cmd, cmd_raises, update_env
+from conftest import chdir, cmd, cmd_raises, update_env
 
 from west import configuration as config
-from west.util import PathType
+from west.util import PathType, WestNotFound
 
 SYSTEM = config.ConfigFile.SYSTEM
 GLOBAL = config.ConfigFile.GLOBAL
@@ -125,6 +125,10 @@ def test_config_list_paths():
     WEST_CONFIG_GLOBAL = os.environ['WEST_CONFIG_GLOBAL']
     WEST_CONFIG_SYSTEM = os.environ['WEST_CONFIG_SYSTEM']
 
+    # Fixture is pristine?
+    stdout = cmd('config --list-paths')
+    assert stdout.splitlines() == []
+
     # create the configs
     cmd('config --local pytest.key val')
     cmd('config --global pytest.key val')
@@ -149,9 +153,11 @@ def test_config_list_paths():
     stdout = cmd('config --list-paths')
     assert stdout.splitlines() == []
 
-    # list local config as it exists (determined from filesystem, not from env)
+    # list local config as it exists (default value, not overriden by fixture env)
     del os.environ['WEST_CONFIG_LOCAL']
     default_config = pathlib.Path('.west') / 'config'
+    defconfig_abs_str = str(default_config.absolute())
+    # Cheap fake workspace, enough to fool west for this test
     default_config.parent.mkdir()
     default_config.write_text(
         textwrap.dedent('''\
@@ -161,7 +167,26 @@ def test_config_list_paths():
     ''')
     )
     stdout = cmd('config --list-paths')
-    assert stdout.splitlines() == [str(default_config.absolute())]
+    assert stdout.splitlines() == [defconfig_abs_str]
+
+    # Now point a relative WEST_CONFIG_x to the same file and check it
+    # is anchored to the west topdir (referring to the same file twice
+    # could break other west features but must not break the low-level
+    # --list-paths)
+    assert not default_config.is_absolute()
+    os.mkdir('sub0')
+    for e in ['WEST_CONFIG_GLOBAL', 'WEST_CONFIG_SYSTEM']:
+        with update_env({e: str(default_config)}):
+            for d in ['.', 'sub0', '.west']:
+                with chdir(d):
+                    stdout = cmd('config --list-paths')
+                    assert stdout.splitlines() == [defconfig_abs_str, defconfig_abs_str]
+
+            # Leave the fake west workspace
+            with chdir('..'):
+                with pytest.raises(WestNotFound) as WNE:
+                    stdout = cmd('config --list-paths')
+                assert 'topdir' in str(WNE)
 
 
 def test_config_local():
