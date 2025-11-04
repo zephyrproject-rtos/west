@@ -366,10 +366,11 @@ class WestApp:
 
         if args.command not in no_manifest_ok:
             if isinst(MalformedManifest, MalformedConfig):
+                manifests = []
+                if self.mle:
+                    manifests = list(self.mle.args)
                 self.queued_io.append(
-                    lambda cmd: cmd.die(
-                        "can't load west manifest: " + "\n".join(list(self.mle.args))
-                    )
+                    lambda cmd: cmd.die("can't load west manifest: " + "\n".join(manifests))
                 )
             elif isinst(_ManifestImportDepth):
                 self.queued_io.append(
@@ -387,18 +388,19 @@ class WestApp:
             elif isinst(FileNotFoundError):
                 # This should ordinarily only happen when the top
                 # level manifest is not found.
+                filename = self.mle.filename if self.mle else None
+                topdir = f'{self.topdir}/' if self.topdir else ''
                 self.queued_io.append(
                     lambda cmd: cmd.die(
-                        f"manifest file not found: {self.mle.filename}\n"
+                        f"manifest file not found: {filename}\n"
                         "Please check manifest.file and manifest.path in "
-                        f"{self.topdir + '/' or ''}.west/config"
+                        f"{topdir}.west/config"
                     )
                 )
             elif isinst(PermissionError):
+                filename = self.mle.filename if self.mle else None
                 self.queued_io.append(
-                    lambda cmd: cmd.die(
-                        f"permission denied when loading manifest file: {self.mle.filename}"
-                    )
+                    lambda cmd: cmd.die(f"permission denied when loading manifest file: {filename}")
                 )
             else:
                 self.queued_io.append(
@@ -412,11 +414,12 @@ class WestApp:
             # "None" means "extensions could not be determined".
             # Leaving this an empty dict would mean "there are no
             # extensions", which is different.
-            self.extensions = None
+            self.extensions = {}
             return
 
         try:
-            path_specs = extension_commands(self.config, manifest=self.manifest)
+            if self.config:
+                path_specs = extension_commands(self.config, manifest=self.manifest)
         except ExtensionCommandError as ece:
             self.handle_extension_command_error(ece)
         extension_names = set()
@@ -469,14 +472,15 @@ class WestApp:
         if ece.hint:
             msg += '\n  Hint: ' + ece.hint
 
-        if self.cmd and self.cmd.verbosity >= Verbosity.DBG_EXTREME:
-            self.cmd.err(msg, fatal=True)
-            self.cmd.banner('Traceback (enabled by -vvv):')
-            traceback.print_exc()
-        else:
-            tb_file = dump_traceback()
-            msg += f'\n  See {tb_file} for a traceback.'
-            self.cmd.err(msg, fatal=True)
+        if self.cmd:
+            if self.cmd.verbosity >= Verbosity.DBG_EXTREME:
+                self.cmd.err(msg, fatal=True)
+                self.cmd.banner('Traceback (enabled by -vvv):')
+                traceback.print_exc()
+            else:
+                tb_file = dump_traceback()
+                msg += f'\n  See {tb_file} for a traceback.'
+                self.cmd.err(msg, fatal=True)
         sys.exit(ece.returncode)
 
     def setup_parsers(self):
@@ -608,20 +612,26 @@ class WestApp:
                 early_args = early_args._replace(command_name=alias.args[0])
 
         self.handle_early_arg_errors(early_args)
-        args, unknown = self.west_parser.parse_known_args(args=argv)
+        args, unknown = (
+            self.west_parser.parse_known_args(args=argv) if self.west_parser else (None, None)
+        )
 
         # Set up logging verbosity before running the command, for
         # backwards compatibility. Remove this when we can part ways
         # with the log module.
-        log.set_verbosity(args.verbose - args.quiet)
+        if args:
+            log.set_verbosity(args.verbose - args.quiet)
 
         # If we were run as 'west -h ...' or 'west --help ...',
         # monkeypatch the args namespace so we end up running Help.  The
         # user might have also provided a command. If so, print help about
         # that command.
-        if args.help or args.command is None:
+        if args and (args.help or args.command is None):
             args.command_name = args.command
             args.command = 'help'
+
+        if not args:
+            return
 
         # Finally, run the command.
         try:
@@ -667,6 +677,7 @@ class WestApp:
         except BrokenPipeError:
             sys.exit(0)
         except CalledProcessError as cpe:
+            assert self.cmd
             self.cmd.err(
                 f'command exited with status {cpe.returncode}: {quote_sh_list(cpe.cmd)}', fatal=True
             )
@@ -686,8 +697,10 @@ class WestApp:
             # try to fix a previous update that left 'manifest-rev'
             # branches pointing at revisions with invalid manifest
             # data in projects that get imported.
+            assert self.cmd
             self.cmd.die('\n  '.join(str(arg) for arg in mm.args))
         except WestNotFound as wnf:
+            assert self.cmd
             self.cmd.die(str(wnf))
 
     def handle_early_arg_errors(self, early_args):
@@ -718,7 +731,8 @@ class WestApp:
         self.print_usage_and_exit(f'west: unknown command "{command_name}"; {extra_help}')
 
     def print_usage_and_exit(self, message):
-        self.west_parser.print_usage(file=sys.stderr)
+        if self.west_parser:
+            self.west_parser.print_usage(file=sys.stderr)
         sys.exit(message)
 
     def setup_west_logging(self, verbosity):
@@ -808,6 +822,10 @@ class WestApp:
         manifest = self.manifest
         topdir = self.topdir
         config = self.config
+
+        assert manifest
+        assert config
+        assert topdir
 
         if args.zephyr_base:
             # The command line --zephyr-base takes precedence over
@@ -1162,7 +1180,7 @@ class WestArgumentParser(argparse.ArgumentParser):
         # Track information we want for formatting help.  The argparse
         # module calls kwargs.pop(), so can't call super first without
         # losing data.
-        optional = {'options': [], 'metavar': kwargs.get('metavar', None)}
+        optional: dict = {'options': [], 'metavar': kwargs.get('metavar', None)}
         need_metavar = optional['metavar'] is None and kwargs.get('action') in (None, 'store')
         for arg in args:
             if not arg.startswith('-'):
@@ -1266,7 +1284,7 @@ def main(argv=None):
 # If you add a command here, make sure to think about how it should be
 # handled in case of ManifestVersionError or other reason the manifest
 # might fail to load (import error, configuration file error, etc.)
-BUILTIN_COMMAND_GROUPS = {
+BUILTIN_COMMAND_GROUPS: dict[str | None, list] = {
     'built-in commands for managing git repositories': [
         Init,
         Update,

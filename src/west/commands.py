@@ -157,6 +157,7 @@ class WestCommand(ABC):
             a fatal error.
         :param verbosity: command output verbosity level; can be changed later
         '''
+        self.app = None
         self.name: str = name
         self.help: str = help
         self.description: str = description
@@ -726,14 +727,14 @@ def _commands_module_from_file(file):
     # - Windows and macOS have case insensitive names
     # - Windows accepts slash or backslash as separator
     # - POSIX operating systems have symlinks
-    pathobj = Path(file).resolve()
+    pathobj = Path(file).resolve().as_posix()
     if pathobj in _EXT_MODULES_CACHE:
         return _EXT_MODULES_CACHE[pathobj]
 
     mod_name = next(_EXT_MODULES_NAME_IT)
     spec = importlib.util.spec_from_file_location(mod_name, os.fspath(pathobj))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    _EXT_MODULES_CACHE[file] = mod
-
-    return mod
+    if spec and spec.loader:
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _EXT_MODULES_CACHE[file] = mod
+        return mod

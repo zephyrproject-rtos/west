@@ -556,6 +556,8 @@ The following arguments are available:
         if args.inactive and args.projects:
             self.parser.error('-i cannot be combined with an explicit project list')
 
+        assert self.topdir, 'no west topdir'
+
         for project in self._projects(args.projects):
             # Include the project based on the inactive flag. If the flag is
             # set, include only inactive projects. Otherwise, include only
@@ -702,7 +704,6 @@ class ManifestCommand(_ProjectCommand):
     def do_run(self, args, user_args):
         manifest = self.manifest
         dump_kwargs = {'default_flow_style': False, 'sort_keys': False}
-
         if args.validate:
             pass  # nothing more to do
         elif args.resolve:
@@ -739,6 +740,9 @@ class ManifestCommand(_ProjectCommand):
         '''"Performs a top-down search of the west topdir,
         ignoring every directory that corresponds to a west project.
         '''
+        if not self.topdir:
+            return
+
         ppaths = []
         untracked = []
         for project in self._projects(None):
@@ -1361,7 +1365,7 @@ class Update(_ProjectCommand):
         self.auto_cache = args.auto_cache or config.get('update.auto-cache')
         self.sync_submodules = config.getboolean('update.sync-submodules', default=True)
 
-        self.group_filter: List[str] = []
+        self.group_filter: list[str] = []
 
         def handle(group_filter_item):
             item = group_filter_item.strip()
@@ -1392,7 +1396,7 @@ class Update(_ProjectCommand):
         # call our importer whenever it encounters an import statement
         # in a project, allowing us to control the recursion so it
         # always uses the latest manifest data.
-        self.updated = set()
+        self.updated: set = set()
 
         self.manifest = Manifest.from_file(
             importer=self.update_importer, import_flags=ImportFlag.FORCE_PROJECTS
@@ -1591,12 +1595,11 @@ class Update(_ProjectCommand):
             )
 
     def update(self, project):
+        stats: dict = dict()
+        take_stats = False
         if self.args.stats:
-            stats = dict()
+            take_stats = True
             update_start = perf_counter()
-        else:
-            stats = None
-        take_stats = stats is not None
 
         self.banner(f'updating {project.name_and_path}:')
 
@@ -1639,7 +1642,7 @@ class Update(_ProjectCommand):
                 start = perf_counter()
             project.git('status')
             if take_stats:
-                stats['get current status'] = perf_counter - start
+                stats['get current status'] = perf_counter() - start
         elif try_rebase:
             # Attempt a rebase.
             self.inf(f'west update: rebasing to {MANIFEST_REV} {sha}')
@@ -2413,7 +2416,8 @@ class Topdir(_ProjectCommand):
         return self._parser(parser_adder)
 
     def do_run(self, args, user_args):
-        self.inf(PurePath(self.topdir).as_posix())
+        if self.topdir:
+            self.inf(PurePath(self.topdir).as_posix())
 
 
 class SelfUpdate(_ProjectCommand):
