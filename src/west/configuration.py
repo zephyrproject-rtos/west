@@ -175,15 +175,15 @@ class Configuration:
 
         local_path = _location(ConfigFile.LOCAL, topdir=topdir, find_local=False) or None
 
-        self._system_path = Path(_location(ConfigFile.SYSTEM))
-        self._global_path = Path(_location(ConfigFile.GLOBAL))
+        self._system_path = Path(_location(ConfigFile.SYSTEM, topdir=topdir))
+        self._global_path = Path(_location(ConfigFile.GLOBAL, topdir=topdir))
         self._local_path = Path(local_path) if local_path is not None else None
 
         self._system = _InternalCF.from_path(self._system_path)
         self._global = _InternalCF.from_path(self._global_path)
         self._local = _InternalCF.from_path(self._local_path)
 
-    def get_paths(self, location: ConfigFile = ConfigFile.ALL):
+    def get_paths(self, location: ConfigFile = ConfigFile.ALL) -> list[Path]:
         ret = []
         if self._global and location in [ConfigFile.GLOBAL, ConfigFile.ALL]:
             ret.append(self._global.path)
@@ -587,7 +587,22 @@ def delete_config(
         raise KeyError(f'{section}.{key}')
 
 
+def _rel_topdir_to_abs(p: PathType, topdir: PathType | None) -> str:
+    # Converts a path relative to topdir to an absolute path.
+    # , returns absolute paths unchanged.
+    if os.path.isabs(p):
+        return str(p)
+    if topdir is None:
+        raise WestNotFound(f"'{p}' is relative but 'west topdir' is not defined")
+    return str(os.path.join(topdir, p))
+
+
 def _location(cfg: ConfigFile, topdir: PathType | None = None, find_local: bool = True) -> str:
+    # Return the WEST_CONFIG_x environment variable if defined, or the
+    # OS-specific default value. Anchors relative paths to
+    # "topdir". Does _not_ check whether the file exists or if it is
+    # readable or actually interact with the filesystem in any way.
+    #
     # Making this a function that gets called each time you ask for a
     # configuration file makes it respect updated environment
     # variables (such as XDG_CONFIG_HOME, PROGRAMDATA) if they're set
@@ -607,7 +622,7 @@ def _location(cfg: ConfigFile, topdir: PathType | None = None, find_local: bool 
         raise ValueError('ConfigFile.ALL has no location')
     elif cfg == ConfigFile.SYSTEM:
         if 'WEST_CONFIG_SYSTEM' in env:
-            return env['WEST_CONFIG_SYSTEM']
+            return _rel_topdir_to_abs(env['WEST_CONFIG_SYSTEM'], topdir)
 
         plat = platform.system()
 
@@ -637,7 +652,7 @@ def _location(cfg: ConfigFile, topdir: PathType | None = None, find_local: bool 
         raise ValueError('unsupported platform ' + plat)
     elif cfg == ConfigFile.GLOBAL:
         if 'WEST_CONFIG_GLOBAL' in env:
-            return env['WEST_CONFIG_GLOBAL']
+            return _rel_topdir_to_abs(env['WEST_CONFIG_GLOBAL'], topdir)
 
         if platform.system() == 'Linux' and 'XDG_CONFIG_HOME' in env:
             return os.path.join(env['XDG_CONFIG_HOME'], 'west', 'config')
@@ -645,7 +660,7 @@ def _location(cfg: ConfigFile, topdir: PathType | None = None, find_local: bool 
         return os.fspath(Path.home() / '.westconfig')
     elif cfg == ConfigFile.LOCAL:
         if 'WEST_CONFIG_LOCAL' in env:
-            return env['WEST_CONFIG_LOCAL']
+            return _rel_topdir_to_abs(env['WEST_CONFIG_LOCAL'], topdir)
 
         if topdir:
             return os.fspath(Path(topdir) / WEST_DIR / 'config')
