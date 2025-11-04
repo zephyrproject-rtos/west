@@ -143,7 +143,7 @@ def _check_git_capabilities(tmpdir_factory):
 
 @pytest.fixture(autouse=True)
 def independent_global_and_system_config(tmpdir_factory):
-    # Fixture to ensure that the user's actual global and system configuration
+    # Fixture to ensure that the user's actual configuration
     # files are neither used nor touched during test.
     #
     # We also set ZEPHYR_BASE (to avoid complaints in subcommand
@@ -160,6 +160,7 @@ def independent_global_and_system_config(tmpdir_factory):
     with update_env({
         'WEST_CONFIG_SYSTEM': str(system),
         'WEST_CONFIG_GLOBAL': str(glbl),
+        'WEST_CONFIG_LOCAL': None,
         'ZEPHYR_BASE': str(tmpdir / 'no-zephyr-here'),
     }):
         yield
