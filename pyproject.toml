@@ -118,6 +118,9 @@ env = {PYTHONIOENCODING = "utf-8"}
 lint = "ruff check ."
 format = "ruff format"
 types = "mypy --package west"
+# work in progress
+types-extra = "mypy --package west --check-untyped-defs"
+
 all = ["test", "lint", "format", "types"]
 
 # Github specific tasks
