@@ -9,9 +9,10 @@ import textwrap
 from typing import Any
 
 import pytest
-from conftest import chdir, cmd, cmd_raises, update_env
+from conftest import WINDOWS, chdir, cmd, cmd_raises, tmp_west_topdir, update_env
 
 from west import configuration as config
+from west.configuration import MalformedConfig
 from west.util import PathType, WestNotFound
 
 SYSTEM = config.ConfigFile.SYSTEM
@@ -617,6 +618,154 @@ def test_config_precedence():
     assert 'pytest' not in cfg(f=SYSTEM)
     assert cfg(f=GLOBAL)['pytest']['precedence'] == 'global'
     assert cfg(f=LOCAL)['pytest']['precedence'] == 'local'
+
+
+def test_config_multiple(config_tmpdir):
+    # Verify that local settings take precedence over global ones,
+    # but that both values are still available, and that setting
+    # either doesn't affect system settings.
+    def write_config(config_file, section, key1, value1, key2, value2):
+        config_file.parent.mkdir(exist_ok=True)
+
+        content = textwrap.dedent(f'''
+        [{section}]
+        {key1} = {value1}
+        {key2} = {value2}
+        ''')
+
+        with open(config_file, 'w') as conf:
+            conf.write(content)
+
+    # helper function to assert multiple config values
+    def run_and_assert(expected_values: dict[str, dict[str, str]]):
+        for scope, meta in expected_values.items():
+            for flags, expected in meta.items():
+                stdout = cmd(f'config --{scope} {flags}').rstrip()
+                if type(expected) is list:
+                    stdout = stdout.splitlines()
+                assert stdout == expected, f"{scope} {flags}: {expected} =! {stdout}"
+
+    # config file paths
+    config_dir = pathlib.Path(config_tmpdir) / 'configs'
+    config_s1 = config_dir / 'system 1'
+    config_s2 = config_dir / 'system 2'
+    config_g1 = config_dir / 'global 1'
+    config_g2 = config_dir / 'global 2'
+    config_l1 = config_dir / 'local 1'
+    config_l2 = config_dir / 'local 2'
+
+    # create some configs with
+    # - some individual option per config file (s1/s2/g1/g2/l1/l2))
+    # - the same option (s/g/l) defined in multiple configs
+    write_config(config_s1, 'sec', 's', '1 !"$&/()=?', 's1', '1 !"$&/()=?')
+    write_config(config_s2, 'sec', 's', '2', 's2', '2')
+    write_config(config_g1, 'sec', 'g', '1', 'g1', '1')
+    write_config(config_g2, 'sec', 'g', '2', 'g2', '2')
+    write_config(config_l1, 'sec', 'l', '1', 'l1', '1')
+    write_config(config_l2, 'sec', 'l', '2', 'l2', '2')
+
+    # config file without read permission (does not work on Windows)
+    if not WINDOWS:
+        config_non_readable = config_dir / 'non-readable'
+        config_non_readable.touch()
+        config_non_readable.chmod(0o000)
+        with update_env({'WEST_CONFIG_GLOBAL': f'{config_g1}{os.pathsep}{config_non_readable}'}):
+            _, stderr = cmd_raises('config --global some.section', MalformedConfig)
+        expected = f"Error while reading one of '{[str(config_g1), str(config_non_readable)]}'"
+        assert expected in stderr
+
+    # specify multiple configs for each config level (separated by os.pathsep)
+    os.environ["WEST_CONFIG_GLOBAL"] = f'{config_g1}{os.pathsep}{config_g2}'
+    os.environ["WEST_CONFIG_SYSTEM"] = f'{config_s1}{os.pathsep}{config_s2}'
+    os.environ["WEST_CONFIG_LOCAL"] = f'{config_l1}{os.pathsep}{config_l2}'
+
+    # check options from individual files and that options from latter configs override
+    expected = {
+        'system': {'sec.s1': '1 !"$&/()=?', 'sec.s2': '2', 'sec.s': '2'},
+        'global': {'sec.g1': '1', 'sec.g2': '2', 'sec.g': '2'},
+        'local': {'sec.l1': '1', 'sec.l2': '2', 'sec.l': '2'},
+    }
+    run_and_assert(expected)
+
+    # check that list-paths gives correct output
+    expected = {
+        'system': {'--list-paths': [str(config_s1), str(config_s2)]},
+        'global': {'--list-paths': [str(config_g1), str(config_g2)]},
+        'local': {'--list-paths': [str(config_l1), str(config_l2)]},
+    }
+    run_and_assert(expected)
+
+    # writing not possible if multiple configs are used
+    _, stderr = cmd_raises('config --local sec.l3 3', ValueError)
+    assert f'Cannot set value if multiple configs in use: {[config_l1, config_l2]}' in stderr
+
+
+@pytest.mark.parametrize("location", [LOCAL, GLOBAL, SYSTEM])
+def test_config_multiple_write(location):
+    # write to a config with a single config file must work, even if other
+    # locations have multiple configs in use
+    flag = west_flag[location]
+    env_var = west_env[location]
+
+    configs_dir = pathlib.Path("configs")
+    config1 = (configs_dir / 'config 1').resolve()
+    config2 = (configs_dir / 'config 2').resolve()
+    config3 = (configs_dir / 'config 3').resolve()
+
+    env = {west_env[location]: f'{config1}'}
+    other_locations = [c for c in [LOCAL, GLOBAL, SYSTEM] if c != location]
+    for loc in other_locations:
+        env[west_env[loc]] = f'{config2}{os.pathsep}{config3}'
+
+    with update_env(env):
+        cmd(f'config {flag} key.value {env_var}')
+        stdout = cmd(f'config {flag} key.value')
+        assert [env_var] == stdout.rstrip().splitlines()
+
+
+@pytest.mark.parametrize("location", [LOCAL, GLOBAL, SYSTEM])
+def test_config_multiple_relative(location):
+    # specify multiple configs for each config level (separated by os.pathsep).
+    # The paths may be relative relative paths, which are always anchored to
+    # west topdir. For the test, the cwd is changed to another cwd to ensure
+    # that relative paths are anchored correctly.
+    flag = west_flag[location]
+    env_var = west_env[location]
+
+    msg = "'{file}' is relative but 'west topdir' is not defined"
+
+    # create some configs
+    configs_dir = pathlib.Path('config')
+    configs_dir.mkdir()
+    config1 = (configs_dir / 'config 1').resolve()
+    config2 = (configs_dir / 'config 2').resolve()
+    config1.touch()
+    config2.touch()
+
+    west_topdir = pathlib.Path.cwd()
+    cwd = west_topdir / 'any' / 'other cwd'
+    cwd.mkdir(parents=True)
+    with chdir(cwd):
+        config2_rel = config2.relative_to(west_topdir)
+        command = f'config {flag} --list-paths'
+        env_value = f'{config1}{os.pathsep}{config2_rel}'
+        with update_env({env_var: env_value}):
+            # cannot anchor relative path if no west topdir exists
+            exc, _ = cmd_raises(command, WestNotFound)
+            assert msg.format(file=config2_rel) in str(exc.value)
+
+            # relative paths are anchored to west topdir
+            with tmp_west_topdir(west_topdir):
+                stdout = cmd(command)
+                assert [str(config1), str(config2)] == stdout.rstrip().splitlines()
+
+        # if a wrong separator is used, no config file must be found
+        wrong_sep = ':' if WINDOWS else ';'
+        env_value = f'{config1}{wrong_sep}{config2_rel}'
+        with update_env({env_var: env_value}):
+            # no path is listed
+            stdout = cmd(command)
+            assert not stdout
 
 
 def test_config_missing_key():
