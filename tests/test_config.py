@@ -198,6 +198,86 @@ def test_config_list_paths():
                 assert 'topdir' in str(WNE)
 
 
+def test_config_list_search_paths_all():
+    _, err_msg = cmd_raises('config --list-search-paths pytest.foo', SystemExit)
+    assert '--list-search-paths cannot be combined with name argument' in err_msg
+
+    WEST_CONFIG_SYSTEM = os.getenv('WEST_CONFIG_SYSTEM')
+    WEST_CONFIG_GLOBAL = os.getenv('WEST_CONFIG_GLOBAL')
+    WEST_CONFIG_LOCAL = os.getenv('WEST_CONFIG_LOCAL')
+
+    # one config file set via env variables
+    stdout = cmd('config --list-search-paths')
+    assert stdout.splitlines() == [WEST_CONFIG_SYSTEM, WEST_CONFIG_GLOBAL, WEST_CONFIG_LOCAL]
+
+    # multiple config files are set via env variables
+    conf_dir = (pathlib.Path('some') / 'conf').resolve()
+    config_s1 = conf_dir / "s1"
+    config_s2 = conf_dir / "s2"
+    config_g1 = conf_dir / "g1"
+    config_g2 = conf_dir / "g2"
+    config_l1 = conf_dir / "l1"
+    config_l2 = conf_dir / "l2"
+    env = {
+        'WEST_CONFIG_SYSTEM': f'{config_s1}{os.pathsep}{config_s2}',
+        'WEST_CONFIG_GLOBAL': f'{config_g1}{os.pathsep}{config_g2}',
+        'WEST_CONFIG_LOCAL': f'{config_l1}{os.pathsep}{config_l2}',
+    }
+    with update_env(env):
+        stdout = cmd('config --list-search-paths')
+        search_paths = stdout.splitlines()
+        assert search_paths == [
+            str(config_s1),
+            str(config_s2),
+            str(config_g1),
+            str(config_g2),
+            str(config_l1),
+            str(config_l2),
+        ]
+
+    # unset all west config env variables
+    env = {
+        'WEST_CONFIG_SYSTEM': None,
+        'WEST_CONFIG_GLOBAL': None,
+        'WEST_CONFIG_LOCAL': None,
+    }
+    with update_env(env):
+        # outside west topdir: show system and global config search paths
+        stdout = cmd('config --list-search-paths')
+        search_paths = stdout.splitlines()
+        assert len(search_paths) == 2
+
+        # inside west topdir: show system, global and local config search paths
+        west_topdir = pathlib.Path('.')
+        with tmp_west_topdir(west_topdir):
+            stdout = cmd('config --list-search-paths')
+            search_paths = stdout.splitlines()
+            assert len(search_paths) == 3
+            local_path = (west_topdir / '.west' / 'config').resolve()
+            assert search_paths[2] == str(local_path)
+
+
+@pytest.mark.parametrize("location", [LOCAL, GLOBAL, SYSTEM])
+def test_config_list_search_paths(location):
+    flag = '' if location == ALL else west_flag[location]
+    env_var = west_env[location] if flag else None
+
+    west_topdir = pathlib.Path('.')
+    config1 = (west_topdir / 'some' / 'config 1').resolve()
+    config2 = pathlib.Path('relative') / 'c 2'
+    config2_abs = config2.resolve()
+    with tmp_west_topdir(west_topdir):
+        env = {env_var: f'{config1}{os.pathsep}{config2}'}
+        # env variable contains two config files
+        with update_env(env):
+            stdout = cmd(f'config {flag} --list-search-paths')
+            assert stdout.splitlines() == [str(config1), str(config2_abs)]
+        # if no env var is set it should list one default search path
+        with update_env({env_var: None}):
+            stdout = cmd(f'config {flag} --list-search-paths')
+            assert len(stdout.splitlines()) == 1
+
+
 def test_config_local():
     # test_config_system for local variables.
     cmd('config --local pytest.local foo')
