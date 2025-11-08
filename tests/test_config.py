@@ -19,6 +19,18 @@ GLOBAL = config.ConfigFile.GLOBAL
 LOCAL = config.ConfigFile.LOCAL
 ALL = config.ConfigFile.ALL
 
+west_env = {
+    SYSTEM: 'WEST_CONFIG_SYSTEM',
+    GLOBAL: 'WEST_CONFIG_GLOBAL',
+    LOCAL: 'WEST_CONFIG_LOCAL',
+}
+
+west_flag = {
+    SYSTEM: '--system',
+    GLOBAL: '--global',
+    LOCAL: '--local',
+}
+
 
 @pytest.fixture(autouse=True)
 def autouse_config_tmpdir(config_tmpdir):
@@ -93,18 +105,11 @@ def test_config_global():
     assert 'pytest' not in lcl
 
 
-TEST_CASES_CONFIG_LIST_PATHS = [
-    # (flag, env_var)
-    ('--local', 'WEST_CONFIG_LOCAL'),
-    ('--system', 'WEST_CONFIG_SYSTEM'),
-    ('--global', 'WEST_CONFIG_GLOBAL'),
-]
-
-
-@pytest.mark.parametrize("test_case", TEST_CASES_CONFIG_LIST_PATHS)
-def test_config_list_paths_env(test_case):
+@pytest.mark.parametrize("location", [LOCAL, GLOBAL, SYSTEM])
+def test_config_list_paths_env(location):
     '''Test that --list-paths considers the env variables'''
-    flag, env_var = test_case
+    flag = west_flag[location]
+    env_var = west_env[location]
 
     # create the config
     cmd(f'config {flag} pytest.key val')
