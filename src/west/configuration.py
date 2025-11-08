@@ -185,10 +185,10 @@ class Configuration:
 
     def get_paths(self, location: ConfigFile = ConfigFile.ALL) -> list[Path]:
         ret = []
-        if self._global and location in [ConfigFile.GLOBAL, ConfigFile.ALL]:
-            ret.append(self._global.path)
         if self._system and location in [ConfigFile.SYSTEM, ConfigFile.ALL]:
             ret.append(self._system.path)
+        if self._global and location in [ConfigFile.GLOBAL, ConfigFile.ALL]:
+            ret.append(self._global.path)
         if self._local and location in [ConfigFile.LOCAL, ConfigFile.ALL]:
             ret.append(self._local.path)
         return ret

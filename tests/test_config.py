@@ -139,16 +139,16 @@ def test_config_list_paths():
     assert (
         stdout.splitlines()
         == textwrap.dedent(f'''\
-        {WEST_CONFIG_GLOBAL}
         {WEST_CONFIG_SYSTEM}
+        {WEST_CONFIG_GLOBAL}
         {WEST_CONFIG_LOCAL}
         ''').splitlines()
     )
 
     # do not list any configs if no config files currently exist
     # (Note: even no local config exists, same as outside any west workspace)
-    pathlib.Path(WEST_CONFIG_GLOBAL).unlink()
     pathlib.Path(WEST_CONFIG_SYSTEM).unlink()
+    pathlib.Path(WEST_CONFIG_GLOBAL).unlink()
     pathlib.Path(WEST_CONFIG_LOCAL).unlink()
     stdout = cmd('config --list-paths')
     assert stdout.splitlines() == []
