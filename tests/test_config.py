@@ -127,6 +127,9 @@ def test_config_list_paths_env(location):
 
 
 def test_config_list_paths():
+    _, err_msg = cmd_raises('config --list-paths pytest.foo', SystemExit)
+    assert '--list-paths cannot be combined with name argument' in err_msg
+
     WEST_CONFIG_LOCAL = os.environ['WEST_CONFIG_LOCAL']
     WEST_CONFIG_GLOBAL = os.environ['WEST_CONFIG_GLOBAL']
     WEST_CONFIG_SYSTEM = os.environ['WEST_CONFIG_SYSTEM']
