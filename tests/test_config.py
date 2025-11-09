@@ -256,15 +256,15 @@ def test_system_creation():
     # Test that the system file -- and just that file -- is created on
     # demand.
 
-    assert not os.path.isfile(config._location(SYSTEM))
-    assert not os.path.isfile(config._location(GLOBAL))
-    assert not os.path.isfile(config._location(LOCAL))
+    assert not os.path.isfile(config._location(SYSTEM)[0])
+    assert not os.path.isfile(config._location(GLOBAL)[0])
+    assert not os.path.isfile(config._location(LOCAL)[0])
 
     update_testcfg('pytest', 'key', 'val', configfile=SYSTEM)
 
-    assert os.path.isfile(config._location(SYSTEM))
-    assert not os.path.isfile(config._location(GLOBAL))
-    assert not os.path.isfile(config._location(LOCAL))
+    assert os.path.isfile(config._location(SYSTEM)[0])
+    assert not os.path.isfile(config._location(GLOBAL)[0])
+    assert not os.path.isfile(config._location(LOCAL)[0])
     assert cfg(f=ALL)['pytest']['key'] == 'val'
     assert cfg(f=SYSTEM)['pytest']['key'] == 'val'
     assert 'pytest' not in cfg(f=GLOBAL)
@@ -274,15 +274,15 @@ def test_system_creation():
 def test_global_creation():
     # Like test_system_creation, for global config options.
 
-    assert not os.path.isfile(config._location(SYSTEM))
-    assert not os.path.isfile(config._location(GLOBAL))
-    assert not os.path.isfile(config._location(LOCAL))
+    assert not os.path.isfile(config._location(SYSTEM)[0])
+    assert not os.path.isfile(config._location(GLOBAL)[0])
+    assert not os.path.isfile(config._location(LOCAL)[0])
 
     update_testcfg('pytest', 'key', 'val', configfile=GLOBAL)
 
-    assert not os.path.isfile(config._location(SYSTEM))
-    assert os.path.isfile(config._location(GLOBAL))
-    assert not os.path.isfile(config._location(LOCAL))
+    assert not os.path.isfile(config._location(SYSTEM)[0])
+    assert os.path.isfile(config._location(GLOBAL)[0])
+    assert not os.path.isfile(config._location(LOCAL)[0])
     assert cfg(f=ALL)['pytest']['key'] == 'val'
     assert 'pytest' not in cfg(f=SYSTEM)
     assert cfg(f=GLOBAL)['pytest']['key'] == 'val'
@@ -292,15 +292,15 @@ def test_global_creation():
 def test_local_creation():
     # Like test_system_creation, for local config options.
 
-    assert not os.path.isfile(config._location(SYSTEM))
-    assert not os.path.isfile(config._location(GLOBAL))
-    assert not os.path.isfile(config._location(LOCAL))
+    assert not os.path.isfile(config._location(SYSTEM)[0])
+    assert not os.path.isfile(config._location(GLOBAL)[0])
+    assert not os.path.isfile(config._location(LOCAL)[0])
 
     update_testcfg('pytest', 'key', 'val', configfile=LOCAL)
 
-    assert not os.path.isfile(config._location(SYSTEM))
-    assert not os.path.isfile(config._location(GLOBAL))
-    assert os.path.isfile(config._location(LOCAL))
+    assert not os.path.isfile(config._location(SYSTEM)[0])
+    assert not os.path.isfile(config._location(GLOBAL)[0])
+    assert os.path.isfile(config._location(LOCAL)[0])
     assert cfg(f=ALL)['pytest']['key'] == 'val'
     assert 'pytest' not in cfg(f=SYSTEM)
     assert 'pytest' not in cfg(f=GLOBAL)
@@ -310,9 +310,9 @@ def test_local_creation():
 def test_local_creation_with_topdir():
     # Like test_local_creation, with a specified topdir.
 
-    system = pathlib.Path(config._location(SYSTEM))
-    glbl = pathlib.Path(config._location(GLOBAL))
-    local = pathlib.Path(config._location(LOCAL))
+    system = pathlib.Path(config._location(SYSTEM)[0])
+    glbl = pathlib.Path(config._location(GLOBAL)[0])
+    local = pathlib.Path(config._location(LOCAL)[0])
 
     topdir = pathlib.Path(os.getcwd()) / 'test-topdir'
     topdir_west = topdir / '.west'
