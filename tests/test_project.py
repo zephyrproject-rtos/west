@@ -121,6 +121,183 @@ def test_workspace(west_update_tmpdir):
     assert wct.join('zephyr', 'subsys', 'bluetooth', 'code.c').check(file=1)
 
 
+def test_workspace_modify_url_replace(tmpdir, repos_tmpdir):
+    remotes_dir = repos_tmpdir / 'repos'
+    workspace_dir = tmpdir / 'workspace'
+    workspace_dir.mkdir()
+
+    # use remote zephyr
+    remote_zephyr = tmpdir / 'repos' / 'zephyr'
+
+    # create a local base project with a west.yml
+    project_base = remotes_dir / 'base'
+    create_repo(project_base)
+    add_commit(
+        project_base,
+        'manifest commit',
+        # zephyr revision is implicitly master:
+        files={
+            'west.yml': textwrap.dedent('''
+            manifest:
+              import-modifications:
+                url-replace:
+                - old: xxx
+                  new: yyy
+              remotes:
+                - name: upstream
+                  url-base: xxx
+              projects:
+              - name: zephyr
+                remote: upstream
+                path: zephyr-rtos
+                import: True
+              ''')
+        },
+    )
+
+    # create another project with another west.yml (stacked on base)
+    project_middle = remotes_dir / 'middle'
+    create_repo(project_middle)
+    add_commit(
+        project_middle,
+        'manifest commit',
+        # zephyr revision is implicitly master:
+        files={
+            'west.yml': f'''
+                      manifest:
+                        import-modifications:
+                          url-replace:
+                          - old: yyy
+                            new: zzz
+                        projects:
+                        - name: base
+                          url: {project_base}
+                          import: True
+                      '''
+        },
+    )
+
+    # create an app that uses middle project
+    project_app = workspace_dir / 'app'
+    project_app.mkdir()
+    with open(project_app / 'west.yml', 'w') as f:
+        f.write(
+            textwrap.dedent(f'''\
+            manifest:
+              import-modifications:
+                url-replace:
+                  - old: zzz
+                    new: {os.path.dirname(remote_zephyr)}
+              projects:
+                - name: middle
+                  url: {project_middle}
+                  import: True
+        ''')
+        )
+
+    # init workspace in projects_dir (project_app's parent)
+    cmd(['init', '-l', project_app])
+
+    # update workspace in projects_dir
+    cmd('update', cwd=workspace_dir)
+
+    # zephyr projects from base are cloned
+    for project_subdir in [
+        Path('subdir') / 'Kconfiglib',
+        'tagged_repo',
+        'net-tools',
+        'zephyr-rtos',
+    ]:
+        assert (workspace_dir / project_subdir).check(dir=1)
+        assert (workspace_dir / project_subdir / '.git').check(dir=1)
+
+
+def test_workspace_modify_url_replace_with_self_import(repos_tmpdir):
+    remote_zephyr = repos_tmpdir / 'repos' / 'zephyr'
+    projects_dir = repos_tmpdir / 'projects'
+    projects_dir.mkdir()
+
+    # create a local base project with a west.yml
+    project_base = projects_dir / 'base'
+    project_base.mkdir()
+    with open(project_base / 'west.yml', 'w') as f:
+        f.write(
+            textwrap.dedent('''\
+            manifest:
+              remotes:
+                - name: upstream
+                  url-base: nonexistent
+              projects:
+              - name: zephyr
+                remote: upstream
+                path: zephyr-rtos
+                import: True
+        ''')
+        )
+
+    # create another project with another west.yml (stacked on base)
+    project_middle = projects_dir / 'middle'
+    project_middle.mkdir()
+    with open(project_middle / 'west.yml', 'w') as f:
+        f.write(
+            textwrap.dedent('''\
+            manifest:
+              self:
+                import: ../base
+        ''')
+        )
+
+    # create another project with another west.yml (stacked on base)
+    project_another = projects_dir / 'another'
+    project_another.mkdir()
+    with open(project_another / 'west.yml', 'w') as f:
+        f.write(
+            textwrap.dedent('''\
+            manifest:
+              # this should not have any effect since there are no imports
+              import-modifications:
+                url-replace:
+                  - old: nonexistent
+                    new: from-another
+        ''')
+        )
+
+    # create another project with another west.yml (stacked on base)
+    project_app = projects_dir / 'app'
+    project_app.mkdir()
+    with open(project_app / 'west.yml', 'w') as f:
+        f.write(
+            textwrap.dedent(f'''\
+            manifest:
+              import-modifications:
+                url-replace:
+                  - old: nonexistent
+                    new: {os.path.dirname(remote_zephyr)}
+              self:
+                import:
+                - ../another
+                - ../middle
+        ''')
+        )
+
+    # init workspace in projects_dir (project_app's parent)
+    cmd(['init', '-l', project_app])
+
+    # update workspace in projects_dir
+    cmd('update', cwd=projects_dir)
+
+    ws = projects_dir
+    # zephyr projects from base are cloned
+    for project_subdir in [
+        Path('subdir') / 'Kconfiglib',
+        'tagged_repo',
+        'net-tools',
+        'zephyr-rtos',
+    ]:
+        assert (ws / project_subdir).check(dir=1)
+        assert (ws / project_subdir / '.git').check(dir=1)
+
+
 def test_list(west_update_tmpdir):
     # Projects shall be listed in the order they appear in the manifest.
     # Check the behavior for some format arguments of interest as well.
