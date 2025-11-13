@@ -49,8 +49,16 @@ All `west config` commands can be applied for a specific configuration level by
 providing one of the following arguments:
     --local | --system | --global
 
-The following command prints a list of all configuration files currently
-considered and existing (listed in the order as they are loaded):
+For each configuration level (local, global, and system) also multiple config
+file locations can be specified. To do so, set according environment variable
+to contain all paths (separated by 'os.pathsep', which is ';' on Windows or
+':' otherwise): Latter configuration files have precedence in such lists.
+
+To list all configuration files searched by west config, in the order as they
+are looked up:
+    west config --list-search-paths
+
+To list only existing configs (listed in the order as they are loaded):
     west config --list-paths
 
 To get the value for config option <name>, type:
@@ -113,7 +121,12 @@ class Config(WestCommand):
         group.add_argument(
             '--list-paths',
             action='store_true',
-            help='list all config files that are currently considered by west config',
+            help='list paths of existing config files currently used by west config',
+        )
+        group.add_argument(
+            '--list-search-paths',
+            action='store_true',
+            help='list search paths for west config files',
         )
         group.add_argument(
             '-l', '--list', action='store_true', help='list all options and their values'
@@ -166,10 +179,19 @@ class Config(WestCommand):
 
     def do_run(self, args, user_args):
         delete = args.delete or args.delete_all
-        if args.list:
+        if any([args.list, args.list_paths, args.list_search_paths]):
             if args.name:
-                self.parser.error('-l cannot be combined with name argument')
-        elif not args.name and not args.list_paths:
+                self.parser.error(
+                    (
+                        '-l'
+                        if args.list
+                        else '--list-paths'
+                        if args.list_paths
+                        else '--list-search-paths'
+                    )
+                    + ' cannot be combined with name argument'
+                )
+        elif not args.name:
             self.parser.error('missing argument name (to list all options and values, use -l)')
         elif args.append:
             if args.value is None:
@@ -177,6 +199,8 @@ class Config(WestCommand):
 
         if args.list_paths:
             self.list_paths(args)
+        elif args.list_search_paths:
+            self.list_search_paths(args)
         elif args.list:
             self.list(args)
         elif delete:
@@ -189,9 +213,14 @@ class Config(WestCommand):
             self.write(args)
 
     def list_paths(self, args):
-        config_paths = self.config.get_paths(args.configfile or ALL)
+        config_paths = self.config.get_existing_paths(args.configfile or ALL)
         for config_path in config_paths:
             self.inf(config_path)
+
+    def list_search_paths(self, args):
+        search_paths = self.config.get_search_paths(args.configfile or ALL)
+        for search_path in search_paths:
+            self.inf(search_path)
 
     def list(self, args):
         what = args.configfile or ALL

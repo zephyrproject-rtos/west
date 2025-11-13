@@ -69,6 +69,22 @@ WINDOWS = platform.system() == 'Windows'
 
 
 @contextlib.contextmanager
+def tmp_west_topdir(path: str | Path):
+    """
+    Temporarily create a west topdir for the duration of the `with` block by
+    creating a .west directory at given path. The directory is removed again
+    when the `with` block exits.
+    """
+    west_dir = Path(path) / '.west'
+    west_dir.mkdir(parents=True)
+    try:
+        yield
+    finally:
+        # remove the directory (must be empty)
+        west_dir.rmdir()
+
+
+@contextlib.contextmanager
 def update_env(env: dict[str, str | None]):
     """
     Temporarily update the process environment variables.
