@@ -2854,7 +2854,9 @@ class _PatchedConfiguration(Configuration):
         super().__init__(*args, **kwargs)
         self.__patch_dict = patch_dict
 
-    def get(self, option, **kwargs):
+    def get(
+        self, option: str, default: str | None = None, configfile: ConfigFile = ConfigFile.ALL
+    ) -> str | None:
         if option in self.__patch_dict:
             return self.__patch_dict[option]
-        return super().get(option, **kwargs)
+        return super().get(option, default, configfile)
