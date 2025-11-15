@@ -2675,6 +2675,12 @@ def test_import_project_release_dir(tmpdir):
     # Tests for a workspace that imports a directory from a project
     # at a fixed release.
 
+    # Don't run in a random cwd, this could be an existing west
+    # workspace and would fail the `west init -l ...` below.  We don't
+    # want this test to depend on any special cwd either so the root is
+    # a reasonable choice.
+    os.chdir(tmpdir.parts()[0])
+
     remotes = tmpdir / 'remotes'
     empty_project = remotes / 'empty_project'
     create_repo(empty_project)
