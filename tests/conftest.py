@@ -142,27 +142,43 @@ def _check_git_capabilities(tmpdir_factory):
 
 
 @pytest.fixture(autouse=True)
-def independent_global_and_system_config(tmpdir_factory):
-    # Fixture to ensure that the user's actual configuration
-    # files are neither used nor touched during test.
-    #
-    # We also set ZEPHYR_BASE (to avoid complaints in subcommand
-    # stderr), but to a spurious location (so that attempts to read
-    # from inside of it are caught here).
-    #
+def setup_teardown_test_environment(tmpdir_factory):
+    """
+    The fixture ensures an isolated test environment.
+
+    It creates a new temporary directory which is used as working directory.
+    This ensures a clean start for each test and prevents tests from affecting
+    another one through changes to the working directory.
+
+    The fixture ensures that the user's actual configuration files are neither
+    used nor touched during test, as WEST_CONFIG_* env variables are set,
+    whereby no config files are created at these locations.
+
+    The fixture sets ZEPHYR_BASE (to avoid complaints in subcommand stderr),
+    but to a spurious location (so that attempts to read from inside of it are
+    caught here).
+
+    The fixture also ensures that any environment modifications made by a test
+    do not leak into subsequent tests, as the environment is restored when the
+    `update_env` with-block exits.
+    """
     tmpdir = Path(tmpdir_factory.mktemp("test-configs"))
+    tmp_cwd = tmpdir_factory.mktemp("tmp-cwd")
 
     # config paths
     system = tmpdir / 'config.system'
     glbl = tmpdir / 'config.global'
 
     # run with environment variables set
-    with update_env({
-        'WEST_CONFIG_SYSTEM': str(system),
-        'WEST_CONFIG_GLOBAL': str(glbl),
-        'WEST_CONFIG_LOCAL': None,
-        'ZEPHYR_BASE': str(tmpdir / 'no-zephyr-here'),
-    }):
+    with (
+        chdir(tmp_cwd),
+        update_env({
+            'WEST_CONFIG_SYSTEM': str(system),
+            'WEST_CONFIG_GLOBAL': str(glbl),
+            'WEST_CONFIG_LOCAL': None,
+            'ZEPHYR_BASE': str(tmpdir / 'no-zephyr-here'),
+        }),
+    ):
         yield
 
 
