@@ -110,9 +110,15 @@ preview = true
 mypy_path = "src"
 ignore_missing_imports = true
 
+[tool.pytest.ini_options]
+# You can override any pytest option via pytest argument `-o key=value`.
+# E.g. unset option `-o pythonpath=` to use the installed west in tests
+pythonpath = "src"
+
 [tool.poe.tasks.test]
-cmd = "python -m pytest -v -W error --junitxml=junit.xml -o junit_family=xunit1 --cov-report=html --cov-config=pyproject.toml --cov=west"
+cmd = "python -m pytest -W error"
 env = {PYTHONIOENCODING = "utf-8"}
+
 
 [tool.poe.tasks]
 lint = "ruff check ."
@@ -126,3 +132,7 @@ all = ["test", "lint", "format", "types"]
 # Github specific tasks
 gh-lint = "ruff check --output-format=github ."
 gh-format = "ruff format --check --output-format=github"
+
+[tool.poe.tasks.gh-test]
+cmd = "python -m pytest -W error -v -o pythonpath= -o junit_family=xunit1 --junitxml=junit.xml --cov-report=html --cov-config=pyproject.toml --cov=west"
+env = {PYTHONIOENCODING = "utf-8"}

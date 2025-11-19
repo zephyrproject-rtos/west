@@ -147,28 +147,30 @@ First, install the dependencies::
   # Recommended in an active virtual environment
   pip3 install --group dev
 
-Then, run the test suite locally from the top level directory::
 
-  # Using uv
+Then, run the tests (from the project's top level directory)::
+
+  # Run the full test suite with uv (recommended)
   uv run poe all
 
-  # Using poe
-  # Recommended in an active virtual environment
+  # Or run the full test suite with poe directly.
+  # (recommended in an active virtual environment)
   poe all
 
-  # Manually (test the installed west version)
+  # Run only the pytest tests (against the local worktree)
   pytest
 
-  # Manually (test the local copy)
-  pytest -o pythonpath=src
+The ``all`` target from ``poe`` runs multiple tasks sequentially. Use ``poe -h``
+to get a list of all available tasks.
+You can pass arguments to any ``poe`` task, which are forwarded to the
+underlying command. This is especially helpful when you want to run
+only specific tests to save time. Examples::
 
-The ``all`` target from ``poe`` runs multiple tasks sequentially. Run ``poe -h``
-to get the list of configured tasks.
-You can pass arguments to the task running ``poe``. This is especially useful
-on specific tests and save time. Examples::
-
-  # Run a subset of tests
+  # Run a subset of tests (file)
   poe test tests/test_project.py
+
+  # Run a single test
+  poe test tests/test_project.py::test_workspace
 
   # Run the ``test_update_narrow()`` code with ``pdb`` (but _not_ the
   # west code which is running in subprocesses)
