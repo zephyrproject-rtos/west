@@ -19,13 +19,16 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
-        task: [test]
+        task: [gh-test]
         # The include map here is actually used to extend the matrix.
         # By passing all keys used in the matrix we append new unique combinations.
         # For more information see:
         # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-adding-configurations
         include:
           # Run linter/type checks only on 1 combination
+          - os: ubuntu-latest
+            python-version: '3.13'
+            task: test
           - os: ubuntu-latest
             python-version: '3.13'
             task: gh-lint
@@ -61,7 +64,7 @@ jobs:
         run: uv run --frozen --directory "./check out/" --env-file=.github/http_env_block.conf poe ${{ matrix.task }}
 
       - name: Upload coverage reports
-        if: ${{ matrix.task == 'test' }}
+        if: ${{ matrix.task == 'gh-test' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-${{ matrix.os }}-${{ matrix.python-version }}
@@ -69,7 +72,7 @@ jobs:
           include-hidden-files: true
 
       - name: Upload test reports
-        if: ${{ matrix.task == 'test' }}
+        if: ${{ matrix.task == 'gh-test' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tests-${{ matrix.os }}-${{ matrix.python-version }}

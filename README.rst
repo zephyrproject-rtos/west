@@ -156,11 +156,11 @@ Then, run the test suite locally from the top level directory::
   # Recommended in an active virtual environment
   poe all
 
-  # Manually (test the installed west version)
+  # Manually (test the local copy)
   pytest
 
-  # Manually (test the local copy)
-  pytest -o pythonpath=src
+  # Manually (test the installed west version)
+  pytest -o pythonpath=
 
 The ``all`` target from ``poe`` runs multiple tasks sequentially. Run ``poe -h``
 to get the list of configured tasks.
