@@ -15,6 +15,9 @@ from pathlib import Path, PurePath
 
 import pytest
 
+# https://chrisyeh96.github.io/2017/08/08/definitive-guide-python-imports.html#case-3-importing-from-parent-directory
+# Test the local west and not some other, installed version.
+sys.path.insert(1, os.path.join(sys.path[0], '../src'))
 from west.app import main
 
 GIT = shutil.which('git')
