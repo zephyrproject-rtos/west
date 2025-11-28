@@ -703,6 +703,30 @@ def test_config_precedence():
     assert cfg(f=LOCAL)['pytest']['precedence'] == 'local'
 
 
+@pytest.mark.skipif(
+    WINDOWS or (os.geteuid() == 0),
+    reason="Non-readable files do not exist on Windows, and root user can always read files",
+)
+def test_config_non_readable_file(config_tmpdir):
+    # test to read a config file without read permission
+    cwd = pathlib.Path.cwd()
+
+    # create a readable file
+    config_readable = cwd / 'readable'
+    config_readable.touch()
+
+    # create a non-readable file
+    config_non_readable = cwd / 'non-readable'
+    config_non_readable.touch()
+    config_non_readable.chmod(0o000)
+
+    # trying to use a non-readable config should result in according error
+    with update_env({'WEST_CONFIG_GLOBAL': f'{config_readable}{os.pathsep}{config_non_readable}'}):
+        _, stderr = cmd_raises('config --global some.section', MalformedConfig)
+    expected = f"Error while reading one of '{[str(config_readable), str(config_non_readable)]}'"
+    assert expected in stderr
+
+
 def test_config_multiple(config_tmpdir):
     # Verify that local settings take precedence over global ones,
     # but that both values are still available, and that setting
@@ -746,16 +770,6 @@ def test_config_multiple(config_tmpdir):
     write_config(config_g2, 'sec', 'g', '2', 'g2', '2')
     write_config(config_l1, 'sec', 'l', '1', 'l1', '1')
     write_config(config_l2, 'sec', 'l', '2', 'l2', '2')
-
-    # config file without read permission (does not work on Windows)
-    if not WINDOWS:
-        config_non_readable = config_dir / 'non-readable'
-        config_non_readable.touch()
-        config_non_readable.chmod(0o000)
-        with update_env({'WEST_CONFIG_GLOBAL': f'{config_g1}{os.pathsep}{config_non_readable}'}):
-            _, stderr = cmd_raises('config --global some.section', MalformedConfig)
-        expected = f"Error while reading one of '{[str(config_g1), str(config_non_readable)]}'"
-        assert expected in stderr
 
     # specify multiple configs for each config level (separated by os.pathsep)
     os.environ["WEST_CONFIG_GLOBAL"] = f'{config_g1}{os.pathsep}{config_g2}'
