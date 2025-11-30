@@ -9,6 +9,7 @@ from pathlib import Path
 from conftest import (
     GIT,
     add_commit,
+    chdir,
     cmd,
     create_branch,
     create_repo,
@@ -312,6 +313,100 @@ def test_update_auto_cache(tmpdir):
     assert rev_parse(other_workspace_bar, 'HEAD') == bar_head_newer
     assert foo_head_newer in rev_list(auto_cache_dir / "foo" / foo_hash)
     assert bar_head_newer in rev_list(auto_cache_dir / "bar" / bar_hash)
+
+
+def test_update_auto_cache_skipped_remote_update(tmpdir):
+    foo_remote = Path(tmpdir / 'remotes' / 'foo')
+    bar_remote = Path(tmpdir / 'remotes' / 'bar')
+    auto_cache_dir = Path(tmpdir / 'auto_cache_dir')
+
+    def create_foo_bar_commits():
+        add_commit(foo_remote, 'new commit')
+        add_commit(bar_remote, 'new commit')
+        foo_head = rev_parse(foo_remote, 'HEAD')
+        bar_head = rev_parse(bar_remote, 'HEAD')
+        return foo_head, bar_head
+
+    def setup_workspace_and_west_update(workspace, foo_head, bar_head):
+        setup_cache_workspace(
+            workspace,
+            foo_remote=foo_remote,
+            foo_head=foo_head,
+            bar_remote=bar_remote,
+            bar_head=bar_head,
+        )
+        with chdir(workspace):
+            stdout = cmd(['-v', 'update', '--auto-cache', auto_cache_dir])
+        return stdout
+
+    create_repo(foo_remote)
+    create_repo(bar_remote)
+    foo_commit1, bar_commit1 = create_foo_bar_commits()
+    foo_commit2, bar_commit2 = create_foo_bar_commits()
+
+    # run initial west update to setup auto-cache and get cache directories
+    setup_workspace_and_west_update(
+        tmpdir / 'workspace1',
+        foo_head=foo_commit1,
+        bar_head=bar_commit1,
+    )
+
+    # read the auto-cache hashes from foo and bar
+    (bar_hash,) = [p for p in (auto_cache_dir / 'bar').iterdir() if p.is_dir()]
+    auto_cache_dir_bar = auto_cache_dir / 'bar' / bar_hash
+    (foo_hash,) = [p for p in (auto_cache_dir / 'foo').iterdir() if p.is_dir()]
+    auto_cache_dir_foo = auto_cache_dir / 'foo' / foo_hash
+
+    # Imitate that foo remote is temporarily offline by moving it temporarily.
+    # Since foo and bar revisions are used which are already contained in the auto-cache,
+    # west update should work with according messages as there is no need to update remotes.
+    foo_moved = Path(tmpdir / 'remotes' / 'foo.moved')
+    shutil.move(foo_remote, foo_moved)
+    stdout = setup_workspace_and_west_update(
+        tmpdir / 'workspace2',
+        foo_head=foo_commit2,
+        bar_head=bar_commit2,
+    )
+    shutil.move(foo_moved, foo_remote)
+    msgs = [
+        f"foo: auto-cache remote update is skipped as it already contains commit {foo_commit2}",
+        f"foo: cloning from {auto_cache_dir_foo}",
+        f"bar: auto-cache remote update is skipped as it already contains commit {bar_commit2}",
+        f"bar: cloning from {auto_cache_dir_bar}",
+    ]
+    for msg in msgs:
+        assert msg in stdout
+
+    # If a new commit is used, the auto-cache should be updated with remote
+    foo_commit3, bar_commit3 = create_foo_bar_commits()
+    stdout = setup_workspace_and_west_update(
+        tmpdir / 'workspace3',
+        foo_head=foo_commit3,
+        bar_head=bar_commit3,
+    )
+    msgs = [
+        f"foo: update auto-cache ({auto_cache_dir_foo}) with remote",
+        f"foo: cloning from {auto_cache_dir_foo}",
+        f"bar: update auto-cache ({auto_cache_dir_bar}) with remote",
+        f"bar: cloning from {auto_cache_dir_bar}",
+    ]
+    for msg in msgs:
+        assert msg in stdout
+
+    # If a branch is used as revision, the auto-cache must be updated.
+    stdout = setup_workspace_and_west_update(
+        tmpdir / 'workspace4',
+        foo_head='master',
+        bar_head='master',
+    )
+    msgs = [
+        f"foo: update auto-cache ({auto_cache_dir_foo}) with remote",
+        f"foo: cloning from {auto_cache_dir_foo}",
+        f"bar: update auto-cache ({auto_cache_dir_bar}) with remote",
+        f"bar: cloning from {auto_cache_dir_bar}",
+    ]
+    for msg in msgs:
+        assert msg in stdout
 
 
 def test_update_caches_priorities(tmpdir):
