@@ -1177,9 +1177,9 @@ class Update(_ProjectCommand):
             '--auto-cache',
             help='''automatically setup local cache repositories
                     in a flat folder hierarchy, but with an additional
-                    subfolder (hashed name) for different remote URLs.
-                    Each local cache repository is automatically cloned
-                    on first usage and synced on subsequent clones.
+                    subfolder (hashed name) for different remote URLs. Each
+                    local cache repository is automatically cloned on first
+                    usage and synced on subsequent fetches (if necessary).
                     This cache has the lowest priority (Prio 2).''',
         )
 
@@ -1203,7 +1203,8 @@ class Update(_ProjectCommand):
         workspace setup.
         Only in case of auto-cache the 'west update' process updates the local
         caches first, which then serve as the source for pulling changes into
-        the workspace.
+        the workspace. Thereby, the auto-cache only fetches updates from remote
+        if the specified revision is not already present in the local cache.
 
         Example: Assume your manifest describes this workspace structure:
           (workspace)
@@ -1233,7 +1234,8 @@ class Update(_ProjectCommand):
           folder hierarchy is setup automatically. Each repository is stored under a
           directory named after the basename of its remote URL. To prevent conflicts
           between repos with same name, a hash of the remote URL is used as subfolder.
-          Note: Each local cache repo is automatically synced on subsequent updates.
+          Note: Each local cache repo is automatically synced on subsequent updates on
+          demand (if the requested revision is not already contained within the cache).
             (auto cache directory)
             ├── bar.git
             │   ├── <hash>
@@ -1757,13 +1759,29 @@ class Update(_ProjectCommand):
             # Then clone the repository into the local cache.
             cache_dir_parent = Path(cache_dir).parent
             cache_dir_parent.mkdir(parents=True, exist_ok=True)
+            self.dbg(f'{project.name}: create auto-cache for {project.url} in {cache_dir}')
             project.git(
                 ['clone', '--mirror', '--', project.url, os.fspath(cache_dir)], cwd=cache_dir_parent
             )
             self.create_auto_cache_info(project, cache_dir)
         else:
-            # The local cache already exists. Sync it with remote.
-            project.git(['remote', 'update', '--prune'], cwd=cache_dir)
+            # check if the remote update can be skipped
+            if self.fs != 'always':
+                # Determine the type of the project revision by checking if it is
+                # already contained in the auto-cache.
+                # If it is an already available tag or a commit, the remote
+                # update can be skipped. Otherwise the auto-cache must be updated.
+                rev_type = _rev_type(project, cwd=cache_dir)
+                if rev_type in ('tag', 'commit'):
+                    self.dbg(
+                        f'{project.name}: auto-cache remote update is skipped '
+                        f'as it already contains {rev_type} {project.revision}'
+                    )
+                    return
+
+            # The auto-cache needs to be updated. Sync with remote.
+            self.dbg(f'{project.name}: update auto-cache ({cache_dir}) with remote')
+            project.git(['remote', 'update', '--prune'], cwd=cache_dir, check=False)
 
     def init_project(self, project):
         # update() helper. Initialize an uncloned project repository.
@@ -2472,7 +2490,7 @@ def _maybe_sha(rev):
     return len(rev) <= 40
 
 
-def _rev_type(project, rev=None):
+def _rev_type(project, rev=None, cwd=None):
     # Returns a "refined" revision type of rev (default:
     # project.revision) as one of the following strings: 'tag', 'tree',
     # 'blob', 'commit', 'branch', 'other'.
@@ -2490,7 +2508,9 @@ def _rev_type(project, rev=None):
     # update" specific logic.
     if not rev:
         rev = project.revision
-    cp = project.git(['cat-file', '-t', rev], check=False, capture_stdout=True, capture_stderr=True)
+    cp = project.git(
+        ['cat-file', '-t', rev], cwd=cwd, check=False, capture_stdout=True, capture_stderr=True
+    )
     stdout = cp.stdout.decode('utf-8').strip()
     if cp.returncode:
         return 'other'
@@ -2505,6 +2525,7 @@ def _rev_type(project, rev=None):
         check=False,
         capture_stdout=True,
         capture_stderr=True,
+        cwd=cwd,
     )
     if cp.returncode:
         # This can happen if the ref name is ambiguous, e.g.:
