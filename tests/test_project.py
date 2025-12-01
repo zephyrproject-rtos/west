@@ -969,7 +969,6 @@ def test_update_some_with_imports(repos_tmpdir):
                       ''',
         },
     )
-
     cmd(['init', '-l', manifest_repo])
 
     # Updating unknown projects should fail as always.
@@ -1886,6 +1885,188 @@ def test_init_local_with_manifest_filename(repos_tmpdir):
     cmd(['init', '--mf', 'project.yml', '-l', zephyr_install_dir])
     workspace.chdir()
     cmd('update')
+
+
+TEST_CASES_INIT = [
+    # (local_dir, topdir, directory, manifest_file, expected_error)
+    ######################################
+    # REMOTE MANIFEST
+    ######################################
+    # init from remote repository (without any parameters)
+    (None, None, None, None, None),
+    # specify topdir in current directory
+    (None, Path('.'), None, None, None),
+    # specify topdir in a subfolder
+    (None, Path('subdir'), None, None, None),
+    # use deprecated [directory] to specify topdir
+    (None, None, Path('subdir'), None, None),
+    # specify topdir in a sibling
+    (None, Path('..') / 'sibling', None, None, None),
+    # specify topdir and [directory]
+    (None, Path('subdir'), Path('subdir') / 'extra' / 'level', None, None),
+    # error cases
+    # specify a non-existent manifest file
+    (None, Path('.'), None, Path('non-existent.yml'), SystemExit),
+    # specify topdir and [directory] (but directory is not inside topdir)
+    (None, Path('subdir'), Path('sibling'), None, SystemExit),
+    ######################################
+    # LOCAL MANIFEST
+    ######################################
+    # init workspace in current working directory (without --topdir)
+    (Path('workspace') / 'zephyr', None, Path('workspace') / 'zephyr', None, None),
+    # init workspace in current working directory
+    (Path('workspace') / 'zephyr', Path('.'), Path('workspace') / 'zephyr', None, None),
+    # init workspace in a subfolder of current working directory
+    (Path('workspace') / 'zephyr', Path('workspace'), Path('workspace') / 'zephyr', None, None),
+    # init workspace in current working directory by providing a manifest file
+    (Path('workspace') / 'zephyr', Path('.'), Path('workspace'), Path('zephyr') / 'west.yml', None),
+    # init workspace in itself by providing manifest file
+    (
+        Path('workspace') / 'zephyr',
+        Path('.'),
+        Path('.'),
+        Path('workspace') / 'zephyr' / 'west.yml',
+        None,
+    ),
+    # init workspace in a subfolder by providing manifest file
+    (
+        Path('workspace') / 'subdir' / 'zephyr',
+        Path('workspace'),
+        Path('workspace') / 'subdir',
+        Path('zephyr') / 'west.yml',
+        None,
+    ),
+    # init workspace in a subfolder by providing manifest file
+    (
+        Path('workspace') / 'subdir' / 'zephyr',
+        Path('workspace'),
+        Path('workspace'),
+        Path('subdir') / 'zephyr' / 'west.yml',
+        None,
+    ),
+    # error cases
+    # init workspace without a directory
+    (Path('workspace') / 'zephyr', Path('.'), None, None, SystemExit),
+    # init workspace in a sibling repository path
+    (
+        Path('workspace') / 'zephyr',
+        Path('sibling'),
+        Path('workspace') / 'zephyr',
+        None,
+        SystemExit,
+    ),
+    # init workspace from non-existent manifest
+    (
+        Path('workspace') / 'zephyr',
+        Path('.'),
+        Path('non-existent.yml'),
+        None,
+        SystemExit,
+    ),
+    # init workspace from a manifest not inside the workspace
+    (Path('..') / 'zephyr', Path('.'), Path('..') / 'zephyr', None, SystemExit),
+]
+
+
+@pytest.mark.parametrize("test_case", TEST_CASES_INIT)
+def test_init(repos_tmpdir, test_case):
+    zephyr_remote = repos_tmpdir / 'repos' / 'zephyr'
+    repos_tmpdir.chdir()
+    flags = []
+
+    local_dir, topdir, directory, manifest_file, expected_error = test_case
+
+    # prepare local manifest in local_dir
+    if local_dir:
+        # place the local manifest to given path
+        clone(str(zephyr_remote), str(local_dir))
+        flags += ['-l']
+    else:
+        # clone from remote manifest
+        flags += ["-m", zephyr_remote]
+
+    # extend west init flags according to specified test case
+    if topdir:
+        flags += ['-t', topdir]
+    if manifest_file:
+        flags += ['--mf', manifest_file]
+    if directory:
+        flags += [directory]
+
+    # initialize west workspace
+    if not expected_error:
+        cmd(['init'] + flags)
+    else:
+        cmd_raises(['init'] + flags, expected_error)
+        return
+
+    # go to west workspace and check for correct config
+    if local_dir:
+        # topdir is either specified or default (directory.parent)
+        workspace = topdir or directory.parent
+    else:
+        # topdir is either specified, directory or default (cwd)
+        workspace = topdir or directory or Path.cwd()
+
+    workspace_abs = workspace.absolute()
+
+    os.chdir(workspace)
+    actual = cmd('config manifest.path')
+    if local_dir:
+        assert Path(actual.rstrip()) == directory.relative_to(workspace)
+    else:
+        if topdir and directory:
+            # zephyr is cloned into specified subdirectory in workspace
+            expected = os.path.relpath(directory, topdir)
+            assert Path(actual.rstrip()) == Path(expected) / 'zephyr'
+        else:
+            # zephyr is cloned directly to workspace
+            assert Path(actual.rstrip()) == Path('zephyr')
+
+    manifest_file = manifest_file or Path('west.yml')
+    actual = cmd('config manifest.file')
+    assert Path(actual.rstrip()) == Path(manifest_file)
+
+    # update must run successful
+    cmd('update')
+
+    # init again must fail
+    _, stderr = cmd_raises(['init'] + flags, SystemExit)
+    assert "FATAL ERROR: already initialized" in stderr
+
+    # init topdir again from other directory must fail
+    os.chdir(workspace.parent)
+    _, stderr = cmd_raises(['init', '-l', '--topdir', workspace_abs, zephyr_remote], SystemExit)
+    assert "FATAL ERROR: already initialized" in stderr
+    _, stderr = cmd_raises(['init', '--topdir', workspace_abs, '-m', zephyr_remote], SystemExit)
+    assert "FATAL ERROR: already initialized" in stderr
+
+
+def test_init_topdir_again(repos_tmpdir):
+    repos_tmpdir.chdir()
+    workspace = Path(repos_tmpdir) / 'ws'
+    zephyr = repos_tmpdir / 'repos' / 'zephyr'
+
+    # initial clone
+    cmd(['init', 'ws', '-m', zephyr])
+
+    # initialize west workspace again
+    _, stderr = cmd_raises(['init', 'ws', '-m', zephyr], SystemExit)
+    assert "FATAL ERROR: already initialized" in stderr
+
+    # initialize west workspace again
+    _, stderr = cmd_raises(['init', '--topdir', 'ws', '-m', zephyr], SystemExit)
+    assert "FATAL ERROR: already initialized" in stderr
+
+    # initialize west workspace again
+    os.chdir(workspace)
+    _, stderr = cmd_raises(['init', '--local', 'zephyr'], SystemExit)
+    assert "FATAL ERROR: already initialized" in stderr
+
+    # initialize west workspace again
+    os.chdir(workspace.parent)
+    _, stderr = cmd_raises(['init', '-l', '--topdir', 'ws', Path('ws') / 'zephyr'], SystemExit)
+    assert "FATAL ERROR: already initialized" in stderr
 
 
 def test_init_local_with_empty_path(repos_tmpdir):
