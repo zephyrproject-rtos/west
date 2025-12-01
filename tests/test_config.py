@@ -703,9 +703,10 @@ def test_config_precedence():
     assert cfg(f=LOCAL)['pytest']['precedence'] == 'local'
 
 
+@pytest.mark.skipif(WINDOWS, reason="chmod is limited on Windows")
 @pytest.mark.skipif(
-    WINDOWS or (os.geteuid() == 0),
-    reason="Non-readable files do not exist on Windows, and root user can always read files",
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root user can always read files",
 )
 def test_config_non_readable_file(config_tmpdir):
     # test to read a config file without read permission
