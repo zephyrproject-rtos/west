@@ -31,14 +31,14 @@ jobs:
 
     steps:
     - name: Download build artifacts
-      uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
       with:
         name: python-package-distributions
         path: dist/
 
     # The assets can be attached to an existing release, if a matching tag is found
     - name: Upload release assets
-      uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2.3.3
+      uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
       with:
         files: dist/*.whl
 
