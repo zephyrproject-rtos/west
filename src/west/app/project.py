@@ -1780,7 +1780,26 @@ class Update(_ProjectCommand):
                     return
 
             # The auto-cache needs to be updated. Sync with remote.
+            # Note: always make sure that the auto-cache HEAD points to correct
+            # remote HEAD, to avoid issues while updating the cache or cloning
+            # from auto-cache, e.g. if the remote default branch has changed:
             self.dbg(f'{project.name}: update auto-cache ({cache_dir}) with remote')
+            cp = project.git(
+                ['ls-remote', '--symref', 'HEAD'],
+                cwd=cache_dir,
+                capture_stdout=True,
+                capture_stderr=True,
+                check=False,
+            )
+            if cp.returncode == 0:
+                # extract branch name from stdout, e.g. "ref: refs/heads/main	HEAD"
+                remote_head = cp.stdout.decode('utf-8').split()[1]
+                project.git(
+                    ['symbolic-ref', 'HEAD', remote_head],
+                    cwd=cache_dir,
+                    capture_stdout=True,
+                    check=False,
+                )
             project.git(['remote', 'update', '--prune'], cwd=cache_dir, check=False)
 
     def init_project(self, project):
