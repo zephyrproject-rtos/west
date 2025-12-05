@@ -465,11 +465,13 @@ class WestApp:
         if self.cmd is not None:
             msg = f"extension command \"{self.cmd.name}\" couldn't be run"
         else:
+            self.cmd = self.builtins['help']
             msg = "could not load extension command(s)"
+
         if ece.hint:
             msg += '\n  Hint: ' + ece.hint
 
-        if self.cmd and self.cmd.verbosity >= Verbosity.DBG_EXTREME:
+        if self.cmd.verbosity >= Verbosity.DBG_EXTREME:
             self.cmd.err(msg, fatal=True)
             self.cmd.banner('Traceback (enabled by -vvv):')
             traceback.print_exc()
