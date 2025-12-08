@@ -7,6 +7,7 @@
 import os
 import shlex
 import textwrap
+from collections.abc import Iterable
 from pathlib import Path
 
 # What west's APIs accept for paths.
@@ -39,9 +40,9 @@ def escapes_directory(path: PathType, directory: PathType) -> bool:
     return ret
 
 
-def quote_sh_list(cmd: list[str]) -> str:
+def quote_sh_list(cmd: Iterable[str | os.PathLike]) -> str:
     '''Transform a command from list into shell string form.'''
-    return ' '.join(shlex.quote(s) for s in cmd)
+    return ' '.join(shlex.quote(str(s)) for s in cmd)
 
 
 def wrap(text: str, indent: str) -> list[str]:
