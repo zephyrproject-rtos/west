@@ -360,8 +360,15 @@ def west_init_tmpdir(repos_tmpdir):
     west_tmpdir = repos_tmpdir / 'workspace'
     manifest = repos_tmpdir / 'repos' / 'zephyr'
     cmd(['init', '-m', str(manifest), str(west_tmpdir)])
-    west_tmpdir.chdir()
-    return west_tmpdir
+    with chdir(west_tmpdir):
+        yield west_tmpdir
+
+
+@pytest.fixture
+def west_update_tmpdir(west_init_tmpdir):
+    '''Like west_init_tmpdir, but also runs west update.'''
+    cmd('update', cwd=west_init_tmpdir)
+    return west_init_tmpdir
 
 
 @pytest.fixture
