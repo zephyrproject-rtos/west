@@ -4,42 +4,25 @@
 
 import textwrap
 
-import pytest
-from conftest import add_commit, chdir, cmd, cmd_raises
+from conftest import add_commit, cmd, cmd_raises
 
 
-@pytest.fixture
-def workspace(repos_tmpdir):
-    workspace = repos_tmpdir / 'workspace'
-    manifest_repo = repos_tmpdir / 'repos' / 'zephyr'
-
-    # Initialize workspace
-    cmd(['init', '-m', str(manifest_repo), str(workspace)])
-    with chdir(workspace):
-        cmd('update')
-        yield workspace
-
-
-def test_extension_commands_basic(west_init_tmpdir):
+def test_extension_commands_basic(west_update_tmpdir):
     # Test basic extension command loading and structure
-    cmd('update')
-
     ext_output = cmd('test-extension')
     assert 'Testing test command 1' in ext_output
 
 
-def test_extension_commands_disabled(west_init_tmpdir):
+def test_extension_commands_disabled(west_update_tmpdir):
     # Test that extension commands can be disabled via config
-    cmd('update')
     cmd('config commands.allow_extensions false')
-
     err_info, _ = cmd_raises('test-extension', SystemExit)
     assert 'unknown command "test-extension"' in err_info.value.code
 
 
-def test_extension_command_missing_file(workspace):
+def test_extension_command_missing_file(west_update_tmpdir):
     # Test handling of extension commands with missing python files
-    net_tools_path = workspace / 'net-tools'
+    net_tools_path = west_update_tmpdir / 'net-tools'
     add_commit(
         net_tools_path,
         'add broken extension command',
@@ -58,9 +41,9 @@ def test_extension_command_missing_file(workspace):
     cmd_raises('broken-cmd', FileNotFoundError)
 
 
-def test_extension_command_invalid_yaml(workspace):
+def test_extension_command_invalid_yaml(west_update_tmpdir):
     # Test handling of invalid YAML in west-commands file
-    net_tools_path = workspace / 'net-tools'
+    net_tools_path = west_update_tmpdir / 'net-tools'
     add_commit(
         net_tools_path,
         'add invalid yaml',
@@ -74,9 +57,9 @@ def test_extension_command_invalid_yaml(workspace):
     assert 'could not load extension command(s)' in err_msg
 
 
-def test_extension_command_invalid_schema(workspace):
+def test_extension_command_invalid_schema(west_update_tmpdir):
     # Test handling of YAML that doesn't match the schema
-    net_tools_path = workspace / 'net-tools'
+    net_tools_path = west_update_tmpdir / 'net-tools'
     add_commit(
         net_tools_path,
         'add invalid schema',
@@ -93,9 +76,9 @@ def test_extension_command_invalid_schema(workspace):
     assert 'could not load extension command(s)' in err_msg
 
 
-def test_extension_command_missing_attribute(workspace):
+def test_extension_command_missing_attribute(west_update_tmpdir):
     # Test handling of extension command with missing class attribute
-    net_tools_path = workspace / 'net-tools'
+    net_tools_path = west_update_tmpdir / 'net-tools'
     add_commit(
         net_tools_path,
         'add python file without class',
@@ -120,9 +103,9 @@ def test_extension_command_missing_attribute(workspace):
     assert 'no attribute MissingClass' in err_msg
 
 
-def test_extension_command_constructor_error(workspace):
+def test_extension_command_constructor_error(west_update_tmpdir):
     # Test handling of extension command whose constructor raises an exception
-    net_tools_path = workspace / 'net-tools'
+    net_tools_path = west_update_tmpdir / 'net-tools'
     add_commit(
         net_tools_path,
         'add command with broken constructor',
@@ -151,9 +134,9 @@ def test_extension_command_constructor_error(workspace):
     assert 'command constructor threw an exception' in err_msg
 
 
-def test_extension_command_import_error(workspace):
+def test_extension_command_import_error(west_update_tmpdir):
     # Test handling of extension command with import errors
-    net_tools_path = workspace / 'net-tools'
+    net_tools_path = west_update_tmpdir / 'net-tools'
     add_commit(
         net_tools_path,
         'add file with import error',
@@ -179,9 +162,9 @@ def test_extension_command_import_error(workspace):
     assert 'could not import' in err_msg
 
 
-def test_extension_command_directory_escape(workspace):
+def test_extension_command_directory_escape(west_update_tmpdir):
     # Test that extension commands can't escape project directory
-    net_tools_path = workspace / 'net-tools'
+    net_tools_path = west_update_tmpdir / 'net-tools'
     add_commit(
         net_tools_path,
         'add escaping west-commands file',
@@ -201,9 +184,9 @@ def test_extension_command_directory_escape(workspace):
     assert 'escapes project path' in err_msg
 
 
-def test_extension_command_default_class_name(workspace):
+def test_extension_command_default_class_name(west_update_tmpdir):
     # Test that class name defaults to command name if not specified
-    net_tools_path = workspace / 'net-tools'
+    net_tools_path = west_update_tmpdir / 'net-tools'
     add_commit(
         net_tools_path,
         'add command with default class name',
@@ -232,9 +215,9 @@ def test_extension_command_default_class_name(workspace):
     assert 'default class name works' in ext_output
 
 
-def test_extension_command_multiple_commands_same_file(workspace):
+def test_extension_command_multiple_commands_same_file(west_update_tmpdir):
     # Test multiple commands defined in the same python file
-    net_tools_path = workspace / 'net-tools'
+    net_tools_path = west_update_tmpdir / 'net-tools'
     add_commit(
         net_tools_path,
         'add multiple commands',

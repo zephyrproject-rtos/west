@@ -72,18 +72,6 @@ SUBMODULE_ADD = [GIT, '-c', 'protocol.file.allow=always', 'submodule', 'add']
 PROTOCOL_FILE_ALLOW = '--submodule-init-config protocol.file.allow=always'
 
 #
-# Test fixtures
-#
-
-
-@pytest.fixture
-def west_update_tmpdir(west_init_tmpdir):
-    '''Like west_init_tmpdir, but also runs west update.'''
-    cmd('update', cwd=str(west_init_tmpdir))
-    return west_init_tmpdir
-
-
-#
 # Test cases
 #
 
