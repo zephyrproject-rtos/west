@@ -408,6 +408,19 @@ def test_update_auto_cache_skipped_remote_update(tmpdir):
     for msg in msgs:
         assert msg in stdout
 
+    # Rename remote default branches and update remote (results in dangling remote HEAD).
+    subprocess.check_call([GIT, 'branch', '-m', 'master', 'renamed-master'], cwd=foo_remote)
+    subprocess.check_call([GIT, 'branch', '-m', 'master', 'changed/main'], cwd=bar_remote)
+    subprocess.check_call([GIT, 'remote', 'update', '--prune'], cwd=auto_cache_dir_foo)
+    subprocess.check_call([GIT, 'remote', 'update', '--prune'], cwd=auto_cache_dir_bar)
+
+    # west update must succeed
+    setup_workspace_and_west_update(
+        tmpdir / 'workspace5',
+        foo_head='renamed-master',
+        bar_head='changed/main',
+    )
+
 
 def test_update_caches_priorities(tmpdir):
     # Test that the correct cache is used if multiple caches are specified
