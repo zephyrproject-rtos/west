@@ -7,6 +7,7 @@
 Parser and abstract data types for west manifests.
 '''
 
+import copy
 import enum
 import errno
 import logging
@@ -180,6 +181,34 @@ ManifestDataType = str | dict
 # Logging
 
 _logger = logging.getLogger(__name__)
+
+
+# Representation of remapping
+
+
+class ImportRemapping:
+    """Represents `remapping` within a manifest."""
+
+    def __init__(self, manifest_data: dict | None = None):
+        """Initialize a new ImportRemapping instance."""
+        self.url_replaces: list[tuple[str, str]] = []
+        self.append(manifest_data or {})
+
+    def append(self, manifest_data: dict):
+        """Append values from a manifest data (dictionary) to this instance."""
+        for kind, values in manifest_data.get('remapping', {}).items():
+            if kind == 'url':
+                self.url_replaces += [(v['old'], v['new']) for v in values]
+
+    def merge(self, other):
+        """Merge another ImportRemapping instance into this one."""
+        if not isinstance(other, ImportRemapping):
+            raise TypeError(f"Unsupported type'{type(other).__name__}'")
+        self.url_replaces += other.url_replaces
+
+    def copy(self):
+        """Return a deep copy of this instance."""
+        return copy.deepcopy(self)
 
 
 # Type for the submodule value passed through the manifest file.
@@ -455,6 +484,9 @@ class _import_ctx(NamedTuple):
 
     # Bit vector of flags that modify import behavior.
     import_flags: 'ImportFlag'
+
+    # remapping
+    remapping: ImportRemapping
 
 
 def _imap_filter_allows(imap_filter: ImapFilterFnType, project: 'Project') -> bool:
@@ -2052,6 +2084,7 @@ class Manifest:
             current_repo_abspath=current_repo_abspath,
             project_importer=project_importer,
             import_flags=import_flags,
+            remapping=ImportRemapping(),
         )
 
     def _recursive_init(self, ctx: _import_ctx):
@@ -2073,6 +2106,10 @@ class Manifest:
         _logger.debug('loading %s', loading_what)
 
         manifest_data = self._ctx.current_data['manifest']
+
+        # append values from resolved manifest_data to current context
+        new_remapping = ImportRemapping(manifest_data)
+        self._ctx.remapping.merge(new_remapping)
 
         schema_version = str(manifest_data.get('version', SCHEMA_VERSION))
 
@@ -2322,6 +2359,7 @@ class Manifest:
             current_abspath=pathobj_abs,
             current_relpath=pathobj,
             current_data=pathobj_abs.read_text(encoding=Manifest.encoding),
+            remapping=self._ctx.remapping.copy(),
         )
         try:
             Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
@@ -2451,6 +2489,13 @@ class Manifest:
             url = url_bases[remote] + '/' + (repo_path or name)
         else:
             self._malformed(f'project {name} has no remote or url and no default remote is set')
+
+        # modify the url
+        if url:
+            url_replaces = self._ctx.remapping.url_replaces
+            for url_replace in reversed(url_replaces):
+                old, new = url_replace
+                url = url.replace(old, new)
 
         # The project's path needs to respect any import: path-prefix,
         # regardless of self._ctx.import_flags. The 'ignore' type flags
@@ -2672,6 +2717,7 @@ class Manifest:
             # We therefore use a separate list for tracking them
             # from our current list.
             manifest_west_commands=[],
+            remapping=self._ctx.remapping.copy(),
         )
         try:
             submanifest = Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
