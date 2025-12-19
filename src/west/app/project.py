@@ -1821,29 +1821,6 @@ class Update(_ProjectCommand):
             )
             # Reset the remote's URL to the project's fetch URL.
             project.git(['remote', 'set-url', project.remote_name, project.url])
-            # Make sure we have a detached HEAD so we can delete the
-            # local branch created by git clone.
-            project.git('checkout --quiet --detach HEAD')
-            # Find the name of any local branch created by git clone.
-            # West commits to only touching 'manifest-rev' in the
-            # local branch name space.
-            local_branches = (
-                project.git(
-                    ['for-each-ref', '--format', '%(refname)', 'refs/heads/*'], capture_stdout=True
-                )
-                .stdout.decode('utf-8')
-                .splitlines()
-            )
-            # This should contain at most one branch in current
-            # versions of git, but we might as well get them all just
-            # in case that changes.
-            for branch in local_branches:
-                if not branch:
-                    continue
-                # This is safe: it can't be garbage collected by git before we
-                # have a chance to use it, because we have another ref, namely
-                # f'refs/remotes/{project.remote_name}/{branch}'.
-                project.git(['update-ref', '-d', branch])
 
     def project_auto_cache(self, project):
         if self.auto_cache is None:
