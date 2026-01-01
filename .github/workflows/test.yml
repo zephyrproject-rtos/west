@@ -48,7 +48,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@ed21f2f24f8dd64503750218de024bcf64c7250a # v7.1.5
+        uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
         with:
           python-version: ${{ matrix.python-version }}
           working-directory: './check out/'
@@ -65,7 +65,7 @@ jobs:
 
       - name: Upload coverage reports
         if: ${{ matrix.task == 'gh-test' }}
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: coverage-${{ matrix.os }}-${{ matrix.python-version }}
           path: "./check out/.coverage"
@@ -73,7 +73,7 @@ jobs:
 
       - name: Upload test reports
         if: ${{ matrix.task == 'gh-test' }}
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: tests-${{ matrix.os }}-${{ matrix.python-version }}
           path: "./check out/junit.xml"
@@ -94,7 +94,7 @@ jobs:
           python-version: '3.13'
 
       - name: Download all artifacts
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
 
       - name: Install coverage
         run: pip3 install coverage
@@ -105,7 +105,7 @@ jobs:
           coverage xml
 
       - name: Upload combined coverage report
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: coverage-combined
           path: coverage.xml
@@ -118,6 +118,6 @@ jobs:
 
       - name: Upload test results to Codecov
         if: github.repository_owner == 'zephyrproject-rtos' && ${{ !cancelled() }}
-        uses: codecov/test-results-action@47f89e9acb64b76debcd5ea40642d25a4adced9f # v1.1.1
+        uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1.2.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
