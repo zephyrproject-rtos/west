@@ -131,6 +131,11 @@ properties:
           $ref: "#/$defs/groups"
         # Arbitrary project user data.
         userdata: {}
+      # Mutual exclusivity constraints
+      not:
+        anyOf:
+          - required: [remote, url]
+          - required: [repo-path, url]
 
   # If present, a list of project groups to enable and disable. Prefix
   # a group name with "-" to disable it; prefix with "+" to enable it.

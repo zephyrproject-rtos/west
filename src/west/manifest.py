@@ -2438,14 +2438,13 @@ class Manifest:
         url = pd.get('url')
         remote = pd.get('remote')
         repo_path = pd.get('repo-path')
-        if remote and url:
-            self._malformed(f'project {name} has both "remote: {remote}" and "url: {url}"')
+        # Mutual exclusivity of remote and url is enforced by JSON schema
         if defaults.remote and not (remote or url):
             remote = defaults.remote
 
         if url:
-            if repo_path:
-                self._malformed(f'project {name} has "repo_path: {repo_path}" and "url: {url}"')
+            # Mutual exclusivity of url and repo-path is enforced by JSON schema
+            pass
         elif remote:
             if remote not in url_bases:
                 self._malformed(f'project {name} remote {remote} is not defined')
