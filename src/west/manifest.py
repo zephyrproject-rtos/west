@@ -2152,9 +2152,7 @@ class Manifest:
             return
 
         raw_filter: list[RawGroupType] = manifest_data['group-filter']
-        if not raw_filter:
-            self._malformed('"manifest: group-filter:" may not be empty')
-
+        # Empty check is done by JSON schema (minItems: 1)
         group_filter = self._validated_group_filter('manifest', raw_filter)
         _logger.debug('group-filter: %s', group_filter)
 

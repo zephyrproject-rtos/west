@@ -3099,7 +3099,7 @@ def test_invalid_manifest_group_filters():
             Manifest.from_data(data)
         assert err_must_contain in "\n".join(e.value.args)
 
-    check2([], 'may not be empty')
+    check2([], '[] should be non-empty')
     check2('hello', "is not of type 'array'")
     check2(3, "is not of type 'array'")
     check2(3.14, "is not of type 'array'")

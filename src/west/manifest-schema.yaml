@@ -136,6 +136,7 @@ properties:
   # a group name with "-" to disable it; prefix with "+" to enable it.
   group-filter:
     $ref: "#/$defs/groups"
+    minItems: 1
 
   # The "self" key specifies values for the project containing the manifest
   # file (the "manifest repository").
