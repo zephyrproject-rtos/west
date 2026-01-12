@@ -20,7 +20,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn
 
-import pykwalify.core
+import jsonschema
 import yaml
 
 try:
@@ -203,7 +203,7 @@ class _defaults(NamedTuple):
 
 _DEFAULT_REV = 'master'
 _WEST_YML = 'west.yml'
-_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
+_SCHEMA_PATH = Path(__file__).parent / "manifest-schema.yaml"
 _SCHEMA_VER = parse_version(SCHEMA_VERSION)
 _EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
 _VALID_SCHEMA_VERS = [
@@ -228,6 +228,10 @@ def _load(data: str) -> Any:
         return yaml.load(data, Loader=SafeLoader)
     except yaml.scanner.ScannerError as e:
         raise MalformedManifest(data) from e
+
+
+def _load_schema():
+    return _load(_SCHEMA_PATH.read_text(encoding=Manifest.encoding))
 
 
 def _west_commands_list(west_commands: WestCommandsType | None) -> list[str]:
@@ -634,9 +638,9 @@ def validate(data: Any) -> dict[str, Any]:
             raise MalformedManifest(msg)
 
     try:
-        pykwalify.core.Core(source_data=data, schema_files=[_SCHEMA_PATH]).validate()
-    except pykwalify.errors.SchemaError as se:
-        raise MalformedManifest(se.msg) from se
+        jsonschema.validate(data, _load_schema())
+    except jsonschema.ValidationError as e:
+        raise MalformedManifest(str(e)) from e
 
     # Normalize all odd cases to an empty, iterable list (#823)
     for k in ['projects']:
@@ -2253,9 +2257,8 @@ class Manifest:
         # system) with a fallback on self._ctx.project_importer.
 
         imptype = type(imp)
-        if imptype is bool:
-            self._malformed(f'got "self: import: {imp}" of boolean')
-        elif self._ctx.import_flags & ImportFlag.IGNORE:
+        # Boolean import is prevented by JSON schema for self.import
+        if self._ctx.import_flags & ImportFlag.IGNORE:
             # If we're ignoring imports altogether, this is fine.
             _logger.debug('ignored self import')
             return
@@ -2730,28 +2733,7 @@ class Manifest:
             copy.pop('path-prefix', ''),
         )
 
-        # Check that the value is OK.
-        #
-        # If you modify the error handling here, be sure to
-        # update test_import_map_error_handling() as needed.
-        if copy:
-            # We popped out all of the valid keys already.
-            self._malformed(f'{src}: invalid import contents: {copy}')
-        elif not _is_imap_list(ret.name_allowlist):
-            self._malformed(f'{src}: bad import name-allowlist {ret.name_allowlist}')
-        elif not _is_imap_list(ret.path_allowlist):
-            self._malformed(f'{src}: bad import path-allowlist {ret.path_allowlist}')
-        elif not _is_imap_list(ret.name_blocklist):
-            self._malformed(f'{src}: bad import name-blocklist {ret.name_blocklist}')
-        elif not _is_imap_list(ret.path_blocklist):
-            self._malformed(f'{src}: bad import path-blocklist {ret.path_blocklist}')
-        elif not isinstance(ret.path_prefix, str):
-            self._malformed(
-                f'{src}: bad import path-prefix '
-                f'{ret.path_prefix}; expected str, not '
-                f'{type(ret.path_prefix)}'
-            )
-
+        # Validation is done by the JSON schema.
         return ret
 
     def _add_project(self, project: Project) -> bool:

@@ -1,0 +1,229 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://zephyrproject.org/schemas/west/manifest"
+title: West Manifest
+description: |
+  A JSON schema for validation of West manifest YAML files.
+
+  This schema has similar semantics to the repo XML format:
+  https://gerrit.googlesource.com/git-repo/+/master/docs/manifest-format.md
+
+  --------------------------------------------------------------
+
+  DO NOT CHANGE THIS FILE WITHOUT:
+
+  - updating west.manifest.SCHEMA_VERSION and
+    west.manifest._VALID_SCHEMA_VERS
+  - reviewing and updating sphinx documentation
+
+  --------------------------------------------------------------
+
+type: object
+additionalProperties: false
+properties:
+  # The "version" key is optional. It's the minimum version manifest
+  # schema that is required to correctly parse the manifest data.
+  version:
+    oneOf:
+      - type: string
+      - type: number
+
+  # The "defaults" key specifies some default values used in the
+  # rest of the manifest.
+  defaults:
+    type: object
+    additionalProperties: false
+    properties:
+      # The name of the default remote.
+      remote:
+        type: string
+      # The default revision (master if not given).
+      revision:
+        type: string
+
+  # The "remotes" key specifies a sequence of remotes, each of which has a name
+  # and a fetch URL base. These URL bases are concatenated with project names
+  # (separated by a /) to form complete fetch URLs.
+  remotes:
+    type: array
+    items:
+      type: object
+      required: [name, url-base]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+        url-base:
+          type: string
+
+  # The "projects" key specifies a sequence of "projects", each of which has a
+  # remote, and may specify additional configuration.
+  #
+  # A manifest without projects was forbidden up through west 0.9.x,
+  # but it can be convenient to create such manifests at times, so it
+  # is now allowed.
+  projects:
+    type: array
+    items:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        # Project's unique name.
+        name:
+          type: string
+        # Project description. Has no effect.
+        description:
+          type: string
+        # Name of the project's remote. May not be combined with "url".
+        remote:
+          type: string
+        # If a remote is given, the project is fetched from this URL:
+        #
+        # remote.url-base + / + repo-path
+        #
+        # "repo-path" defaults to "name".
+        repo-path:
+          type: string
+        # Explicit project fetch URL. May not be combined with "remote".
+        url:
+          type: string
+        # Revision to check out. May be a branch, tag, or SHA.
+        # Default: "master"
+        revision:
+          type: string
+
+        # Path to check out, relative to the west installation root.
+        # The default is the name.
+        path:
+          type: string
+        # Submodules to checkout within the project
+        submodules:
+          oneOf:
+            - type: boolean
+            - type: array
+              items:
+                type: object
+                required: [path]
+                additionalProperties: false
+                properties:
+                  path:
+                    type: string
+                  name:
+                    type: string
+        # Limits the clone depth of the project if given.
+        clone-depth:
+          type: integer
+          minimum: 1
+
+        # Path to a west-commands.yml inside the project.
+        west-commands:
+          type: string
+        # Additional manifest data to import from the project.
+        import:
+          oneOf:
+            - type: boolean
+            - type: string
+            - type: array
+              items:
+                type: string
+            - $ref: "#/$defs/import-object"
+        groups:
+          $ref: "#/$defs/groups"
+        # Arbitrary project user data.
+        userdata: {}
+
+  # If present, a list of project groups to enable and disable. Prefix
+  # a group name with "-" to disable it; prefix with "+" to enable it.
+  group-filter:
+    $ref: "#/$defs/groups"
+
+  # The "self" key specifies values for the project containing the manifest
+  # file (the "manifest repository").
+  self:
+    type: object
+    additionalProperties: false
+    properties:
+      path:
+        type: ["string", "null"]
+      # The manifest repository may also contain additional west
+      # commands. See the above comment for details.
+      west-commands:
+        type: string
+      # Additional manifest data to import from the manifest
+      # repository.
+      import:
+        oneOf:
+          # No boolean import here
+          - type: string
+          - type: array
+            items:
+              type: string
+          - $ref: "#/$defs/import-object"
+      # Arbitrary user data for manifest repository
+      userdata: {}
+
+$defs:
+  import-object:
+    type: object
+    additionalProperties: false
+    properties:
+      file:
+        type: string
+      name-allowlist:
+        oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
+      path-allowlist:
+        oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
+      name-blocklist:
+        oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
+      path-blocklist:
+        oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
+      path-prefix:
+        type: string
+      # Deprecated aliases
+      name-whitelist:
+        oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
+      path-whitelist:
+        oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
+      name-blacklist:
+        oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
+      path-blacklist:
+        oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
+
+  groups:
+    type: array
+    items:
+      oneOf:
+        - type: string
+        - type: number

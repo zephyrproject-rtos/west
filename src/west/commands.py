@@ -19,10 +19,10 @@ from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
 from types import ModuleType
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import colorama
-import pykwalify
+import jsonschema
 
 try:
     from yaml import CSafeLoader as SafeLoader
@@ -43,13 +43,24 @@ This package also provides support for extension commands.'''
 
 __all__ = ['CommandContextError', 'CommandError', 'WestCommand']
 
-_EXT_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'west-commands-schema.yml')
+_EXT_SCHEMA_PATH = Path(__file__).parent / 'west-commands-schema.yaml'
 
 # Cache which maps files implementing extension commands to their
 # imported modules.
 _EXT_MODULES_CACHE: dict[str, ModuleType] = {}
 # Infinite iterator of "fresh" extension command module names.
 _EXT_MODULES_NAME_IT = (f'west.commands.ext.cmd_{i}' for i in itertools.count(1))
+
+
+def _load(data: str) -> Any:
+    try:
+        return yaml.load(data, Loader=SafeLoader)
+    except yaml.YAMLError as e:
+        raise ExtensionCommandError from e
+
+
+def _load_schema():
+    return _load(_EXT_SCHEMA_PATH.read_text(encoding=Manifest.encoding))
 
 
 class CommandError(RuntimeError):
@@ -670,16 +681,12 @@ def _ext_specs(project):
 
         # Load the spec file and check the schema.
         with open(spec_file) as f:
-            try:
-                commands_spec = yaml.load(f.read(), Loader=SafeLoader)
-            except yaml.YAMLError as e:
-                raise ExtensionCommandError from e
+            commands_spec = _load(f.read())
+
         try:
-            pykwalify.core.Core(
-                source_data=commands_spec, schema_files=[_EXT_SCHEMA_PATH]
-            ).validate()
-        except pykwalify.errors.SchemaError as e:
-            raise ExtensionCommandError from e
+            jsonschema.validate(commands_spec, _load_schema())
+        except jsonschema.ValidationError as e:
+            raise ExtensionCommandError(hint=str(e)) from e
 
         for commands_desc in commands_spec['west-commands']:
             ret.extend(_ext_specs_from_desc(project, commands_desc))
