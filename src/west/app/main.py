@@ -462,24 +462,28 @@ class WestApp:
         }
 
     def handle_extension_command_error(self, ece):
+
+
         if self.cmd is not None:
-            msg = f"extension command \"{self.cmd.name}\" couldn't be run"
+            msg = f'extension command "{self.cmd.name}" could not be run'
         else:
-            self.cmd = self.builtins['help']
             msg = "could not load extension command(s)"
 
         if ece.hint:
-            msg += '\n  Hint: ' + ece.hint
+            msg += "\n  Hint: " + ece.hint
 
-        if self.cmd.verbosity >= Verbosity.DBG_EXTREME:
-            self.cmd.err(msg, fatal=True)
-            self.cmd.banner('Traceback (enabled by -vvv):')
-            traceback.print_exc()
+        if self.cmd is not None:
+            if self.cmd.verbosity >= Verbosity.DBG_EXTREME:
+                self.cmd.err(msg, fatal=True)
+                self.cmd.banner("Traceback (most recent call last):")
+                traceback.print_exc()
+            else:
+                self.cmd.err(msg, fatal=True)
         else:
-            tb_file = dump_traceback()
-            msg += f'\n  See {tb_file} for a traceback.'
-            self.cmd.err(msg, fatal=True)
-        sys.exit(ece.returncode)
+            import sys
+            print(msg, file=sys.stderr)
+            traceback.print_exc()
+            sys.exit(ece.returncode)
 
     def setup_parsers(self):
         # Set up and install command-line argument parsers.
