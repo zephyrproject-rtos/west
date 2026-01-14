@@ -59,7 +59,7 @@ QUAL_REFS_WEST = 'refs/west/'
 #: v1.0.x, so that users can say "I want schema version 1" instead of
 #: having to keep using '0.13', which was the previous version this
 #: changed.)
-SCHEMA_VERSION = '1.2'
+SCHEMA_VERSION = '1.6'
 # MAINTAINERS:
 #
 # - Make sure to update _VALID_SCHEMA_VERS if you change this.
@@ -215,6 +215,7 @@ _VALID_SCHEMA_VERS = [
     '0.12',
     '0.13',
     '1.0',
+    '1.2',
     SCHEMA_VERSION,
 ]
 
