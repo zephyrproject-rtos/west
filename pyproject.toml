@@ -22,7 +22,6 @@ dependencies = [
     "colorama~=0.4",
     "jsonschema~=4.0",
     "packaging~=25.0",
-    "pykwalify~=1.8",
     "pyyaml~=6.0",
 ]
 license = "Apache-2.0"
