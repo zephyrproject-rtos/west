@@ -1870,6 +1870,228 @@ def test_init_local_with_manifest_filename(repos_tmpdir):
     cmd('update')
 
 
+def _setup_test_init(manifest_repo, local_dir, topdir, directory, manifest_file):
+    flags = []
+    if local_dir:
+        # make sure that manifest_repo is present under local_dir
+        clone(str(manifest_repo), str(local_dir))
+        flags += ['-l']
+    else:
+        # clone from remote manifest
+        flags += ["-m", manifest_repo]
+
+    # extend west init flags according to specified test case
+    if topdir:
+        flags += ['-t', topdir]
+    if manifest_file:
+        flags += ['--mf', manifest_file]
+    if directory:
+        flags += [directory]
+    return flags
+
+
+TEST_CASES_INIT = [
+    # (local_dir, topdir, directory, manifest_file)
+    ######################################
+    # REMOTE MANIFEST
+    ######################################
+    # init from remote repository (without any parameters)
+    (None, None, None, None),
+    # specify topdir in current directory
+    (None, Path('.'), None, None),
+    # specify topdir in a subfolder
+    (None, Path('subdir'), None, None),
+    # use deprecated [directory] to specify topdir
+    (None, None, Path('subdir'), None),
+    # specify topdir and [directory]
+    (None, Path('subdir'), Path('subdir') / 'extra' / 'level', None),
+    ######################################
+    # LOCAL MANIFEST
+    ######################################
+    # init workspace in current working directory (without --topdir)
+    (Path('workspace') / 'zephyr', None, Path('workspace') / 'zephyr', None),
+    # init workspace in current working directory
+    (Path('workspace') / 'zephyr', Path('.'), Path('workspace') / 'zephyr', None),
+    # init workspace in a subfolder of current working directory
+    (Path('workspace') / 'zephyr', Path('workspace'), Path('workspace') / 'zephyr', None),
+    # init workspace in current working directory by providing a manifest file
+    (Path('workspace') / 'zephyr', Path('.'), Path('workspace'), Path('zephyr') / 'west.yml'),
+    # init workspace in itself by providing manifest file
+    (
+        Path('workspace') / 'zephyr',
+        Path('.'),
+        Path('.'),
+        Path('workspace') / 'zephyr' / 'west.yml',
+    ),
+    # init workspace in a subfolder by providing manifest file
+    (
+        Path('workspace') / 'subdir' / 'zephyr',
+        Path('workspace'),
+        Path('workspace') / 'subdir',
+        Path('zephyr') / 'west.yml',
+    ),
+    # init workspace in a subfolder by providing manifest file
+    (
+        Path('workspace') / 'subdir' / 'zephyr',
+        Path('workspace'),
+        Path('workspace'),
+        Path('subdir') / 'zephyr' / 'west.yml',
+    ),
+]
+
+
+@pytest.mark.parametrize("test_case", TEST_CASES_INIT)
+def test_init(repos_tmpdir, test_case):
+    local_dir, topdir, directory, manifest_file = test_case
+
+    repos_tmpdir.chdir()
+    manifest_repo = repos_tmpdir / 'repos' / 'zephyr'
+    flags = _setup_test_init(manifest_repo, local_dir, topdir, directory, manifest_file)
+
+    # initialize west workspace
+    cmd(['init'] + flags)
+
+    # cd into the workspace
+    if local_dir:
+        # topdir is either specified or default (directory.parent)
+        workspace = topdir or directory.parent
+    else:
+        # topdir is either specified, directory or default (cwd)
+        workspace = topdir or directory or Path.cwd()
+    workspace_abs = workspace.absolute()
+    os.chdir(workspace)
+
+    # check if config option 'manifest.path' is correctly set
+    actual = cmd('config manifest.path')
+    if local_dir:
+        assert Path(actual.rstrip()) == directory.relative_to(workspace)
+    else:
+        if topdir and directory:
+            # zephyr is cloned into specified subdirectory in workspace
+            subdir = os.path.relpath(directory, topdir)
+            assert Path(actual.rstrip()) == Path(subdir) / 'zephyr'
+        else:
+            # zephyr is cloned directly to workspace
+            assert Path(actual.rstrip()) == Path('zephyr')
+
+    # check if config option 'manifest.file' is correctly set
+    actual = cmd('config manifest.file')
+    expected = manifest_file or Path('west.yml')
+    assert Path(actual.rstrip()) == Path(expected)
+
+    # re-initialization of a workspace must always fail
+    _, stderr = cmd_raises(['init'] + flags, SystemExit)
+    assert "FATAL ERROR: already initialized" in stderr
+    os.chdir(workspace.parent)
+    _, stderr = cmd_raises(['init', '-l', '--topdir', workspace_abs, manifest_repo], SystemExit)
+    assert "FATAL ERROR: already initialized" in stderr
+    _, stderr = cmd_raises(['init', '--topdir', workspace_abs, '-m', manifest_repo], SystemExit)
+    assert "FATAL ERROR: already initialized" in stderr
+
+
+TEST_CASES_INIT_FAILS = [
+    # (local_dir, topdir, directory, manifest_file, expected_error, expected_error)
+    ######################################
+    # REMOTE MANIFEST
+    ######################################
+    # specify a non-existent manifest file
+    (
+        None,
+        Path('.'),
+        None,
+        Path('non-existent.yml'),
+        SystemExit,
+        "FATAL ERROR: can't init: no non-existent.yml found",
+    ),
+    # specify topdir and [directory] (but directory is not inside topdir)
+    (
+        None,
+        Path('subdir'),
+        Path('sibling'),
+        None,
+        SystemExit,
+        "FATAL ERROR: directory 'sibling' must be relative to west topdir 'subdir'",
+    ),
+    ######################################
+    # LOCAL MANIFEST
+    ######################################
+    # init workspace without a directory
+    (
+        Path('workspace') / 'zephyr',
+        Path('.'),
+        None,
+        None,
+        SystemExit,
+        "FATAL ERROR: can't init: no west.yml found",
+    ),
+    # init workspace in a sibling repository path
+    (
+        Path('workspace') / 'zephyr',
+        Path('sibling'),
+        Path('workspace') / 'zephyr',
+        None,
+        SystemExit,
+        "west.yml must be relative to west topdir",
+    ),
+    # init workspace from non-existent manifest
+    (
+        Path('workspace') / 'zephyr',
+        Path('.'),
+        Path('non-existent.yml'),
+        None,
+        SystemExit,
+        "FATAL ERROR: can't init: no west.yml found",
+    ),
+    # init workspace from a manifest not inside the workspace
+    (
+        Path('..') / 'zephyr',
+        Path('.'),
+        Path('..') / 'zephyr',
+        None,
+        SystemExit,
+        "west.yml must be relative to west topdir",
+    ),
+]
+
+
+@pytest.mark.parametrize("test_case", TEST_CASES_INIT_FAILS)
+def test_init_fails(repos_tmpdir, test_case):
+    local_dir, topdir, directory, manifest_file, expected_error, expected_stderr = test_case
+
+    manifest_repo = repos_tmpdir / 'repos' / 'zephyr'
+    repos_tmpdir.chdir()
+    flags = _setup_test_init(manifest_repo, local_dir, topdir, directory, manifest_file)
+    _, stderr = cmd_raises(['init'] + flags, expected_error)
+    assert expected_stderr in stderr
+
+
+def test_init_topdir_again(repos_tmpdir):
+    repos_tmpdir.chdir()
+    workspace = Path(repos_tmpdir) / 'ws'
+    zephyr = repos_tmpdir / 'repos' / 'zephyr'
+
+    # initial clone
+    cmd(['init', 'ws', '-m', zephyr])
+
+    # initialize west workspace again
+    _, stderr = cmd_raises(['init', 'ws', '-m', zephyr], SystemExit)
+    assert "FATAL ERROR: already initialized" in stderr
+
+    # initialize west workspace again
+    _, stderr = cmd_raises(['init', '--topdir', 'ws', '-m', zephyr], SystemExit)
+    assert "FATAL ERROR: already initialized" in stderr
+
+    # initialize west workspace again
+    os.chdir(workspace)
+    _, stderr = cmd_raises(['init', '--local', 'zephyr'], SystemExit)
+    assert "FATAL ERROR: already initialized" in stderr
+
+    # initialize west workspace again
+    os.chdir(workspace.parent)
+    _, stderr = cmd_raises(['init', '-l', '--topdir', 'ws', Path('ws') / 'zephyr'], SystemExit)
+    assert "FATAL ERROR: already initialized" in stderr
+
+
 def test_init_local_with_empty_path(repos_tmpdir):
     # Test "west init -l ." + "west update".
     # Regression test for:
