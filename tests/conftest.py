@@ -650,3 +650,15 @@ def check_proj_consistency(actual, expected):
     assert actual.clone_depth == expected.clone_depth
     assert actual.revision == expected.revision
     assert actual.west_commands == expected.west_commands
+
+
+def tree(path: Path, prefix="") -> str:
+    lines = []
+    entries = sorted(path.iterdir(), key=lambda p: (p.is_file(), p.name))
+    for i, entry in enumerate(entries):
+        connector = "└── " if i == len(entries) - 1 else "├── "
+        lines.append(prefix + connector + entry.name)
+        if entry.is_dir():
+            indent = "    " if i == len(entries) - 1 else "│   "
+            lines.extend(tree(entry, prefix + indent))
+    return "\n".join(lines)
