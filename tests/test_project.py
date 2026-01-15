@@ -959,8 +959,6 @@ def test_update_some_with_imports(repos_tmpdir):
         },
     )
 
-    cmd(['init', '-l', manifest_repo])
-
     # Updating unknown projects should fail as always.
 
     with pytest.raises(SystemExit):
@@ -1038,7 +1036,6 @@ def test_update_submodules_list(repos_tmpdir):
                        '''
         },
     )
-    cmd(['init', '-l', manifest_repo])
 
     # Make tagged_repo to be zephyr project submodule.
     subprocess.check_call(SUBMODULE_ADD + [str(tagged_repo), 'tagged_repo'], cwd=zephyr)
@@ -1162,7 +1159,6 @@ def test_update_all_submodules(repos_tmpdir):
                        '''
         },
     )
-    cmd(['init', '-l', manifest_repo])
 
     # Make tagged_repo to be zephyr project submodule.
     subprocess.check_call(SUBMODULE_ADD + [str(tagged_repo), 'tagged_repo'], cwd=zephyr)
@@ -1274,7 +1270,6 @@ def test_update_no_submodules(repos_tmpdir):
                        '''
         },
     )
-    cmd(['init', '-l', manifest_repo])
 
     # Make tagged_repo to be zephyr project submodule.
     subprocess.check_call(SUBMODULE_ADD + [str(tagged_repo), 'tagged_repo'], cwd=zephyr)
@@ -1380,7 +1375,6 @@ def test_update_submodules_strategy(repos_tmpdir):
                        '''
         },
     )
-    cmd(['init', '-l', manifest_repo])
 
     # Make tagged_repo to be zephyr project submodule.
     subprocess.check_call(SUBMODULE_ADD + [str(tagged_repo), 'tagged_repo'], cwd=zephyr)
@@ -2784,7 +2778,6 @@ def test_import_project_release_fork(repos_tmpdir):
         },
     )
 
-    cmd(['init', '-l', manifest_repo])
     with pytest.raises(ManifestImportFailed):
         Manifest.from_topdir(topdir=ws)
 
@@ -2870,7 +2863,6 @@ def test_import_project_release_dir(tmpdir):
         },
     )
 
-    cmd(['init', '-l', manifest_repo])
     with pytest.raises(ManifestImportFailed):
         Manifest.from_topdir(topdir=ws)
 
@@ -2913,7 +2905,6 @@ def test_import_project_rolling(repos_tmpdir):
         },
     )
 
-    cmd(['init', '-l', manifest_repo])
     with pytest.raises(ManifestImportFailed):
         Manifest.from_topdir(topdir=ws)
 
