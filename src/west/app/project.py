@@ -281,6 +281,9 @@ below.
         if args.local and (args.manifest_url or args.manifest_rev or args.clone_opt):
             self.die('-l cannot be combined with -m, -o or --mr')
 
+        if args.manifest_file is not None and Path(args.manifest_file).is_absolute():
+            self.die(f'--mf {args.manifest_file} argument is not relative')
+
         self.die_if_no_git()
 
         if args.local:
