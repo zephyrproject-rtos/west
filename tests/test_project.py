@@ -413,7 +413,7 @@ def test_manifest_freeze(west_update_tmpdir):
     #   manifest
     # - attributes are listed in NURPCW order (name, url, ...)
     # - all revisions are full 40-character SHAs
-    # - there isn't any random YAML tag crap
+    # - there isn't any random YAML tag
     expected_res = [
         '^manifest:$',
         '^  projects:$',
