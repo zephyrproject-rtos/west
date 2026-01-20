@@ -2113,14 +2113,14 @@ def test_import_map_error_handling():
             make_manifest(import_map)
         assert expected_err_contains in str(e.value)
 
-    # Unexpected keys are errors.
-    check_error({'invalid-key': 1}, 'invalid import contents')
-    # Invalid types for map keys are errors.
-    check_error({'name-allowlist': {}}, 'bad import name-allowlist')
-    check_error({'path-allowlist': {}}, 'bad import path-allowlist')
-    check_error({'name-blocklist': {}}, 'bad import name-blocklist')
-    check_error({'path-blocklist': {}}, 'bad import path-blocklist')
-    check_error({'path-prefix': {}}, 'bad import path-prefix')
+    # Unexpected keys are errors (now caught by jsonschema additionalProperties).
+    check_error({'invalid-key': 1}, 'Additional properties are not allowed')
+    # Invalid types for map keys are errors (now caught by jsonschema).
+    check_error({'name-allowlist': {}}, '{} is not valid under any of the given schemas')
+    check_error({'path-allowlist': {}}, '{} is not valid under any of the given schemas')
+    check_error({'name-blocklist': {}}, '{} is not valid under any of the given schemas')
+    check_error({'path-blocklist': {}}, '{} is not valid under any of the given schemas')
+    check_error({'path-prefix': {}}, '{} is not of type \'string\'')
 
 
 # A manifest repository with a subdirectory containing multiple
@@ -2321,6 +2321,7 @@ def test_import_self_directory(content, tmp_workspace):
 
 def test_import_self_bool():
     # Importing a boolean from self is an error and must fail.
+    # This is now caught by JSON schema validation.
 
     with pytest.raises(MalformedManifest) as e:
         M('''\
@@ -2329,7 +2330,7 @@ def test_import_self_bool():
           url: u
         self:
           import: true''')
-    assert 'of boolean' in str(e.value)
+    assert 'True is not valid under any of the given schemas' in str(e.value)
     with pytest.raises(MalformedManifest) as e:
         M('''\
         projects:
@@ -2337,7 +2338,7 @@ def test_import_self_bool():
           url: u
         self:
           import: false''')
-    assert 'of boolean' in str(e.value)
+    assert 'False is not valid under any of the given schemas' in str(e.value)
 
 
 def test_import_self_err_malformed(manifest_repo):
@@ -3041,11 +3042,11 @@ def test_invalid_groups():
     group-filter: {}
     '''
 
-    # These come from pykwalify itself.
+    # These come from jsonschema (previously from pykwalify).
     for fmt in [fmt_scalar_project, fmt_scalar_group_filter]:
-        check(fmt, 'hello', 'is not a list')
-        check(fmt, 3, 'is not a list')
-        check(fmt, 3.14, 'is not a list')
+        check(fmt, 'hello', "is not of type 'array'")
+        check(fmt, 3, "is not of type 'array'")
+        check(fmt, 3.14, "is not of type 'array'")
 
 
 def test_groups():
@@ -3098,10 +3099,10 @@ def test_invalid_manifest_group_filters():
             Manifest.from_data(data)
         assert err_must_contain in "\n".join(e.value.args)
 
-    check2([], 'may not be empty')
-    check2('hello', 'not a list')
-    check2(3, 'not a list')
-    check2(3.14, 'not a list')
+    check2([], '[] should be non-empty')
+    check2('hello', "is not of type 'array'")
+    check2(3, "is not of type 'array'")
+    check2(3.14, "is not of type 'array'")
 
 
 def test_is_active():

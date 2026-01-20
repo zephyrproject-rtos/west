@@ -1,0 +1,40 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://zephyrproject.org/schemas/west/commands"
+title: West Commands
+description: |
+  A JSON schema for validation of west commands YAML files. This allows
+  projects managed by west to provide additional commands.
+
+  By convention, this file is named west-commands.yml.
+
+  --------------------------------------------------------------
+
+  DO NOT CHANGE THIS FILE WITHOUT UPDATING THE DOCUMENTATION!
+
+  --------------------------------------------------------------
+
+type: object
+additionalProperties: false
+properties:
+  west-commands:
+    type: array
+    items:
+      type: object
+      required: [file, commands]
+      additionalProperties: false
+      properties:
+        file:
+          type: string
+        commands:
+          type: array
+          items:
+            type: object
+            required: [name]
+            additionalProperties: false
+            properties:
+              name:
+                type: string
+              class:
+                type: string
+              help:
+                type: string
