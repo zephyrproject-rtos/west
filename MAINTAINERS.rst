@@ -144,10 +144,15 @@ Summary of what happens:
    Decide if west.manifest.SCHEMA_VERSION needs an update:
 
    - SCHEMA_VERSION should be updated to X.Y if release vX.Y will have manifest
-     syntax changes that earlier versions of west cannot parse.
+     syntax changes that earlier versions of west cannot parse. The version
+     check causes earlier west versions to abort and forces users to upgrade
+     west to use manifests with new syntax or features.
 
    - SCHEMA_VERSION should *not* be changed for west vX.Y if the manifest
-     syntax is fully compatible with what west vX.(Y-1) can handle.
+     syntax is fully compatible with what west vX.(Y-1) can handle. This would
+     force some users to upgrade west unnecessarily when trying to use
+     manifests wrongly presenting themselves as using new syntax/features that
+     have not actually changed.
 
    If you want to change SCHEMA_VERSION, send this as a pull request to the
    main branch and get it reviewed and merged. (This requires a PR and review
