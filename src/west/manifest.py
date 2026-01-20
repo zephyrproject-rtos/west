@@ -174,7 +174,7 @@ def _update_project_filter(project_filter: ProjectFilterType, option_value: str 
 
 
 # The parsed contents of a manifest YAML file as returned by _load(),
-# after sanitychecking with validate().
+# after schema validation with validate().
 ManifestDataType = str | dict
 
 # Logging
@@ -783,7 +783,7 @@ class ImportFlag(enum.IntFlag):
 
 
 def _flags_ok(flags: ImportFlag) -> bool:
-    # Sanity-check the combination of flags.
+    # Validate the combination of flags.
     F_I = ImportFlag.IGNORE
     F_FP = ImportFlag.FORCE_PROJECTS
     F_IP = ImportFlag.IGNORE_PROJECTS
@@ -2230,7 +2230,7 @@ class Manifest:
         )
 
     def _assert_imports_ok(self) -> None:
-        # Sanity check that we aren't calling code that does importing
+        # Check that we aren't calling code that does importing
         # if the flags tell us not to.
         #
         # Could be deleted if this feature stabilizes and we never hit
