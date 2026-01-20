@@ -92,7 +92,7 @@ def test_config_global():
     assert cmd('config pytest.global').rstrip() == 'bar'
     assert cmd('config --global pytest.global').rstrip() == 'bar'
 
-    # Sanity check that we can create multiple variables per section.
+    # Check that we can create multiple variables per section.
     # Just use the API here; there's coverage already that the command line
     # and API match.
     cmd('config --global pytest.global2 foo2')
