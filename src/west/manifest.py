@@ -51,7 +51,7 @@ QUAL_MANIFEST_REV_BRANCH = 'refs/heads/' + MANIFEST_REV_BRANCH
 #: Git ref space used by west for internal purposes.
 QUAL_REFS_WEST = 'refs/west/'
 
-#: The latest manifest schema version supported by this west program.
+#: The highest manifest schema version supported by this west version.
 #:
 #: This value will change whenever a new version of west includes new
 #: manifest file features not supported by earlier versions of west.
@@ -204,7 +204,7 @@ class _defaults(NamedTuple):
 _DEFAULT_REV = 'master'
 _WEST_YML = 'west.yml'
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "manifest-schema.yml")
-_SCHEMA_VER = parse_version(SCHEMA_VERSION)
+_MAX_SUPPORTED_SCHEMA_VER = parse_version(SCHEMA_VERSION)
 _EARLIEST_VER_STR = '0.6.99'  # we introduced the version feature after 0.6
 _VALID_SCHEMA_VERS = [
     _EARLIEST_VER_STR,
@@ -616,17 +616,17 @@ def validate(data: Any) -> dict[str, Any]:
         #
         #  version: 0.8
         if not isinstance(data['version'], str):
-            min_version_str = str(data['version'])
+            manifest_version_str = str(data['version'])
             casted_to_str = True
         else:
-            min_version_str = data['version']
+            manifest_version_str = data['version']
             casted_to_str = False
 
-        min_version = parse_version(min_version_str)
-        if min_version > _SCHEMA_VER:
-            raise ManifestVersionError(min_version_str)
-        if min_version_str not in _VALID_SCHEMA_VERS:
-            msg = f'invalid version {min_version_str}; must be one of: ' + ', '.join(
+        manifest_version = parse_version(manifest_version_str)
+        if manifest_version > _MAX_SUPPORTED_SCHEMA_VER:
+            raise ManifestVersionError(manifest_version_str)
+        if manifest_version_str not in _VALID_SCHEMA_VERS:
+            msg = f'invalid version {manifest_version_str}; must be one of: ' + ', '.join(
                 _VALID_SCHEMA_VERS
             )
             if casted_to_str:
