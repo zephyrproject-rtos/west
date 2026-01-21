@@ -2523,19 +2523,21 @@ class Manifest:
         if ret_norm[0] in '/\\' or os.path.isabs(ret_norm):
             self._malformed(
                 f'project "{ret.name}" has absolute path '
-                f'{ret.path}; this must be relative to the '
+                f'"{ret.path}"; this must be relative to the '
                 f'workspace topdir' + (f' ({self.topdir})' if self.topdir else '')
             )
 
         if ret_norm.startswith('..'):
             self._malformed(
-                f'project "{name}" path {ret.path} '
-                f'normalizes to {ret_norm}, which escapes '
+                f'project "{name}" path "{ret.path}" '
+                f'normalizes to "{ret_norm}", which escapes '
                 f'the workspace topdir'
             )
 
         if Path(ret_norm).parts[0] == util.WEST_DIR:
-            self._malformed(f'project "{name}" path {ret.path} is in the {util.WEST_DIR} directory')
+            self._malformed(
+                f'project "{name}" path "{ret.path}" is in the {util.WEST_DIR} directory'
+            )
 
         return ret
 
