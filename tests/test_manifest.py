@@ -27,6 +27,7 @@ from conftest import (
     add_tag,
     check_proj_consistency,
     checkout_branch,
+    cmd,
     create_branch,
     create_repo,
     create_workspace,
@@ -490,6 +491,25 @@ def test_project_paths_with_repo_path():
     expected2 = Project('testproject_v2', 'https://url1.com/testproject', revision='v2.0')
     check_proj_consistency(m.projects[1], expected1)
     check_proj_consistency(m.projects[2], expected2)
+
+
+# Officially _not_ supported! Was actually broken from 1.3 to 1.5
+# See #910 and zephyr commit 7d40091fbfedfc
+# If this gets in the way of some great new feature then feel free to remove this test.
+def test_project_path_is_topdir(repos_tmpdir):
+    mnft_dir = Path('zephyr')
+    mnft_file = mnft_dir / 'west.yml'
+
+    with open(mnft_file, encoding='utf-8') as f:
+        mnft = f.read()
+    assert 'path: subdir/Kconfiglib' in mnft
+    with open(mnft_file, 'w', encoding='utf-8') as f:
+        f.write(mnft.replace('path: subdir/Kconfiglib', 'path: .'))
+
+    cmd(['init', '-l', mnft_dir])
+    for c in ['help', 'list', 'update', 'list']:
+        outputs = cmd(c)
+        assert 'WARNING:' in outputs
 
 
 def test_project_clone_depth():
