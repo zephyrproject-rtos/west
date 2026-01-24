@@ -11,14 +11,14 @@ from typing import Any
 import pytest
 from conftest import WINDOWS, chdir, cmd, cmd_raises, tmp_west_topdir, update_env
 
-from west import configuration as config
+from west import configuration as wconfig
 from west.configuration import MalformedConfig
 from west.util import PathType, WestNotFound
 
-SYSTEM = config.ConfigFile.SYSTEM
-GLOBAL = config.ConfigFile.GLOBAL
-LOCAL = config.ConfigFile.LOCAL
-ALL = config.ConfigFile.ALL
+SYSTEM = wconfig.ConfigFile.SYSTEM
+GLOBAL = wconfig.ConfigFile.GLOBAL
+LOCAL = wconfig.ConfigFile.LOCAL
+ALL = wconfig.ConfigFile.ALL
 
 west_env = {
     SYSTEM: 'WEST_CONFIG_SYSTEM',
@@ -46,7 +46,7 @@ def cfg(f=ALL, topdir=None):
     cp = configparser.ConfigParser(allow_no_value=True)
     # TODO: convert this mechanism without the global deprecated read_config
     with pytest.deprecated_call():
-        config.read_config(configfile=f, config=cp, topdir=topdir)
+        wconfig.read_config(configfile=f, config=cp, topdir=topdir)
     return cp
 
 
@@ -54,20 +54,20 @@ def update_testcfg(
     section: str,
     key: str,
     value: Any,
-    configfile: config.ConfigFile = LOCAL,
+    configfile: wconfig.ConfigFile = LOCAL,
     topdir: PathType | None = None,
 ) -> None:
-    c = config.Configuration(topdir)
+    c = wconfig.Configuration(topdir)
     c.set(option=f'{section}.{key}', value=value, configfile=configfile)
 
 
 def delete_testcfg(
     section: str,
     key: str,
-    configfile: config.ConfigFile | None = None,
+    configfile: wconfig.ConfigFile | None = None,
     topdir: PathType | None = None,
 ) -> None:
-    c = config.Configuration(topdir)
+    c = wconfig.Configuration(topdir)
     c.delete(option=f'{section}.{key}', configfile=configfile)
 
 
@@ -345,15 +345,15 @@ def test_system_creation():
     # Test that the system file -- and just that file -- is created on
     # demand.
 
-    assert not os.path.isfile(config._location(SYSTEM)[0])
-    assert not os.path.isfile(config._location(GLOBAL)[0])
-    assert not os.path.isfile(config._location(LOCAL)[0])
+    assert not os.path.isfile(wconfig._location(SYSTEM)[0])
+    assert not os.path.isfile(wconfig._location(GLOBAL)[0])
+    assert not os.path.isfile(wconfig._location(LOCAL)[0])
 
     update_testcfg('pytest', 'key', 'val', configfile=SYSTEM)
 
-    assert os.path.isfile(config._location(SYSTEM)[0])
-    assert not os.path.isfile(config._location(GLOBAL)[0])
-    assert not os.path.isfile(config._location(LOCAL)[0])
+    assert os.path.isfile(wconfig._location(SYSTEM)[0])
+    assert not os.path.isfile(wconfig._location(GLOBAL)[0])
+    assert not os.path.isfile(wconfig._location(LOCAL)[0])
     assert cfg(f=ALL)['pytest']['key'] == 'val'
     assert cfg(f=SYSTEM)['pytest']['key'] == 'val'
     assert 'pytest' not in cfg(f=GLOBAL)
@@ -363,15 +363,15 @@ def test_system_creation():
 def test_global_creation():
     # Like test_system_creation, for global config options.
 
-    assert not os.path.isfile(config._location(SYSTEM)[0])
-    assert not os.path.isfile(config._location(GLOBAL)[0])
-    assert not os.path.isfile(config._location(LOCAL)[0])
+    assert not os.path.isfile(wconfig._location(SYSTEM)[0])
+    assert not os.path.isfile(wconfig._location(GLOBAL)[0])
+    assert not os.path.isfile(wconfig._location(LOCAL)[0])
 
     update_testcfg('pytest', 'key', 'val', configfile=GLOBAL)
 
-    assert not os.path.isfile(config._location(SYSTEM)[0])
-    assert os.path.isfile(config._location(GLOBAL)[0])
-    assert not os.path.isfile(config._location(LOCAL)[0])
+    assert not os.path.isfile(wconfig._location(SYSTEM)[0])
+    assert os.path.isfile(wconfig._location(GLOBAL)[0])
+    assert not os.path.isfile(wconfig._location(LOCAL)[0])
     assert cfg(f=ALL)['pytest']['key'] == 'val'
     assert 'pytest' not in cfg(f=SYSTEM)
     assert cfg(f=GLOBAL)['pytest']['key'] == 'val'
@@ -381,15 +381,15 @@ def test_global_creation():
 def test_local_creation():
     # Like test_system_creation, for local config options.
 
-    assert not os.path.isfile(config._location(SYSTEM)[0])
-    assert not os.path.isfile(config._location(GLOBAL)[0])
-    assert not os.path.isfile(config._location(LOCAL)[0])
+    assert not os.path.isfile(wconfig._location(SYSTEM)[0])
+    assert not os.path.isfile(wconfig._location(GLOBAL)[0])
+    assert not os.path.isfile(wconfig._location(LOCAL)[0])
 
     update_testcfg('pytest', 'key', 'val', configfile=LOCAL)
 
-    assert not os.path.isfile(config._location(SYSTEM)[0])
-    assert not os.path.isfile(config._location(GLOBAL)[0])
-    assert os.path.isfile(config._location(LOCAL)[0])
+    assert not os.path.isfile(wconfig._location(SYSTEM)[0])
+    assert not os.path.isfile(wconfig._location(GLOBAL)[0])
+    assert os.path.isfile(wconfig._location(LOCAL)[0])
     assert cfg(f=ALL)['pytest']['key'] == 'val'
     assert 'pytest' not in cfg(f=SYSTEM)
     assert 'pytest' not in cfg(f=GLOBAL)
@@ -399,9 +399,9 @@ def test_local_creation():
 def test_local_creation_with_topdir():
     # Like test_local_creation, with a specified topdir.
 
-    system = pathlib.Path(config._location(SYSTEM)[0])
-    glbl = pathlib.Path(config._location(GLOBAL)[0])
-    local = pathlib.Path(config._location(LOCAL)[0])
+    system = pathlib.Path(wconfig._location(SYSTEM)[0])
+    glbl = pathlib.Path(wconfig._location(GLOBAL)[0])
+    local = pathlib.Path(wconfig._location(LOCAL)[0])
 
     topdir = pathlib.Path(os.getcwd()) / 'test-topdir'
     topdir_west = topdir / '.west'
@@ -514,7 +514,7 @@ def test_delete_none():
     delete_testcfg('pytest', 'key', configfile=None)
     assert cfg(f=ALL)['pytest']['key'] == 'system'
     with pytest.raises(KeyError), pytest.deprecated_call():
-        config.delete_config('pytest', 'key', configfile=None)
+        wconfig.delete_config('pytest', 'key', configfile=None)
 
     # Using the Configuration Class this does remove from system
     delete_testcfg('pytest', 'key', configfile=None)
@@ -531,7 +531,7 @@ def test_delete_list():
     assert cfg(f=GLOBAL)['pytest']['key'] == 'global'
     assert cfg(f=LOCAL)['pytest']['key'] == 'local'
     with pytest.deprecated_call():
-        config.delete_config('pytest', 'key', configfile=[GLOBAL, LOCAL])
+        wconfig.delete_config('pytest', 'key', configfile=[GLOBAL, LOCAL])
     assert cfg(f=SYSTEM)['pytest']['key'] == 'system'
     assert 'pytest' not in cfg(f=GLOBAL)
     assert 'pytest' not in cfg(f=LOCAL)
