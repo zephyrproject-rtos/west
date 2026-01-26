@@ -2523,19 +2523,33 @@ class Manifest:
         if ret_norm[0] in '/\\' or os.path.isabs(ret_norm):
             self._malformed(
                 f'project "{ret.name}" has absolute path '
-                f'{ret.path}; this must be relative to the '
+                f'"{ret.path}"; this must be relative to the '
                 f'workspace topdir' + (f' ({self.topdir})' if self.topdir else '')
             )
 
         if ret_norm.startswith('..'):
             self._malformed(
-                f'project "{name}" path {ret.path} '
-                f'normalizes to {ret_norm}, which escapes '
+                f'project "{name}" path "{ret.path}" '
+                f'normalizes to "{ret_norm}", which escapes '
                 f'the workspace topdir'
             )
 
-        if Path(ret_norm).parts[0] == util.WEST_DIR:
-            self._malformed(f'project "{name}" path {ret.path} is in the {util.WEST_DIR} directory')
+        _path = Path(ret_norm)
+
+        # Unsupported, see https://github.com/zephyrproject-rtos/zephyr/commit/7d40091fbfedfc
+        if _path == Path('.'):
+            _logger.warning("Making the topdir a git clone is not supported; do not report bugs.")
+            return ret
+
+        # Can any other Path have zero part? Just in case, provide a decent error message
+        # instead of "index out of range" (see #910)
+        if len(_path.parts) < 1:
+            self._malformed(f'project "{name}" path "{ret.path}" has no part?! ({_path})')
+
+        if _path.parts[0] == util.WEST_DIR:
+            self._malformed(
+                f'project "{name}" path "{ret.path}" is in the {util.WEST_DIR} directory'
+            )
 
         return ret
 
