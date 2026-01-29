@@ -308,8 +308,12 @@ below.
         manifest_dir = Path(args.directory or os.getcwd()).resolve()
         manifest_filename = args.manifest_file or 'west.yml'
         manifest_file = manifest_dir / manifest_filename
-        topdir = manifest_dir.parent
         rel_manifest = manifest_dir.name
+        # If user overrides topdir, use that.
+        if args.topdir is not None:
+            topdir = Path(args.topdir).resolve()
+        else:
+            topdir = manifest_dir.parent
         west_dir = topdir / WEST_DIR
 
         if not manifest_file.is_file():
@@ -320,7 +324,7 @@ below.
         self.create(west_dir)
         os.chdir(topdir)
         self.config = Configuration(topdir=topdir)
-        self.config.set('manifest.path', os.fspath(rel_manifest))
+        self.config.set('manifest.path', str(manifest_dir))
         self.config.set('manifest.file', manifest_filename)
 
         return topdir

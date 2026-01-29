@@ -560,6 +560,13 @@ class WestApp:
         )
 
         parser.add_argument(
+            '-t',
+            '--topdir',
+            default=None,
+            help='''Override west topdir.''',
+        )
+
+        parser.add_argument(
             '-q',
             '--quiet',
             default=0,
