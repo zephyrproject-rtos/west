@@ -13,6 +13,7 @@ import logging
 import os
 import platform
 import subprocess
+import sys
 import textwrap
 from copy import deepcopy
 from glob import glob
@@ -2949,8 +2950,22 @@ def test_import_path_prefix_no_escape(manifest_repo):
     assert 'escapes the workspace topdir' in str(excinfo.value)
 
 
-def test_import_loop_detection_self(manifest_repo):
+_def_rec_limit = sys.getrecursionlimit()
+
+
+# Parametrize to trigger the Python RecursionError in more varied places in the code and provide
+# more coverage. We used to test only the default value and to pass this test by chance, missing
+# the regression in cpython 3.13.8 caused by this backport to 3.13:
+# https://github.com/python/cpython/commit/ebccd1de88d
+# Long story in west issue #908.
+@pytest.mark.parametrize("py_rec_limit", range(_def_rec_limit, _def_rec_limit + 10))
+@pytest.mark.skipif(
+    (3, 13, 8) <= sys.version_info and sys.version_info < (3, 14), reason="See west issue #908"
+)
+def test_import_loop_detection_self(manifest_repo, py_rec_limit):
     # Verify that a self-import which causes an import loop is an error.
+
+    sys.setrecursionlimit(py_rec_limit)
 
     with open(manifest_repo / 'west.yml', 'w') as f:
         f.write('''
