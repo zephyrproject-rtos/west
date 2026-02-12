@@ -739,7 +739,8 @@ class ManifestVersionError(Exception):
 
 class _ManifestImportDepth(ManifestImportFailed):
     # A hack to signal to main.py what happened.
-    pass
+    def __str__(self):
+        return f'Import of {self.imp} failed: import level too deep'
 
 
 #
