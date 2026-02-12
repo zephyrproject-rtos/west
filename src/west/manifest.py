@@ -1612,8 +1612,6 @@ class Manifest:
             raise ManifestVersionError(mv.version, file=self._ctx.current_abspath) from mv
         except MalformedManifest as mm:
             self._malformed(mm.args[0], parent=mm)
-        except TypeError as te:
-            self._malformed(te.args[0], parent=te)
 
         # Finish loading the validated data.
 
