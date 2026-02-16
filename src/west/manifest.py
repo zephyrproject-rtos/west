@@ -2496,7 +2496,7 @@ class Manifest:
             path=path,
             submodules=self._load_submodules(pd.get('submodules'), f'project {name}'),
             clone_depth=pd.get('clone-depth'),
-            west_commands=pd.get('west-commands'),
+            west_commands=Path(pd.get('west-commands')).as_posix() if pd.get('west-commands') else None,
             topdir=self.topdir,
             remote_name=remote,
             groups=groups,
@@ -2628,7 +2628,7 @@ class Manifest:
             return
 
         for data in imported:
-            self._import_data_from_project(project, data, None)
+            self._import_data_from_project(project, data, path)
 
         _logger.debug(f'done resolving import {path} for {project}')
 
@@ -2647,16 +2647,22 @@ class Manifest:
         _logger.debug(f'done resolving import {imap} for {project}')
 
     def _import_data_from_project(
-        self, project: Project, data: Any, imap: _import_map | None
+        self, project: Project, data: Any, imap_or_mfpath: _import_map | str
     ) -> None:
         # Destructively add the imported data into our 'projects' map.
-
-        if imap is not None:
-            imap_filter = _compose_imap_filters(self._ctx.imap_filter, _imap_filter(imap))
-            imap_path_prefix = imap.path_prefix
-        else:
-            imap_filter = self._ctx.imap_filter
-            imap_path_prefix = '.'
+        match imap_or_mfpath:
+            case _import_map():
+                imap_filter = _compose_imap_filters(
+                    self._ctx.imap_filter, _imap_filter(imap_or_mfpath)
+                )
+                imap_path_prefix = imap_or_mfpath.path_prefix
+                mfst_path = imap_or_mfpath.file
+            case str():
+                imap_filter = self._ctx.imap_filter
+                imap_path_prefix = '.'
+                mfst_path = imap_or_mfpath
+            case _:
+                raise AssertionError(f'imap_or_mfpath has unexpected type {type(imap_or_mfpath)}')
 
         child_ctx = self._ctx._replace(
             imap_filter=imap_filter,
@@ -2674,13 +2680,21 @@ class Manifest:
         try:
             submanifest = Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
         except RecursionError as e:
-            raise _ManifestImportDepth(None, imap.file if imap else None) from e
+            raise _ManifestImportDepth(None, mfst_path) from e
 
         # Patch up any extension commands in the imported data
         # by allocating them to the project.
-        project.west_commands = _west_commands_merge(
-            project.west_commands, submanifest._ctx.manifest_west_commands
-        )
+
+        # If the manifest was imported from a project subdirectory
+        # (manifest_path is a relative path within the project),
+        # we need to adjust the west_commands paths to be relative
+        # to the project root, not to the manifest subdirectory.
+        mfst_dir = Path(mfst_path).parent if _is_yml(mfst_path) else Path(mfst_path)
+        west_commands_to_merge = [
+            (mfst_dir / cmd).as_posix() for cmd in submanifest._ctx.manifest_west_commands
+        ]
+
+        project.west_commands = _west_commands_merge(project.west_commands, west_commands_to_merge)
 
     def _import_content_from_project(self, project: Project, path: str) -> ImportedContentType:
         if not (self._ctx.import_flags & ImportFlag.FORCE_PROJECTS) and project.is_cloned():

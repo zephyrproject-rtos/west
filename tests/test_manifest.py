@@ -2095,6 +2095,67 @@ def test_import_project_submanifest_commands_both(manifest_repo):
     assert p1.west_commands == expected
 
 
+def test_import_project_submanifest_commands_from_project_subdirectory(manifest_repo):
+    # When a manifest is imported from a project subdirectory (e.g., mf_subdir/west.yml),
+    # and that manifest defines west-commands, the paths should be
+    # resolved relative to the manifest subdirectory.
+    # This tests _import_path_from_project with a string path.
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: p1
+            url: url-placeholder
+            import: mf_subdir/west.yml
+        ''')
+
+    p1 = manifest_repo / '..' / 'p1'
+    create_repo(p1)
+    create_branch(p1, 'manifest-rev', checkout=True)
+    add_commit(
+        p1,
+        'add mf_subdir/west.yml with west-commands',
+        files={
+            'mf_subdir/west.yml': '''\
+                                manifest:
+                                  projects:
+                                  - name: p2
+                                    url: url-placeholder2
+                                  self:
+                                    west-commands: p2subdir/west-commands.yml
+                                ''',
+        },
+    )
+    checkout_branch(p1, 'master')
+
+    # Case A: import as a string path to the submanifest file.
+    p1_proj = MF().get_projects(['p1'])[0]
+    # The west_commands path should be 'mf_subdir/p2subdir/west-commands.yml',
+    # not 'west-commands.yml', to be resolved correctly
+    # relative to the project root. See issue #725.
+    expected = ['mf_subdir/p2subdir/west-commands.yml']
+    assert p1_proj.west_commands == expected
+
+    # Case B: import using an import-map whose 'file' is a directory.
+    # Re-write the top-level manifest to use an import map instead of
+    # a string; the imported manifest still lives at mf_subdir/west.yml.
+    with open(manifest_repo / 'west.yml', 'w') as f:
+      f.write('''\
+      manifest:
+        projects:
+        - name: p1
+          url: url-placeholder
+          import:
+            file: mf_subdir
+      ''')
+
+    # Reload and check the west_commands were resolved the same way.
+    p1_proj = MF().get_projects(['p1'])[0]
+    expected = ['mf_subdir/p2subdir/west-commands.yml']
+    assert p1_proj.west_commands == expected
+
+
 def test_import_map_error_handling():
     # Make sure we handle expected errors when loading import:
     # values that are maps.
