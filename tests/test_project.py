@@ -435,7 +435,7 @@ def test_manifest_freeze(west_update_tmpdir):
         '^    url: .*$',
         '^    revision: [a-f0-9]{40}$',
         '^    clone-depth: 1$',
-        '^    west-commands: scripts/west-commands.yml$',
+        r'^    west-commands: scripts[/\\]+west-commands.yml$',
         '^  self:$',
         '^    path: zephyr$',
     ]
@@ -459,7 +459,7 @@ def test_manifest_freeze_active(west_update_tmpdir):
         '^    url: .*$',
         '^    revision: [a-f0-9]{40}$',
         '^    clone-depth: 1$',
-        '^    west-commands: scripts/west-commands.yml$',
+        r'^    west-commands: scripts[/\\]+west-commands.yml$',
         '^  self:$',
         '^    path: zephyr$',
     ]
@@ -491,7 +491,7 @@ def test_manifest_resolve(west_update_tmpdir):
         '^    url: .*$',
         '^    revision: master$',
         '^    clone-depth: 1$',
-        '^    west-commands: scripts/west-commands.yml$',
+        r'^    west-commands: scripts[/\\]+west-commands.yml$',
         '^  self:$',
         '^    path: zephyr$',
     ]
@@ -515,7 +515,7 @@ def test_manifest_resolve_active(west_update_tmpdir):
         '^    url: .*$',
         '^    revision: master$',
         '^    clone-depth: 1$',
-        '^    west-commands: scripts/west-commands.yml$',
+        r'^    west-commands: scripts[/\\]+west-commands.yml$',
         '^  self:$',
         '^    path: zephyr$',
     ]

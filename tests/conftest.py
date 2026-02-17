@@ -31,8 +31,19 @@ GIT = shutil.which('git')
 # name.
 GIT_INIT_HAS_BRANCH = False
 
+WINDOWS = platform.system() == 'Windows'
+
+# We do NOT recommend or even advertise using backslashes on Windows because:
+# - they are a quoting and escape nightmare, and
+# - forward slashes work 99% of the time on Windows.
+# But:
+# - Backslashes should still work on Windows! So let's test them.
+# - This helps catch OS-independent mistakes in both production code and test code
+#   where we hardcode forward slashes directly instead of using Python's Pathlib or os.path.
+_scripts_west_cmds = r'scripts\\west-commands.yml' if WINDOWS else 'scripts///west-commands.yml'
+
 # If you change this, keep the docstring in repos_tmpdir() updated also.
-MANIFEST_TEMPLATE = '''\
+MANIFEST_TEMPLATE = f'''\
 manifest:
   defaults:
     remote: test-local
@@ -56,12 +67,10 @@ manifest:
     - name: net-tools
       description: Networking tools.
       clone-depth: 1
-      west-commands: scripts/west-commands.yml
+      west-commands: '{_scripts_west_cmds}'
   self:
     path: zephyr
 '''
-
-WINDOWS = platform.system() == 'Windows'
 
 #
 # Contextmanager
@@ -649,4 +658,5 @@ def check_proj_consistency(actual, expected):
     )
     assert actual.clone_depth == expected.clone_depth
     assert actual.revision == expected.revision
-    assert actual.west_commands == expected.west_commands
+    for a, e in zip(actual.west_commands, expected.west_commands, strict=True):
+        assert PurePath(a) == PurePath(e)

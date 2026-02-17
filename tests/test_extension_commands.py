@@ -4,7 +4,7 @@
 
 import textwrap
 
-from conftest import add_commit, cmd, cmd_raises
+from conftest import WINDOWS, add_commit, cmd, cmd_raises
 
 
 def test_extension_commands_basic(west_update_tmpdir):
@@ -218,11 +218,13 @@ def test_extension_command_default_class_name(west_update_tmpdir):
 def test_extension_command_multiple_commands_same_file(west_update_tmpdir):
     # Test multiple commands defined in the same python file
     net_tools_path = west_update_tmpdir / 'net-tools'
+    # Make sure we use either Pathlib or os.path
+    ext_file = r'scripts\\multi.py' if WINDOWS else 'scripts//multi.py'
     add_commit(
         net_tools_path,
         'add multiple commands',
         files={
-            'scripts/multi.py': textwrap.dedent('''\
+            ext_file: textwrap.dedent('''\
                 from west.commands import WestCommand
 
                 class FirstCommand(WestCommand):
@@ -241,9 +243,9 @@ def test_extension_command_multiple_commands_same_file(west_update_tmpdir):
                     def do_run(self, args, unknown):
                         print('second command')
                 '''),
-            'scripts/west-commands.yml': textwrap.dedent('''\
+            'scripts/west-commands.yml': textwrap.dedent(f'''\
                 west-commands:
-                  - file: scripts/multi.py
+                  - file: {ext_file}
                     commands:
                       - name: first
                         class: FirstCommand
