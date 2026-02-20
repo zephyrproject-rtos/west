@@ -2,9 +2,14 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+import subprocess
 import textwrap
+from pathlib import Path
 
-from conftest import add_commit, cmd, cmd_raises
+import yaml
+from conftest import GIT, WINDOWS, add_commit, cmd, cmd_raises, yaml_editor
+
+# The west command "test-extension" comes from the "west_update_tmpdir" fixture in conftest.py
 
 
 def test_extension_commands_basic(west_update_tmpdir):
@@ -259,3 +264,81 @@ def test_extension_command_multiple_commands_same_file(west_update_tmpdir):
     assert 'first command' in ext_output
     ext_output = cmd('second')
     assert 'second command' in ext_output
+
+
+def test_extension_special_chars(west_update_tmpdir):
+    # Detect any unexpected changes in the way we've been handling backslashes and other
+    # special characters. Changes in how we handle such edge cases may or may not be desired
+    # (and this test may be updated accordingly), but we never want these changes to come as
+    # a surprise and we want to keep control over them.
+
+    ext_proj = 'net-tools'
+    ext_proj_p = Path(ext_proj)
+
+    # Rename scripts/test.py to something strange.
+    # The actual location is purposely different on Windows
+    weird_ext_py = r'scripts///win subdir\\\test.py'
+    with yaml_editor(ext_proj_p / 'scripts' / 'west-commands.yml') as cmds:
+        assert cmds["west-commands"][0]["file"] == 'scripts/test.py'
+        cmds["west-commands"][0]["file"] = weird_ext_py
+    if WINDOWS:
+        (ext_proj_p / 'scripts' / 'win subdir').mkdir()
+    (ext_proj_p / 'scripts' / 'test.py').rename(ext_proj_p / weird_ext_py)
+
+    # Just for the logs
+    subprocess.check_call([GIT, '-C', ext_proj, 'add', weird_ext_py])
+    print(cmd('diff --manifest'))
+
+    # Does the extension still work
+    ext_output = cmd('test-extension')
+    assert 'Testing test command 1' in ext_output
+
+    def yaml_get_proj(mf: dict, projname: str):
+        _l = [p for p in mf["manifest"]['projects'] if p["name"] == projname]
+        assert len(_l) == 1
+        return _l[0]
+
+    # Now also rename the project's 'scripts/west-commands.yml' to something strange
+    weird_cmds = r'scripts///win subdir\\\w-cmds.yml'
+    with yaml_editor('zephyr/west.yml') as _mf:
+        _ext_p_yml = yaml_get_proj(_mf, ext_proj)
+        assert _ext_p_yml["west-commands"] == 'scripts/west-commands.yml'
+        _ext_p_yml["west-commands"] = weird_cmds
+    (ext_proj_p / 'scripts' / 'west-commands.yml').rename(ext_proj_p / weird_cmds)
+
+    # Just for the logs
+    subprocess.check_call([GIT, '-C', ext_proj, 'add', weird_cmds])
+    print(cmd('diff --manifest'))
+
+    # Does the extension still work
+    ext_output = cmd('test-extension')
+    assert 'Testing test command 1' in ext_output
+
+    # Test how west-commands gets printed back in `west manifest --resolve`
+    resolved_mf = cmd('manifest --resolve')
+    resolved_mf = yaml.safe_load(resolved_mf)
+    ext_proj_yaml = yaml_get_proj(resolved_mf, ext_proj)
+    assert ext_proj_yaml["west-commands"] == weird_cmds
+
+    ######  self: west-commands #####
+
+    # self: west-commands: follows a slightly different code path.
+    # Move the extension away from the project and into self.
+    Path('zephyr', 'scripts').mkdir()
+    if WINDOWS:
+        Path('zephyr', 'scripts', 'win subdir').mkdir()
+    (ext_proj_p / weird_ext_py).rename(Path('zephyr', weird_ext_py))
+
+    (ext_proj_p / weird_cmds).rename(Path('zephyr', weird_cmds))
+
+    # The extension is now missing from ext_proj. That's OK, it's supported.
+    with yaml_editor('zephyr/west.yml') as _mf:
+        _mf["manifest"]["self"]["west-commands"] = weird_cmds
+
+    ext_output = cmd('test-extension')
+    assert 'Testing test command 1' in ext_output
+
+    # Test how west-commands gets printed back in `west manifest --resolve`
+    resolved_mf = cmd('manifest --resolve')
+    resolved_mf = yaml.safe_load(resolved_mf)
+    assert resolved_mf["manifest"]["self"]["west-commands"] == weird_cmds
