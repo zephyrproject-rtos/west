@@ -25,6 +25,7 @@ from conftest import (
     create_repo,
     create_workspace,
     rev_parse,
+    yaml_editor,
 )
 
 from west.manifest import ImportFlag as MIF
@@ -157,15 +158,55 @@ def test_list_manifest(west_update_tmpdir):
     abspath = cmd('list -f {abspath} manifest').strip()
     posixpath = cmd('list -f {posixpath} manifest').strip()
     assert path == 'manifest_moved'
-    assert Path(abspath) == west_update_tmpdir / 'manifest_moved'
+    assert abspath == str(west_update_tmpdir / 'manifest_moved')
     assert posixpath == Path(west_update_tmpdir).as_posix() + '/manifest_moved'
 
     path = cmd('list --manifest-path-from-yaml -f {path} manifest').strip()
     abspath = cmd('list --manifest-path-from-yaml -f {abspath} manifest').strip()
     posixpath = cmd('list --manifest-path-from-yaml -f {posixpath} manifest').strip()
     assert path == 'zephyr'
-    assert Path(abspath) == Path(str(west_update_tmpdir / 'zephyr'))
+    assert abspath == str(west_update_tmpdir / 'zephyr')
     assert posixpath == Path(west_update_tmpdir).as_posix() + '/zephyr'
+
+
+def test_list_special_chars(west_update_tmpdir):
+    # Detect any unexpected changes in the way we've been handling backslashes and multiple
+    # slashes in paths. Changes in how we handle such edge cases may or may not be desired
+    # (and this test may be updated accordingly), but we never want these changes to come as
+    # a surprise and we want to keep control over them.
+
+    proj_name = 'net-tools2-stress-slashes'
+
+    with yaml_editor('zephyr/west.yml') as mf:
+        mf["manifest"]["projects"].append(
+            {
+                'name': proj_name,
+                'path': r'subdir///sub dir2\\\net-tools2',
+                'url': mf["manifest"]["remotes"][0]["url-base"] + '/net-tools',
+                'description': 'Test special chars in paths',
+            },
+        )
+    print(cmd('diff'))  # just logging
+
+    path = cmd('list -f {path} ' + proj_name).strip()
+    abspath = cmd('list -f {abspath} ' + proj_name).strip()
+    posixpath = cmd('list -f {posixpath} ' + proj_name).strip()
+
+    forward_rel_path = r'subdir/sub dir2/net-tools2' if WINDOWS else r'subdir/sub dir2\\\net-tools2'
+    native_rel_path = r'subdir\sub dir2\net-tools2' if WINDOWS else r'subdir/sub dir2\\\net-tools2'
+    assert path == forward_rel_path
+    assert abspath == str(west_update_tmpdir) + os.path.sep + native_rel_path
+    assert posixpath == Path(west_update_tmpdir).as_posix() + '/' + forward_rel_path
+
+    def yaml_get_proj(mf: dict, projname: str):
+        _l = [p for p in mf["manifest"]['projects'] if p["name"] == projname]
+        assert len(_l) == 1
+        return _l[0]
+
+    resolved_mf = cmd('manifest --resolve')
+    resolved_mf = yaml.safe_load(resolved_mf)
+    proj_yaml = yaml_get_proj(resolved_mf, proj_name)
+    assert proj_yaml["path"] == forward_rel_path
 
 
 def test_list_groups(west_init_tmpdir):
