@@ -18,6 +18,7 @@ import pytest
 from west.app import main
 
 GIT = shutil.which('git')
+assert GIT and Path(GIT).exists()
 
 # Git capabilities are discovered at runtime in
 # _check_git_capabilities().
