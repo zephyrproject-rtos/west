@@ -167,6 +167,7 @@ class WestCommand(ABC):
         self.manifest = None
         self.config = None
         self._hooks: list[Callable[[WestCommand], None]] = []
+        self.color: str | None = None
 
     def add_pre_run_hook(self, hook: Callable[['WestCommand'], None]) -> None:
         '''Add a hook which will be called right before do_run().
@@ -202,6 +203,9 @@ class WestCommand(ABC):
         :param config: `west.configuration.Configuration` or ``None``,
             accessible as ``self.config`` from `WestCommand.do_run`
         '''
+        arg_color = getattr(args, 'color', None)
+        if arg_color is not None:
+            self.color = arg_color
         self.config = config
         if unknown and not self.accepts_unknown_args:
             self.parser.error(f'unexpected arguments: {unknown}')
@@ -543,8 +547,12 @@ class WestCommand(ABC):
 
     @property
     def color_ui(self) -> bool:
-        '''Should we colorize output?'''
-        return self.config.getboolean('color.ui', default=True) if self.has_config else True
+        if self.color == 'never':
+            return False
+        if self.color == 'always':
+            return True
+        # Just to represent auto and None return True
+        return True
 
     #
     # Internal APIs. Not for public consumption.
