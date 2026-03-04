@@ -66,19 +66,13 @@ include-package-data = true
 where = ["src"]
 namespaces = false
 
+# Note this section is only for interactive `coverage run ...` use and ignored by "gh-test"
+# below.  pytest's --cov-config= option is for passing .coveragerc file syntax and it seems to
+# silently ignore pyproject.toml files.
 [tool.coverage.run]
 patch = ["subprocess"]
 relative_files = true
-omit = [
-  "*/tmp/*",
-]
-
-[tool.coverage.report]
-omit = [
-  "*/tmp/*",
-  "*/net-tools/scripts/*",
-  "*/subdir/Kconfiglib/scripts/test.py",
-]
+source = ["src/"]
 
 [tool.coverage.paths]
 source = [
@@ -134,5 +128,6 @@ gh-lint = "ruff check --output-format=github ."
 gh-format = "ruff format --check --output-format=github"
 
 [tool.poe.tasks.gh-test]
-cmd = "python -m pytest -W error -v -o pythonpath= -o junit_family=xunit1 --junitxml=junit.xml --cov-report=html --cov-config=pyproject.toml --cov=west"
+# Keep the --cov= option in sync with [tool.coverage.run] above.
+cmd = "python -m pytest -W error -v -o pythonpath= -o junit_family=xunit1 --junitxml=junit.xml --cov-report=html --cov=src/"
 env = {PYTHONIOENCODING = "utf-8"}
