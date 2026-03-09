@@ -131,8 +131,12 @@ class WestCommand(ABC):
     def __init__(
         self,
         name: str,
-        help: str,
-        description: str,
+        # Required for built-ins but unused by extensions, see
+        # https://github.com/zephyrproject-rtos/west/issues/927
+        help: str | None = None,
+        # We want a description. But this parameter comes after .help which has a
+        # default value, so it must have a default too. We check below instead.
+        description: str | None = None,
         accepts_unknown_args: bool = False,
         requires_workspace: bool = True,
         verbosity: Verbosity = Verbosity.INF,
@@ -158,8 +162,10 @@ class WestCommand(ABC):
         :param verbosity: command output verbosity level; can be changed later
         '''
         self.name: str = name
-        self.help: str = help
-        self.description: str = description
+        self.help: str | None = help
+        assert description is not None, f"west command '{name}' misses a description field"
+        # We have unfortunately allowed blank description strings in the past
+        self.description: str = description if description else "MISSING description"
         self.accepts_unknown_args: bool = accepts_unknown_args
         self.requires_workspace = requires_workspace
         self.verbosity = verbosity
@@ -592,9 +598,23 @@ class _ExtFactory:
 
         # Create the command instance and return it.
         try:
-            return cls()
+            cmd = cls()
         except Exception as e:
             raise ExtensionCommandError(hint='command constructor threw an exception') from e
+
+        if cmd.help:
+            # Very "soft" warning that does not pollute expected output
+            cmd.description += f'''
+WARNING: in file {self.py_file},
+  the WestCommand constructor of the west extension '{cmd.name}' sets
+  the ignored 'help' field to "{cmd.help}"
+  but only the help from the west-commands.yml file has ever been used.
+  See west bug https://github.com/zephyrproject-rtos/west/issues/927.
+  Change that help field to "" to silence this warning while preserving
+  compatibility with older west versions that unfortunately required
+  that help parameter.'''
+
+        return cmd
 
 
 @dataclass

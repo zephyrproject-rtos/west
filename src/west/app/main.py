@@ -225,6 +225,8 @@ class WestApp:
 
         for group, classes in BUILTIN_COMMAND_GROUPS.items():
             lst = [cls() for cls in classes]
+            for cmd in lst:
+                assert cmd.help, f".help field missing in built-in command '{cmd.name}'"
             self.builtins.update({command.name: command for command in lst})
             self.builtin_groups[group] = lst
 

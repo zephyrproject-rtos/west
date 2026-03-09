@@ -264,8 +264,7 @@ def _session_repos(tmp_path_factory):
                 class TestExtension(WestCommand):
                     def __init__(self):
                         super().__init__('test-extension',
-                                         'test-extension-help',
-                                         '')
+                                         description='description of test extension')
                     def do_add_parser(self, parser_adder):
                         parser = parser_adder.add_parser(self.name)
                         return parser
