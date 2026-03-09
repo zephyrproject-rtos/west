@@ -2160,14 +2160,20 @@ def test_extension_command_multiproject(repos_tmpdir):
                       '''),
             'scripts/test.py': textwrap.dedent('''\
                       from west.commands import WestCommand
+                      import argparse
                       class Test(WestCommand):
                           def __init__(self):
                               super(Test, self).__init__(
                                   'kconfigtest',
-                                  'Kconfig test application',
-                                  '')
+                                  'ignored help string that must warn',
+                                  'description of Kconfiglib kconfigtest extension',
+                              )
                           def do_add_parser(self, parser_adder):
-                              parser = parser_adder.add_parser(self.name)
+                              parser = parser_adder.add_parser(self.name,
+                                description=self.description,
+                                # we don't want newlines "randomly" inserted
+                                formatter_class=argparse.RawDescriptionHelpFormatter,
+                              )
                               return parser
                           def do_run(self, args, ignored):
                               print('Testing kconfig test')
@@ -2196,6 +2202,10 @@ def test_extension_command_multiproject(repos_tmpdir):
 
     actual = cmd('kconfigtest')
     assert actual.rstrip() == 'Testing kconfig test'
+
+    actual = cmd('kconfigtest -h')
+    assert 'description of Kconfiglib kconfigtest' in actual
+    assert re.search(r'WARNING.*Kconfiglib.*scripts.*test.py.*927', actual, re.DOTALL)
 
 
 def test_extension_command_duplicate(repos_tmpdir):
@@ -2252,17 +2262,17 @@ def test_extension_command_duplicate(repos_tmpdir):
                               class: Test
                       '''),
             'scripts/test.py': textwrap.dedent('''\
-                      from argparse import REMAINDER
+                      import argparse
                       from west.commands import WestCommand
                       class List(WestCommand):
                           def __init__(self):
                               super(List, self).__init__(
                                   'list',
-                                  'test list',
-                                  '')
+                                  description='description of rejected list extension',
+                               )
                           def do_add_parser(self, parser_adder):
                               parser = parser_adder.add_parser(self.name)
-                              parser.add_argument('any', nargs=REMAINDER)
+                              parser.add_argument('any', nargs=argparse.REMAINDER)
                               return parser
                           def do_run(self, args, ignored):
                               print('This must never be printed')
@@ -2270,10 +2280,15 @@ def test_extension_command_duplicate(repos_tmpdir):
                           def __init__(self):
                               super(Test, self).__init__(
                                   'test-extension',
-                                  'test application',
-                                  '')
+                                  '', # help
+                                  '', # description
+                               )
                           def do_add_parser(self, parser_adder):
-                              parser = parser_adder.add_parser(self.name)
+                              parser = parser_adder.add_parser(self.name,
+                                  description=self.description,
+                                  # we don't want newlines "randomly" inserted
+                                  formatter_class=argparse.RawDescriptionHelpFormatter,
+                              )
                               return parser
                           def do_run(self, args, ignored):
                               print('Testing kconfig test command')
@@ -2299,6 +2314,11 @@ def test_extension_command_duplicate(repos_tmpdir):
     # Expect output from the Kconfiglib command, not its net-tools duplicate.
     actual = cmd('test-extension').splitlines()
     assert actual == expected_warns + ['Testing kconfig test command']
+
+    actual = cmd('test-extension -h')
+    assert "MISSING description" in actual
+    # https://github.com/zephyrproject-rtos/west/issues/927 is silenced by: help=''
+    assert "927" not in actual
 
 
 def test_topdir_none(tmpdir):
