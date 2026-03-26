@@ -306,6 +306,13 @@ below.
         #
         # https://docs.python.org/3/library/pathlib.html#pathlib.PurePath.parent
         manifest_dir = Path(args.directory or os.getcwd()).resolve()
+
+        try:
+            already = util.west_topdir(manifest_dir, fall_back=False)
+            self.die_already(already)
+        except util.WestNotFound:
+            pass
+
         manifest_filename = args.manifest_file or 'west.yml'
         manifest_file = manifest_dir / manifest_filename
         topdir = manifest_dir.parent
@@ -317,7 +324,7 @@ below.
 
         self.banner('Initializing from existing manifest repository', rel_manifest)
         self.small_banner(f'Creating {west_dir} and local configuration file')
-        self.create(west_dir)
+        self.create(west_dir, exist_ok=False)
         os.chdir(topdir)
         self.config = Configuration(topdir=topdir)
         self.config.set('manifest.path', os.fspath(rel_manifest))
