@@ -417,6 +417,16 @@ below.
 
         manifest_abspath = topdir / manifest_path
 
+        # We already looked for old .west/ pollution earlier but only at the highest
+        # topdir/.west level because we didn't know the manifest_path yet. Now that we know
+        # "manifest_path", look again for any existing, clashing .west/ located at a lower
+        # level somewhere between the new topdir and the new manifest_path. This check will be
+        # especially useful once the new --topdir feature is available, see
+        # https://github.com/zephyrproject-rtos/west/issues/774
+        already = util.west_topdir(manifest_abspath, fall_back=False)
+        if not topdir.samefile(already):
+            self.die_already(already)
+
         # Some filesystems like NTFS can't rename files in use.
         # See west issue #558. Will ReFS address this?
         ren_delay = args.rename_delay
