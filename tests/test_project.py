@@ -1764,6 +1764,7 @@ def test_init_again(west_init_tmpdir):
 
     expected_msg = f'FATAL ERROR: already initialized in {west_init_tmpdir}'
 
+    # A bare `init` defaults to cloning -m http://zephyrproject/zephyr
     exc, stderr = cmd_raises('init', SystemExit, cwd=west_init_tmpdir)
     assert exc.value.code == 1
     assert expected_msg in stderr
@@ -1772,14 +1773,25 @@ def test_init_again(west_init_tmpdir):
     assert exc.value.code == 1
     assert expected_msg in stderr
 
+    # Test --local and a manifest directory argument
+    _tmpdir_parts = Path(west_init_tmpdir).parts
+    for i in range(1, len(_tmpdir_parts) + 1):
+        _cd = Path(*_tmpdir_parts[0:i])
+        assert _cd.exists()
+        _rel_top = Path(*_tmpdir_parts[i:])
+        assert (_cd / _rel_top / '.west').exists()
+        exc, stderr = cmd_raises(['init', _rel_top / 'zephyr', '--local'], SystemExit, cwd=_cd)
+        assert exc.value.code == 1
+        assert expected_msg in stderr
+
     manifest = west_init_tmpdir / '..' / 'repos' / 'zephyr'
     exc, stderr = cmd_raises(
         f'-vvv init -m {manifest} workspace', RuntimeError, cwd=west_init_tmpdir.dirname
     )
     assert expected_msg in stderr
 
-    expected_msg = "die with -vvv or more shows a stack trace. exit_code argument is ignored"
-    assert expected_msg in str(exc.value)
+    expected_vvv_msg = "die with -vvv or more shows a stack trace. exit_code argument is ignored"
+    assert expected_vvv_msg in str(exc.value)
 
 
 def test_init_local_manifest_project(repos_tmpdir):
