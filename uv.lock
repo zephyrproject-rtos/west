@@ -134,6 +134,15 @@ wheels = [
 ]
 
 [[package]]
+name = "execnet"
+version = "2.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bf/89/780e11f9588d9e7128a3f87788354c7946a9cbb1401ad38a48c4db9a4f07/execnet-2.1.2.tar.gz", hash = "sha256:63d83bfdd9a23e35b9c6a3261412324f964c2ec8dcd8d3c6916ee9373e0befcd", size = 166622, upload-time = "2025-11-12T09:56:37.75Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl", hash = "sha256:67fba928dd5a544b783f6056f449e5e3931a5c378b128bc18501f7ea79e296ec", size = 40708, upload-time = "2025-11-12T09:56:36.333Z" },
+]
+
+[[package]]
 name = "iniconfig"
 version = "2.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -373,6 +382,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/5e/f7/c933acc76f5208b3b00089573cf6a2bc26dc80a8aece8f52bb7d6b1855ca/pytest_cov-7.0.0.tar.gz", hash = "sha256:33c97eda2e049a0c5298e91f519302a1334c26ac65c1a483d6206fd458361af1", size = 54328, upload-time = "2025-09-09T10:57:02.113Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ee/49/1377b49de7d0c1ce41292161ea0f721913fa8722c19fb9c1e3aa0367eecb/pytest_cov-7.0.0-py3-none-any.whl", hash = "sha256:3b8e9558b16cc1479da72058bdecf8073661c7f57f7d3c5f22a1c23507f2d861", size = 22424, upload-time = "2025-09-09T10:57:00.695Z" },
+]
+
+[[package]]
+name = "pytest-xdist"
+version = "3.0.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "execnet" },
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0b/74/3ba11ebecb6f3f69a472a3c19be65c46a1dd3efaa580d973118455c74c34/pytest-xdist-3.0.2.tar.gz", hash = "sha256:688da9b814370e891ba5de650c9327d1a9d861721a524eb917e620eec3e90291", size = 69590, upload-time = "2022-10-25T15:58:05.94Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0e/99/2b300b4391f27ba31c6ec1ce643700ee2d32f860e3877a13106ef3a30e22/pytest_xdist-3.0.2-py3-none-any.whl", hash = "sha256:9feb9a18e1790696ea23e1434fa73b325ed4998b0e9fcb221f16fd1945e6df1b", size = 36540, upload-time = "2022-10-25T15:58:03.188Z" },
 ]
 
 [[package]]
@@ -637,6 +659,7 @@ dev = [
     { name = "poethepoet" },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "types-pyyaml" },
 ]
@@ -647,6 +670,7 @@ test = [
     { name = "coverage" },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "pytest-xdist" },
 ]
 types = [
     { name = "mypy" },
@@ -668,6 +692,7 @@ dev = [
     { name = "poethepoet", specifier = "~=0.37" },
     { name = "pytest", specifier = ">=8.4,<10.0" },
     { name = "pytest-cov", specifier = "~=7.0" },
+    { name = "pytest-xdist", specifier = ">=3" },
     { name = "ruff", specifier = "~=0.13" },
     { name = "types-pyyaml", specifier = "~=6.0" },
 ]
@@ -676,6 +701,7 @@ test = [
     { name = "coverage", specifier = "~=7.10" },
     { name = "pytest", specifier = ">=8.4,<10.0" },
     { name = "pytest-cov", specifier = "~=7.0" },
+    { name = "pytest-xdist", specifier = ">=3" },
 ]
 types = [
     { name = "mypy", specifier = "~=1.18" },
