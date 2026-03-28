@@ -123,7 +123,7 @@ types-extra = "mypy --package west --check-untyped-defs"
 
 all = ["test", "lint", "format", "types"]
 
-# Github specific tasks
+# Github specific tasks, see comments in .github/workflows/*.yml
 gh-lint = "ruff check --output-format=github ."
 gh-format = "ruff format --check --output-format=github"
 
