@@ -1,3 +1,5 @@
+---
+# yamllint disable rule:truthy
 name: Python Test
 
 on: [push, pull_request]
@@ -12,7 +14,7 @@ concurrency:
 
 jobs:
   build:
-    name: Run tasks
+    name: Run poe tasks
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -21,7 +23,9 @@ jobs:
         python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
         task: [gh-test]
         # The include map here is actually used to extend the matrix.
-        # By passing all keys used in the matrix we append new unique combinations.
+        # By passing all keys used in the matrix we append new unique combinations
+        # that do not run across the whole matrix but only once. These poe tasks
+        # are defined in pyproject.toml.
         # For more information see:
         # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-adding-configurations
         include:
