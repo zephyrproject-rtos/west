@@ -114,6 +114,8 @@ pythonpath = "src"
 cmd = "python -m pytest -W error"
 env = {PYTHONIOENCODING = "utf-8"}
 
+[tool.poe.tasks.test-xdist]
+ref = "test -n auto"
 
 [tool.poe.tasks]
 lint = "ruff check ."

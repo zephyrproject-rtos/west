@@ -42,6 +42,13 @@ jobs:
           - os: ubuntu-latest
             python-version: '3.13'
             task: types
+          # Running tests in parallel can produce confusing logs and only saves a
+          # few minutes, so don't do it across the whole matrix. This section is
+          # not to save time in Github; it is here to make sure pytest-xdist keeps
+          # working so developers can keep saving time on their workstations.
+          - os: ubuntu-latest
+            python-version: '3.13'
+            task: test-xdist
 
     steps:
       - name: Checkout
