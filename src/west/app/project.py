@@ -1840,7 +1840,7 @@ class Update(_ProjectCommand):
                 cwd=self.topdir,
             )
             # Reset the remote's URL to the project's fetch URL.
-            project.git(['remote', 'set-url', project.remote_name, project.url])
+            project.git(['remote', 'set-url', '--', project.remote_name, project.url])
             # Make sure we have a detached HEAD so we can delete the
             # local branch created by git clone.
             project.git('checkout --quiet --detach HEAD')
