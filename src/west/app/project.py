@@ -2122,6 +2122,11 @@ class ForAll(_ProjectCommand):
 
                 west forall -c "echo \\$WEST_PROJECT_NAME"
 
+            The WEST_PROJECT_* values are purely based on the manifest
+            file(s). In case of changes unknown to west, these values
+            may or may not still match what your system has become when
+            you run the command.
+
             If the command has multiple words, you must quote the -c
             option to prevent the shell from splitting it up. Since
             the command is run through the shell, you can use
