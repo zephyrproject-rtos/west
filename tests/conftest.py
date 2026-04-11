@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path, PurePath
 
 import pytest
+import yaml
 
 from west.app import main
 
@@ -39,25 +40,26 @@ manifest:
     remote: test-local
 
   remotes:
-    - name: test-local
-      url-base: THE_URL_BASE
+  - name: test-local
+    url-base: THE_URL_BASE
 
   projects:
-    - name: Kconfiglib
-      description: |
-        Kconfiglib is an implementation of
-        the Kconfig language written in Python.
-      revision: zephyr
-      path: subdir/Kconfiglib
-      groups:
-        - Kconfiglib-group
-      submodules: true
-    - name: tagged_repo
-      revision: v1.0
-    - name: net-tools
-      description: Networking tools.
-      clone-depth: 1
-      west-commands: scripts/west-commands.yml
+  - name: Kconfiglib
+    description: |
+      Kconfiglib is an implementation of
+      the Kconfig language written in Python.
+    revision: zephyr
+    path: subdir/Kconfiglib
+    groups:
+    - Kconfiglib-group
+    submodules: true
+  - name: tagged_repo
+    revision: v1.0
+  - name: net-tools
+    description: Networking tools.
+    clone-depth: 1
+    west-commands: scripts/west-commands.yml
+
   self:
     path: zephyr
 '''
@@ -67,6 +69,19 @@ WINDOWS = platform.system() == 'Windows'
 #
 # Contextmanager
 #
+
+
+@contextlib.contextmanager
+def yaml_editor(yaml_f: str | Path):
+    # Fail fast if not writable
+    with open(yaml_f, 'r+') as f:
+        pass
+    with open(yaml_f) as f:
+        mf = yaml.safe_load(f)
+    yield mf
+    # Overwrite file
+    with open(yaml_f, 'w') as f:
+        yaml.safe_dump(mf, f, sort_keys=False)
 
 
 @contextlib.contextmanager
@@ -253,11 +268,11 @@ def _session_repos(tmp_path_factory):
             'qemu-script.sh': 'echo hello world net-tools\n',
             'scripts/west-commands.yml': textwrap.dedent('''\
                 west-commands:
-                  - file: scripts/test.py
-                    commands:
-                      - name: test-extension
-                        class: TestExtension
-                        help: test-extension-help
+                - file: scripts/test.py
+                  commands:
+                  - name: test-extension
+                    class: TestExtension
+                    help: test-extension-help
                 '''),
             'scripts/test.py': textwrap.dedent('''\
                 from west.commands import WestCommand
