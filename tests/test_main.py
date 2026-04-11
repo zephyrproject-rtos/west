@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from conftest import cmd, cmd_subprocess
 
+import west.app.main as west_main
 import west.version
 
 
@@ -48,3 +49,18 @@ def test_module_run(tmp_path, monkeypatch):
     # check that that the sys.path was correctly inserted
     expected_path = Path(__file__).parents[1] / 'src'
     assert actual_path == [f'{expected_path}', 'initial-path']
+
+
+@pytest.mark.parametrize(
+    "argv, expected_color, expected_command, expected_unexpected",
+    [
+        (['--color=always', 'help'], 'always', 'help', []),
+        (['--color', 'never', 'status'], 'never', 'status', []),
+        (['--color', 'invalid', 'status'], None, 'status', ['--color=invalid']),
+    ],
+)
+def test_parse_early_args_color(argv, expected_color, expected_command, expected_unexpected):
+    ea = west_main.parse_early_args(argv)
+    assert ea.color == expected_color
+    assert ea.command_name == expected_command
+    assert ea.unexpected_arguments == expected_unexpected

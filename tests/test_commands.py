@@ -26,6 +26,15 @@ class WestCommandImpl(WestCommand):
 
 cmd = WestCommandImpl(name="x", help="y", description="z")
 
+
+class DummyConfig:
+    def __init__(self, color_ui_value):
+        self.color_ui_value = color_ui_value
+
+    def getboolean(self, _option, default=True):
+        return self.color_ui_value if self.color_ui_value is not None else default
+
+
 TEST_STR = "This is some test string"
 COL_RED = "\x1b[91m"
 COL_YELLOW = "\x1b[93m"
@@ -120,3 +129,28 @@ def test_die(capsys, test_case):
     stderr = captured.err
     assert stderr == exp_err
     assert stdout == exp_out
+
+
+def test_color_ui_uses_color():
+    command = WestCommandImpl(name="x", help="y", description="z")
+    command.color = 'always'
+    assert command.color_ui is True
+
+    command.color = 'never'
+    assert command.color_ui is False
+
+
+def test_color_ui_default_is_enabled_when_mode_is_auto():
+    command = WestCommandImpl(name="x", help="y", description="z")
+    command.color = 'auto'
+    command.config = DummyConfig(False)
+
+    assert command.color_ui is True
+
+
+def test_color_ui_default_without_config():
+    command = WestCommandImpl(name="x", help="y", description="z")
+    command.color = None
+    command.config = None
+
+    assert command.color_ui is True
