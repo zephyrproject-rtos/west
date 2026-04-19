@@ -701,13 +701,18 @@ def _ext_specs(project):
         except pykwalify.errors.SchemaError as e:
             raise ExtensionCommandError from e
 
+        # Resolve command Python files relative to the manifest root for
+        # import-derived west-commands entries, otherwise project root.
+        mfst_dir = project._west_commands_manifest_dirs.get(cmd)
+        base_dir = os.path.join(project.abspath, mfst_dir) if mfst_dir else project.abspath
+
         for commands_desc in commands_spec['west-commands']:
-            ret.extend(_ext_specs_from_desc(project, commands_desc))
+            ret.extend(_ext_specs_from_desc(project, commands_desc, base_dir))
     return ret
 
 
-def _ext_specs_from_desc(project, commands_desc):
-    py_file = os.path.join(project.abspath, commands_desc['file'])
+def _ext_specs_from_desc(project, commands_desc, base_dir):
+    py_file = os.path.join(base_dir, commands_desc['file'])
 
     # Verify the YAML's python file doesn't escape the project directory.
     if escapes_directory(py_file, project.abspath):
