@@ -2637,13 +2637,19 @@ class Manifest:
 
         _logger.debug(f'resolving import {path} for {project}')
         imported = self._import_content_from_project(project, path)
-        if imported is None:
-            # This can happen if self._ctx.project_importer returns None.
-            # It means there's nothing to do.
-            return
 
-        for data in imported:
-            self._import_data_from_project(project, data, None)
+        match imported:
+            case None:
+                # This can happen if self._ctx.project_importer returns None.
+                # It means there's nothing to do.
+                return
+            case str():
+                self._import_data_from_project(project, imported, path, directory_import=False)
+            case list():
+                for data in imported:
+                    self._import_data_from_project(project, data, path, directory_import=True)
+            case _:
+                raise AssertionError(f'imported content has unexpected type {type(imported)}')
 
         _logger.debug(f'done resolving import {path} for {project}')
 
@@ -2653,25 +2659,40 @@ class Manifest:
         _logger.debug(f'resolving import {imap} for {project}')
 
         imported = self._import_content_from_project(project, imap.file)
-        if imported is None:
-            return
-
-        for data in imported:
-            self._import_data_from_project(project, data, imap)
+        match imported:
+            case None:
+                return
+            case str():
+                self._import_data_from_project(project, imported, imap, directory_import=False)
+            case list():
+                for data in imported:
+                    self._import_data_from_project(project, data, imap, directory_import=True)
+            case _:
+                raise AssertionError(f'imported content has unexpected type {type(imported)}')
 
         _logger.debug(f'done resolving import {imap} for {project}')
 
     def _import_data_from_project(
-        self, project: Project, data: Any, imap: _import_map | None
+        self,
+        project: Project,
+        data: Any,
+        imap_or_mfpath: _import_map | str,
+        directory_import: bool,
     ) -> None:
         # Destructively add the imported data into our 'projects' map.
-
-        if imap is not None:
-            imap_filter = _compose_imap_filters(self._ctx.imap_filter, _imap_filter(imap))
-            imap_path_prefix = imap.path_prefix
-        else:
-            imap_filter = self._ctx.imap_filter
-            imap_path_prefix = '.'
+        match imap_or_mfpath:
+            case _import_map():
+                imap_filter = _compose_imap_filters(
+                    self._ctx.imap_filter, _imap_filter(imap_or_mfpath)
+                )
+                imap_path_prefix = imap_or_mfpath.path_prefix
+                mfst_path = imap_or_mfpath.file
+            case str():
+                imap_filter = self._ctx.imap_filter
+                imap_path_prefix = '.'
+                mfst_path = imap_or_mfpath
+            case _:
+                raise AssertionError(f'imap_or_mfpath has unexpected type {type(imap_or_mfpath)}')
 
         child_ctx = self._ctx._replace(
             imap_filter=imap_filter,
@@ -2689,38 +2710,41 @@ class Manifest:
         try:
             submanifest = Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
         except RecursionError as e:
-            raise _ManifestImportDepth(None, imap.file if imap else None) from e
+            raise _ManifestImportDepth(None, mfst_path) from e
 
         # Patch up any extension commands in the imported data
         # by allocating them to the project.
-        project.west_commands = _west_commands_merge(
-            project.west_commands, submanifest._ctx.manifest_west_commands
-        )
+
+        # If the manifest was imported from a project subdirectory
+        # (manifest_path is a relative path within the project),
+        # we need to adjust the west_commands paths to be relative
+        # to the project root, not to the manifest subdirectory.
+        mfst_dir = Path(mfst_path) if directory_import else Path(mfst_path).parent
+        west_commands_to_merge = [
+            (mfst_dir / cmd).as_posix() for cmd in submanifest._ctx.manifest_west_commands
+        ]
+
+        project.west_commands = _west_commands_merge(project.west_commands, west_commands_to_merge)
 
     def _import_content_from_project(self, project: Project, path: str) -> ImportedContentType:
         if not (self._ctx.import_flags & ImportFlag.FORCE_PROJECTS) and project.is_cloned():
             try:
-                content = _manifest_content_at(project, path, Manifest.encoding)
+                return _manifest_content_at(project, path, Manifest.encoding)
             except MalformedManifest as mm:
                 self._malformed(mm.args[0])
             except FileNotFoundError:
                 # We may need to fetch a new manifest-rev, e.g. if
                 # revision is a branch that didn't used to have a
                 # manifest, but now does.
-                content = self._ctx.project_importer(project, path)
+                return self._ctx.project_importer(project, path)
             except subprocess.CalledProcessError:
                 # We may need a new manifest-rev, e.g. if revision is
                 # a SHA we don't have yet.
-                content = self._ctx.project_importer(project, path)
+                return self._ctx.project_importer(project, path)
         else:
             # We need to clone this project, or we were specifically
             # asked to use the importer.
-            content = self._ctx.project_importer(project, path)
-
-        if isinstance(content, str):
-            content = [content]
-
-        return content
+            return self._ctx.project_importer(project, path)
 
     def _load_imap(self, imp: dict, src: str) -> _import_map:
         # Convert a parsed self or project import value from YAML into

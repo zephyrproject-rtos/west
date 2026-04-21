@@ -2116,6 +2116,101 @@ def test_import_project_submanifest_commands_both(manifest_repo):
     assert p1.west_commands == expected
 
 
+def test_import_project_submanifest_commands_from_project_subdirectory(manifest_repo):
+    # When a manifest is imported from a project subdirectory (e.g., mf_subdir/west.yml),
+    # and that manifest defines west-commands, the paths should be
+    # resolved relative to the manifest subdirectory.
+    # This test covers both string and import-map forms, for file and directory imports.
+
+    p1 = manifest_repo / '..' / 'p1'
+    create_repo(p1)
+    # West reads the manifest from the 'manifest-rev' branch of the project, so we need to
+    # create it and add the manifest there.
+    create_branch(p1, 'manifest-rev', checkout=True)
+    add_commit(
+        p1,
+        'add mf_subdir/west.yml with west-commands',
+        files={
+            'mf_subdir/west.yml': '''\
+                                manifest:
+                                  projects:
+                                  - name: p2
+                                    url: url-placeholder2
+                                  self:
+                                    west-commands: p2subdir/west-commands.yml
+                                ''',
+        },
+    )
+    # Checkout master (which is empty) to ensure the west.yml file is not present in the
+    # file system, and that the west-commands are resolved from the 'manifest-rev' branch
+    # using git, not the currently checked out version.
+    checkout_branch(p1, 'master')
+
+    # Case A: import as a string path to the submanifest file.
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: p1
+            url: url-placeholder
+            import: mf_subdir/west.yml
+        ''')
+
+    # The west_commands path should be 'mf_subdir/p2subdir/west-commands.yml',
+    # not 'west-commands.yml', to be resolved correctly
+    # relative to the project root. See issue #725.
+    p1_proj = MF().get_projects(['p1'])[0]
+    expected = ['mf_subdir/p2subdir/west-commands.yml']
+    assert p1_proj.west_commands == expected
+
+    # Case B: import using an import-map whose 'file' is a file path.
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''\
+      manifest:
+        projects:
+        - name: p1
+          url: url-placeholder
+          import:
+            file: mf_subdir/west.yml
+      ''')
+
+    # Reload and check the west_commands were resolved the same way.
+    p1_proj = MF().get_projects(['p1'])[0]
+    expected = ['mf_subdir/p2subdir/west-commands.yml']
+    assert p1_proj.west_commands == expected
+
+    # Case C: import as a string path to the submanifest directory.
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''\
+      manifest:
+        projects:
+        - name: p1
+          url: url-placeholder
+          import: mf_subdir
+      ''')
+
+    # Reload and check the west_commands were resolved the same way.
+    p1_proj = MF().get_projects(['p1'])[0]
+    expected = ['mf_subdir/p2subdir/west-commands.yml']
+    assert p1_proj.west_commands == expected
+
+    # Case D: import using an import-map whose 'file' is a directory.
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''\
+      manifest:
+        projects:
+        - name: p1
+          url: url-placeholder
+          import:
+            file: mf_subdir
+      ''')
+
+    # Reload and check the west_commands were resolved the same way.
+    p1_proj = MF().get_projects(['p1'])[0]
+    expected = ['mf_subdir/p2subdir/west-commands.yml']
+    assert p1_proj.west_commands == expected
+
+
 def test_import_map_error_handling():
     # Make sure we handle expected errors when loading import:
     # values that are maps.
