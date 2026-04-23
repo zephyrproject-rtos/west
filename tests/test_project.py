@@ -628,6 +628,122 @@ def test_compare(config_tmpdir, west_init_tmpdir):
     assert 'mybranch' in cmd('compare --no-ignore-branches')
 
 
+def test_compare_format_manifest(config_tmpdir, west_init_tmpdir):
+    # ManifestProject special-casing: empty output, single-line
+    # machine-readable output without any banner, and the path/sha/url
+    # keys that are distinct from regular projects -- same conventions
+    # as 'west list'.
+
+    # No dirty projects -> no output at all.
+    assert cmd('compare --format {name}') == ''
+
+    # Dirty the manifest repo.
+    foo = west_init_tmpdir / 'zephyr' / 'foo'
+    with open(foo, 'w'):
+        pass
+
+    # The whole point of --format is stable machine-readable output:
+    # no banner ('=== ...'), exactly one line per dirty project, and
+    # the ManifestProject is named 'manifest' just like 'west list'.
+    out = cmd('compare --format {name}')
+    assert '===' not in out
+    assert out.splitlines() == ['manifest']
+
+    # Path-style keys for the ManifestProject come from manifest.repo_*,
+    # not project.*. {sha}/{url} are 'N/A' and {revision} is 'HEAD'.
+    # {groups} is empty. These all match 'west list' behavior.
+    assert cmd('compare -f {path}').strip() == 'zephyr'
+    assert cmd('compare -f {abspath}').strip() == str(west_init_tmpdir / 'zephyr')
+    assert cmd('compare -f {posixpath}').strip() == (Path(west_init_tmpdir / 'zephyr').as_posix())
+    assert cmd('compare -f {sha}').strip() == 'N/A'
+    assert cmd('compare -f {url}').strip() == 'N/A'
+    assert cmd('compare -f {revision}').strip() == 'HEAD'
+    assert cmd(['compare', '-f', '[{groups}]']).strip() == '[]'
+
+    # --exit-code still fires when --format produced any output.
+    with pytest.raises(SystemExit):
+        cmd('compare --exit-code --format {name}')
+
+    # Cleanup -> empty output again.
+    os.unlink(foo)
+    assert cmd('compare --format {name}') == ''
+
+
+def test_compare_format_projects(config_tmpdir, west_init_tmpdir):
+    # Regular (non-manifest) projects: every format key, multi-project
+    # ordering, and interactions with --all / named projects / the
+    # manifest.group-filter configuration option.
+
+    cmd('update')
+    kconfiglib = west_init_tmpdir / 'subdir' / 'Kconfiglib'
+    bar = kconfiglib / 'bar'
+    with open(bar, 'w'):
+        pass
+
+    # {sha} must resolve to a real 40-char hex SHA for a cloned project
+    # (not 'N/A'): this verifies DelayFormat actually gets invoked when
+    # the format string references {sha}.
+    line = cmd(['compare', '-f', '{name}|{sha}']).strip()
+    name, sha = line.split('|')
+    assert name == 'Kconfiglib'
+    assert re.match(r'^[0-9a-f]{40}$', sha)
+
+    # All remaining keys.
+    out = cmd([
+        'compare',
+        '-f',
+        '{name}|{url}|{path}|{abspath}|{posixpath}|{revision}|{groups}',
+    ]).strip()
+    fields = out.split('|')
+    assert fields[0] == 'Kconfiglib'
+    assert fields[1].endswith('/Kconfiglib')  # url from test fixture's url-base
+    # {path} preserves the manifest YAML value verbatim (always forward
+    # slashes), regardless of OS -- same behavior as 'west list -f {path}'.
+    assert fields[2] == 'subdir/Kconfiglib'
+    assert fields[3] == str(kconfiglib)
+    assert fields[4] == Path(kconfiglib).as_posix()
+    assert fields[5] == 'zephyr'
+    assert fields[6] == 'Kconfiglib-group'  # set in test fixture's manifest
+
+    # Multiple dirty projects produce one line per project, in manifest
+    # order (Kconfiglib before tagged_repo in this fixture's manifest).
+    tagged = west_init_tmpdir / 'tagged_repo' / 'baz'
+    with open(tagged, 'w'):
+        pass
+    assert cmd('compare -f {name}').splitlines() == ['Kconfiglib', 'tagged_repo']
+    os.unlink(tagged)
+
+    # An inactive project is skipped by default but appears with --all
+    # or when named explicitly (same active-project semantics as plain
+    # 'west compare').
+    cmd('config manifest.group-filter -- -Kconfiglib-group')
+    assert cmd('compare -f {name}') == ''
+    assert cmd('compare --all -f {name}').strip() == 'Kconfiglib'
+    assert cmd('compare -f {name} Kconfiglib').strip() == 'Kconfiglib'
+    cmd('config -d manifest.group-filter')
+
+    os.unlink(bar)
+
+
+def test_compare_format_errors(config_tmpdir, west_init_tmpdir):
+    # Malformed format strings must fail cleanly via self.die() ->
+    # SystemExit, not with an uncaught KeyError/IndexError traceback.
+    # Dirty the manifest repo so the format path is actually reached.
+    foo = west_init_tmpdir / 'zephyr' / 'foo'
+    with open(foo, 'w'):
+        pass
+
+    # Unknown named key.
+    with pytest.raises(SystemExit):
+        cmd('compare -f {bogus}')
+
+    # Positional argument (fmt.format() has no positional args).
+    with pytest.raises(SystemExit):
+        cmd('compare -f {0}')
+
+    os.unlink(foo)
+
+
 def test_diff(west_init_tmpdir):
     # FIXME: Check output
 
