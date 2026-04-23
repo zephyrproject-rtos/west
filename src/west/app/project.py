@@ -149,6 +149,86 @@ class _ProjectCommand(WestCommand):
 
         return has_output()
 
+    def _format_project(self, project, fmt, *, manifest_path_from_yaml=False):
+        # Shared between 'west list --format' and 'west compare --format'.
+        # Does not catch subprocess.CalledProcessError; callers decide
+        # whether such failures are fatal.
+        def sha_thunk(project):
+            self.die_if_no_git()
+
+            if not project.is_cloned():
+                self.die(
+                    f'cannot get sha for uncloned project {project.name}; '
+                    f'run "west update {project.name}" and retry'
+                )
+            elif isinstance(project, ManifestProject):
+                return f'{"N/A":40}'
+            else:
+                return project.sha(MANIFEST_REV)
+
+        def cloned_thunk(project):
+            self.die_if_no_git()
+
+            return "cloned" if project.is_cloned() else "not-cloned"
+
+        def active_thunk(project):
+            self.die_if_no_git()
+
+            return "active" if self.manifest.is_active(project) else "inactive"
+
+        def delay(func, project):
+            return DelayFormat(partial(func, project))
+
+        # Spelling out the format keys explicitly here gives us
+        # future-proofing if the internal Project representation
+        # ever changes.
+        #
+        # Using DelayFormat delays computing derived values, such
+        # as SHAs, unless they are specifically requested, and then
+        # ensures they are only computed once.
+        try:
+            if isinstance(project, ManifestProject):
+                # Special-case the manifest repository while it's
+                # still showing up in the 'projects' list. Yet
+                # more evidence we should tackle #327.
+                if manifest_path_from_yaml:
+                    path = self.manifest.yaml_path
+                    apath = abspath(os.path.join(self.topdir, path)) if path else None
+                    ppath = Path(apath).as_posix() if apath else None
+                else:
+                    path = self.manifest.repo_path
+                    apath = self.manifest.repo_abspath
+                    ppath = self.manifest.repo_posixpath
+            else:
+                path = project.path
+                apath = project.abspath
+                ppath = project.posixpath
+
+            result = fmt.format(
+                name=project.name,
+                description=project.description or "None",
+                url=project.url or 'N/A',
+                path=path,
+                abspath=apath,
+                posixpath=ppath,
+                revision=project.revision or 'N/A',
+                clone_depth=project.clone_depth or "None",
+                cloned=delay(cloned_thunk, project),
+                active=delay(active_thunk, project),
+                sha=delay(sha_thunk, project),
+                groups=','.join(project.groups),
+            )
+        except KeyError as e:
+            # The raised KeyError seems to just put the first
+            # invalid argument in the args tuple, regardless of
+            # how many unrecognizable keys there were.
+            self.die(f'unknown key "{e.args[0]}" in format string {shlex.quote(fmt)}')
+        except IndexError:
+            self.parser.print_usage()
+            self.die(f'invalid format string {shlex.quote(fmt)}')
+
+        self.inf(result, colorize=False)
+
 
 class Init(_ProjectCommand):
     def __init__(self):
@@ -548,32 +628,6 @@ The following arguments are available:
         return parser
 
     def do_run(self, args, user_args):
-        def sha_thunk(project):
-            self.die_if_no_git()
-
-            if not project.is_cloned():
-                self.die(
-                    f'cannot get sha for uncloned project {project.name}; '
-                    f'run "west update {project.name}" and retry'
-                )
-            elif isinstance(project, ManifestProject):
-                return f'{"N/A":40}'
-            else:
-                return project.sha(MANIFEST_REV)
-
-        def cloned_thunk(project):
-            self.die_if_no_git()
-
-            return "cloned" if project.is_cloned() else "not-cloned"
-
-        def active_thunk(project):
-            self.die_if_no_git()
-
-            return "active" if self.manifest.is_active(project) else "inactive"
-
-        def delay(func, project):
-            return DelayFormat(partial(func, project))
-
         if args.inactive and args.projects:
             self.parser.error('-i cannot be combined with an explicit project list')
 
@@ -588,57 +642,14 @@ The following arguments are available:
                 self.dbg(f'{project.name}: skipping project')
                 continue
 
-            # Spelling out the format keys explicitly here gives us
-            # future-proofing if the internal Project representation
-            # ever changes.
-            #
-            # Using DelayFormat delays computing derived values, such
-            # as SHAs, unless they are specifically requested, and then
-            # ensures they are only computed once.
             try:
-                if isinstance(project, ManifestProject):
-                    # Special-case the manifest repository while it's
-                    # still showing up in the 'projects' list. Yet
-                    # more evidence we should tackle #327.
-                    if args.manifest_path_from_yaml:
-                        path = self.manifest.yaml_path
-                        apath = abspath(os.path.join(self.topdir, path)) if path else None
-                        ppath = Path(apath).as_posix() if apath else None
-                    else:
-                        path = self.manifest.repo_path
-                        apath = self.manifest.repo_abspath
-                        ppath = self.manifest.repo_posixpath
-                else:
-                    path = project.path
-                    apath = project.abspath
-                    ppath = project.posixpath
-
-                result = args.format.format(
-                    name=project.name,
-                    description=project.description or "None",
-                    url=project.url or 'N/A',
-                    path=path,
-                    abspath=apath,
-                    posixpath=ppath,
-                    revision=project.revision or 'N/A',
-                    clone_depth=project.clone_depth or "None",
-                    cloned=delay(cloned_thunk, project),
-                    active=delay(active_thunk, project),
-                    sha=delay(sha_thunk, project),
-                    groups=','.join(project.groups),
+                self._format_project(
+                    project,
+                    args.format,
+                    manifest_path_from_yaml=args.manifest_path_from_yaml,
                 )
-            except KeyError as e:
-                # The raised KeyError seems to just put the first
-                # invalid argument in the args tuple, regardless of
-                # how many unrecognizable keys there were.
-                self.die(f'unknown key "{e.args[0]}" in format string {shlex.quote(args.format)}')
-            except IndexError:
-                self.parser.print_usage()
-                self.die(f'invalid format string {shlex.quote(args.format)}')
             except subprocess.CalledProcessError:
                 self.die(f'subprocess failed while listing {project.name}')
-
-            self.inf(result, colorize=False)
 
 
 class ManifestCommand(_ProjectCommand):
