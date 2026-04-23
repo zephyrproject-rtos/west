@@ -863,13 +863,38 @@ class Compare(_ProjectCommand):
             The command also prints output for the manifest repository if it
             has nonempty status.
 
-            The output is meant to be human-readable, and may change. It is
-            not a stable interface to write scripts against. This command
-            requires git 2.22 or later.'''),
+            The default output is meant to be human-readable, and may change.
+            It is not a stable interface to write scripts against. If you need
+            machine-readable output (e.g. to feed back into "west update" or
+            "west forall"), pass --format; see FORMAT STRINGS below.
+
+            This command requires git 2.22 or later.'''),
         )
 
     def do_add_parser(self, parser_adder):
-        parser = self._parser(parser_adder, epilog=ACTIVE_CLONED_PROJECTS_HELP)
+        parser = self._parser(
+            parser_adder,
+            epilog=f'''\
+{ACTIVE_CLONED_PROJECTS_HELP}
+
+FORMAT STRINGS
+--------------
+
+When --format is given, "west compare" prints one line per project
+with changes, rendered using the given Python format string. The
+supported keys are the same ones documented in "west list --help".
+Unlike the default output, --format output is a stable interface
+suitable for scripting, for example:
+
+POSIX:
+
+    west compare --format '{{name}}' | while read -r name; do west update "$name"; done
+
+PowerShell:
+
+    west compare --format '{{name}}' | ForEach-Object {{ west update $_ }}
+''',
+        )
         parser.add_argument(
             'projects',
             metavar='PROJECT',
@@ -900,6 +925,13 @@ class Compare(_ProjectCommand):
                     or any compare.ignore-branches configuration
                     option''',
         )
+        parser.add_argument(
+            '-f',
+            '--format',
+            help='''if given, print one line per project with changes
+                    using this format string (stable, machine-readable
+                    output); see FORMAT STRINGS below''',
+        )
         return parser
 
     def do_run(self, args, ignored):
@@ -915,6 +947,13 @@ class Compare(_ProjectCommand):
 
         failed = []
         printed_output = False
+
+        def compare_project(project, fmt):
+            if fmt is None:
+                self.compare(project)
+            else:
+                self._format_project(project, fmt)
+
         for project in self._cloned_projects(args, only_active=not args.all):
             if isinstance(project, ManifestProject):
                 # West doesn't track the relationship between the manifest
@@ -922,7 +961,7 @@ class Compare(_ProjectCommand):
                 # in printing output for comparisons that makes sense.
                 if self._has_nonempty_status(project):
                     try:
-                        self.compare(project)
+                        compare_project(project, args.format)
                         printed_output = True
                     except subprocess.CalledProcessError:
                         failed.append(project)
@@ -960,7 +999,7 @@ class Compare(_ProjectCommand):
                 ):
                     continue
 
-                self.compare(project)
+                compare_project(project, args.format)
                 printed_output = True
             except subprocess.CalledProcessError:
                 failed.append(project)
