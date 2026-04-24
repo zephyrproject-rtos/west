@@ -911,19 +911,10 @@ PowerShell:
         )
         parser.add_argument(
             '--ignore-branches',
-            default=None,
-            action='store_true',
+            action=argparse.BooleanOptionalAction,
             help='''skip output for projects with checked out
                     branches and clean working trees if the branch is
                     at the same commit as the last "west update"''',
-        )
-        parser.add_argument(
-            '--no-ignore-branches',
-            dest='ignore_branches',
-            action='store_false',
-            help='''overrides a previous --ignore-branches
-                    or any compare.ignore-branches configuration
-                    option''',
         )
         parser.add_argument(
             '-f',
