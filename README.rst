@@ -9,7 +9,7 @@
 
 This is the Zephyr RTOS meta tool, ``west``.
 
-https://docs.zephyrproject.org/latest/guides/west/index.html
+https://docs.zephyrproject.org/latest/develop/west/index.html
 
 Installation
 ------------
@@ -34,8 +34,8 @@ By default, west uses `upstream Zephyr's manifest file
 doesn't care if the manifest repository is zephyr or not. You can and are
 encouraged to make your own manifest repositories to meet your needs.
 
-For more details, see the `West guide
-<https://docs.zephyrproject.org/latest/guides/west/index.html>`_ in the Zephyr
+For more details, see the `West (Zephyr's meta-tool)
+<https://docs.zephyrproject.org/latest/develop/west/index.html>`_ in the Zephyr
 documentation.
 
 Example usage using the upstream manifest file::
@@ -55,7 +55,7 @@ What just happened:
   creating working trees in the installation directory ``zephyrproject``.
 
 Use ``west init -m`` to specify another manifest repository. Use ``--mr`` to
-use a revision to inialize from; if not given, the remote's default branch is used.
+use a revision to initialize from; if not given, the remote's default branch is used.
 Use ``--mf`` to use a manifest file other than ``west.yml``.
 
 Additional Commands
@@ -69,7 +69,7 @@ command with ``west <command> -h``.
 
 West is extensible: you can add new commands to west without modifying its
 source code. See `Extensions
-<https://docs.zephyrproject.org/latest/guides/west/extensions.html>`_ in the
+<https://docs.zephyrproject.org/latest/develop/west/extensions.html>`_ in the
 documentation for details.
 
 
@@ -126,7 +126,7 @@ To build the west wheel file::
   python -m build
 
 This will create a file named ``dist/west-x.y.z-py3-none-any.whl``,
-where ``x.y.z`` is the current version in setup.py.
+where ``x.y.z`` is the current version in pyproject.toml.
 
 To install the wheel::
 
