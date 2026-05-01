@@ -8,6 +8,9 @@ license.workspace = true
 
 [dependencies]
 log = "0.4"
+toml_edit = "0.22"
+tempfile = "3"
+dirs = "5"
 
 [dev-dependencies]
-tempfile = "3"
+serial_test = "3"
