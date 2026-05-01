@@ -1,0 +1,13 @@
+[package]
+name = "west-core"
+version = "2.0.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+log = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

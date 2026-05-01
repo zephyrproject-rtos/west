@@ -13,3 +13,6 @@ htmlcov/
 .dir-locals.el
 .venv/
 junit.xml
+
+# rust
+target/
