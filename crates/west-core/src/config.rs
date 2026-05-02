@@ -21,15 +21,33 @@ pub enum ConfigValue {
     Bool(bool),
     Integer(i64),
     Float(f64),
+    List(Vec<ConfigValue>),
 }
 
 impl ConfigValue {
+    /// Build a `List` of strings from any iterable of string-like items.
+    pub fn list_of_strings<I, S>(items: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        ConfigValue::List(
+            items
+                .into_iter()
+                .map(|s| ConfigValue::String(s.into()))
+                .collect(),
+        )
+    }
+
     fn into_toml_value(self) -> Value {
         match self {
             ConfigValue::String(s) => Value::from(s),
             ConfigValue::Bool(b) => Value::from(b),
             ConfigValue::Integer(i) => Value::from(i),
             ConfigValue::Float(f) => Value::from(f),
+            ConfigValue::List(items) => {
+                Value::Array(items.into_iter().map(|cv| cv.into_toml_value()).collect())
+            }
         }
     }
 
@@ -39,6 +57,11 @@ impl ConfigValue {
             Value::Boolean(b) => Some(ConfigValue::Bool(*b.value())),
             Value::Integer(i) => Some(ConfigValue::Integer(*i.value())),
             Value::Float(f) => Some(ConfigValue::Float(*f.value())),
+            Value::Array(arr) => arr
+                .iter()
+                .map(ConfigValue::from_toml_value)
+                .collect::<Option<Vec<_>>>()
+                .map(ConfigValue::List),
             _ => None,
         }
     }
@@ -252,6 +275,72 @@ impl Configuration {
         }
     }
 
+    pub fn get_list(&self, option: &str) -> Result<Option<Vec<ConfigValue>>, ConfigError> {
+        let (section, key) = parse_key(option)?;
+        for layer in self.layers.iter().rev() {
+            if let Some(v) = lookup(&layer.doc, section, key) {
+                return value_as_list(v)
+                    .map(Some)
+                    .ok_or_else(|| ConfigError::TypeMismatch {
+                        option: option.to_owned(),
+                        expected: "list",
+                    });
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn get_list_in(
+        &self,
+        option: &str,
+        layer: &Path,
+    ) -> Result<Option<Vec<ConfigValue>>, ConfigError> {
+        let (section, key) = parse_key(option)?;
+        let idx = self.find_layer(layer)?;
+        match lookup(&self.layers[idx].doc, section, key) {
+            Some(v) => value_as_list(v)
+                .map(Some)
+                .ok_or_else(|| ConfigError::TypeMismatch {
+                    option: option.to_owned(),
+                    expected: "list",
+                }),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_list_str(&self, option: &str) -> Result<Option<Vec<String>>, ConfigError> {
+        let (section, key) = parse_key(option)?;
+        for layer in self.layers.iter().rev() {
+            if let Some(v) = lookup(&layer.doc, section, key) {
+                return value_as_list_str(v)
+                    .map(Some)
+                    .ok_or_else(|| ConfigError::TypeMismatch {
+                        option: option.to_owned(),
+                        expected: "list of strings",
+                    });
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn get_list_str_in(
+        &self,
+        option: &str,
+        layer: &Path,
+    ) -> Result<Option<Vec<String>>, ConfigError> {
+        let (section, key) = parse_key(option)?;
+        let idx = self.find_layer(layer)?;
+        match lookup(&self.layers[idx].doc, section, key) {
+            Some(v) => value_as_list_str(v)
+                .map(Some)
+                .ok_or_else(|| ConfigError::TypeMismatch {
+                    option: option.to_owned(),
+                    expected: "list of strings",
+                }),
+            None => Ok(None),
+        }
+    }
+
     pub fn set(
         &mut self,
         option: &str,
@@ -415,6 +504,16 @@ fn value_as_f64(v: &Value) -> Option<f64> {
         Value::String(s) => s.value().parse().ok(),
         _ => None,
     }
+}
+
+fn value_as_list(v: &Value) -> Option<Vec<ConfigValue>> {
+    let arr = v.as_array()?;
+    arr.iter().map(ConfigValue::from_toml_value).collect()
+}
+
+fn value_as_list_str(v: &Value) -> Option<Vec<String>> {
+    let arr = v.as_array()?;
+    arr.iter().map(value_as_string).collect()
 }
 
 fn collect_items(doc: &DocumentMut) -> Vec<(String, ConfigValue)> {
@@ -707,5 +806,155 @@ mod tests {
             c.set(".bar", ConfigValue::Bool(true), &p),
             Err(ConfigError::InvalidKey(_))
         ));
+    }
+
+    #[test]
+    fn set_list_of_strings_round_trips() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        let mut c = cfg(&[&p]);
+        c.set(
+            "manifest.project-filter",
+            ConfigValue::list_of_strings(["+foo", "-bar", "baz"]),
+            &p,
+        )
+        .unwrap();
+
+        let written = fs::read_to_string(&p).unwrap();
+        assert!(
+            written.contains(r#"project-filter = ["+foo", "-bar", "baz"]"#),
+            "unexpected TOML: {written}"
+        );
+
+        let c2 = cfg(&[&p]);
+        assert_eq!(
+            c2.get_list_str("manifest.project-filter").unwrap(),
+            Some(vec!["+foo".into(), "-bar".into(), "baz".into()])
+        );
+    }
+
+    #[test]
+    fn get_list_on_scalar_returns_type_mismatch() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        fs::write(&p, "[s]\nv = \"scalar\"\n").unwrap();
+        let c = cfg(&[&p]);
+        assert!(matches!(
+            c.get_list("s.v"),
+            Err(ConfigError::TypeMismatch { .. })
+        ));
+        assert!(matches!(
+            c.get_list_str("s.v"),
+            Err(ConfigError::TypeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn get_str_on_list_returns_none() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        fs::write(&p, "[s]\nv = [\"a\", \"b\"]\n").unwrap();
+        let c = cfg(&[&p]);
+        assert!(c.get_str("s.v").is_none());
+    }
+
+    #[test]
+    fn get_bool_on_list_returns_type_mismatch() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        fs::write(&p, "[s]\nv = [true, false]\n").unwrap();
+        let c = cfg(&[&p]);
+        assert!(matches!(
+            c.get_bool("s.v"),
+            Err(ConfigError::TypeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn empty_list_round_trips() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        let mut c = cfg(&[&p]);
+        c.set("s.v", ConfigValue::List(vec![]), &p).unwrap();
+
+        let c2 = cfg(&[&p]);
+        assert_eq!(c2.get_list("s.v").unwrap(), Some(vec![]));
+        assert_eq!(c2.get_list_str("s.v").unwrap(), Some(vec![]));
+    }
+
+    #[test]
+    fn mixed_type_list_round_trips_via_get_list() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        fs::write(&p, "[s]\nv = [1, \"two\", true]\n").unwrap();
+        let c = cfg(&[&p]);
+        assert_eq!(
+            c.get_list("s.v").unwrap(),
+            Some(vec![
+                ConfigValue::Integer(1),
+                ConfigValue::String("two".into()),
+                ConfigValue::Bool(true),
+            ])
+        );
+    }
+
+    #[test]
+    fn get_list_str_coerces_int_and_bool_elements() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        fs::write(&p, "[s]\nv = [1, \"two\", true]\n").unwrap();
+        let c = cfg(&[&p]);
+        assert_eq!(
+            c.get_list_str("s.v").unwrap(),
+            Some(vec!["1".into(), "two".into(), "true".into()])
+        );
+    }
+
+    #[test]
+    fn get_list_str_rejects_non_coercible_element() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        // Inline tables aren't representable as strings.
+        fs::write(&p, "[s]\nv = [\"ok\", { a = 1 }]\n").unwrap();
+        let c = cfg(&[&p]);
+        assert!(matches!(
+            c.get_list_str("s.v"),
+            Err(ConfigError::TypeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn items_preserves_list_variant() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        let mut c = cfg(&[&p]);
+        c.set("s.v", ConfigValue::list_of_strings(["a", "b"]), &p)
+            .unwrap();
+        let items = c.items();
+        let map: std::collections::HashMap<_, _> = items.into_iter().collect();
+        match map.get("s.v") {
+            Some(ConfigValue::List(items)) => {
+                assert_eq!(items.len(), 2);
+                assert_eq!(items[0], ConfigValue::String("a".into()));
+                assert_eq!(items[1], ConfigValue::String("b".into()));
+            }
+            other => panic!("expected List variant, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn precedence_list_replaces_not_merges() {
+        let tmp = TempDir::new().unwrap();
+        let p1 = tmp.path().join("a.toml");
+        let p2 = tmp.path().join("b.toml");
+        let mut c = cfg(&[&p1, &p2]);
+
+        c.set("k.v", ConfigValue::list_of_strings(["low-1", "low-2"]), &p1)
+            .unwrap();
+        c.set("k.v", ConfigValue::list_of_strings(["high"]), &p2)
+            .unwrap();
+
+        // Higher-precedence layer fully replaces the lower one — no element-wise merge.
+        assert_eq!(c.get_list_str("k.v").unwrap(), Some(vec!["high".into()]));
     }
 }

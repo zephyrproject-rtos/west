@@ -35,6 +35,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             ConfigValue::String("override".into()),
             &upper,
         )?;
+        cfg.set(
+            "manifest.project-filter",
+            ConfigValue::list_of_strings(["+foo", "-bar", "baz"]),
+            &upper,
+        )?;
         println!("--- written ---");
         println!("{}:\n{}", lower.display(), std::fs::read_to_string(&lower)?);
         println!("{}:\n{}", upper.display(), std::fs::read_to_string(&upper)?);
@@ -47,6 +52,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("manifest.path = {:?}", cfg.get_str("manifest.path"));
     println!("manifest.file = {:?}", cfg.get_str("manifest.file"));
     println!("update.narrow = {:?}", cfg.get_bool("update.narrow")?);
+    println!(
+        "manifest.project-filter = {:?}",
+        cfg.get_list_str("manifest.project-filter")?
+    );
 
     println!("--- per-layer read ---");
     println!(
@@ -66,6 +75,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     assert_eq!(cfg.get_str("manifest.path").as_deref(), Some("override"));
     assert_eq!(cfg.get_str("manifest.file").as_deref(), Some("west.yml"));
     assert_eq!(cfg.get_bool("update.narrow")?, Some(true));
+    assert_eq!(
+        cfg.get_list_str("manifest.project-filter")?,
+        Some(vec!["+foo".into(), "-bar".into(), "baz".into()])
+    );
 
     println!("\nOK");
     Ok(())
