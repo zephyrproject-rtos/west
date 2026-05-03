@@ -8,9 +8,14 @@ license.workspace = true
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-clap-verbosity-flag = "3"
 env_logger = "0.11"
+log = "0.4"
 west-core = { path = "../west-core" }
+
+[dev-dependencies]
+assert_cmd = "2"
+serial_test = "3"
+tempfile = "3"
 
 [[bin]]
 name = "west"

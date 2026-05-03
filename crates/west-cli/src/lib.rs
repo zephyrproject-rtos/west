@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::Parser;
-use clap_verbosity_flag::Verbosity;
+use clap::{ArgAction, Args, Parser};
+use log::LevelFilter;
 
 pub mod commands;
 
@@ -10,14 +10,43 @@ pub mod commands;
 #[command(name = "west", version, about = "The Zephyr RTOS meta-tool")]
 pub struct Cli {
     /// Run as if west was started in <DIR>.
-    #[arg(short = 'C', value_name = "DIR", global = true)]
+    #[arg(short = 'C', value_name = "DIR")]
     pub chdir: Option<PathBuf>,
 
     #[command(flatten)]
-    pub verbosity: Verbosity,
+    pub verbosity: VerbosityArgs,
 
     #[command(subcommand)]
     pub command: commands::Command,
+}
+
+// `-v` / `-q` count flags driving the `log` crate's `LevelFilter`.
+//
+// Default: `Error`. `-v` → `Warn`, `-vv` → `Info`, `-vvv` → `Debug`,
+// `-vvvv` → `Trace`. `-q` subtracts; multiple `-q`s silence the logger
+// entirely.
+#[derive(Args, Debug)]
+pub struct VerbosityArgs {
+    /// Increase logging verbosity.
+    #[arg(short = 'v', long = "verbose", action = ArgAction::Count, conflicts_with = "quiet")]
+    pub verbose: u8,
+    /// Decrease logging verbosity.
+    #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
+    pub quiet: u8,
+}
+
+impl VerbosityArgs {
+    pub fn log_level_filter(&self) -> LevelFilter {
+        let net = i32::from(self.verbose) - i32::from(self.quiet);
+        match net {
+            i32::MIN..=-1 => LevelFilter::Off,
+            0 => LevelFilter::Error,
+            1 => LevelFilter::Warn,
+            2 => LevelFilter::Info,
+            3 => LevelFilter::Debug,
+            _ => LevelFilter::Trace,
+        }
+    }
 }
 
 pub fn run() -> ExitCode {

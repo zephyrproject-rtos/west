@@ -67,6 +67,20 @@ impl ConfigValue {
     }
 }
 
+/// Scalars render to their natural representation. Lists deliberately error
+/// out — the CLI is responsible for per-element formatting.
+impl fmt::Display for ConfigValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfigValue::String(s) => f.write_str(s),
+            ConfigValue::Bool(b) => write!(f, "{b}"),
+            ConfigValue::Integer(i) => write!(f, "{i}"),
+            ConfigValue::Float(x) => write!(f, "{x}"),
+            ConfigValue::List(_) => Err(fmt::Error),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ConfigError {
     InvalidKey(String),
