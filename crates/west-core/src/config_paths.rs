@@ -294,9 +294,6 @@ mod tests {
         unsafe { env::set_var("XDG_CONFIG_HOME", tmp.path()) };
         let r = resolve(None);
         clear_env();
-        assert_eq!(
-            r.global,
-            Some(tmp.path().join("west").join("config.toml"))
-        );
+        assert_eq!(r.global, Some(tmp.path().join("west").join("config.toml")));
     }
 }

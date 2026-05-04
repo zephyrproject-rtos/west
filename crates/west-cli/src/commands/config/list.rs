@@ -1,10 +1,11 @@
+use std::path::Path;
 use std::process::ExitCode;
 
 use clap::Args;
 
-use west_core::config::ConfigValue;
+use west_core::config::{ConfigValue, Configuration};
 
-use super::{LoadedConfig, ScopeArgs, load, scope_to_path};
+use super::{LoadedConfig, ScopeArgs, scope_to_path};
 
 #[derive(Args, Debug)]
 pub struct ListArgs {
@@ -12,17 +13,12 @@ pub struct ListArgs {
     pub scope: ScopeArgs,
 }
 
-pub fn run(args: ListArgs) -> ExitCode {
-    let extras: Vec<_> = args.scope.file.iter().cloned().collect();
-    let LoadedConfig { resolved, config } = match load(&extras) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("west: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+pub fn run(args: ListArgs, loaded: &mut LoadedConfig) -> ExitCode {
+    if let Some(file) = &args.scope.file {
+        return list_single_file(file);
+    }
 
-    let scope_path = match scope_to_path(&args.scope, &resolved) {
+    let scope_path = match scope_to_path(&args.scope, &loaded.resolved) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("west: {e}");
@@ -31,20 +27,43 @@ pub fn run(args: ListArgs) -> ExitCode {
     };
 
     let items = match scope_path {
-        Some(p) => match config.items_in(&p) {
+        Some(p) => match loaded.config.items_in(&p) {
             Ok(items) => items,
             Err(e) => {
                 eprintln!("west: {e}");
                 return ExitCode::from(2);
             }
         },
-        None => config.items(),
+        None => loaded.config.items(),
     };
 
-    for (key, value) in items {
-        emit(&key, &value);
-    }
+    print_items(&items);
     ExitCode::SUCCESS
+}
+
+fn list_single_file(file: &Path) -> ExitCode {
+    let single = match Configuration::load([file.to_path_buf()]) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("west: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let items = match single.items_in(file) {
+        Ok(items) => items,
+        Err(e) => {
+            eprintln!("west: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    print_items(&items);
+    ExitCode::SUCCESS
+}
+
+fn print_items(items: &[(String, ConfigValue)]) {
+    for (key, value) in items {
+        emit(key, value);
+    }
 }
 
 fn emit(key: &str, value: &ConfigValue) {
@@ -54,8 +73,8 @@ fn emit(key: &str, value: &ConfigValue) {
                 match el {
                     ConfigValue::List(_) => {
                         // Nested lists aren't representable in git-style flat
-                        // output. Render as a TOML-ish fragment to surface
-                        // them without crashing.
+                        // output. Render as a placeholder to surface them
+                        // without crashing.
                         println!("{key}=<nested list>");
                     }
                     other => println!("{key}={other}"),

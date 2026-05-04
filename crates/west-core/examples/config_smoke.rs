@@ -49,8 +49,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cfg = Configuration::load([lower.clone(), upper.clone()])?;
 
     println!("--- merged read ---");
-    println!("manifest.path = {:?}", cfg.get_str("manifest.path"));
-    println!("manifest.file = {:?}", cfg.get_str("manifest.file"));
+    println!("manifest.path = {:?}", cfg.get_str("manifest.path")?);
+    println!("manifest.file = {:?}", cfg.get_str("manifest.file")?);
     println!("update.narrow = {:?}", cfg.get_bool("update.narrow")?);
     println!(
         "manifest.project-filter = {:?}",
@@ -72,8 +72,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("  {k} = {v:?}");
     }
 
-    assert_eq!(cfg.get_str("manifest.path").as_deref(), Some("override"));
-    assert_eq!(cfg.get_str("manifest.file").as_deref(), Some("west.yml"));
+    assert_eq!(cfg.get_str("manifest.path")?.as_deref(), Some("override"));
+    assert_eq!(cfg.get_str("manifest.file")?.as_deref(), Some("west.yml"));
     assert_eq!(cfg.get_bool("update.narrow")?, Some(true));
     assert_eq!(
         cfg.get_list_str("manifest.project-filter")?,

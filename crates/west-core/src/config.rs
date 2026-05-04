@@ -39,6 +39,34 @@ impl ConfigValue {
         )
     }
 
+    /// Parse a CLI-supplied value as a TOML expression. Bare strings (no
+    /// leading TOML-construct char and not parseable as TOML) fall back to
+    /// `ConfigValue::String`. Values that *look* like TOML constructs but
+    /// fail to parse are rejected — callers must quote them explicitly.
+    pub fn parse(s: &str) -> Result<Self, ConfigError> {
+        let wrapped = format!("__v = {s}");
+        match wrapped.parse::<DocumentMut>() {
+            Ok(doc) => doc
+                .get("__v")
+                .and_then(|i| i.as_value())
+                .and_then(ConfigValue::from_toml_value)
+                .ok_or_else(|| ConfigError::InvalidValue {
+                    input: s.to_owned(),
+                    message: "unsupported TOML value type".to_owned(),
+                }),
+            Err(e) => {
+                if s.starts_with(['[', '{', '"', '\'']) {
+                    Err(ConfigError::InvalidValue {
+                        input: s.to_owned(),
+                        message: e.to_string(),
+                    })
+                } else {
+                    Ok(ConfigValue::String(s.to_owned()))
+                }
+            }
+        }
+    }
+
     fn into_toml_value(self) -> Value {
         match self {
             ConfigValue::String(s) => Value::from(s),
@@ -84,6 +112,10 @@ impl fmt::Display for ConfigValue {
 #[derive(Debug)]
 pub enum ConfigError {
     InvalidKey(String),
+    InvalidValue {
+        input: String,
+        message: String,
+    },
     UnknownLayer(PathBuf),
     Io {
         path: PathBuf,
@@ -108,6 +140,9 @@ impl fmt::Display for ConfigError {
                     f,
                     "invalid configuration key {k:?} (expected `section.key`)"
                 )
+            }
+            ConfigError::InvalidValue { input, message } => {
+                write!(f, "invalid configuration value {input:?}: {message}")
             }
             ConfigError::UnknownLayer(p) => {
                 write!(f, "unknown configuration layer: {}", p.display())
@@ -149,6 +184,9 @@ struct Layer {
 #[derive(Debug)]
 pub struct Configuration {
     layers: Vec<Layer>,
+    /// Ad-hoc, read-only overrides at top precedence. Sourced from `--config`
+    /// CLI flags; never persisted; ignored by writes.
+    inline: Option<DocumentMut>,
 }
 
 impl Configuration {
@@ -183,68 +221,136 @@ impl Configuration {
             trace!("loaded config layer {} (exists={exists})", path.display());
             layers.push(Layer { path, doc, exists });
         }
-        Ok(Configuration { layers })
+        Ok(Configuration {
+            layers,
+            inline: None,
+        })
     }
 
-    pub fn get_str(&self, option: &str) -> Option<String> {
-        let (section, key) = parse_key(option).ok()?;
+    /// Attach ad-hoc overrides at top precedence. Reads consult them first;
+    /// `set` / `delete` never touch them.
+    pub fn with_inline(mut self, doc: DocumentMut) -> Self {
+        self.inline = Some(doc);
+        self
+    }
+
+    /// Set an option in the inline-override layer (creating the layer if
+    /// absent). Inline overrides are read-only as far as `set` / `delete` /
+    /// `delete_topmost` go — this method is the *only* way to populate them
+    /// programmatically.
+    pub fn set_inline(&mut self, option: &str, value: ConfigValue) -> Result<(), ConfigError> {
+        let (section, key) = parse_key(option)?;
+        let inline = self.inline.get_or_insert_with(DocumentMut::new);
+        let section_item = inline
+            .entry(section)
+            .or_insert_with(|| Item::Table(Table::new()));
+        let table = section_item
+            .as_table_mut()
+            .ok_or_else(|| ConfigError::TypeMismatch {
+                option: option.to_owned(),
+                expected: "table",
+            })?;
+        table[key] = Item::Value(value.into_toml_value());
+        Ok(())
+    }
+
+    /// Walk inline → highest-precedence layer → lowest, returning the first
+    /// `Value` for `section.key`.
+    fn merged_lookup(&self, section: &str, key: &str) -> Option<&Value> {
+        if let Some(inline) = &self.inline {
+            if let Some(v) = lookup(inline, section, key) {
+                return Some(v);
+            }
+        }
         for layer in self.layers.iter().rev() {
             if let Some(v) = lookup(&layer.doc, section, key) {
-                return value_as_string(v);
+                return Some(v);
             }
         }
         None
     }
 
-    pub fn get_bool(&self, option: &str) -> Result<Option<bool>, ConfigError> {
+    /// Generic accessor returning the raw [`ConfigValue`] (or `None`).
+    /// Useful for the CLI's display path which doesn't pre-commit to a type.
+    pub fn get(&self, option: &str) -> Result<Option<ConfigValue>, ConfigError> {
         let (section, key) = parse_key(option)?;
-        for layer in self.layers.iter().rev() {
-            if let Some(v) = lookup(&layer.doc, section, key) {
-                return value_as_bool(v)
+        match self.merged_lookup(section, key) {
+            Some(v) => {
+                ConfigValue::from_toml_value(v)
                     .map(Some)
                     .ok_or_else(|| ConfigError::TypeMismatch {
                         option: option.to_owned(),
-                        expected: "bool",
-                    });
+                        expected: "scalar or list",
+                    })
             }
+            None => Ok(None),
         }
-        Ok(None)
+    }
+
+    pub fn get_str(&self, option: &str) -> Result<Option<String>, ConfigError> {
+        let (section, key) = parse_key(option)?;
+        match self.merged_lookup(section, key) {
+            Some(v) => value_as_string(v)
+                .map(Some)
+                .ok_or_else(|| ConfigError::TypeMismatch {
+                    option: option.to_owned(),
+                    expected: "string",
+                }),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_bool(&self, option: &str) -> Result<Option<bool>, ConfigError> {
+        let (section, key) = parse_key(option)?;
+        match self.merged_lookup(section, key) {
+            Some(v) => value_as_bool(v)
+                .map(Some)
+                .ok_or_else(|| ConfigError::TypeMismatch {
+                    option: option.to_owned(),
+                    expected: "bool",
+                }),
+            None => Ok(None),
+        }
     }
 
     pub fn get_i64(&self, option: &str) -> Result<Option<i64>, ConfigError> {
         let (section, key) = parse_key(option)?;
-        for layer in self.layers.iter().rev() {
-            if let Some(v) = lookup(&layer.doc, section, key) {
-                return value_as_i64(v)
-                    .map(Some)
-                    .ok_or_else(|| ConfigError::TypeMismatch {
-                        option: option.to_owned(),
-                        expected: "integer",
-                    });
-            }
+        match self.merged_lookup(section, key) {
+            Some(v) => value_as_i64(v)
+                .map(Some)
+                .ok_or_else(|| ConfigError::TypeMismatch {
+                    option: option.to_owned(),
+                    expected: "integer",
+                }),
+            None => Ok(None),
         }
-        Ok(None)
     }
 
     pub fn get_f64(&self, option: &str) -> Result<Option<f64>, ConfigError> {
         let (section, key) = parse_key(option)?;
-        for layer in self.layers.iter().rev() {
-            if let Some(v) = lookup(&layer.doc, section, key) {
-                return value_as_f64(v)
-                    .map(Some)
-                    .ok_or_else(|| ConfigError::TypeMismatch {
-                        option: option.to_owned(),
-                        expected: "float",
-                    });
-            }
+        match self.merged_lookup(section, key) {
+            Some(v) => value_as_f64(v)
+                .map(Some)
+                .ok_or_else(|| ConfigError::TypeMismatch {
+                    option: option.to_owned(),
+                    expected: "float",
+                }),
+            None => Ok(None),
         }
-        Ok(None)
     }
 
     pub fn get_str_in(&self, option: &str, layer: &Path) -> Result<Option<String>, ConfigError> {
         let (section, key) = parse_key(option)?;
         let idx = self.find_layer(layer)?;
-        Ok(lookup(&self.layers[idx].doc, section, key).and_then(value_as_string))
+        match lookup(&self.layers[idx].doc, section, key) {
+            Some(v) => value_as_string(v)
+                .map(Some)
+                .ok_or_else(|| ConfigError::TypeMismatch {
+                    option: option.to_owned(),
+                    expected: "string",
+                }),
+            None => Ok(None),
+        }
     }
 
     pub fn get_bool_in(&self, option: &str, layer: &Path) -> Result<Option<bool>, ConfigError> {
@@ -291,17 +397,31 @@ impl Configuration {
 
     pub fn get_list(&self, option: &str) -> Result<Option<Vec<ConfigValue>>, ConfigError> {
         let (section, key) = parse_key(option)?;
-        for layer in self.layers.iter().rev() {
-            if let Some(v) = lookup(&layer.doc, section, key) {
-                return value_as_list(v)
+        match self.merged_lookup(section, key) {
+            Some(v) => value_as_list(v)
+                .map(Some)
+                .ok_or_else(|| ConfigError::TypeMismatch {
+                    option: option.to_owned(),
+                    expected: "list",
+                }),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_in(&self, option: &str, layer: &Path) -> Result<Option<ConfigValue>, ConfigError> {
+        let (section, key) = parse_key(option)?;
+        let idx = self.find_layer(layer)?;
+        match lookup(&self.layers[idx].doc, section, key) {
+            Some(v) => {
+                ConfigValue::from_toml_value(v)
                     .map(Some)
                     .ok_or_else(|| ConfigError::TypeMismatch {
                         option: option.to_owned(),
-                        expected: "list",
-                    });
+                        expected: "scalar or list",
+                    })
             }
+            None => Ok(None),
         }
-        Ok(None)
     }
 
     pub fn get_list_in(
@@ -324,17 +444,15 @@ impl Configuration {
 
     pub fn get_list_str(&self, option: &str) -> Result<Option<Vec<String>>, ConfigError> {
         let (section, key) = parse_key(option)?;
-        for layer in self.layers.iter().rev() {
-            if let Some(v) = lookup(&layer.doc, section, key) {
-                return value_as_list_str(v)
-                    .map(Some)
-                    .ok_or_else(|| ConfigError::TypeMismatch {
-                        option: option.to_owned(),
-                        expected: "list of strings",
-                    });
-            }
+        match self.merged_lookup(section, key) {
+            Some(v) => value_as_list_str(v)
+                .map(Some)
+                .ok_or_else(|| ConfigError::TypeMismatch {
+                    option: option.to_owned(),
+                    expected: "list of strings",
+                }),
+            None => Ok(None),
         }
-        Ok(None)
     }
 
     pub fn get_list_str_in(
@@ -423,11 +541,16 @@ impl Configuration {
     }
 
     /// Merged dotted-key view across all layers. Higher-precedence layers
-    /// override lower-precedence ones.
+    /// override lower-precedence ones; inline overrides win over everything.
     pub fn items(&self) -> Vec<(String, ConfigValue)> {
         let mut merged = BTreeMap::new();
         for layer in &self.layers {
             for (k, v) in collect_items(&layer.doc) {
+                merged.insert(k, v);
+            }
+        }
+        if let Some(inline) = &self.inline {
+            for (k, v) in collect_items(inline) {
                 merged.insert(k, v);
             }
         }
@@ -482,42 +605,19 @@ fn lookup<'a>(doc: &'a DocumentMut, section: &str, key: &str) -> Option<&'a Valu
 }
 
 fn value_as_string(v: &Value) -> Option<String> {
-    match v {
-        Value::String(s) => Some(s.value().clone()),
-        Value::Boolean(b) => Some(b.value().to_string()),
-        Value::Integer(i) => Some(i.value().to_string()),
-        Value::Float(f) => Some(f.value().to_string()),
-        _ => None,
-    }
+    v.as_str().map(str::to_owned)
 }
 
 fn value_as_bool(v: &Value) -> Option<bool> {
-    match v {
-        Value::Boolean(b) => Some(*b.value()),
-        Value::String(s) => match s.value().to_ascii_lowercase().as_str() {
-            "1" | "yes" | "true" | "on" => Some(true),
-            "0" | "no" | "false" | "off" => Some(false),
-            _ => None,
-        },
-        _ => None,
-    }
+    v.as_bool()
 }
 
 fn value_as_i64(v: &Value) -> Option<i64> {
-    match v {
-        Value::Integer(i) => Some(*i.value()),
-        Value::String(s) => s.value().parse().ok(),
-        _ => None,
-    }
+    v.as_integer()
 }
 
 fn value_as_f64(v: &Value) -> Option<f64> {
-    match v {
-        Value::Float(f) => Some(*f.value()),
-        Value::Integer(i) => Some(*i.value() as f64),
-        Value::String(s) => s.value().parse().ok(),
-        _ => None,
-    }
+    v.as_float()
 }
 
 fn value_as_list(v: &Value) -> Option<Vec<ConfigValue>> {
@@ -595,7 +695,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let p = tmp.path().join("missing.toml");
         let c = cfg(&[&p]);
-        assert!(c.get_str("foo.bar").is_none());
+        assert!(c.get_str("foo.bar").unwrap().is_none());
         assert_eq!(c.existing().len(), 0);
         assert_eq!(c.layer_paths().len(), 1);
     }
@@ -630,7 +730,7 @@ mod tests {
         c.set("k.v", ConfigValue::String("high".into()), &p3)
             .unwrap();
 
-        assert_eq!(c.get_str("k.v").as_deref(), Some("high"));
+        assert_eq!(c.get_str("k.v").unwrap().as_deref(), Some("high"));
     }
 
     #[test]
@@ -659,40 +759,208 @@ mod tests {
     }
 
     #[test]
-    fn get_bool_string_coercion() {
+    fn get_bool_on_string_returns_type_mismatch() {
         let tmp = TempDir::new().unwrap();
         let p = tmp.path().join("c.toml");
-        fs::write(
-            &p,
-            "[s]\na = \"yes\"\nb = \"1\"\nc = \"FALSE\"\nd = \"off\"\nbad = \"maybe\"\n",
-        )
-        .unwrap();
+        fs::write(&p, "[s]\nv = \"true\"\n").unwrap();
         let c = cfg(&[&p]);
-        assert_eq!(c.get_bool("s.a").unwrap(), Some(true));
-        assert_eq!(c.get_bool("s.b").unwrap(), Some(true));
-        assert_eq!(c.get_bool("s.c").unwrap(), Some(false));
-        assert_eq!(c.get_bool("s.d").unwrap(), Some(false));
         assert!(matches!(
-            c.get_bool("s.bad"),
+            c.get_bool("s.v"),
             Err(ConfigError::TypeMismatch { .. })
         ));
     }
 
     #[test]
-    fn get_i64_and_get_f64_native_and_coerce() {
+    fn get_i64_native_only() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        fs::write(&p, "[n]\nint = 42\nas_str = \"7\"\n").unwrap();
+        let c = cfg(&[&p]);
+        assert_eq!(c.get_i64("n.int").unwrap(), Some(42));
+        assert!(matches!(
+            c.get_i64("n.as_str"),
+            Err(ConfigError::TypeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn get_f64_native_only_no_int_upcoercion() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        fs::write(&p, "[n]\nfloat = 1.5\nint = 42\nas_str = \"2.5\"\n").unwrap();
+        let c = cfg(&[&p]);
+        assert_eq!(c.get_f64("n.float").unwrap(), Some(1.5));
+        assert!(matches!(
+            c.get_f64("n.int"),
+            Err(ConfigError::TypeMismatch { .. })
+        ));
+        assert!(matches!(
+            c.get_f64("n.as_str"),
+            Err(ConfigError::TypeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn get_str_on_bool_returns_type_mismatch() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        fs::write(&p, "[s]\nv = true\n").unwrap();
+        let c = cfg(&[&p]);
+        assert!(matches!(
+            c.get_str("s.v"),
+            Err(ConfigError::TypeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn get_returns_raw_config_value() {
         let tmp = TempDir::new().unwrap();
         let p = tmp.path().join("c.toml");
         fs::write(
             &p,
-            "[n]\nint = 42\nfloat = 1.5\nint_str = \"7\"\nfloat_str = \"2.5\"\n",
+            "[s]\ns = \"x\"\nb = true\ni = 42\nf = 1.5\nl = [\"a\", \"b\"]\n",
         )
         .unwrap();
         let c = cfg(&[&p]);
-        assert_eq!(c.get_i64("n.int").unwrap(), Some(42));
-        assert_eq!(c.get_i64("n.int_str").unwrap(), Some(7));
-        assert_eq!(c.get_f64("n.float").unwrap(), Some(1.5));
-        assert_eq!(c.get_f64("n.int").unwrap(), Some(42.0));
-        assert_eq!(c.get_f64("n.float_str").unwrap(), Some(2.5));
+        assert_eq!(c.get("s.s").unwrap(), Some(ConfigValue::String("x".into())));
+        assert_eq!(c.get("s.b").unwrap(), Some(ConfigValue::Bool(true)));
+        assert_eq!(c.get("s.i").unwrap(), Some(ConfigValue::Integer(42)));
+        assert_eq!(c.get("s.f").unwrap(), Some(ConfigValue::Float(1.5)));
+        assert_eq!(
+            c.get("s.l").unwrap(),
+            Some(ConfigValue::list_of_strings(["a", "b"]))
+        );
+        assert!(c.get("s.missing").unwrap().is_none());
+    }
+
+    #[test]
+    fn with_inline_overrides_file_value() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        fs::write(&p, "[s]\nv = \"file\"\n").unwrap();
+
+        let inline_doc: DocumentMut = "[s]\nv = \"inline\"\n".parse().unwrap();
+        let c = cfg(&[&p]).with_inline(inline_doc);
+        assert_eq!(c.get_str("s.v").unwrap().as_deref(), Some("inline"));
+    }
+
+    #[test]
+    fn with_inline_does_not_affect_writes() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        let inline_doc: DocumentMut = "[s]\nv = \"inline\"\n".parse().unwrap();
+        let mut c = cfg(&[&p]).with_inline(inline_doc);
+
+        c.set("s.v", ConfigValue::String("written".into()), &p)
+            .unwrap();
+
+        // The inline override still wins on read.
+        assert_eq!(c.get_str("s.v").unwrap().as_deref(), Some("inline"));
+        // The file got the new value, not the inline.
+        let on_disk = fs::read_to_string(&p).unwrap();
+        assert!(on_disk.contains(r#"v = "written""#));
+        assert!(!on_disk.contains("inline"));
+    }
+
+    #[test]
+    fn with_inline_appears_in_items_at_top_precedence() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        fs::write(&p, "[s]\nshared = \"file\"\nfile_only = \"f\"\n").unwrap();
+        let inline_doc: DocumentMut = "[s]\nshared = \"inline\"\ninline_only = \"i\"\n"
+            .parse()
+            .unwrap();
+        let c = cfg(&[&p]).with_inline(inline_doc);
+        let map: std::collections::HashMap<_, _> = c.items().into_iter().collect();
+        assert_eq!(
+            map.get("s.shared"),
+            Some(&ConfigValue::String("inline".into()))
+        );
+        assert_eq!(
+            map.get("s.file_only"),
+            Some(&ConfigValue::String("f".into()))
+        );
+        assert_eq!(
+            map.get("s.inline_only"),
+            Some(&ConfigValue::String("i".into()))
+        );
+    }
+
+    #[test]
+    fn parse_value_native_types() {
+        assert_eq!(ConfigValue::parse("42").unwrap(), ConfigValue::Integer(42));
+        assert_eq!(ConfigValue::parse("-7").unwrap(), ConfigValue::Integer(-7));
+        assert_eq!(ConfigValue::parse("1.5").unwrap(), ConfigValue::Float(1.5));
+        assert_eq!(ConfigValue::parse("true").unwrap(), ConfigValue::Bool(true));
+        assert_eq!(
+            ConfigValue::parse("false").unwrap(),
+            ConfigValue::Bool(false)
+        );
+    }
+
+    #[test]
+    fn parse_value_quoted_string() {
+        assert_eq!(
+            ConfigValue::parse(r#""42""#).unwrap(),
+            ConfigValue::String("42".into())
+        );
+        assert_eq!(
+            ConfigValue::parse(r#""hello""#).unwrap(),
+            ConfigValue::String("hello".into())
+        );
+    }
+
+    #[test]
+    fn parse_value_bare_string_fallback() {
+        assert_eq!(
+            ConfigValue::parse("zephyr").unwrap(),
+            ConfigValue::String("zephyr".into())
+        );
+        assert_eq!(
+            ConfigValue::parse("hello world").unwrap(),
+            ConfigValue::String("hello world".into())
+        );
+        assert_eq!(
+            ConfigValue::parse("path/to/thing").unwrap(),
+            ConfigValue::String("path/to/thing".into())
+        );
+        assert_eq!(
+            ConfigValue::parse("").unwrap(),
+            ConfigValue::String("".into())
+        );
+    }
+
+    #[test]
+    fn parse_value_arrays() {
+        assert_eq!(
+            ConfigValue::parse(r#"["+foo","-bar"]"#).unwrap(),
+            ConfigValue::list_of_strings(["+foo", "-bar"])
+        );
+        assert_eq!(
+            ConfigValue::parse("[1,2,3]").unwrap(),
+            ConfigValue::List(vec![
+                ConfigValue::Integer(1),
+                ConfigValue::Integer(2),
+                ConfigValue::Integer(3),
+            ])
+        );
+        assert_eq!(ConfigValue::parse("[]").unwrap(), ConfigValue::List(vec![]));
+    }
+
+    #[test]
+    fn parse_value_rejects_ambiguous_toml_constructs() {
+        assert!(matches!(
+            ConfigValue::parse("[bad"),
+            Err(ConfigError::InvalidValue { .. })
+        ));
+        assert!(matches!(
+            ConfigValue::parse(r#""mismatched"#),
+            Err(ConfigError::InvalidValue { .. })
+        ));
+        assert!(matches!(
+            ConfigValue::parse("{not-toml"),
+            Err(ConfigError::InvalidValue { .. })
+        ));
     }
 
     #[test]
@@ -718,10 +986,10 @@ mod tests {
             .unwrap();
 
         c.delete_topmost("k.v").unwrap();
-        assert_eq!(c.get_str("k.v").as_deref(), Some("low"));
+        assert_eq!(c.get_str("k.v").unwrap().as_deref(), Some("low"));
 
         c.delete_topmost("k.v").unwrap();
-        assert!(c.get_str("k.v").is_none());
+        assert!(c.get_str("k.v").unwrap().is_none());
 
         assert!(matches!(
             c.delete_topmost("k.v"),
@@ -756,7 +1024,7 @@ mod tests {
 
         // Round-trip on reload
         let c2 = cfg(&[&p]);
-        assert_eq!(c2.get_str("foo.bar.baz").as_deref(), Some("v"));
+        assert_eq!(c2.get_str("foo.bar.baz").unwrap().as_deref(), Some("v"));
     }
 
     #[test]
@@ -864,12 +1132,15 @@ mod tests {
     }
 
     #[test]
-    fn get_str_on_list_returns_none() {
+    fn get_str_on_list_returns_type_mismatch() {
         let tmp = TempDir::new().unwrap();
         let p = tmp.path().join("c.toml");
         fs::write(&p, "[s]\nv = [\"a\", \"b\"]\n").unwrap();
         let c = cfg(&[&p]);
-        assert!(c.get_str("s.v").is_none());
+        assert!(matches!(
+            c.get_str("s.v"),
+            Err(ConfigError::TypeMismatch { .. })
+        ));
     }
 
     #[test]
@@ -913,15 +1184,15 @@ mod tests {
     }
 
     #[test]
-    fn get_list_str_coerces_int_and_bool_elements() {
+    fn get_list_str_strict_rejects_mixed_types() {
         let tmp = TempDir::new().unwrap();
         let p = tmp.path().join("c.toml");
         fs::write(&p, "[s]\nv = [1, \"two\", true]\n").unwrap();
         let c = cfg(&[&p]);
-        assert_eq!(
-            c.get_list_str("s.v").unwrap(),
-            Some(vec!["1".into(), "two".into(), "true".into()])
-        );
+        assert!(matches!(
+            c.get_list_str("s.v"),
+            Err(ConfigError::TypeMismatch { .. })
+        ));
     }
 
     #[test]

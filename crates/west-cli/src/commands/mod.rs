@@ -2,6 +2,8 @@ use std::process::ExitCode;
 
 use clap::Subcommand;
 
+use config::LoadedConfig;
+
 pub mod config;
 pub mod topdir;
 
@@ -13,9 +15,9 @@ pub enum Command {
     Topdir,
 }
 
-pub fn dispatch(cmd: Command) -> ExitCode {
+pub fn dispatch(cmd: Command, mut loaded: LoadedConfig) -> ExitCode {
     match cmd {
-        Command::Config(a) => config::run(a),
+        Command::Config(a) => config::run(a, &mut loaded),
         Command::Topdir => topdir::run(),
     }
 }

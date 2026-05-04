@@ -3,7 +3,7 @@ use std::process::ExitCode;
 
 use clap::{Args, Subcommand};
 
-use west_core::config::Configuration;
+use west_core::config::{ConfigValue, Configuration};
 use west_core::config_paths::{ResolvedConfig, resolve};
 
 pub mod get;
@@ -29,12 +29,12 @@ pub enum Action {
     List(list::ListArgs),
 }
 
-pub fn run(args: ConfigArgs) -> ExitCode {
+pub fn run(args: ConfigArgs, loaded: &mut LoadedConfig) -> ExitCode {
     match args.action {
-        Action::Get(a) => get::run(a),
-        Action::Set(a) => set::run(a),
-        Action::Unset(a) => unset::run(a),
-        Action::List(a) => list::run(a),
+        Action::Get(a) => get::run(a, loaded),
+        Action::Set(a) => set::run(a, loaded),
+        Action::Unset(a) => unset::run(a, loaded),
+        Action::List(a) => list::run(a, loaded),
     }
 }
 
@@ -67,29 +67,38 @@ pub struct LoadedConfig {
 }
 
 /// Discover the workspace topdir (best-effort), resolve the conventional layer
-/// stack, and load it into a `Configuration`. `extra` paths (e.g. from `--file`)
-/// are appended at the highest precedence position if not already present.
-pub fn load(extra: &[PathBuf]) -> Result<LoadedConfig, String> {
-    let cwd = std::env::current_dir()
-        .map_err(|e| format!("cannot get current directory: {e}"))?;
+/// stack, and load it into a `Configuration`.
+///
+/// `extra_files` paths (from `--config-file` and `--file`) are appended at the
+/// highest file-backed precedence position. `inline_pairs` are `NAME=VALUE`
+/// strings (from `--config`); they're parsed into a `DocumentMut` and attached
+/// at top precedence as read-only overrides.
+pub fn load(extra_files: &[PathBuf], inline_pairs: &[String]) -> Result<LoadedConfig, String> {
+    let cwd = std::env::current_dir().map_err(|e| format!("cannot get current directory: {e}"))?;
     let topdir = west_core::topdir::topdir(&cwd).ok();
     let resolved = resolve(topdir.as_deref());
     let mut paths = resolved.layer_paths();
-    for e in extra {
+    for e in extra_files {
         if !paths.contains(e) {
             paths.push(e.clone());
         }
     }
-    let config = Configuration::load(paths).map_err(|e| format!("{e}"))?;
+    let mut config = Configuration::load(paths).map_err(|e| format!("{e}"))?;
+    for pair in inline_pairs {
+        let (name, raw) = pair
+            .split_once('=')
+            .ok_or_else(|| format!("--config: expected NAME=VALUE, got {pair:?}"))?;
+        let value = ConfigValue::parse(raw).map_err(|e| format!("--config {pair:?}: {e}"))?;
+        config
+            .set_inline(name, value)
+            .map_err(|e| format!("--config {pair:?}: {e}"))?;
+    }
     Ok(LoadedConfig { resolved, config })
 }
 
 /// Resolve a `ScopeArgs` to a single layer path. Returns `Ok(None)` when no
 /// scope flag was supplied (caller decides default).
-pub fn scope_to_path(
-    s: &ScopeArgs,
-    r: &ResolvedConfig,
-) -> Result<Option<PathBuf>, String> {
+pub fn scope_to_path(s: &ScopeArgs, r: &ResolvedConfig) -> Result<Option<PathBuf>, String> {
     if let Some(p) = &s.file {
         return Ok(Some(p.clone()));
     }
@@ -108,9 +117,11 @@ pub fn scope_to_path(
             .ok_or_else(|| "--global: no global config file is configured".to_owned());
     }
     if s.local {
-        return r.local.clone().map(Some).ok_or_else(|| {
-            "--local: not in a workspace; use --file or run inside one".to_owned()
-        });
+        return r
+            .local
+            .clone()
+            .map(Some)
+            .ok_or_else(|| "--local: not in a workspace; use --file or run inside one".to_owned());
     }
     Ok(None)
 }

@@ -1,10 +1,11 @@
+use std::path::Path;
 use std::process::ExitCode;
 
 use clap::Args;
 
-use west_core::config::ConfigError;
+use west_core::config::{ConfigError, Configuration};
 
-use super::{LoadedConfig, ScopeArgs, load, scope_to_path};
+use super::{LoadedConfig, ScopeArgs, scope_to_path};
 
 #[derive(Args, Debug)]
 pub struct UnsetArgs {
@@ -14,20 +15,12 @@ pub struct UnsetArgs {
     pub scope: ScopeArgs,
 }
 
-pub fn run(args: UnsetArgs) -> ExitCode {
-    let extras: Vec<_> = args.scope.file.iter().cloned().collect();
-    let LoadedConfig {
-        resolved,
-        mut config,
-    } = match load(&extras) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("west: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+pub fn run(args: UnsetArgs, loaded: &mut LoadedConfig) -> ExitCode {
+    if let Some(file) = &args.scope.file {
+        return unset_in_single_file(&args.name, file);
+    }
 
-    let scope_path = match scope_to_path(&args.scope, &resolved) {
+    let scope_path = match scope_to_path(&args.scope, &loaded.resolved) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("west: {e}");
@@ -36,14 +29,29 @@ pub fn run(args: UnsetArgs) -> ExitCode {
     };
 
     let result = match scope_path {
-        Some(p) => config.delete(&args.name, &p),
-        None => config.delete_topmost(&args.name),
+        Some(p) => loaded.config.delete(&args.name, &p),
+        None => loaded.config.delete_topmost(&args.name),
     };
 
+    map_unset_result(&args.name, result)
+}
+
+fn unset_in_single_file(name: &str, file: &Path) -> ExitCode {
+    let mut single = match Configuration::load([file.to_path_buf()]) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("west: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    map_unset_result(name, single.delete(name, file))
+}
+
+fn map_unset_result(name: &str, result: Result<(), ConfigError>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(ConfigError::NotFound(_)) => {
-            eprintln!("west: not set: {}", args.name);
+            eprintln!("west: not set: {name}");
             ExitCode::FAILURE
         }
         Err(e) => {

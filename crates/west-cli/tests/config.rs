@@ -1,4 +1,5 @@
-//! Integration tests for `west config get/set/unset/list`.
+//! Integration tests for `west config get/set/unset/list` and the top-level
+//! `--config` / `--config-file` overrides.
 //!
 //! Each test uses a tempdir for the workspace plus tempfile paths for the
 //! global/system layers, wired in via `WEST_CONFIG_*` env vars. Tests are
@@ -130,21 +131,20 @@ fn set_via_file_flag_writes_to_arbitrary_path() {
 
 #[test]
 #[serial]
-fn set_typed_int_writes_native_toml_integer() {
+fn set_writes_native_integer_via_toml_syntax() {
     let sb = Sandbox::new();
     sb.west()
-        .args(["config", "set", "--type", "int", "n.v", "42"])
+        .args(["config", "set", "n.v", "42"])
         .assert()
         .success();
     let body = read(&sb.local);
     assert!(body.contains("v = 42"), "got: {body}");
-    assert!(!body.contains(r#"v = "42""#), "should not be quoted: {body}");
+    assert!(
+        !body.contains(r#"v = "42""#),
+        "should not be quoted: {body}"
+    );
 
-    let out = sb
-        .west()
-        .args(["config", "get", "n.v"])
-        .assert()
-        .success();
+    let out = sb.west().args(["config", "get", "n.v"]).assert().success();
     assert_eq!(
         std::str::from_utf8(&out.get_output().stdout).unwrap(),
         "42\n"
@@ -153,26 +153,41 @@ fn set_typed_int_writes_native_toml_integer() {
 
 #[test]
 #[serial]
-fn set_typed_bool_accepts_python_set_and_rejects_garbage() {
+fn set_writes_string_when_value_is_quoted() {
     let sb = Sandbox::new();
     sb.west()
-        .args(["config", "set", "--type", "bool", "b.v", "yes"])
+        .args(["config", "set", "n.v", r#""42""#])
         .assert()
         .success();
-    let out = sb
-        .west()
-        .args(["config", "get", "b.v"])
+    let body = read(&sb.local);
+    assert!(body.contains(r#"v = "42""#), "got: {body}");
+}
+
+#[test]
+#[serial]
+fn set_writes_native_bool_via_toml_syntax() {
+    let sb = Sandbox::new();
+    sb.west()
+        .args(["config", "set", "b.v", "true"])
         .assert()
         .success();
+    let body = read(&sb.local);
+    assert!(body.contains("v = true"), "got: {body}");
+
+    let out = sb.west().args(["config", "get", "b.v"]).assert().success();
     assert_eq!(
         std::str::from_utf8(&out.get_output().stdout).unwrap(),
         "true\n"
     );
+}
 
-    // Garbage rejected with exit 2.
+#[test]
+#[serial]
+fn set_rejects_ambiguous_unparseable_toml() {
+    let sb = Sandbox::new();
     let res = sb
         .west()
-        .args(["config", "set", "--type", "bool", "b.v", "maybe"])
+        .args(["config", "set", "x.v", "[bad"])
         .assert()
         .failure();
     assert_eq!(res.get_output().status.code(), Some(2));
@@ -180,22 +195,21 @@ fn set_typed_bool_accepts_python_set_and_rejects_garbage() {
 
 #[test]
 #[serial]
-fn set_list_writes_toml_array_and_get_prints_one_per_line() {
+fn set_list_via_toml_array_syntax() {
     let sb = Sandbox::new();
     sb.west()
         .args([
             "config",
             "set",
-            "--list",
             "manifest.project-filter",
-            "+foo",
-            "-bar",
-            "baz",
+            r#"["+foo","-bar","baz"]"#,
         ])
         .assert()
         .success();
     assert!(
-        read(&sb.local).contains(r#"project-filter = ["+foo", "-bar", "baz"]"#)
+        read(&sb.local).contains(r#"project-filter = ["+foo", "-bar", "baz"]"#),
+        "got: {}",
+        read(&sb.local)
     );
 
     let out = sb
@@ -236,23 +250,21 @@ fn unset_default_removes_topmost_then_next() {
         .assert()
         .success();
 
-    sb.west().args(["config", "unset", "k.v"]).assert().success();
-    let out = sb
-        .west()
-        .args(["config", "get", "k.v"])
+    sb.west()
+        .args(["config", "unset", "k.v"])
         .assert()
         .success();
+    let out = sb.west().args(["config", "get", "k.v"]).assert().success();
     assert_eq!(
         std::str::from_utf8(&out.get_output().stdout).unwrap(),
         "global-val\n"
     );
 
-    sb.west().args(["config", "unset", "k.v"]).assert().success();
-    let res = sb
-        .west()
-        .args(["config", "get", "k.v"])
+    sb.west()
+        .args(["config", "unset", "k.v"])
         .assert()
-        .failure();
+        .success();
+    let res = sb.west().args(["config", "get", "k.v"]).assert().failure();
     assert_eq!(res.get_output().status.code(), Some(1));
 }
 
@@ -274,11 +286,7 @@ fn unset_scoped_only_touches_that_scope() {
         .assert()
         .success();
 
-    let out = sb
-        .west()
-        .args(["config", "get", "k.v"])
-        .assert()
-        .success();
+    let out = sb.west().args(["config", "get", "k.v"]).assert().success();
     assert_eq!(
         std::str::from_utf8(&out.get_output().stdout).unwrap(),
         "L\n"
@@ -314,23 +322,23 @@ fn list_shows_merged_view_with_lists_expanded() {
             "config",
             "set",
             "--local",
-            "--list",
             "manifest.project-filter",
-            "+a",
-            "-b",
+            r#"["+a","-b"]"#,
         ])
         .assert()
         .success();
 
-    let out = sb
-        .west()
-        .args(["config", "list"])
-        .assert()
-        .success();
+    let out = sb.west().args(["config", "list"]).assert().success();
     let stdout = std::str::from_utf8(&out.get_output().stdout).unwrap();
     assert!(stdout.contains("manifest.path=upper"), "got: {stdout}");
-    assert!(stdout.contains("manifest.project-filter=+a"), "got: {stdout}");
-    assert!(stdout.contains("manifest.project-filter=-b"), "got: {stdout}");
+    assert!(
+        stdout.contains("manifest.project-filter=+a"),
+        "got: {stdout}"
+    );
+    assert!(
+        stdout.contains("manifest.project-filter=-b"),
+        "got: {stdout}"
+    );
     assert!(!stdout.contains("manifest.path=lower"), "got: {stdout}");
 }
 
@@ -368,4 +376,153 @@ fn get_missing_exits_1_no_output() {
         .failure();
     assert_eq!(res.get_output().status.code(), Some(1));
     assert!(res.get_output().stdout.is_empty());
+}
+
+// --- top-level --config / --config-file -------------------------------------
+
+#[test]
+#[serial]
+fn top_level_config_overrides_file() {
+    let sb = Sandbox::new();
+    sb.west()
+        .args(["config", "set", "k.v", "from-file"])
+        .assert()
+        .success();
+    let out = sb
+        .west()
+        .args(["--config", "k.v=from-cli", "config", "get", "k.v"])
+        .assert()
+        .success();
+    assert_eq!(
+        std::str::from_utf8(&out.get_output().stdout).unwrap(),
+        "from-cli\n"
+    );
+}
+
+#[test]
+#[serial]
+fn top_level_config_typed_int() {
+    let sb = Sandbox::new();
+    let out = sb
+        .west()
+        .args(["--config", "n.v=42", "config", "get", "n.v"])
+        .assert()
+        .success();
+    assert_eq!(
+        std::str::from_utf8(&out.get_output().stdout).unwrap(),
+        "42\n"
+    );
+}
+
+#[test]
+#[serial]
+fn top_level_config_array() {
+    let sb = Sandbox::new();
+    let out = sb
+        .west()
+        .args([
+            "--config",
+            r#"foo.list=["a","b"]"#,
+            "config",
+            "get",
+            "foo.list",
+        ])
+        .assert()
+        .success();
+    assert_eq!(
+        std::str::from_utf8(&out.get_output().stdout).unwrap(),
+        "a\nb\n"
+    );
+}
+
+#[test]
+#[serial]
+fn top_level_config_does_not_affect_writes() {
+    let sb = Sandbox::new();
+    // Override says X, but `set` writes Y to disk.
+    sb.west()
+        .args(["--config", "k.v=overridden", "config", "set", "k.v", "Y"])
+        .assert()
+        .success();
+    assert!(
+        read(&sb.local).contains(r#"v = "Y""#),
+        "got: {}",
+        read(&sb.local)
+    );
+
+    // Without the override, get reads Y from disk.
+    let out = sb.west().args(["config", "get", "k.v"]).assert().success();
+    assert_eq!(
+        std::str::from_utf8(&out.get_output().stdout).unwrap(),
+        "Y\n"
+    );
+}
+
+#[test]
+#[serial]
+fn top_level_config_file_appends_layer() {
+    let sb = Sandbox::new();
+    let extra = sb._tmp.path().join("extra.toml");
+    std::fs::write(&extra, "[k]\nv = \"from-extra\"\n").unwrap();
+
+    let out = sb
+        .west()
+        .args([
+            "--config-file",
+            extra.to_str().unwrap(),
+            "config",
+            "get",
+            "k.v",
+        ])
+        .assert()
+        .success();
+    assert_eq!(
+        std::str::from_utf8(&out.get_output().stdout).unwrap(),
+        "from-extra\n"
+    );
+}
+
+#[test]
+#[serial]
+fn top_level_config_load_failure_blocks_other_commands() {
+    let sb = Sandbox::new();
+    // Malformed TOML in the local layer.
+    std::fs::write(&sb.local, "[unclosed\nno = good\n").unwrap();
+
+    let res = sb.west().args(["topdir"]).assert().failure();
+    let stderr = String::from_utf8_lossy(&res.get_output().stderr);
+    assert!(
+        stderr.contains("malformed TOML"),
+        "expected malformed-TOML error from top-level load, got: {stderr}"
+    );
+}
+
+#[test]
+#[serial]
+fn top_level_invalid_config_pair_errors() {
+    let sb = Sandbox::new();
+    let res = sb
+        .west()
+        .args(["--config", "no-equals", "topdir"])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&res.get_output().stderr);
+    assert!(
+        stderr.contains("--config"),
+        "expected --config error, got: {stderr}"
+    );
+}
+
+#[test]
+#[serial]
+fn top_level_flags_rejected_after_subcommand() {
+    let sb = Sandbox::new();
+    let res = sb
+        .west()
+        .args(["config", "get", "--config", "k.v=oops", "k.v"])
+        .assert()
+        .failure();
+    let code = res.get_output().status.code();
+    // clap emits exit code 2 for arg-parse errors.
+    assert_eq!(code, Some(2));
 }

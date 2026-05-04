@@ -16,6 +16,17 @@ pub struct Cli {
     #[command(flatten)]
     pub verbosity: VerbosityArgs,
 
+    /// Additional configuration options. NAME is a TOML dotted key; VALUE is
+    /// a TOML expression. Bare strings (without TOML constructs) may omit
+    /// quotes. Repeatable.
+    #[arg(long = "config", value_name = "NAME=VALUE", action = ArgAction::Append)]
+    pub config: Vec<String>,
+
+    /// Additional configuration files, appended at top file-backed precedence.
+    /// Repeatable.
+    #[arg(long = "config-file", value_name = "PATH", action = ArgAction::Append)]
+    pub config_file: Vec<PathBuf>,
+
     #[command(subcommand)]
     pub command: commands::Command,
 }
@@ -63,5 +74,15 @@ pub fn run() -> ExitCode {
         }
     }
 
-    commands::dispatch(cli.command)
+    // Resolve and load config up front. Future alias / extension dispatchers
+    // will consult this before delegating to a built-in subcommand.
+    let loaded = match commands::config::load(&cli.config_file, &cli.config) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("west: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    commands::dispatch(cli.command, loaded)
 }

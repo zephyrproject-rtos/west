@@ -1,8 +1,11 @@
+use std::path::Path;
 use std::process::ExitCode;
 
 use clap::Args;
 
-use super::{LoadedConfig, ScopeArgs, load, scope_to_path};
+use west_core::config::{ConfigValue, Configuration};
+
+use super::{LoadedConfig, ScopeArgs, scope_to_path};
 
 #[derive(Args, Debug)]
 pub struct GetArgs {
@@ -12,16 +15,14 @@ pub struct GetArgs {
     pub scope: ScopeArgs,
 }
 
-pub fn run(args: GetArgs) -> ExitCode {
-    let extras: Vec<_> = args.scope.file.iter().cloned().collect();
-    let LoadedConfig { resolved, config } = match load(&extras) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("west: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let scope_path = match scope_to_path(&args.scope, &resolved) {
+pub fn run(args: GetArgs, loaded: &mut LoadedConfig) -> ExitCode {
+    // --file PATH: operate strictly on PATH; ignore the layered config and
+    // any --config inline overrides.
+    if let Some(file) = &args.scope.file {
+        return get_from_single_file(&args.name, file);
+    }
+
+    let scope_path = match scope_to_path(&args.scope, &loaded.resolved) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("west: {e}");
@@ -29,35 +30,37 @@ pub fn run(args: GetArgs) -> ExitCode {
         }
     };
 
-    // Lookup either across all layers or in a single layer. We try the scalar
-    // accessor first; if the value turns out to be a list, fall through to
-    // the list accessor.
-    let scalar = match &scope_path {
-        Some(p) => match config.get_str_in(&args.name, p) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("west: {e}");
-                return ExitCode::from(2);
-            }
-        },
-        None => config.get_str(&args.name),
+    let value = match scope_path {
+        Some(p) => loaded.config.get_in(&args.name, &p),
+        None => loaded.config.get(&args.name),
     };
 
-    if let Some(s) = scalar {
-        println!("{s}");
-        return ExitCode::SUCCESS;
-    }
+    emit(value)
+}
 
-    // Maybe it's a list?
-    let list_result = match &scope_path {
-        Some(p) => config.get_list_str_in(&args.name, p),
-        None => config.get_list_str(&args.name),
+fn get_from_single_file(name: &str, file: &Path) -> ExitCode {
+    let single = match Configuration::load([file.to_path_buf()]) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("west: {e}");
+            return ExitCode::FAILURE;
+        }
     };
-    match list_result {
-        Ok(Some(items)) => {
-            for item in items {
-                println!("{item}");
+    emit(single.get_in(name, file))
+}
+
+fn emit(value: Result<Option<ConfigValue>, west_core::config::ConfigError>) -> ExitCode {
+    match value {
+        Ok(Some(ConfigValue::List(items))) => {
+            for it in items {
+                if let Ok(s) = format_scalar(&it) {
+                    println!("{s}");
+                }
             }
+            ExitCode::SUCCESS
+        }
+        Ok(Some(scalar)) => {
+            println!("{scalar}");
             ExitCode::SUCCESS
         }
         Ok(None) => ExitCode::FAILURE,
@@ -68,3 +71,9 @@ pub fn run(args: GetArgs) -> ExitCode {
     }
 }
 
+fn format_scalar(v: &ConfigValue) -> Result<String, std::fmt::Error> {
+    use std::fmt::Write;
+    let mut buf = String::new();
+    write!(&mut buf, "{v}")?;
+    Ok(buf)
+}
