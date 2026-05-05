@@ -1,9 +1,11 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{ArgAction, Args, Parser};
 use log::LevelFilter;
 
+pub mod alias;
 pub mod commands;
 
 #[derive(Parser, Debug)]
@@ -61,23 +63,37 @@ impl VerbosityArgs {
 }
 
 pub fn run() -> ExitCode {
-    let cli = Cli::parse();
+    let argv: Vec<OsString> = std::env::args_os().collect();
 
-    env_logger::Builder::new()
-        .filter_level(cli.verbosity.log_level_filter())
-        .init();
+    // Initial parse: read top-level flags (-C, -v/-q, --config, --config-file)
+    // from the user's actual argv. These are the only sources for those flags;
+    // aliases never propagate them.
+    let initial = Cli::parse_from(&argv);
 
-    if let Some(dir) = &cli.chdir {
+    if let Some(dir) = &initial.chdir {
         if let Err(e) = std::env::set_current_dir(dir) {
             eprintln!("west: -C {}: {e}", dir.display());
             return ExitCode::FAILURE;
         }
     }
 
-    // Resolve and load config up front. Future alias / extension dispatchers
-    // will consult this before delegating to a built-in subcommand.
-    let loaded = match commands::config::load(&cli.config_file, &cli.config) {
+    env_logger::Builder::new()
+        .filter_level(initial.verbosity.log_level_filter())
+        .init();
+
+    let loaded = match commands::config::load(&initial.config_file, &initial.config) {
         Ok(l) => l,
+        Err(e) => {
+            eprintln!("west: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // Resolve aliases. Re-parses argv on each iteration; aliases never inject
+    // top-level flags (validated in `alias::lookup`) so the initial chdir,
+    // logger, and config state remain valid throughout.
+    let cli = match alias::resolve_loop(argv, &loaded.config) {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("west: {e}");
             return ExitCode::FAILURE;
