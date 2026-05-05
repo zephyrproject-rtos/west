@@ -161,6 +161,7 @@ pub fn resolve_loop(mut argv: Vec<OsString>, cfg: &Configuration) -> Result<Cli,
 fn subcommand_token(cmd: &Command) -> String {
     match cmd {
         Command::Config(_) => "config".to_owned(),
+        Command::Exec(_) => "exec".to_owned(),
         Command::Topdir => "topdir".to_owned(),
         Command::External(args) => args
             .first()
