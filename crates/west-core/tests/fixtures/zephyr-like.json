@@ -1,0 +1,56 @@
+{
+  "manifest": {
+    "version": "1.2",
+    "remotes": [
+      { "name": "upstream", "url-base": "https://github.com/zephyrproject-rtos" },
+      { "name": "nrf",      "url-base": "https://github.com/nrfconnect" }
+    ],
+    "defaults": { "remote": "upstream", "revision": "main" },
+    "self": {
+      "path": "manifest",
+      "west-commands": "scripts/west-commands.yml"
+    },
+    "group-filter": ["-optional", "+core"],
+    "projects": [
+      { "name": "zephyr", "groups": ["core"] },
+      {
+        "name": "hal_nordic",
+        "remote": "nrf",
+        "revision": "nordic-fixes",
+        "path": "modules/hal/nordic",
+        "clone-depth": 1,
+        "groups": ["hal", "core"]
+      },
+      {
+        "name": "hal_st",
+        "remote": "upstream",
+        "repo-path": "hal_st",
+        "path": "modules/hal/st",
+        "groups": ["hal", "optional"]
+      },
+      {
+        "name": "vendor-thing",
+        "url": "https://git.example.com/vendor-thing.git",
+        "revision": "v2.0.0",
+        "path": "vendor/thing",
+        "west-commands": ["west-commands.yml", "extra-commands.yml"],
+        "submodules": true
+      },
+      {
+        "name": "with-explicit-submodules",
+        "revision": "main",
+        "path": "subs",
+        "submodules": [
+          { "path": "deep/sub" },
+          { "path": "other/sub", "name": "my-sub-name" }
+        ]
+      },
+      {
+        "name": "no-submodules-explicit",
+        "path": "nosubs",
+        "submodules": false,
+        "userdata": { "any": "thing", "nested": { "deeply": "ok" } }
+      }
+    ]
+  }
+}

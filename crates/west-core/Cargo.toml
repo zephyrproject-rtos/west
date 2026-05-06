@@ -7,10 +7,14 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-log = "0.4"
-toml_edit = "0.22"
-tempfile = "3"
 dirs = "5"
+garde = { version = "0.20", features = ["derive", "regex"] }
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde-saphyr = "0.0.26"
+serde_json = "1"
+tempfile = "3"
+toml_edit = { version = "0.22", features = ["serde"] }
 
 [dev-dependencies]
 serial_test = "3"

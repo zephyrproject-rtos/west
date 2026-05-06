@@ -15,4 +15,5 @@ impl std::error::Error for WestNotFound {}
 
 pub mod config;
 pub mod config_paths;
+pub mod manifest;
 pub mod topdir;
