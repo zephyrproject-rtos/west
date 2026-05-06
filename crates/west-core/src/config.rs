@@ -240,17 +240,11 @@ impl Configuration {
     /// programmatically.
     pub fn set_inline(&mut self, option: &str, value: ConfigValue) -> Result<(), ConfigError> {
         let (section, key) = parse_key(option)?;
+        let parts = dotted_parts(section, key);
+        let (leaf, prefix) = parts.split_last().expect("parse_key ensures non-empty");
         let inline = self.inline.get_or_insert_with(DocumentMut::new);
-        let section_item = inline
-            .entry(section)
-            .or_insert_with(|| Item::Table(Table::new()));
-        let table = section_item
-            .as_table_mut()
-            .ok_or_else(|| ConfigError::TypeMismatch {
-                option: option.to_owned(),
-                expected: "table",
-            })?;
-        table[key] = Item::Value(value.into_toml_value());
+        let table = ensure_table_mut(inline, prefix, option)?;
+        table[*leaf] = Item::Value(value.into_toml_value());
         Ok(())
     }
 
@@ -480,20 +474,13 @@ impl Configuration {
         layer: &Path,
     ) -> Result<(), ConfigError> {
         let (section, key) = parse_key(option)?;
+        let parts = dotted_parts(section, key);
+        let (leaf, prefix) = parts.split_last().expect("parse_key ensures non-empty");
         let idx = self.find_layer(layer)?;
         let l = &mut self.layers[idx];
 
-        let section_item = l
-            .doc
-            .entry(section)
-            .or_insert_with(|| Item::Table(Table::new()));
-        let table = section_item
-            .as_table_mut()
-            .ok_or_else(|| ConfigError::TypeMismatch {
-                option: option.to_owned(),
-                expected: "table",
-            })?;
-        table[key] = Item::Value(value.into_toml_value());
+        let table = ensure_table_mut(&mut l.doc, prefix, option)?;
+        table[*leaf] = Item::Value(value.into_toml_value());
 
         write_atomic(&l.path, &l.doc)?;
         l.exists = true;
@@ -502,25 +489,11 @@ impl Configuration {
 
     pub fn delete(&mut self, option: &str, layer: &Path) -> Result<(), ConfigError> {
         let (section, key) = parse_key(option)?;
+        let parts = dotted_parts(section, key);
         let idx = self.find_layer(layer)?;
         let l = &mut self.layers[idx];
 
-        let section_item = l
-            .doc
-            .get_mut(section)
-            .ok_or_else(|| ConfigError::NotFound(option.to_owned()))?;
-        let table = section_item
-            .as_table_mut()
-            .ok_or_else(|| ConfigError::NotFound(option.to_owned()))?;
-
-        if table.remove(key).is_none() {
-            return Err(ConfigError::NotFound(option.to_owned()));
-        }
-
-        if table.is_empty() {
-            l.doc.remove(section);
-        }
-
+        delete_nested(&mut l.doc, &parts, option)?;
         write_atomic(&l.path, &l.doc)?;
         Ok(())
     }
@@ -593,15 +566,104 @@ fn parse_key(option: &str) -> Result<(&str, &str), ConfigError> {
     }
 }
 
+/// Build the full dotted path from `(section, rest)`. Each segment must be
+/// non-empty.
+fn dotted_parts<'a>(section: &'a str, key: &'a str) -> Vec<&'a str> {
+    std::iter::once(section).chain(key.split('.')).collect()
+}
+
+/// Walk a dotted path through nested tables (and inline tables) and return
+/// the leaf [`Value`] if it exists.
 fn lookup<'a>(doc: &'a DocumentMut, section: &str, key: &str) -> Option<&'a Value> {
-    let section_item = doc.get(section)?;
-    if let Some(table) = section_item.as_table() {
-        return table.get(key).and_then(|i| i.as_value());
+    let parts = dotted_parts(section, key);
+    let (leaf, prefix) = parts.split_last()?;
+    let mut cur = Cursor::Table(doc);
+    for part in prefix {
+        cur = cur.descend(part)?;
     }
-    if let Some(inline) = section_item.as_inline_table() {
-        return inline.get(key);
+    cur.value(leaf)
+}
+
+/// Cursor for navigating either kind of TOML table during read.
+enum Cursor<'a> {
+    Table(&'a toml_edit::Table),
+    Inline(&'a toml_edit::InlineTable),
+}
+
+impl<'a> Cursor<'a> {
+    fn descend(self, name: &str) -> Option<Cursor<'a>> {
+        match self {
+            Cursor::Table(t) => {
+                let item = t.get(name)?;
+                if let Some(t) = item.as_table() {
+                    Some(Cursor::Table(t))
+                } else if let Some(it) = item.as_inline_table() {
+                    Some(Cursor::Inline(it))
+                } else {
+                    None
+                }
+            }
+            Cursor::Inline(it) => {
+                let v = it.get(name)?;
+                v.as_inline_table().map(Cursor::Inline)
+            }
+        }
     }
-    None
+
+    fn value(self, name: &str) -> Option<&'a Value> {
+        match self {
+            Cursor::Table(t) => t.get(name).and_then(|i| i.as_value()),
+            Cursor::Inline(it) => it.get(name),
+        }
+    }
+}
+
+/// Walk + create intermediate sub-tables, returning the deepest table.
+/// Errors if any intermediate exists but is not a standard table (e.g.,
+/// it's an inline table or a scalar).
+fn ensure_table_mut<'a>(
+    table: &'a mut Table,
+    parts: &[&str],
+    option: &str,
+) -> Result<&'a mut Table, ConfigError> {
+    if parts.is_empty() {
+        return Ok(table);
+    }
+    let head = parts[0];
+    let item = table
+        .entry(head)
+        .or_insert_with(|| Item::Table(Table::new()));
+    let sub = item
+        .as_table_mut()
+        .ok_or_else(|| ConfigError::TypeMismatch {
+            option: option.to_owned(),
+            expected: "table",
+        })?;
+    ensure_table_mut(sub, &parts[1..], option)
+}
+
+/// Recursively delete the leaf at `parts` and clean up any sub-tables that
+/// become empty along the way.
+fn delete_nested(table: &mut Table, parts: &[&str], option: &str) -> Result<(), ConfigError> {
+    debug_assert!(!parts.is_empty());
+    if parts.len() == 1 {
+        if table.remove(parts[0]).is_none() {
+            return Err(ConfigError::NotFound(option.to_owned()));
+        }
+        return Ok(());
+    }
+    let head = parts[0];
+    let item = table
+        .get_mut(head)
+        .ok_or_else(|| ConfigError::NotFound(option.to_owned()))?;
+    let sub = item
+        .as_table_mut()
+        .ok_or_else(|| ConfigError::NotFound(option.to_owned()))?;
+    delete_nested(sub, &parts[1..], option)?;
+    if sub.is_empty() {
+        table.remove(head);
+    }
+    Ok(())
 }
 
 fn value_as_string(v: &Value) -> Option<String> {
@@ -632,24 +694,45 @@ fn value_as_list_str(v: &Value) -> Option<Vec<String>> {
 
 fn collect_items(doc: &DocumentMut) -> Vec<(String, ConfigValue)> {
     let mut out = Vec::new();
-    for (section, item) in doc.iter() {
-        if let Some(table) = item.as_table() {
-            for (key, value_item) in table.iter() {
-                if let Some(v) = value_item.as_value() {
-                    if let Some(cv) = ConfigValue::from_toml_value(v) {
-                        out.push((format!("{section}.{key}"), cv));
-                    }
-                }
-            }
+    walk_table_items(doc, "", &mut out);
+    out
+}
+
+/// Recursively walk `table` and append `(dotted-key, value)` pairs into `out`.
+/// Nested tables produce dotted keys; the leaf must be a serializable
+/// scalar/list (anything `ConfigValue::from_toml_value` accepts).
+fn walk_table_items(table: &Table, prefix: &str, out: &mut Vec<(String, ConfigValue)>) {
+    for (key, item) in table.iter() {
+        let path = if prefix.is_empty() {
+            key.to_owned()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        if let Some(sub) = item.as_table() {
+            walk_table_items(sub, &path, out);
         } else if let Some(inline) = item.as_inline_table() {
-            for (key, v) in inline.iter() {
-                if let Some(cv) = ConfigValue::from_toml_value(v) {
-                    out.push((format!("{section}.{key}"), cv));
-                }
+            walk_inline_items(inline, &path, out);
+        } else if let Some(v) = item.as_value() {
+            if let Some(cv) = ConfigValue::from_toml_value(v) {
+                out.push((path, cv));
             }
         }
     }
-    out
+}
+
+fn walk_inline_items(
+    inline: &toml_edit::InlineTable,
+    prefix: &str,
+    out: &mut Vec<(String, ConfigValue)>,
+) {
+    for (key, v) in inline.iter() {
+        let path = format!("{prefix}.{key}");
+        if let Some(nested) = v.as_inline_table() {
+            walk_inline_items(nested, &path, out);
+        } else if let Some(cv) = ConfigValue::from_toml_value(v) {
+            out.push((path, cv));
+        }
+    }
 }
 
 fn write_atomic(path: &Path, doc: &DocumentMut) -> Result<(), ConfigError> {
@@ -1012,19 +1095,64 @@ mod tests {
     }
 
     #[test]
-    fn dotted_key_three_levels_round_trips() {
+    fn dotted_key_three_levels_round_trips_via_nested_tables() {
         let tmp = TempDir::new().unwrap();
         let p = tmp.path().join("c.toml");
         let mut c = cfg(&[&p]);
         c.set("foo.bar.baz", ConfigValue::String("v".into()), &p)
             .unwrap();
         let written = fs::read_to_string(&p).unwrap();
-        assert!(written.contains("[foo]"), "got: {written}");
-        assert!(written.contains(r#""bar.baz" = "v""#), "got: {written}");
+        // 3-level dotted keys serialize as nested TOML tables.
+        assert!(written.contains("[foo.bar]"), "got: {written}");
+        assert!(written.contains(r#"baz = "v""#), "got: {written}");
 
-        // Round-trip on reload
+        // Round-trip on reload.
         let c2 = cfg(&[&p]);
         assert_eq!(c2.get_str("foo.bar.baz").unwrap().as_deref(), Some("v"));
+    }
+
+    #[test]
+    fn nested_dotted_keys_share_intermediate_tables() {
+        // Setting `tool.git.binary` and `tool.git.shallow` should produce a
+        // single `[tool.git]` table with two values, not two separate ones.
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        let mut c = cfg(&[&p]);
+        c.set(
+            "tool.git.binary",
+            ConfigValue::String("/usr/bin/git".into()),
+            &p,
+        )
+        .unwrap();
+        c.set("tool.git.shallow", ConfigValue::Bool(true), &p)
+            .unwrap();
+
+        let written = fs::read_to_string(&p).unwrap();
+        // One [tool.git] table with two keys.
+        let occurrences = written.matches("[tool.git]").count();
+        assert_eq!(occurrences, 1, "got: {written}");
+        assert_eq!(
+            c.get_str("tool.git.binary").unwrap().as_deref(),
+            Some("/usr/bin/git")
+        );
+        assert_eq!(c.get_bool("tool.git.shallow").unwrap(), Some(true));
+    }
+
+    #[test]
+    fn nested_delete_cleans_up_empty_parent_tables() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("c.toml");
+        let mut c = cfg(&[&p]);
+        c.set(
+            "tool.git.binary",
+            ConfigValue::String("/usr/bin/git".into()),
+            &p,
+        )
+        .unwrap();
+        c.delete("tool.git.binary", &p).unwrap();
+        let written = fs::read_to_string(&p).unwrap();
+        // Both `[tool.git]` and `[tool]` should be gone since both became empty.
+        assert!(!written.contains("[tool"), "got: {written}");
     }
 
     #[test]
