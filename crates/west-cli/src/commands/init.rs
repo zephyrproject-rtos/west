@@ -172,31 +172,30 @@ fn bootstrap(
             )));
         }
 
-        let manifest = Manifest::from_path(&manifest_yaml).map_err(InitError::Manifest)?;
-        let yaml_self_path = &manifest.self_.path;
+        // Use the lenient probe: at bootstrap we only need `self.path`. The
+        // strict loader rejects `import:` directives (e.g. zephyr's example
+        // application), but those don't matter until later commands consume
+        // the manifest — we shouldn't block init on them.
+        let yaml_self_path =
+            Manifest::peek_self_path(&manifest_yaml).map_err(InitError::Manifest)?;
 
         let manifest_path = match user_manifest_path.clone() {
             Some(user) => {
-                if !yaml_self_path.as_os_str().is_empty()
-                    && yaml_self_path != &user
-                    && yaml_self_path != Path::new("manifest")
-                {
-                    eprintln!(
-                        "west: warning: --manifest-path={} differs from the manifest's self.path ({}); the workspace layout will not match the manifest's documented layout",
-                        user.display(),
-                        yaml_self_path.display(),
-                    );
+                if let Some(yaml) = &yaml_self_path {
+                    if yaml != &user && yaml != Path::new("manifest") {
+                        eprintln!(
+                            "west: warning: --manifest-path={} differs from the manifest's self.path ({}); the workspace layout will not match the manifest's documented layout",
+                            user.display(),
+                            yaml.display(),
+                        );
+                    }
                 }
                 user
             }
-            None => {
-                if !yaml_self_path.as_os_str().is_empty() && yaml_self_path != Path::new("manifest")
-                {
-                    yaml_self_path.clone()
-                } else {
-                    PathBuf::from(url_basename(url))
-                }
-            }
+            None => match yaml_self_path {
+                Some(p) if p != Path::new("manifest") => p,
+                _ => PathBuf::from(url_basename(url)),
+            },
         };
 
         // Move tempdir → <workspace>/<manifest.path>.

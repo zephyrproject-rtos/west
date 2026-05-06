@@ -359,6 +359,39 @@ enum OneOrMany<T> {
     Many(Vec<T>),
 }
 
+// =====================================================================
+// Lenient probe — used by `peek_self_path`. Tolerates `import:` keys,
+// unknown fields, and partial/incomplete manifests because it doesn't
+// derive `Validate` or use `#[serde(deny_unknown_fields)]`.
+// =====================================================================
+
+#[derive(Debug, Deserialize)]
+struct ManifestProbeFile {
+    #[serde(default)]
+    manifest: Option<ManifestProbeSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ManifestProbeSection {
+    #[serde(default, rename = "self")]
+    self_: Option<SelfProbe>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SelfProbe {
+    #[serde(default)]
+    path: Option<String>,
+}
+
+impl ManifestProbeFile {
+    fn into_self_path(self) -> Option<PathBuf> {
+        self.manifest
+            .and_then(|m| m.self_)
+            .and_then(|s| s.path)
+            .map(PathBuf::from)
+    }
+}
+
 impl<T> OneOrMany<T> {
     fn into_vec(self) -> Vec<T> {
         match self {
@@ -398,6 +431,41 @@ impl Manifest {
             Some("yaml") | Some("yml") => Self::from_yaml_str(&body),
             Some("toml") => Self::from_toml_str(&body),
             Some("json") => Self::from_json_str(&body),
+            other => Err(ManifestError::UnsupportedFormat(
+                other.unwrap_or("").to_owned(),
+            )),
+        }
+    }
+
+    /// Read just `manifest.self.path` from a manifest file, tolerating
+    /// `import:` directives and unknown fields. Useful at workspace bootstrap
+    /// time, when we want to discover where the manifest repo should live
+    /// without yet committing to a full validation pass.
+    ///
+    /// Returns `Ok(None)` when the file is parseable but has no `self.path`.
+    /// Returns the same parse errors as the strict loaders for malformed
+    /// input.
+    pub fn peek_self_path(path: &Path) -> Result<Option<PathBuf>, ManifestError> {
+        let body = fs::read_to_string(path).map_err(|e| ManifestError::Io {
+            path: path.to_owned(),
+            source: e,
+        })?;
+        match path.extension().and_then(OsStr::to_str) {
+            Some("yaml") | Some("yml") => {
+                let probe: ManifestProbeFile =
+                    serde_saphyr::from_str(&body).map_err(ManifestError::Yaml)?;
+                Ok(probe.into_self_path())
+            }
+            Some("toml") => {
+                let probe: ManifestProbeFile =
+                    toml_edit::de::from_str(&body).map_err(ManifestError::Toml)?;
+                Ok(probe.into_self_path())
+            }
+            Some("json") => {
+                let probe: ManifestProbeFile =
+                    serde_json::from_str(&body).map_err(ManifestError::Json)?;
+                Ok(probe.into_self_path())
+            }
             other => Err(ManifestError::UnsupportedFormat(
                 other.unwrap_or("").to_owned(),
             )),
@@ -968,6 +1036,84 @@ manifest:
         )
         .unwrap();
         assert_eq!(m.projects[0].revision, "master");
+    }
+
+    #[test]
+    fn peek_self_path_returns_path_on_yaml() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = dir.path().join("m.yml");
+        std::fs::write(
+            &p,
+            r#"
+manifest:
+  self:
+    path: my-manifest
+  projects:
+    - name: x
+      url: https://example.com/x
+"#,
+        )
+        .unwrap();
+        let got = Manifest::peek_self_path(&p).unwrap();
+        assert_eq!(got, Some(PathBuf::from("my-manifest")));
+    }
+
+    #[test]
+    fn peek_self_path_tolerates_imports_and_unknown_fields() {
+        // Mirrors zephyrproject-rtos/example-application's shape: project-level
+        // `import:` plus `name-allowlist`, plus an unknown top-level key. The
+        // strict loader rejects all of these; `peek_self_path` must not.
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = dir.path().join("m.yml");
+        std::fs::write(
+            &p,
+            r#"
+manifest:
+  self:
+    path: example-application
+  unknown-future-key: 42
+  remotes:
+    - name: r
+      url-base: https://example.com
+  projects:
+    - name: zephyr
+      remote: r
+      revision: main
+      import:
+        name-allowlist: [cmsis]
+"#,
+        )
+        .unwrap();
+        let got = Manifest::peek_self_path(&p).unwrap();
+        assert_eq!(got, Some(PathBuf::from("example-application")));
+    }
+
+    #[test]
+    fn peek_self_path_returns_none_when_unset() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = dir.path().join("m.yml");
+        std::fs::write(
+            &p,
+            r#"
+manifest:
+  projects:
+    - name: x
+      url: https://example.com/x
+"#,
+        )
+        .unwrap();
+        assert_eq!(Manifest::peek_self_path(&p).unwrap(), None);
+    }
+
+    #[test]
+    fn peek_self_path_propagates_parse_errors() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = dir.path().join("m.yml");
+        std::fs::write(&p, "manifest: [not, valid").unwrap();
+        assert!(matches!(
+            Manifest::peek_self_path(&p),
+            Err(ManifestError::Yaml(_))
+        ));
     }
 
     #[test]

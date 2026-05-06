@@ -108,6 +108,25 @@ const SAMPLE_MANIFEST_NO_SELF_PATH: &str = r#"manifest:
       remote: example
 "#;
 
+/// Mirrors the structure used by zephyrproject-rtos/example-application:
+/// a `self.path`, a remote, and a project with `import:` to pull in a
+/// nested manifest. Strict validation rejects `import:`; init must not.
+const SAMPLE_MANIFEST_WITH_IMPORT: &str = r#"manifest:
+  self:
+    path: example-application
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: main
+      import:
+        name-allowlist:
+          - cmsis
+          - hal_nordic
+"#;
+
 // ===========================================================================
 // bootstrap mode
 // ===========================================================================
@@ -399,6 +418,43 @@ fn bootstrap_in_subdir_of_existing_workspace_errors() {
         .failure();
     let stderr = String::from_utf8_lossy(&res.get_output().stderr);
     assert!(stderr.contains("already"), "stderr: {stderr}");
+}
+
+#[test]
+#[serial]
+fn bootstrap_succeeds_when_manifest_uses_imports() {
+    // Mirrors the real-world case of zephyrproject-rtos/example-application,
+    // whose west.yml has `import:` on its zephyr project. Init should not
+    // reject the manifest at bootstrap time — it only needs `self.path`.
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let sb = Sandbox::new();
+    let bare = make_bare_manifest_repo(sb.root(), SAMPLE_MANIFEST_WITH_IMPORT);
+    let workspace = sb.root().join("ws");
+
+    sb.west()
+        .args([
+            "init",
+            "--url",
+            bare.to_str().unwrap(),
+            workspace.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    assert!(
+        workspace
+            .join("example-application")
+            .join("west.yml")
+            .exists()
+    );
+    let cfg = read(&workspace.join(".west").join("config.toml"));
+    assert!(
+        cfg.contains(r#"path = "example-application""#),
+        "got: {cfg}"
+    );
 }
 
 #[test]
