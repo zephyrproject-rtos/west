@@ -7,6 +7,7 @@ use config::LoadedConfig;
 
 pub mod config;
 pub mod exec;
+pub mod init;
 pub mod topdir;
 
 #[derive(Subcommand, Debug)]
@@ -18,6 +19,8 @@ pub enum Command {
     /// be unambiguous about where exec's args end and the target program's
     /// args begin: `west exec -- python -c 'print(1+1)'`.
     Exec(exec::ExecArgs),
+    /// Initialize a west workspace.
+    Init(init::InitArgs),
     /// Print the top directory of the west workspace.
     Topdir,
     /// Catch-all for unknown subcommand names. Resolved via aliases when
@@ -30,6 +33,7 @@ pub fn dispatch(cmd: Command, mut loaded: LoadedConfig) -> ExitCode {
     match cmd {
         Command::Config(a) => config::run(a, &mut loaded),
         Command::Exec(a) => exec::run(a),
+        Command::Init(a) => init::run(a, &mut loaded),
         Command::Topdir => topdir::run(),
         Command::External(args) => {
             let name = args
