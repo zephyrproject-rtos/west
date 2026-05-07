@@ -84,12 +84,38 @@ pub trait Vcs: fmt::Debug {
     /// existing local branch.
     fn checkout(&self, repo: &Path, target: &CheckoutTarget<'_>) -> Result<(), VcsError>;
 
+    /// Rebase the current branch in `repo` onto `onto`. Fails if the
+    /// rebase has conflicts; the working tree is left in whatever state the
+    /// underlying tool leaves it.
+    fn rebase(&self, repo: &Path, onto: &str) -> Result<(), VcsError>;
+
     /// `true` when `repo`'s working tree has no uncommitted changes.
     fn is_clean(&self, repo: &Path) -> Result<bool, VcsError>;
 
-    /// Record `sha` as the manifest-rev of `repo`. Implementations choose
-    /// where to store it; git writes `refs/heads/manifest-rev`.
-    fn set_manifest_rev(&self, repo: &Path, sha: &str) -> Result<(), VcsError>;
+    /// The branch HEAD currently points at. `Ok(None)` when HEAD is
+    /// detached (or otherwise not on a branch).
+    fn head_branch(&self, repo: &Path) -> Result<Option<String>, VcsError>;
+
+    /// Materialize the submodules in `repo`. `scope` selects all submodules
+    /// or a specific list (paths within the repo). Behavior knobs (recursion,
+    /// pre-update sync) live in `tool.<client>.submodules.*` config.
+    ///
+    /// Clients that don't have a submodule concept should return a
+    /// [`VcsError::CommandFailed`] when invoked on a non-empty scope; for
+    /// `Specific(&[])` the call must be a no-op so callers can pass through
+    /// an empty manifest list without branching.
+    fn update_submodules(&self, repo: &Path, scope: &SubmoduleScope<'_>) -> Result<(), VcsError>;
+
+    /// Record `sha` as the manifest-rev of `repo`. `reason`, if given, is
+    /// recorded with the underlying ref operation so users can inspect why
+    /// the pointer moved (git: shows up in `git reflog refs/heads/manifest-rev`).
+    /// Implementations choose where the pointer is stored.
+    fn set_manifest_rev(
+        &self,
+        repo: &Path,
+        sha: &str,
+        reason: Option<&str>,
+    ) -> Result<(), VcsError>;
 
     /// Read the recorded manifest-rev of `repo`. Returns `Ok(None)` if no
     /// manifest-rev has been recorded yet (fresh clone, hand-curated dir).
@@ -116,6 +142,16 @@ pub enum CheckoutTarget<'a> {
     Detached(&'a str),
     /// An existing local branch.
     Branch(&'a str),
+}
+
+/// Which submodules to act on in [`Vcs::update_submodules`].
+#[derive(Debug, Clone, Copy)]
+pub enum SubmoduleScope<'a> {
+    /// All submodules declared in the repo.
+    All,
+    /// A specific list of submodule paths (relative to the repo root). An
+    /// empty slice is a no-op.
+    Specific(&'a [&'a str]),
 }
 
 /// Errors common to any client. Implementations wrap their tool-specific

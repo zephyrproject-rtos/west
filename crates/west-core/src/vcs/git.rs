@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 
 use crate::config::Configuration;
 
-use super::{CheckoutTarget, FetchSpec, Vcs, VcsError};
+use super::{CheckoutTarget, FetchSpec, SubmoduleScope, Vcs, VcsError};
 
 const NAME: &str = "git";
 
@@ -23,7 +23,7 @@ pub struct GitClient {
     opts: GitOptions,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct GitOptions {
     /// Path to the `git` executable. Defaults to `"git"` (PATH lookup).
     /// Sourced from the `tool.git.binary` config key.
@@ -37,6 +37,31 @@ pub struct GitOptions {
     /// Sourced from `tool.git.fetch.depth`. When set, fetches are shallow
     /// to that depth via `--depth=N`.
     pub fetch_depth: Option<u32>,
+    /// Sourced from `tool.git.fetch.force`. Default `true` — multi-remote
+    /// repos otherwise silently fail to advance their tracking refs when the
+    /// manifest revision points at a different commit than the one already
+    /// fetched.
+    pub fetch_force: bool,
+    /// Sourced from `tool.git.submodules.recurse`. Default `true`. Drives
+    /// `--recursive` on `git submodule update` and `git submodule sync`.
+    pub submodules_recurse: bool,
+    /// Sourced from `tool.git.submodules.sync`. Default `true`. When `true`,
+    /// runs `git submodule sync` before `git submodule update`.
+    pub submodules_sync: bool,
+}
+
+impl Default for GitOptions {
+    fn default() -> Self {
+        Self {
+            binary: None,
+            fetch_strategy: FetchStrategy::default(),
+            fetch_tags: None,
+            fetch_depth: None,
+            fetch_force: true,
+            submodules_recurse: true,
+            submodules_sync: true,
+        }
+    }
 }
 
 /// Strategy for [`Vcs::fetch`](super::Vcs::fetch). `Smart` skips the network
@@ -102,11 +127,29 @@ impl GitClient {
             Err(e) => return Err(bad_option("tool.git.fetch.depth", &e.to_string())),
         };
 
+        let fetch_force = match config.get_bool("tool.git.fetch.force") {
+            Ok(opt) => opt.unwrap_or(true),
+            Err(e) => return Err(bad_option("tool.git.fetch.force", &e.to_string())),
+        };
+
+        let submodules_recurse = match config.get_bool("tool.git.submodules.recurse") {
+            Ok(opt) => opt.unwrap_or(true),
+            Err(e) => return Err(bad_option("tool.git.submodules.recurse", &e.to_string())),
+        };
+
+        let submodules_sync = match config.get_bool("tool.git.submodules.sync") {
+            Ok(opt) => opt.unwrap_or(true),
+            Err(e) => return Err(bad_option("tool.git.submodules.sync", &e.to_string())),
+        };
+
         Ok(Self::new(GitOptions {
             binary,
             fetch_strategy,
             fetch_tags,
             fetch_depth,
+            fetch_force,
+            submodules_recurse,
+            submodules_sync,
         }))
     }
 
@@ -249,6 +292,9 @@ impl Vcs for GitClient {
         let depth_arg = self.opts.fetch_depth.map(|d| format!("--depth={d}"));
 
         let mut argv: Vec<&str> = vec!["-C", &repo_str, "fetch"];
+        if self.opts.fetch_force {
+            argv.push("--force");
+        }
         match self.opts.fetch_tags {
             Some(true) => argv.push("--tags"),
             Some(false) => argv.push("--no-tags"),
@@ -284,6 +330,13 @@ impl Vcs for GitClient {
         check_success(&res)
     }
 
+    fn rebase(&self, repo: &Path, onto: &str) -> Result<(), VcsError> {
+        let repo_str = repo.to_string_lossy().into_owned();
+        // Inherited stdio: rebase can be long-running and conflict prompts
+        // belong on the user's terminal, not buffered into our error path.
+        self.run_inherit(&["-C", &repo_str, "rebase", onto])
+    }
+
     fn is_clean(&self, repo: &Path) -> Result<bool, VcsError> {
         let repo_str = repo.to_string_lossy().into_owned();
         let res = self.run(&["-C", &repo_str, "status", "--porcelain"])?;
@@ -291,9 +344,71 @@ impl Vcs for GitClient {
         Ok(res.output.stdout.iter().all(|b| b.is_ascii_whitespace()))
     }
 
-    fn set_manifest_rev(&self, repo: &Path, sha: &str) -> Result<(), VcsError> {
+    fn head_branch(&self, repo: &Path) -> Result<Option<String>, VcsError> {
         let repo_str = repo.to_string_lossy().into_owned();
-        let res = self.run(&["-C", &repo_str, "update-ref", MANIFEST_REV_REF, sha])?;
+        let res = self.run(&["-C", &repo_str, "rev-parse", "--abbrev-ref", "HEAD"])?;
+        check_success(&res)?;
+        let stdout = std::str::from_utf8(&res.output.stdout).map_err(|e| VcsError::BadOutput {
+            client: NAME,
+            argv: res.argv.clone(),
+            detail: format!("non-UTF-8 stdout: {e}"),
+        })?;
+        let trimmed = stdout.trim();
+        // git emits the literal "HEAD" when HEAD is detached.
+        if trimmed.is_empty() || trimmed == "HEAD" {
+            Ok(None)
+        } else {
+            Ok(Some(trimmed.to_owned()))
+        }
+    }
+
+    fn update_submodules(&self, repo: &Path, scope: &SubmoduleScope<'_>) -> Result<(), VcsError> {
+        // Empty Specific scope is an explicit no-op (caller may have
+        // collected an empty list from manifest-driven filtering).
+        if let SubmoduleScope::Specific(paths) = scope
+            && paths.is_empty()
+        {
+            return Ok(());
+        }
+
+        let repo_str = repo.to_string_lossy().into_owned();
+
+        if self.opts.submodules_sync {
+            let mut argv: Vec<&str> = vec!["-C", &repo_str, "submodule", "sync"];
+            if self.opts.submodules_recurse {
+                argv.push("--recursive");
+            }
+            if let SubmoduleScope::Specific(paths) = scope {
+                argv.push("--");
+                argv.extend(paths.iter().copied());
+            }
+            self.run_inherit(&argv)?;
+        }
+
+        let mut argv: Vec<&str> = vec!["-C", &repo_str, "submodule", "update", "--init"];
+        if self.opts.submodules_recurse {
+            argv.push("--recursive");
+        }
+        if let SubmoduleScope::Specific(paths) = scope {
+            argv.push("--");
+            argv.extend(paths.iter().copied());
+        }
+        self.run_inherit(&argv)
+    }
+
+    fn set_manifest_rev(
+        &self,
+        repo: &Path,
+        sha: &str,
+        reason: Option<&str>,
+    ) -> Result<(), VcsError> {
+        let repo_str = repo.to_string_lossy().into_owned();
+        let mut argv: Vec<&str> = vec!["-C", &repo_str, "update-ref"];
+        if let Some(msg) = reason {
+            argv.extend(["-m", msg]);
+        }
+        argv.extend([MANIFEST_REV_REF, sha]);
+        let res = self.run(&argv)?;
         check_success(&res)
     }
 

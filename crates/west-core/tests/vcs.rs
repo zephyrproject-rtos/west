@@ -9,7 +9,8 @@ use tempfile::TempDir;
 
 use west_core::config::Configuration;
 use west_core::vcs::{
-    self, CheckoutTarget, FetchSpec, FetchStrategy, GitClient, GitOptions, Vcs, VcsError,
+    self, CheckoutTarget, FetchSpec, FetchStrategy, GitClient, GitOptions, SubmoduleScope, Vcs,
+    VcsError,
 };
 
 // ---------- helpers ----------
@@ -519,7 +520,7 @@ fn manifest_rev_round_trip() {
     let v = GitClient::new(GitOptions::default());
     assert!(v.manifest_rev(&dest).unwrap().is_none());
 
-    v.set_manifest_rev(&dest, &head).unwrap();
+    v.set_manifest_rev(&dest, &head, None).unwrap();
     assert_eq!(
         v.manifest_rev(&dest).unwrap().as_deref(),
         Some(head.as_str())
@@ -528,4 +529,234 @@ fn manifest_rev_round_trip() {
     // Confirm the underlying ref is the conventional location.
     let by_ref = git_capture(&["rev-parse", "refs/heads/manifest-rev"], &dest);
     assert_eq!(by_ref, head);
+}
+
+#[test]
+fn set_manifest_rev_records_reflog_message() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    let head = git_capture(&["rev-parse", "HEAD"], &dest);
+
+    let v = GitClient::new(GitOptions::default());
+    v.set_manifest_rev(&dest, &head, Some("west update: moving to abc"))
+        .unwrap();
+
+    let reflog = git_capture(
+        &["reflog", "--format=%gs", "refs/heads/manifest-rev"],
+        &dest,
+    );
+    assert!(
+        reflog.contains("west update: moving to abc"),
+        "reflog missing reason; got: {reflog}"
+    );
+}
+
+#[test]
+fn head_branch_returns_branch_name() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+
+    let v = GitClient::new(GitOptions::default());
+    assert_eq!(v.head_branch(&dest).unwrap().as_deref(), Some("main"));
+}
+
+#[test]
+fn head_branch_returns_none_when_detached() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    let head = git_capture(&["rev-parse", "HEAD"], &dest);
+
+    let v = GitClient::new(GitOptions::default());
+    v.checkout(&dest, &CheckoutTarget::Detached(&head)).unwrap();
+    assert!(v.head_branch(&dest).unwrap().is_none());
+}
+
+#[test]
+fn rebase_replays_local_commits_onto_target() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    git(&["init", "-q", "--initial-branch=main", "."], &work);
+    std::fs::write(work.join("a"), b"a\n").unwrap();
+    git(&["add", "."], &work);
+    git(&["commit", "-q", "-m", "base"], &work);
+    let base = git_capture(&["rev-parse", "HEAD"], &work);
+
+    // Diverge: target branch advances with one commit; the working branch
+    // (`feature`) gets a different commit on top of `base`.
+    git(&["branch", "target"], &work);
+    git(&["checkout", "-q", "target"], &work);
+    std::fs::write(work.join("a"), b"a-target\n").unwrap();
+    git(&["commit", "-q", "-am", "target advance"], &work);
+    let target_tip = git_capture(&["rev-parse", "HEAD"], &work);
+
+    git(&["checkout", "-q", "-b", "feature", &base], &work);
+    std::fs::write(work.join("b"), b"b\n").unwrap();
+    git(&["add", "."], &work);
+    git(&["commit", "-q", "-m", "feature work"], &work);
+
+    let v = GitClient::new(GitOptions::default());
+    v.rebase(&work, "target").unwrap();
+
+    // After rebase, feature's parent should be target's tip.
+    let parent = git_capture(&["rev-parse", "HEAD^"], &work);
+    assert_eq!(parent, target_tip);
+    let cur = git_capture(&["rev-parse", "--abbrev-ref", "HEAD"], &work);
+    assert_eq!(cur, "feature");
+}
+
+#[test]
+fn update_submodules_materializes_worktree() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+
+    // Build a "library" bare repo to use as a submodule source.
+    let lib_work = tmp.path().join("lib-work");
+    std::fs::create_dir_all(&lib_work).unwrap();
+    git(&["init", "-q", "--initial-branch=main", "."], &lib_work);
+    std::fs::write(lib_work.join("LIB"), b"libdata\n").unwrap();
+    git(&["add", "."], &lib_work);
+    git(&["commit", "-q", "-m", "lib"], &lib_work);
+    let lib_bare = tmp.path().join("lib.git");
+    git(
+        &["clone", "-q", "--bare", "lib-work", "lib.git"],
+        tmp.path(),
+    );
+
+    // Build a "super" repo that registers `lib.git` as a submodule.
+    let super_work = tmp.path().join("super-work");
+    std::fs::create_dir_all(&super_work).unwrap();
+    git(&["init", "-q", "--initial-branch=main", "."], &super_work);
+    std::fs::write(super_work.join("README"), b"super\n").unwrap();
+    git(&["add", "."], &super_work);
+    git(&["commit", "-q", "-m", "init super"], &super_work);
+    git(
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "--",
+            lib_bare.to_str().unwrap(),
+            "vendor/lib",
+        ],
+        &super_work,
+    );
+    git(&["commit", "-q", "-m", "add submodule"], &super_work);
+    let super_bare = tmp.path().join("super.git");
+    git(
+        &["clone", "-q", "--bare", "super-work", "super.git"],
+        tmp.path(),
+    );
+
+    // Fresh clone — submodule worktree should be empty until updated.
+    let dest = tmp.path().join("clone");
+    let v = GitClient::new(GitOptions::default());
+    v.clone(super_bare.to_str().unwrap(), &dest, None, None)
+        .unwrap();
+    assert!(!dest.join("vendor/lib/LIB").exists());
+
+    // Modern git refuses submodule clones over `file://` unless
+    // `protocol.file.allow=always`. The submodule clone runs as a
+    // *subprocess* of `git submodule update`, so a local config on the
+    // parent repo doesn't reach it. The `GIT_CONFIG_*` env vars propagate.
+    let _guard = AllowFileProtocolGuard::set();
+    v.update_submodules(&dest, &SubmoduleScope::All).unwrap();
+
+    assert!(
+        dest.join("vendor/lib/LIB").exists(),
+        "submodule worktree should be materialized"
+    );
+}
+
+/// Test-only RAII guard that exposes `protocol.file.allow=always` to every
+/// `git` subprocess for the guard's lifetime. Used so submodule fetches via
+/// `file://` work in CI sandboxes where global git config can't be touched.
+struct AllowFileProtocolGuard;
+impl AllowFileProtocolGuard {
+    fn set() -> Self {
+        // SAFETY: tests don't otherwise touch GIT_CONFIG_*, and the override
+        // we install is benign for any concurrent git invocation.
+        unsafe {
+            std::env::set_var("GIT_CONFIG_COUNT", "1");
+            std::env::set_var("GIT_CONFIG_KEY_0", "protocol.file.allow");
+            std::env::set_var("GIT_CONFIG_VALUE_0", "always");
+        }
+        Self
+    }
+}
+impl Drop for AllowFileProtocolGuard {
+    fn drop(&mut self) {
+        unsafe {
+            std::env::remove_var("GIT_CONFIG_COUNT");
+            std::env::remove_var("GIT_CONFIG_KEY_0");
+            std::env::remove_var("GIT_CONFIG_VALUE_0");
+        }
+    }
+}
+
+#[test]
+fn update_submodules_specific_empty_is_noop() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+
+    let v = GitClient::new(GitOptions::default());
+    // Non-submodule repo + empty Specific → must succeed without error.
+    v.update_submodules(&dest, &SubmoduleScope::Specific(&[]))
+        .unwrap();
+}
+
+#[test]
+fn from_config_reads_fetch_force_and_submodule_options() {
+    let (_t, cfg) = config_with(
+        r#"[tool.git.fetch]
+force = false
+
+[tool.git.submodules]
+recurse = false
+sync = false
+"#,
+    );
+    let git = GitClient::from_config(&cfg).unwrap();
+    let dbg = format!("{git:?}");
+    assert!(dbg.contains("fetch_force: false"), "got: {dbg}");
+    assert!(dbg.contains("submodules_recurse: false"), "got: {dbg}");
+    assert!(dbg.contains("submodules_sync: false"), "got: {dbg}");
+}
+
+#[test]
+fn from_config_default_fetch_force_is_true() {
+    let cfg = empty_config();
+    let git = GitClient::from_config(&cfg).unwrap();
+    let dbg = format!("{git:?}");
+    assert!(dbg.contains("fetch_force: true"), "got: {dbg}");
+    assert!(dbg.contains("submodules_recurse: true"), "got: {dbg}");
+    assert!(dbg.contains("submodules_sync: true"), "got: {dbg}");
 }
