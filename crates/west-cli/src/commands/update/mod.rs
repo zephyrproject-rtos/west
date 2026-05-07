@@ -24,6 +24,7 @@
 //!   through `rebase` and finally to detached checkout. Python parity
 //!   (project.py:1695).
 
+mod import_source;
 mod output;
 mod select;
 
@@ -118,7 +119,18 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         }
     };
 
-    let manifest = match load_manifest(&workspace, &loaded.config) {
+    // The vcs has to exist before we load the manifest: per-project
+    // imports need it to fetch + read each importing project's manifest
+    // file at its manifest revision.
+    let vcs = match vcs::from_config(&loaded.config) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("west: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let manifest = match load_manifest(&workspace, &loaded.config, vcs.as_ref()) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("west: {e}");
@@ -152,14 +164,6 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Err(e) => {
             eprintln!("west: {e}");
             return ExitCode::from(2);
-        }
-    };
-
-    let vcs = match vcs::from_config(&loaded.config) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("west: {e}");
-            return ExitCode::FAILURE;
         }
     };
 
@@ -273,11 +277,7 @@ fn run_one_project(
     let mut buf: Vec<u8> = Vec::new();
     let outcome = match mode {
         Mode::Inherit => {
-            eprintln!(
-                "=== updating {} ({})",
-                project.name,
-                project.path.display()
-            );
+            eprintln!("=== updating {} ({})", project.name, project.path.display());
             let mut out = Output::Inherit;
             run_project_steps(vcs, project, &repo, settings, &mut out)
         }
@@ -547,7 +547,11 @@ fn resolve_workspace_dir() -> Result<PathBuf, String> {
         .map_err(|_| "not inside a west workspace (no .west/ found)".to_string())
 }
 
-fn load_manifest(workspace: &Path, config: &Configuration) -> Result<Manifest, String> {
+fn load_manifest(
+    workspace: &Path,
+    config: &Configuration,
+    vcs: &dyn Vcs,
+) -> Result<Manifest, String> {
     let manifest_path: PathBuf = config
         .get_str("manifest.path")
         .map_err(|e| e.to_string())?
@@ -558,11 +562,10 @@ fn load_manifest(workspace: &Path, config: &Configuration) -> Result<Manifest, S
         .map_err(|e| e.to_string())?
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_MANIFEST_FILE));
-    let full = workspace.join(&manifest_path).join(&manifest_file);
-    // Lenient: tolerate `import:` directives by warning instead of erroring,
-    // so update can do useful work on the directly-defined projects even
-    // while full import resolution remains unimplemented.
-    Manifest::from_path_lenient(&full)
+    let manifest_repo_root = workspace.join(&manifest_path);
+    let full = manifest_repo_root.join(&manifest_file);
+    let source = import_source::WorkspaceImportSource::new(workspace, vcs);
+    Manifest::from_path_with_imports(&full, &manifest_repo_root, &source)
         .map_err(|e| format!("manifest {}: {e}", full.display()))
 }
 

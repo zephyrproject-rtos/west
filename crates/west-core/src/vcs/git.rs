@@ -180,11 +180,7 @@ impl GitClient {
     /// and forwards the captured bytes to `w` after the child exits — git
     /// won't emit progress in this mode but error messages and "From …"
     /// status lines do come through.
-    fn run_with_output(
-        &self,
-        args: &[&str],
-        out: &mut Output<'_>,
-    ) -> Result<(), VcsError> {
+    fn run_with_output(&self, args: &[&str], out: &mut Output<'_>) -> Result<(), VcsError> {
         match out {
             Output::Inherit => {
                 let status = Command::new(self.binary())

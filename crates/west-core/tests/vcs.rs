@@ -156,8 +156,14 @@ fn clone_round_trip() {
     let dest = tmp.path().join("clone");
 
     let v = GitClient::new(GitOptions::default());
-    v.clone(bare.to_str().unwrap(), &dest, None, None, &mut Output::Capture(&mut io::sink()))
-        .unwrap();
+    v.clone(
+        bare.to_str().unwrap(),
+        &dest,
+        None,
+        None,
+        &mut Output::Capture(&mut io::sink()),
+    )
+    .unwrap();
 
     assert!(v.is_repo(&dest).unwrap());
     let head = v.sha(&dest, "HEAD").unwrap();
@@ -233,8 +239,14 @@ fn sha_resolves_head_and_short_ref() {
     let bare = bare_source_with_one_commit(tmp.path());
     let dest = tmp.path().join("clone");
     let v = GitClient::new(GitOptions::default());
-    v.clone(bare.to_str().unwrap(), &dest, None, None, &mut Output::Capture(&mut io::sink()))
-        .unwrap();
+    v.clone(
+        bare.to_str().unwrap(),
+        &dest,
+        None,
+        None,
+        &mut Output::Capture(&mut io::sink()),
+    )
+    .unwrap();
 
     let head = v.sha(&dest, "HEAD").unwrap();
     assert_eq!(head.len(), 40);
@@ -355,8 +367,14 @@ depth = -1
 fn clone_into(root: &Path, bare: &Path) -> PathBuf {
     let dest = root.join("clone");
     let v = GitClient::new(GitOptions::default());
-    v.clone(bare.to_str().unwrap(), &dest, None, None, &mut Output::Capture(&mut io::sink()))
-        .unwrap();
+    v.clone(
+        bare.to_str().unwrap(),
+        &dest,
+        None,
+        None,
+        &mut Output::Capture(&mut io::sink()),
+    )
+    .unwrap();
     dest
 }
 
@@ -399,7 +417,8 @@ fn fetch_smart_skips_when_revision_is_local() {
         remote: "origin",
         revision: Some(&local_head),
     };
-    v.fetch(&dest, &spec, &mut Output::Capture(&mut io::sink())).unwrap();
+    v.fetch(&dest, &spec, &mut Output::Capture(&mut io::sink()))
+        .unwrap();
 
     assert!(
         !fetch_head_present(&dest),
@@ -426,7 +445,8 @@ fn fetch_always_runs_even_when_revision_is_local() {
         remote: "origin",
         revision: Some(&local_head),
     };
-    v.fetch(&dest, &spec, &mut Output::Capture(&mut io::sink())).unwrap();
+    v.fetch(&dest, &spec, &mut Output::Capture(&mut io::sink()))
+        .unwrap();
 
     assert!(
         fetch_head_present(&dest),
@@ -452,7 +472,8 @@ fn fetch_smart_runs_when_revision_is_unknown() {
         remote: "origin",
         revision: Some(&new_sha),
     };
-    v.fetch(&dest, &spec, &mut Output::Capture(&mut io::sink())).unwrap();
+    v.fetch(&dest, &spec, &mut Output::Capture(&mut io::sink()))
+        .unwrap();
 
     // Smart strategy fell through to a real fetch; the new sha should now
     // be locally resolvable.
@@ -631,7 +652,8 @@ fn rebase_replays_local_commits_onto_target() {
     git(&["commit", "-q", "-m", "feature work"], &work);
 
     let v = GitClient::new(GitOptions::default());
-    v.rebase(&work, "target", &mut Output::Capture(&mut io::sink())).unwrap();
+    v.rebase(&work, "target", &mut Output::Capture(&mut io::sink()))
+        .unwrap();
 
     // After rebase, feature's parent should be target's tip.
     let parent = git_capture(&["rev-parse", "HEAD^"], &work);
@@ -705,8 +727,12 @@ fn update_submodules_materializes_worktree() {
     // *subprocess* of `git submodule update`, so a local config on the
     // parent repo doesn't reach it. The `GIT_CONFIG_*` env vars propagate.
     let _guard = AllowFileProtocolGuard::set();
-    v.update_submodules(&dest, &SubmoduleScope::All, &mut Output::Capture(&mut io::sink()))
-        .unwrap();
+    v.update_submodules(
+        &dest,
+        &SubmoduleScope::All,
+        &mut Output::Capture(&mut io::sink()),
+    )
+    .unwrap();
 
     assert!(
         dest.join("vendor/lib/LIB").exists(),
@@ -805,8 +831,12 @@ fn update_submodules_specific_empty_is_noop() {
 
     let v = GitClient::new(GitOptions::default());
     // Non-submodule repo + empty Specific → must succeed without error.
-    v.update_submodules(&dest, &SubmoduleScope::Specific(&[]), &mut Output::Capture(&mut io::sink()))
-        .unwrap();
+    v.update_submodules(
+        &dest,
+        &SubmoduleScope::Specific(&[]),
+        &mut Output::Capture(&mut io::sink()),
+    )
+    .unwrap();
 }
 
 #[test]

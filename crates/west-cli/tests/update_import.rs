@@ -1,0 +1,225 @@
+//! Integration tests for `west update` with manifest import resolution.
+//!
+//! Each test stands up a small graph of bare git repos: a manifest repo
+//! plus N project repos. The manifest declares a project that has an
+//! `import:` directive; the importing project's working tree contains a
+//! sub-manifest that pulls in additional projects. After running
+//! `west update`, we assert on the resulting workspace state.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use assert_cmd::Command as AssertCmd;
+use serial_test::serial;
+use tempfile::TempDir;
+
+const BIN: &str = "west";
+
+// ============================================================================
+// Helpers (mirroring tests/update.rs sandbox pattern)
+// ============================================================================
+
+fn git_available() -> bool {
+    Command::new("git")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn git(args: &[&str], cwd: &Path) {
+    let status = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@example.com")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@example.com")
+        .status()
+        .unwrap_or_else(|e| panic!("git {args:?}: {e}"));
+    assert!(status.success(), "git {args:?} failed");
+}
+
+fn git_capture(args: &[&str], cwd: &Path) -> String {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap_or_else(|e| panic!("git {args:?}: {e}"));
+    assert!(out.status.success(), "git {args:?}: {out:?}");
+    String::from_utf8(out.stdout).unwrap().trim().to_owned()
+}
+
+/// Build a bare repo whose initial commit contains the named files (path → body).
+fn make_bare_with_files(root: &Path, name: &str, files: &[(&str, &str)]) -> PathBuf {
+    let work = root.join(format!("work-{name}"));
+    std::fs::create_dir_all(&work).unwrap();
+    git(&["init", "-q", "--initial-branch=main", "."], &work);
+    for (filename, body) in files {
+        let path = work.join(filename);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, body).unwrap();
+    }
+    git(&["add", "."], &work);
+    git(&["commit", "-q", "-m", "initial"], &work);
+    let bare = root.join(format!("{name}.git"));
+    git(
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            work.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+        root,
+    );
+    let _ = std::fs::remove_dir_all(&work);
+    bare
+}
+
+struct Sandbox {
+    tmp: TempDir,
+}
+
+impl Sandbox {
+    fn new() -> Self {
+        Self {
+            tmp: TempDir::new().unwrap(),
+        }
+    }
+    fn root(&self) -> &Path {
+        self.tmp.path()
+    }
+    fn west(&self) -> AssertCmd {
+        let mut c = AssertCmd::cargo_bin(BIN).unwrap();
+        c.env("WEST_CONFIG_GLOBAL", self.root().join("glob.toml"))
+            .env("WEST_CONFIG_SYSTEM", self.root().join("sys.toml"))
+            .env_remove("WEST_CONFIG_LOCAL")
+            .env_remove("XDG_CONFIG_HOME");
+        c
+    }
+}
+
+/// Run `west init --url <bare> <ws>` and return the workspace path.
+fn init_workspace(sb: &Sandbox, manifest_bare: &Path) -> PathBuf {
+    let workspace = sb.root().join("ws");
+    sb.west()
+        .args([
+            "init",
+            "--url",
+            manifest_bare.to_str().unwrap(),
+            workspace.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    workspace
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[test]
+#[serial]
+fn update_resolves_per_project_import() {
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+
+    // Project Q is the leaf — pulled in by P's import.
+    let q = make_bare_with_files(sb.root(), "q", &[("README", "q\n")]);
+
+    // Project P contains its own west.yml that declares Q as a project.
+    // P also has a normal file so we can verify P itself was checked out.
+    let p_yml = format!(
+        "manifest:\n  projects:\n    - name: q\n      url: {url}\n      revision: main\n",
+        url = q.display(),
+    );
+    let p = make_bare_with_files(sb.root(), "p", &[("README", "p\n"), ("west.yml", &p_yml)]);
+
+    // Manifest repo: declares P with `import: true`.
+    let manifest_yml = format!(
+        "manifest:\n  self:\n    path: my-manifest\n  projects:\n    - name: p\n      url: {url}\n      revision: main\n      import: true\n",
+        url = p.display(),
+    );
+    let manifest_bare = make_bare_with_files(sb.root(), "manifest", &[("west.yml", &manifest_yml)]);
+
+    let ws = init_workspace(&sb, &manifest_bare);
+    sb.west()
+        .args(["-C", ws.to_str().unwrap(), "update", "-j", "1"])
+        .assert()
+        .success();
+
+    // Both P and Q should be cloned with manifest-rev recorded.
+    assert!(ws.join("p/README").exists(), "P must be present");
+    assert!(ws.join("q/README").exists(), "Q (imported) must be present");
+    let p_mr = git_capture(&["rev-parse", "refs/heads/manifest-rev"], &ws.join("p"));
+    let q_mr = git_capture(&["rev-parse", "refs/heads/manifest-rev"], &ws.join("q"));
+    assert_eq!(p_mr.len(), 40);
+    assert_eq!(q_mr.len(), 40);
+}
+
+#[test]
+#[serial]
+fn update_with_import_name_blocklist_skips_blocked() {
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let q = make_bare_with_files(sb.root(), "q", &[("README", "q\n")]);
+    let r = make_bare_with_files(sb.root(), "r", &[("README", "r\n")]);
+    let p_yml = format!(
+        "manifest:\n  projects:\n    - name: q\n      url: {qu}\n      revision: main\n    - name: r\n      url: {ru}\n      revision: main\n",
+        qu = q.display(),
+        ru = r.display(),
+    );
+    let p = make_bare_with_files(sb.root(), "p", &[("west.yml", &p_yml)]);
+    let manifest_yml = format!(
+        r#"manifest:
+  self:
+    path: my-manifest
+  projects:
+    - name: p
+      url: {url}
+      revision: main
+      import:
+        name-blocklist: [r]
+"#,
+        url = p.display(),
+    );
+    let manifest_bare = make_bare_with_files(sb.root(), "manifest", &[("west.yml", &manifest_yml)]);
+    let ws = init_workspace(&sb, &manifest_bare);
+    sb.west()
+        .args(["-C", ws.to_str().unwrap(), "update", "-j", "1"])
+        .assert()
+        .success();
+    assert!(ws.join("p/west.yml").exists());
+    assert!(ws.join("q/README").exists(), "Q should be imported");
+    assert!(!ws.join("r").exists(), "R should be blocked");
+}
+
+#[test]
+#[serial]
+fn update_per_project_import_missing_file_silently_skipped() {
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    // P contains a README but no west.yml — its import: true points at a
+    // non-existent file. Resolution should silently skip; P updates fine.
+    let p = make_bare_with_files(sb.root(), "p", &[("README", "p\n")]);
+    let manifest_yml = format!(
+        "manifest:\n  self:\n    path: my-manifest\n  projects:\n    - name: p\n      url: {url}\n      revision: main\n      import: true\n",
+        url = p.display(),
+    );
+    let manifest_bare = make_bare_with_files(sb.root(), "manifest", &[("west.yml", &manifest_yml)]);
+    let ws = init_workspace(&sb, &manifest_bare);
+    sb.west()
+        .args(["-C", ws.to_str().unwrap(), "update", "-j", "1"])
+        .assert()
+        .success();
+    assert!(ws.join("p/README").exists());
+}
