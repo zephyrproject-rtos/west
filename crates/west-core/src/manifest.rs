@@ -134,6 +134,9 @@ pub enum ManifestError {
     ImportNotSupported {
         context: String,
     },
+    /// `resolve_projects` was given a selector that matches no project (by
+    /// name or by path).
+    UnknownProject(String),
     Io {
         path: PathBuf,
         source: std::io::Error,
@@ -194,6 +197,9 @@ impl fmt::Display for ManifestError {
             ),
             ManifestError::ImportNotSupported { context } => {
                 write!(f, "manifest imports are not supported (found in {context})")
+            }
+            ManifestError::UnknownProject(name) => {
+                write!(f, "unknown project name or path: {name:?}")
             }
             ManifestError::Io { path, source } => {
                 write!(f, "io error on {}: {source}", path.display())
@@ -476,6 +482,78 @@ impl Manifest {
     pub fn project(&self, name: &str) -> Option<&Project> {
         self.projects.iter().find(|p| p.name == name)
     }
+
+    /// Resolve user-facing selectors to projects. Each selector is matched
+    /// first by project name, then by relative path equality. An unmatched
+    /// selector returns [`ManifestError::UnknownProject`] — callers that
+    /// want lenient matching should iterate manually.
+    pub fn resolve_projects<I, S>(&self, selectors: I) -> Result<Vec<&Project>, ManifestError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut out = Vec::new();
+        for sel in selectors {
+            let s = sel.as_ref();
+            if let Some(p) = self.project(s) {
+                out.push(p);
+                continue;
+            }
+            let as_path = std::path::Path::new(s);
+            if let Some(p) = self.projects.iter().find(|p| p.path == as_path) {
+                out.push(p);
+                continue;
+            }
+            return Err(ManifestError::UnknownProject(s.to_owned()));
+        }
+        Ok(out)
+    }
+
+    /// Whether `project` is "active" under the manifest's `group-filter`
+    /// combined with `extra_filter` (e.g. CLI `--group-filter` entries).
+    ///
+    /// Algorithm: a project with no `groups:` is always active. Otherwise,
+    /// walk the combined filter in order maintaining a "disabled groups"
+    /// set — `-foo` adds, `+foo` removes. The project is active iff at
+    /// least one of its groups is *not* in the disabled set. (This
+    /// matches Python's "last matching ± entry wins" behavior because a
+    /// later `+foo` clears `foo` from the set, and a later `-foo` adds it.)
+    pub fn is_active(&self, project: &Project, extra_filter: &[GroupFilterEntry]) -> bool {
+        if project.groups.is_empty() {
+            return true;
+        }
+        let mut disabled: HashSet<&str> = HashSet::new();
+        for entry in self.group_filter.iter().chain(extra_filter.iter()) {
+            if entry.disabled {
+                disabled.insert(&entry.group);
+            } else {
+                disabled.remove(entry.group.as_str());
+            }
+        }
+        project
+            .groups
+            .iter()
+            .any(|g| !disabled.contains(g.as_str()))
+    }
+}
+
+/// Parse user-supplied group-filter strings (CLI flag `--group-filter`).
+///
+/// Each input may itself be comma-separated (`west update --gf +a,-b -gf +c`).
+/// Empty pieces between commas are ignored; whitespace around items is
+/// trimmed. Each non-empty piece must begin with `+` or `-` and name a
+/// valid group, identical to manifest-side validation.
+pub fn parse_cli_group_filter(items: &[String]) -> Result<Vec<GroupFilterEntry>, ManifestError> {
+    let mut split: Vec<String> = Vec::new();
+    for raw in items {
+        for piece in raw.split(',') {
+            let trimmed = piece.trim();
+            if !trimmed.is_empty() {
+                split.push(trimmed.to_owned());
+            }
+        }
+    }
+    parse_group_filter(&split, "command line")
 }
 
 // =====================================================================
@@ -1315,5 +1393,126 @@ manifest:
         assert!(m.project("a").is_some());
         assert!(m.project("b").is_some());
         assert!(m.project("c").is_none());
+    }
+
+    #[test]
+    fn resolve_projects_by_name_and_path() {
+        let m = yaml(
+            r#"
+manifest:
+  projects:
+    - name: a
+      url: https://x
+      path: aa/inner
+    - name: b
+      url: https://y
+"#,
+        )
+        .unwrap();
+        let resolved = m.resolve_projects(["a", "aa/inner", "b"]).unwrap();
+        let names: Vec<&str> = resolved.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["a", "a", "b"]);
+    }
+
+    #[test]
+    fn resolve_projects_unknown_errors() {
+        let m = yaml(
+            r#"
+manifest:
+  projects:
+    - name: a
+      url: https://x
+"#,
+        )
+        .unwrap();
+        let err = m.resolve_projects(["nope"]).unwrap_err();
+        assert!(matches!(err, ManifestError::UnknownProject(s) if s == "nope"));
+    }
+
+    #[test]
+    fn is_active_no_groups_is_always_active() {
+        let m = yaml(
+            r#"
+manifest:
+  group-filter: [-experimental]
+  projects:
+    - name: a
+      url: https://x
+"#,
+        )
+        .unwrap();
+        let p = m.project("a").unwrap();
+        assert!(m.is_active(p, &[]));
+    }
+
+    #[test]
+    fn is_active_disabled_when_only_group_disabled() {
+        let m = yaml(
+            r#"
+manifest:
+  group-filter: [-experimental]
+  projects:
+    - name: a
+      url: https://x
+      groups: [experimental]
+"#,
+        )
+        .unwrap();
+        let p = m.project("a").unwrap();
+        assert!(!m.is_active(p, &[]));
+    }
+
+    #[test]
+    fn is_active_extra_filter_re_enables() {
+        let m = yaml(
+            r#"
+manifest:
+  group-filter: [-experimental]
+  projects:
+    - name: a
+      url: https://x
+      groups: [experimental]
+"#,
+        )
+        .unwrap();
+        let p = m.project("a").unwrap();
+        let extra = parse_cli_group_filter(&["+experimental".to_owned()]).unwrap();
+        assert!(m.is_active(p, &extra));
+    }
+
+    #[test]
+    fn is_active_active_when_any_group_enabled() {
+        let m = yaml(
+            r#"
+manifest:
+  group-filter: [-debug]
+  projects:
+    - name: a
+      url: https://x
+      groups: [debug, prod]
+"#,
+        )
+        .unwrap();
+        let p = m.project("a").unwrap();
+        // prod is not in disabled set → project is active.
+        assert!(m.is_active(p, &[]));
+    }
+
+    #[test]
+    fn parse_cli_group_filter_handles_comma_split() {
+        let parsed = parse_cli_group_filter(&["+a,-b".to_owned(), "+c".to_owned()]).unwrap();
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0].group, "a");
+        assert!(!parsed[0].disabled);
+        assert_eq!(parsed[1].group, "b");
+        assert!(parsed[1].disabled);
+        assert_eq!(parsed[2].group, "c");
+        assert!(!parsed[2].disabled);
+    }
+
+    #[test]
+    fn parse_cli_group_filter_rejects_bare_name() {
+        let err = parse_cli_group_filter(&["foo".to_owned()]).unwrap_err();
+        assert!(matches!(err, ManifestError::InvalidGroupFilter { .. }));
     }
 }

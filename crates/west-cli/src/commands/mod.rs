@@ -9,6 +9,7 @@ pub mod config;
 pub mod exec;
 pub mod init;
 pub mod topdir;
+pub mod update;
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
@@ -23,6 +24,8 @@ pub enum Command {
     Init(init::InitArgs),
     /// Print the top directory of the west workspace.
     Topdir,
+    /// Update projects to their manifest revisions.
+    Update(update::UpdateArgs),
     /// Catch-all for unknown subcommand names. Resolved via aliases when
     /// possible; future PR uses this for extension command lookup.
     #[command(external_subcommand)]
@@ -35,6 +38,7 @@ pub fn dispatch(cmd: Command, mut loaded: LoadedConfig) -> ExitCode {
         Command::Exec(a) => exec::run(a),
         Command::Init(a) => init::run(a, &mut loaded),
         Command::Topdir => topdir::run(),
+        Command::Update(a) => update::run(a, &mut loaded),
         Command::External(args) => {
             let name = args
                 .first()

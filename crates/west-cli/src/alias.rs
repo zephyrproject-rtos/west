@@ -164,6 +164,7 @@ fn subcommand_token(cmd: &Command) -> String {
         Command::Exec(_) => "exec".to_owned(),
         Command::Init(_) => "init".to_owned(),
         Command::Topdir => "topdir".to_owned(),
+        Command::Update(_) => "update".to_owned(),
         Command::External(args) => args
             .first()
             .map(|a| a.to_string_lossy().into_owned())
