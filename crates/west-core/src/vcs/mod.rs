@@ -2,8 +2,11 @@
 //!
 //! `Vcs` is the trait every implementation must satisfy; concrete
 //! implementations are *clients* of the underlying VCS tool (`GitClient`,
-//! eventually `JjClient`, …). The trait surface stays minimal: each operation
-//! is something every plausible client can do.
+//! eventually `JjClient`, …). The trait surface stays declarative: each
+//! method describes what the caller wants, not how the underlying tool
+//! achieves it. Behavior knobs (fetch strategy, shallow depth, tag handling,
+//! …) live in `tool.<client>.<key>` config keys and are read inside the
+//! client — the trait surface never grows for them.
 //!
 //! # Configuration
 //!
@@ -16,6 +19,15 @@
 //! Operations that are inherently specific to one client (shallow clone,
 //! submodule init, jj-style colocation) are NOT in the trait. They live in
 //! the client's own options struct, populated from `tool.<client>.<key>`.
+//!
+//! # Manifest-rev
+//!
+//! West stores a per-project pointer to "the revision the manifest told us
+//! to be at." That pointer is read on every update to decide whether the
+//! working tree needs to move. The trait exposes
+//! [`Vcs::set_manifest_rev`] / [`Vcs::manifest_rev`]; how the pointer is
+//! stored is the client's business — git uses `refs/heads/manifest-rev`,
+//! other clients are free to choose.
 
 use std::error::Error;
 use std::fmt;
@@ -25,7 +37,7 @@ use crate::config::Configuration;
 
 mod git;
 
-pub use git::{GitClient, GitOptions};
+pub use git::{FetchStrategy, GitClient, GitOptions};
 
 /// Operations every VCS client supports.
 pub trait Vcs: fmt::Debug {
@@ -42,7 +54,7 @@ pub trait Vcs: fmt::Debug {
     ///
     /// Git note: passes `revision` to `git clone --branch`, which accepts
     /// branch and tag names only. Landing at a bare commit SHA requires a
-    /// follow-up checkout (which will arrive when `update` lands).
+    /// follow-up [`Vcs::checkout`].
     fn clone(
         &self,
         url: &str,
@@ -57,6 +69,53 @@ pub trait Vcs: fmt::Debug {
 
     /// Is `ancestor` reachable as an ancestor of `descendant`?
     fn is_ancestor(&self, repo: &Path, ancestor: &str, descendant: &str) -> Result<bool, VcsError>;
+
+    /// Bring remote refs in `repo` up to date with `spec.remote`. Whether
+    /// the network call is actually made (smart-skip when the requested
+    /// revision is already local), how tags are handled, and whether the
+    /// fetch is shallow are all driven by `tool.<client>.fetch.*` keys read
+    /// at client construction.
+    fn fetch(&self, repo: &Path, spec: &FetchSpec<'_>) -> Result<(), VcsError>;
+
+    /// Move HEAD in `repo` to `target`.
+    ///
+    /// `Detached(rev)` lands HEAD on the commit without binding it to a
+    /// branch — the safe default for updates. `Branch(name)` switches to an
+    /// existing local branch.
+    fn checkout(&self, repo: &Path, target: &CheckoutTarget<'_>) -> Result<(), VcsError>;
+
+    /// `true` when `repo`'s working tree has no uncommitted changes.
+    fn is_clean(&self, repo: &Path) -> Result<bool, VcsError>;
+
+    /// Record `sha` as the manifest-rev of `repo`. Implementations choose
+    /// where to store it; git writes `refs/heads/manifest-rev`.
+    fn set_manifest_rev(&self, repo: &Path, sha: &str) -> Result<(), VcsError>;
+
+    /// Read the recorded manifest-rev of `repo`. Returns `Ok(None)` if no
+    /// manifest-rev has been recorded yet (fresh clone, hand-curated dir).
+    fn manifest_rev(&self, repo: &Path) -> Result<Option<String>, VcsError>;
+}
+
+/// What to fetch.
+///
+/// `revision` is optional: if `Some`, the implementation may apply the
+/// configured fetch strategy (e.g. `smart` skips the fetch when the revision
+/// is already locally available). If `None`, a default refspec fetch is
+/// performed (`git fetch <remote>`).
+#[derive(Debug, Clone, Copy)]
+pub struct FetchSpec<'a> {
+    pub remote: &'a str,
+    pub revision: Option<&'a str>,
+}
+
+/// Where to land HEAD on [`Vcs::checkout`].
+#[derive(Debug, Clone, Copy)]
+pub enum CheckoutTarget<'a> {
+    /// A commit (SHA or any other revspec the client resolves). HEAD is
+    /// detached after the call.
+    Detached(&'a str),
+    /// An existing local branch.
+    Branch(&'a str),
 }
 
 /// Errors common to any client. Implementations wrap their tool-specific

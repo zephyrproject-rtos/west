@@ -8,7 +8,9 @@ use std::process::Command;
 use tempfile::TempDir;
 
 use west_core::config::Configuration;
-use west_core::vcs::{self, GitClient, GitOptions, Vcs, VcsError};
+use west_core::vcs::{
+    self, CheckoutTarget, FetchSpec, FetchStrategy, GitClient, GitOptions, Vcs, VcsError,
+};
 
 // ---------- helpers ----------
 
@@ -271,4 +273,259 @@ fn command_failed_carries_stderr_and_argv() {
         }
         other => panic!("expected CommandFailed, got {other:?}"),
     }
+}
+
+// ---------- new options on GitClient::from_config ----------
+
+#[test]
+fn from_config_reads_fetch_strategy() {
+    let (_t, cfg) = config_with(
+        r#"[tool.git.fetch]
+strategy = "always"
+"#,
+    );
+    let git = GitClient::from_config(&cfg).unwrap();
+    let dbg = format!("{git:?}");
+    assert!(dbg.contains("Always"), "got: {dbg}");
+}
+
+#[test]
+fn from_config_default_fetch_strategy_is_smart() {
+    let cfg = empty_config();
+    let git = GitClient::from_config(&cfg).unwrap();
+    let dbg = format!("{git:?}");
+    assert!(dbg.contains("Smart"), "got: {dbg}");
+}
+
+#[test]
+fn from_config_invalid_fetch_strategy_errors() {
+    let (_t, cfg) = config_with(
+        r#"[tool.git.fetch]
+strategy = "fast"
+"#,
+    );
+    let err = GitClient::from_config(&cfg).unwrap_err();
+    assert!(matches!(err, VcsError::BadOption { ref key, .. } if key == "tool.git.fetch.strategy"));
+}
+
+#[test]
+fn from_config_reads_fetch_tags_and_depth() {
+    let (_t, cfg) = config_with(
+        r#"[tool.git.fetch]
+tags = false
+depth = 5
+"#,
+    );
+    let git = GitClient::from_config(&cfg).unwrap();
+    let dbg = format!("{git:?}");
+    assert!(dbg.contains("fetch_tags: Some(false)"), "got: {dbg}");
+    assert!(dbg.contains("fetch_depth: Some(5)"), "got: {dbg}");
+}
+
+#[test]
+fn from_config_negative_fetch_depth_errors() {
+    let (_t, cfg) = config_with(
+        r#"[tool.git.fetch]
+depth = -1
+"#,
+    );
+    let err = GitClient::from_config(&cfg).unwrap_err();
+    assert!(matches!(err, VcsError::BadOption { ref key, .. } if key == "tool.git.fetch.depth"));
+}
+
+// ---------- fetch / checkout / is_clean / manifest-rev ----------
+
+/// Create a clone of `bare` into `<root>/clone` and return the clone path.
+fn clone_into(root: &Path, bare: &Path) -> PathBuf {
+    let dest = root.join("clone");
+    let v = GitClient::new(GitOptions::default());
+    v.clone(bare.to_str().unwrap(), &dest, None, None).unwrap();
+    dest
+}
+
+/// Add a new commit to a bare repo (round-trip via a temporary worktree).
+fn add_commit_to_bare(root: &Path, bare: &Path, content: &str) -> String {
+    let work = root.join("bare-work");
+    git(&["clone", "-q", bare.to_str().unwrap(), "bare-work"], root);
+    std::fs::write(work.join("R"), content.as_bytes()).unwrap();
+    git(&["add", "."], &work);
+    git(&["commit", "-q", "-am", content], &work);
+    git(&["push", "-q"], &work);
+    let sha = git_capture(&["rev-parse", "HEAD"], &work);
+    let _ = std::fs::remove_dir_all(&work);
+    sha
+}
+
+/// `git clone` doesn't create `FETCH_HEAD`; only `git fetch` does. So its
+/// existence is a reliable signal that a real fetch happened.
+fn fetch_head_present(repo: &Path) -> bool {
+    repo.join(".git/FETCH_HEAD").exists()
+}
+
+#[test]
+fn fetch_smart_skips_when_revision_is_local() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    let local_head = git_capture(&["rev-parse", "HEAD"], &dest);
+    assert!(!fetch_head_present(&dest), "no fetch yet");
+
+    let v = GitClient::new(GitOptions {
+        fetch_strategy: FetchStrategy::Smart,
+        ..GitOptions::default()
+    });
+    let spec = FetchSpec {
+        remote: "origin",
+        revision: Some(&local_head),
+    };
+    v.fetch(&dest, &spec).unwrap();
+
+    assert!(
+        !fetch_head_present(&dest),
+        "smart strategy should have skipped the fetch"
+    );
+}
+
+#[test]
+fn fetch_always_runs_even_when_revision_is_local() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    let local_head = git_capture(&["rev-parse", "HEAD"], &dest);
+
+    let v = GitClient::new(GitOptions {
+        fetch_strategy: FetchStrategy::Always,
+        ..GitOptions::default()
+    });
+    let spec = FetchSpec {
+        remote: "origin",
+        revision: Some(&local_head),
+    };
+    v.fetch(&dest, &spec).unwrap();
+
+    assert!(
+        fetch_head_present(&dest),
+        "always strategy should have fetched"
+    );
+}
+
+#[test]
+fn fetch_smart_runs_when_revision_is_unknown() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+
+    // Add a new commit upstream — its sha can't possibly be local yet.
+    let new_sha = add_commit_to_bare(tmp.path(), &bare, "second");
+
+    let v = GitClient::new(GitOptions::default()); // smart by default
+    let spec = FetchSpec {
+        remote: "origin",
+        revision: Some(&new_sha),
+    };
+    v.fetch(&dest, &spec).unwrap();
+
+    // Smart strategy fell through to a real fetch; the new sha should now
+    // be locally resolvable.
+    assert_eq!(v.sha(&dest, &new_sha).unwrap(), new_sha);
+}
+
+#[test]
+fn checkout_detached_lands_off_branch() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    let head = git_capture(&["rev-parse", "HEAD"], &dest);
+
+    let v = GitClient::new(GitOptions::default());
+    v.checkout(&dest, &CheckoutTarget::Detached(&head)).unwrap();
+
+    // Detached HEAD: symbolic-ref fails; HEAD still resolves.
+    let sym = Command::new("git")
+        .args(["-C", dest.to_str().unwrap(), "symbolic-ref", "-q", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(!sym.status.success(), "expected detached HEAD");
+    assert_eq!(v.sha(&dest, "HEAD").unwrap(), head);
+}
+
+#[test]
+fn checkout_branch_switches_to_named_branch() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    git(&["init", "-q", "--initial-branch=main", "."], &work);
+    std::fs::write(work.join("R"), b"a\n").unwrap();
+    git(&["add", "."], &work);
+    git(&["commit", "-q", "-m", "main"], &work);
+    git(&["checkout", "-q", "-b", "feature"], &work);
+    std::fs::write(work.join("R"), b"b\n").unwrap();
+    git(&["commit", "-q", "-am", "feature"], &work);
+
+    let v = GitClient::new(GitOptions::default());
+    v.checkout(&work, &CheckoutTarget::Branch("main")).unwrap();
+    let cur = git_capture(&["rev-parse", "--abbrev-ref", "HEAD"], &work);
+    assert_eq!(cur, "main");
+}
+
+#[test]
+fn is_clean_distinguishes_clean_and_dirty() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    let v = GitClient::new(GitOptions::default());
+    assert!(v.is_clean(&dest).unwrap());
+
+    // Modify a tracked file → dirty.
+    std::fs::write(dest.join("README"), b"changed\n").unwrap();
+    assert!(!v.is_clean(&dest).unwrap());
+}
+
+#[test]
+fn manifest_rev_round_trip() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    let head = git_capture(&["rev-parse", "HEAD"], &dest);
+
+    let v = GitClient::new(GitOptions::default());
+    assert!(v.manifest_rev(&dest).unwrap().is_none());
+
+    v.set_manifest_rev(&dest, &head).unwrap();
+    assert_eq!(
+        v.manifest_rev(&dest).unwrap().as_deref(),
+        Some(head.as_str())
+    );
+
+    // Confirm the underlying ref is the conventional location.
+    let by_ref = git_capture(&["rev-parse", "refs/heads/manifest-rev"], &dest);
+    assert_eq!(by_ref, head);
 }

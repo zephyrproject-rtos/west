@@ -8,9 +8,15 @@ use std::process::{Command, Stdio};
 
 use crate::config::Configuration;
 
-use super::{Vcs, VcsError};
+use super::{CheckoutTarget, FetchSpec, Vcs, VcsError};
 
 const NAME: &str = "git";
+
+/// Where the manifest-rev pointer lives in a git repo. Plain
+/// `refs/heads/<name>` rather than `refs/west/<name>` to keep it visible to
+/// `git branch` and ordinary tooling — west's Python implementation has used
+/// this location for years and users expect to see it.
+const MANIFEST_REV_REF: &str = "refs/heads/manifest-rev";
 
 #[derive(Debug)]
 pub struct GitClient {
@@ -22,6 +28,25 @@ pub struct GitOptions {
     /// Path to the `git` executable. Defaults to `"git"` (PATH lookup).
     /// Sourced from the `tool.git.binary` config key.
     pub binary: Option<PathBuf>,
+    /// Sourced from `tool.git.fetch.strategy`. Default: `Smart`.
+    pub fetch_strategy: FetchStrategy,
+    /// Sourced from `tool.git.fetch.tags`. `Some(true)` passes `--tags`,
+    /// `Some(false)` passes `--no-tags`, `None` leaves the flag off (git
+    /// applies its own default — fetch tags reachable from fetched commits).
+    pub fetch_tags: Option<bool>,
+    /// Sourced from `tool.git.fetch.depth`. When set, fetches are shallow
+    /// to that depth via `--depth=N`.
+    pub fetch_depth: Option<u32>,
+}
+
+/// Strategy for [`Vcs::fetch`](super::Vcs::fetch). `Smart` skips the network
+/// call when the requested revision is already resolvable locally; `Always`
+/// fetches unconditionally.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum FetchStrategy {
+    #[default]
+    Smart,
+    Always,
 }
 
 impl GitClient {
@@ -32,14 +57,57 @@ impl GitClient {
     pub fn from_config(config: &Configuration) -> Result<Self, VcsError> {
         let binary = match config.get_str("tool.git.binary") {
             Ok(s) => s.map(PathBuf::from),
-            Err(e) => {
-                return Err(VcsError::BadOption {
-                    key: "tool.git.binary".to_owned(),
-                    detail: e.to_string(),
-                });
-            }
+            Err(e) => return Err(bad_option("tool.git.binary", &e.to_string())),
         };
-        Ok(Self::new(GitOptions { binary }))
+
+        let fetch_strategy = match config.get_str("tool.git.fetch.strategy") {
+            Ok(None) => FetchStrategy::default(),
+            Ok(Some(s)) => match s.as_str() {
+                "smart" => FetchStrategy::Smart,
+                "always" => FetchStrategy::Always,
+                other => {
+                    return Err(bad_option(
+                        "tool.git.fetch.strategy",
+                        &format!("expected \"smart\" or \"always\", got {other:?}"),
+                    ));
+                }
+            },
+            Err(e) => return Err(bad_option("tool.git.fetch.strategy", &e.to_string())),
+        };
+
+        let fetch_tags = match config.get_bool("tool.git.fetch.tags") {
+            Ok(opt) => opt,
+            Err(e) => return Err(bad_option("tool.git.fetch.tags", &e.to_string())),
+        };
+
+        let fetch_depth = match config.get("tool.git.fetch.depth") {
+            Ok(None) => None,
+            Ok(Some(crate::config::ConfigValue::Integer(i))) => {
+                if i <= 0 {
+                    return Err(bad_option(
+                        "tool.git.fetch.depth",
+                        &format!("must be a positive integer, got {i}"),
+                    ));
+                }
+                Some(u32::try_from(i).map_err(|_| {
+                    bad_option("tool.git.fetch.depth", &format!("must fit in u32, got {i}"))
+                })?)
+            }
+            Ok(Some(other)) => {
+                return Err(bad_option(
+                    "tool.git.fetch.depth",
+                    &format!("expected integer, got {other:?}"),
+                ));
+            }
+            Err(e) => return Err(bad_option("tool.git.fetch.depth", &e.to_string())),
+        };
+
+        Ok(Self::new(GitOptions {
+            binary,
+            fetch_strategy,
+            fetch_tags,
+            fetch_depth,
+        }))
     }
 
     fn binary(&self) -> &Path {
@@ -61,7 +129,8 @@ impl GitClient {
     }
 
     /// Run `git` with stdout/stderr inherited from the parent. Used by
-    /// `clone` so the user sees git's progress output.
+    /// long-running operations (clone, fetch) so the user sees git's
+    /// progress output.
     fn run_inherit(&self, args: &[&str]) -> Result<(), VcsError> {
         let status = Command::new(self.binary())
             .args(args)
@@ -162,6 +231,103 @@ impl Vcs for GitClient {
             _ => Err(make_command_failed(&res)),
         }
     }
+
+    fn fetch(&self, repo: &Path, spec: &FetchSpec<'_>) -> Result<(), VcsError> {
+        // Smart strategy: if we're being asked for a specific revision and
+        // it's already resolvable here, no need to talk to the network. The
+        // caller resolves moving refs (branches) to their tip before calling
+        // us, so a hit here means the commit really is current.
+        if matches!(self.opts.fetch_strategy, FetchStrategy::Smart)
+            && let Some(rev) = spec.revision
+            && self.sha(repo, rev).is_ok()
+        {
+            log::trace!("git: smart fetch skipped for {rev:?} (already local)");
+            return Ok(());
+        }
+
+        let repo_str = repo.to_string_lossy().into_owned();
+        let depth_arg = self.opts.fetch_depth.map(|d| format!("--depth={d}"));
+
+        let mut argv: Vec<&str> = vec!["-C", &repo_str, "fetch"];
+        match self.opts.fetch_tags {
+            Some(true) => argv.push("--tags"),
+            Some(false) => argv.push("--no-tags"),
+            None => {}
+        }
+        if let Some(d) = depth_arg.as_deref() {
+            argv.push(d);
+        }
+        argv.push("--");
+        argv.push(spec.remote);
+        if let Some(rev) = spec.revision {
+            argv.push(rev);
+        }
+        self.run_inherit(&argv)
+    }
+
+    fn checkout(&self, repo: &Path, target: &CheckoutTarget<'_>) -> Result<(), VcsError> {
+        let repo_str = repo.to_string_lossy().into_owned();
+        let res = match *target {
+            CheckoutTarget::Detached(rev) => self.run(&[
+                "-C",
+                &repo_str,
+                // Suppress the long detached-HEAD advice text — west is the
+                // tool, the user isn't running git directly here.
+                "-c",
+                "advice.detachedHead=false",
+                "checkout",
+                "--detach",
+                rev,
+            ])?,
+            CheckoutTarget::Branch(name) => self.run(&["-C", &repo_str, "checkout", name])?,
+        };
+        check_success(&res)
+    }
+
+    fn is_clean(&self, repo: &Path) -> Result<bool, VcsError> {
+        let repo_str = repo.to_string_lossy().into_owned();
+        let res = self.run(&["-C", &repo_str, "status", "--porcelain"])?;
+        check_success(&res)?;
+        Ok(res.output.stdout.iter().all(|b| b.is_ascii_whitespace()))
+    }
+
+    fn set_manifest_rev(&self, repo: &Path, sha: &str) -> Result<(), VcsError> {
+        let repo_str = repo.to_string_lossy().into_owned();
+        let res = self.run(&["-C", &repo_str, "update-ref", MANIFEST_REV_REF, sha])?;
+        check_success(&res)
+    }
+
+    fn manifest_rev(&self, repo: &Path) -> Result<Option<String>, VcsError> {
+        let repo_str = repo.to_string_lossy().into_owned();
+        // `--verify` makes rev-parse fail (rather than echo back the literal
+        // arg) when the ref is missing.
+        let res = self.run(&[
+            "-C",
+            &repo_str,
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            MANIFEST_REV_REF,
+        ])?;
+        if !res.output.status.success() {
+            // `--quiet` makes rev-parse exit 1 with empty stderr when the ref
+            // doesn't exist. Anything else is a real error.
+            if res.output.status.code() == Some(1) && res.output.stderr.is_empty() {
+                return Ok(None);
+            }
+            return Err(make_command_failed(&res));
+        }
+        let stdout = std::str::from_utf8(&res.output.stdout).map_err(|e| VcsError::BadOutput {
+            client: NAME,
+            argv: res.argv.clone(),
+            detail: format!("non-UTF-8 stdout: {e}"),
+        })?;
+        let trimmed = stdout.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(trimmed.to_owned()))
+    }
 }
 
 // ---------- helpers ----------
@@ -205,5 +371,12 @@ fn make_command_failed(res: &RunResult) -> VcsError {
         argv: res.argv.clone(),
         exit_code: res.output.status.code(),
         stderr: String::from_utf8_lossy(&res.output.stderr).into_owned(),
+    }
+}
+
+fn bad_option(key: &str, detail: &str) -> VcsError {
+    VcsError::BadOption {
+        key: key.to_owned(),
+        detail: detail.to_owned(),
     }
 }
