@@ -513,7 +513,11 @@ fn load_manifest(workspace: &Path, config: &Configuration) -> Result<Manifest, S
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_MANIFEST_FILE));
     let full = workspace.join(&manifest_path).join(&manifest_file);
-    Manifest::from_path(&full).map_err(|e| format!("manifest {}: {e}", full.display()))
+    // Lenient: tolerate `import:` directives by warning instead of erroring,
+    // so update can do useful work on the directly-defined projects even
+    // while full import resolution remains unimplemented.
+    Manifest::from_path_lenient(&full)
+        .map_err(|e| format!("manifest {}: {e}", full.display()))
 }
 
 fn default_jobs() -> usize {

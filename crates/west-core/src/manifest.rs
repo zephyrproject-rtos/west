@@ -414,33 +414,52 @@ impl<T> OneOrMany<T> {
 impl Manifest {
     pub fn from_yaml_str(s: &str) -> Result<Self, ManifestError> {
         let file: ManifestFile = serde_saphyr::from_str(s).map_err(ManifestError::Yaml)?;
-        validate_and_resolve(file)
+        validate_and_resolve(file, ImportPolicy::Strict)
     }
 
     pub fn from_toml_str(s: &str) -> Result<Self, ManifestError> {
         let file: ManifestFile = toml_edit::de::from_str(s).map_err(ManifestError::Toml)?;
-        validate_and_resolve(file)
+        validate_and_resolve(file, ImportPolicy::Strict)
     }
 
     pub fn from_json_str(s: &str) -> Result<Self, ManifestError> {
         let file: ManifestFile = serde_json::from_str(s).map_err(ManifestError::Json)?;
-        validate_and_resolve(file)
+        validate_and_resolve(file, ImportPolicy::Strict)
     }
 
     /// Sniff `.yaml` / `.yml` / `.toml` / `.json` from the path's extension.
     pub fn from_path(path: &Path) -> Result<Self, ManifestError> {
+        Self::from_path_with(path, ImportPolicy::Strict)
+    }
+
+    /// Like [`Manifest::from_path`] but treats `import:` directives as a
+    /// **warning** rather than an error: the directly-defined projects are
+    /// still returned, with a `log::warn!` noting that imported entries
+    /// will not be resolved. Useful for commands like `west update` that
+    /// can do something useful with the locally-defined projects even
+    /// while full import resolution remains unimplemented.
+    pub fn from_path_lenient(path: &Path) -> Result<Self, ManifestError> {
+        Self::from_path_with(path, ImportPolicy::WarnAndStrip)
+    }
+
+    fn from_path_with(path: &Path, policy: ImportPolicy) -> Result<Self, ManifestError> {
         let body = fs::read_to_string(path).map_err(|e| ManifestError::Io {
             path: path.to_owned(),
             source: e,
         })?;
-        match path.extension().and_then(OsStr::to_str) {
-            Some("yaml") | Some("yml") => Self::from_yaml_str(&body),
-            Some("toml") => Self::from_toml_str(&body),
-            Some("json") => Self::from_json_str(&body),
-            other => Err(ManifestError::UnsupportedFormat(
-                other.unwrap_or("").to_owned(),
-            )),
-        }
+        let file: ManifestFile = match path.extension().and_then(OsStr::to_str) {
+            Some("yaml") | Some("yml") => {
+                serde_saphyr::from_str(&body).map_err(ManifestError::Yaml)?
+            }
+            Some("toml") => toml_edit::de::from_str(&body).map_err(ManifestError::Toml)?,
+            Some("json") => serde_json::from_str(&body).map_err(ManifestError::Json)?,
+            other => {
+                return Err(ManifestError::UnsupportedFormat(
+                    other.unwrap_or("").to_owned(),
+                ));
+            }
+        };
+        validate_and_resolve(file, policy)
     }
 
     /// Read just `manifest.self.path` from a manifest file, tolerating
@@ -560,26 +579,57 @@ pub fn parse_cli_group_filter(items: &[String]) -> Result<Vec<GroupFilterEntry>,
 // Validation + resolution
 // =====================================================================
 
-fn validate_and_resolve(file: ManifestFile) -> Result<Manifest, ManifestError> {
-    file.validate()
-        .map_err(|r| ManifestError::Validation(r.to_string()))?;
-    resolve(file)
+/// How to handle `import:` directives during validation. `Strict` errors;
+/// `WarnAndStrip` logs a `log::warn!` and continues with the directly-defined
+/// projects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImportPolicy {
+    Strict,
+    WarnAndStrip,
 }
 
-fn resolve(file: ManifestFile) -> Result<Manifest, ManifestError> {
+fn validate_and_resolve(
+    file: ManifestFile,
+    policy: ImportPolicy,
+) -> Result<Manifest, ManifestError> {
+    file.validate()
+        .map_err(|r| ManifestError::Validation(r.to_string()))?;
+    resolve(file, policy)
+}
+
+fn resolve(file: ManifestFile, policy: ImportPolicy) -> Result<Manifest, ManifestError> {
     let m = file.manifest;
 
     if m.import.is_some() {
-        return Err(ManifestError::ImportNotSupported {
-            context: "top-level".into(),
-        });
+        match policy {
+            ImportPolicy::Strict => {
+                return Err(ManifestError::ImportNotSupported {
+                    context: "top-level".into(),
+                });
+            }
+            ImportPolicy::WarnAndStrip => {
+                eprintln!(
+                    "west: warning: manifest top-level `import:` is unsupported and \
+                     will be ignored; projects pulled in by the import will not be updated"
+                );
+            }
+        }
     }
 
-    if let Some(self_) = &m.self_ {
-        if self_.import.is_some() {
-            return Err(ManifestError::ImportNotSupported {
-                context: "self".into(),
-            });
+    if let Some(self_) = &m.self_
+        && self_.import.is_some()
+    {
+        match policy {
+            ImportPolicy::Strict => {
+                return Err(ManifestError::ImportNotSupported {
+                    context: "self".into(),
+                });
+            }
+            ImportPolicy::WarnAndStrip => {
+                eprintln!(
+                    "west: warning: manifest `self.import:` is unsupported and will be ignored"
+                );
+            }
         }
     }
 
@@ -599,9 +649,20 @@ fn resolve(file: ManifestFile) -> Result<Manifest, ManifestError> {
             return Err(ManifestError::DuplicateProjectName(ps.name.clone()));
         }
         if ps.import.is_some() {
-            return Err(ManifestError::ImportNotSupported {
-                context: format!("project {:?}", ps.name),
-            });
+            match policy {
+                ImportPolicy::Strict => {
+                    return Err(ManifestError::ImportNotSupported {
+                        context: format!("project {:?}", ps.name),
+                    });
+                }
+                ImportPolicy::WarnAndStrip => {
+                    eprintln!(
+                        "west: warning: project {:?}: `import:` is unsupported and will be \
+                         ignored; projects from {:?}'s manifest will not be updated",
+                        ps.name, ps.name
+                    );
+                }
+            }
         }
         for g in &ps.groups {
             if !is_valid_group(g) {
@@ -1244,6 +1305,61 @@ manifest:
             res,
             Err(ManifestError::ImportNotSupported { context }) if context.contains("p")
         ));
+    }
+
+    #[test]
+    fn from_path_lenient_strips_project_imports() {
+        // Mirror of zephyrproject-rtos/example-application: one project with
+        // an `import:` key. Strict loader rejects; lenient loader returns
+        // the project (without the imported entries it would have pulled in).
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("west.yml");
+        std::fs::write(
+            &path,
+            r#"
+manifest:
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: main
+      import:
+        name-allowlist:
+          - cmsis
+"#,
+        )
+        .unwrap();
+        // Strict still errors.
+        assert!(matches!(
+            Manifest::from_path(&path),
+            Err(ManifestError::ImportNotSupported { .. })
+        ));
+        // Lenient succeeds and returns the directly-defined project.
+        let m = Manifest::from_path_lenient(&path).unwrap();
+        assert_eq!(m.projects.len(), 1);
+        assert_eq!(m.projects[0].name, "zephyr");
+    }
+
+    #[test]
+    fn from_path_lenient_strips_top_level_import() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("west.yml");
+        std::fs::write(
+            &path,
+            r#"
+manifest:
+  import: extras.yml
+  projects:
+    - name: p
+      url: https://x
+"#,
+        )
+        .unwrap();
+        let m = Manifest::from_path_lenient(&path).unwrap();
+        assert_eq!(m.projects.len(), 1);
+        assert_eq!(m.projects[0].name, "p");
     }
 
     #[test]
