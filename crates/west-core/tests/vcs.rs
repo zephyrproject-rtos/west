@@ -2,6 +2,7 @@
 //! against tempdir-backed repositories. The whole module is skipped if
 //! `git --version` doesn't run.
 
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -155,7 +156,8 @@ fn clone_round_trip() {
     let dest = tmp.path().join("clone");
 
     let v = GitClient::new(GitOptions::default());
-    v.clone(bare.to_str().unwrap(), &dest, None, None).unwrap();
+    v.clone(bare.to_str().unwrap(), &dest, None, None, &mut io::sink())
+        .unwrap();
 
     assert!(v.is_repo(&dest).unwrap());
     let head = v.sha(&dest, "HEAD").unwrap();
@@ -184,8 +186,14 @@ fn clone_with_branch() {
 
     let dest = tmp.path().join("clone");
     let v = GitClient::new(GitOptions::default());
-    v.clone(bare.to_str().unwrap(), &dest, Some("feature"), None)
-        .unwrap();
+    v.clone(
+        bare.to_str().unwrap(),
+        &dest,
+        Some("feature"),
+        None,
+        &mut io::sink(),
+    )
+    .unwrap();
 
     let current = git_capture(&["rev-parse", "--abbrev-ref", "HEAD"], &dest);
     assert_eq!(current, "feature");
@@ -202,8 +210,14 @@ fn clone_with_custom_origin() {
     let dest = tmp.path().join("clone");
 
     let v = GitClient::new(GitOptions::default());
-    v.clone(bare.to_str().unwrap(), &dest, None, Some("upstream"))
-        .unwrap();
+    v.clone(
+        bare.to_str().unwrap(),
+        &dest,
+        None,
+        Some("upstream"),
+        &mut io::sink(),
+    )
+    .unwrap();
 
     let url = git_capture(&["remote", "get-url", "upstream"], &dest);
     assert_eq!(url, bare.to_str().unwrap());
@@ -219,7 +233,8 @@ fn sha_resolves_head_and_short_ref() {
     let bare = bare_source_with_one_commit(tmp.path());
     let dest = tmp.path().join("clone");
     let v = GitClient::new(GitOptions::default());
-    v.clone(bare.to_str().unwrap(), &dest, None, None).unwrap();
+    v.clone(bare.to_str().unwrap(), &dest, None, None, &mut io::sink())
+        .unwrap();
 
     let head = v.sha(&dest, "HEAD").unwrap();
     assert_eq!(head.len(), 40);
@@ -340,7 +355,8 @@ depth = -1
 fn clone_into(root: &Path, bare: &Path) -> PathBuf {
     let dest = root.join("clone");
     let v = GitClient::new(GitOptions::default());
-    v.clone(bare.to_str().unwrap(), &dest, None, None).unwrap();
+    v.clone(bare.to_str().unwrap(), &dest, None, None, &mut io::sink())
+        .unwrap();
     dest
 }
 
@@ -383,7 +399,7 @@ fn fetch_smart_skips_when_revision_is_local() {
         remote: "origin",
         revision: Some(&local_head),
     };
-    v.fetch(&dest, &spec).unwrap();
+    v.fetch(&dest, &spec, &mut io::sink()).unwrap();
 
     assert!(
         !fetch_head_present(&dest),
@@ -410,7 +426,7 @@ fn fetch_always_runs_even_when_revision_is_local() {
         remote: "origin",
         revision: Some(&local_head),
     };
-    v.fetch(&dest, &spec).unwrap();
+    v.fetch(&dest, &spec, &mut io::sink()).unwrap();
 
     assert!(
         fetch_head_present(&dest),
@@ -436,7 +452,7 @@ fn fetch_smart_runs_when_revision_is_unknown() {
         remote: "origin",
         revision: Some(&new_sha),
     };
-    v.fetch(&dest, &spec).unwrap();
+    v.fetch(&dest, &spec, &mut io::sink()).unwrap();
 
     // Smart strategy fell through to a real fetch; the new sha should now
     // be locally resolvable.
@@ -615,7 +631,7 @@ fn rebase_replays_local_commits_onto_target() {
     git(&["commit", "-q", "-m", "feature work"], &work);
 
     let v = GitClient::new(GitOptions::default());
-    v.rebase(&work, "target").unwrap();
+    v.rebase(&work, "target", &mut io::sink()).unwrap();
 
     // After rebase, feature's parent should be target's tip.
     let parent = git_capture(&["rev-parse", "HEAD^"], &work);
@@ -674,8 +690,14 @@ fn update_submodules_materializes_worktree() {
     // Fresh clone — submodule worktree should be empty until updated.
     let dest = tmp.path().join("clone");
     let v = GitClient::new(GitOptions::default());
-    v.clone(super_bare.to_str().unwrap(), &dest, None, None)
-        .unwrap();
+    v.clone(
+        super_bare.to_str().unwrap(),
+        &dest,
+        None,
+        None,
+        &mut io::sink(),
+    )
+    .unwrap();
     assert!(!dest.join("vendor/lib/LIB").exists());
 
     // Modern git refuses submodule clones over `file://` unless
@@ -683,7 +705,8 @@ fn update_submodules_materializes_worktree() {
     // *subprocess* of `git submodule update`, so a local config on the
     // parent repo doesn't reach it. The `GIT_CONFIG_*` env vars propagate.
     let _guard = AllowFileProtocolGuard::set();
-    v.update_submodules(&dest, &SubmoduleScope::All).unwrap();
+    v.update_submodules(&dest, &SubmoduleScope::All, &mut io::sink())
+        .unwrap();
 
     assert!(
         dest.join("vendor/lib/LIB").exists(),
@@ -718,6 +741,36 @@ impl Drop for AllowFileProtocolGuard {
 }
 
 #[test]
+fn fetch_writes_progress_to_supplied_writer() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    // Add a new commit upstream so the fetch has something to report.
+    add_commit_to_bare(tmp.path(), &bare, "second");
+
+    let v = GitClient::new(GitOptions::default());
+    let mut buf: Vec<u8> = Vec::new();
+    v.fetch(
+        &dest,
+        &FetchSpec {
+            remote: "origin",
+            revision: None,
+        },
+        &mut buf,
+    )
+    .unwrap();
+    let captured = String::from_utf8_lossy(&buf);
+    assert!(
+        captured.contains("From "),
+        "expected git fetch progress in captured output; got: {captured:?}"
+    );
+}
+
+#[test]
 fn update_submodules_specific_empty_is_noop() {
     if !git_available() {
         eprintln!("skipping: git not installed");
@@ -729,7 +782,7 @@ fn update_submodules_specific_empty_is_noop() {
 
     let v = GitClient::new(GitOptions::default());
     // Non-submodule repo + empty Specific → must succeed without error.
-    v.update_submodules(&dest, &SubmoduleScope::Specific(&[]))
+    v.update_submodules(&dest, &SubmoduleScope::Specific(&[]), &mut io::sink())
         .unwrap();
 }
 

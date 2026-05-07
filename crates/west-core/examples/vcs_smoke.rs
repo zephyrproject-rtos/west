@@ -31,7 +31,8 @@ fn main() -> ExitCode {
 
     let client = GitClient::new(GitOptions::default());
 
-    if let Err(e) = client.clone(&url, &dest, None, None) {
+    let stderr = std::io::stderr();
+    if let Err(e) = client.clone(&url, &dest, None, None, &mut stderr.lock()) {
         eprintln!("clone failed: {e}");
         return ExitCode::FAILURE;
     }

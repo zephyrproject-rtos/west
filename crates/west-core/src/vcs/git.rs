@@ -2,7 +2,7 @@
 //! libgit2 dependency.
 
 use std::ffi::OsString;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -171,26 +171,18 @@ impl GitClient {
         })
     }
 
-    /// Run `git` with stdout/stderr inherited from the parent. Used by
-    /// long-running operations (clone, fetch) so the user sees git's
-    /// progress output.
-    fn run_inherit(&self, args: &[&str]) -> Result<(), VcsError> {
-        let status = Command::new(self.binary())
-            .args(args)
-            .stdin(Stdio::null())
-            .status()
-            .map_err(|e| io_to_err(e, NAME))?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(VcsError::CommandFailed {
-                client: NAME,
-                argv: argv_strings(args),
-                exit_code: status.code(),
-                // No captured stderr — git wrote it directly to the terminal.
-                stderr: String::new(),
-            })
-        }
+    /// Run `git` capturing stdout/stderr, forwarding both to `out`. Used
+    /// by long-running operations (clone, fetch, rebase, submodule update)
+    /// where the user wants to see git's progress messages but the caller
+    /// owns the writer (terminal, per-task buffer, progress bar, …).
+    ///
+    /// stderr is forwarded before stdout so that git's status lines (which
+    /// it prints to stderr) appear in their natural order.
+    fn run_to_writer(&self, args: &[&str], out: &mut dyn Write) -> Result<(), VcsError> {
+        let res = self.run(args)?;
+        write_capture(out, &res.output.stderr)?;
+        write_capture(out, &res.output.stdout)?;
+        check_success(&res)
     }
 }
 
@@ -217,6 +209,7 @@ impl Vcs for GitClient {
         dest: &Path,
         revision: Option<&str>,
         origin: Option<&str>,
+        out: &mut dyn Write,
     ) -> Result<(), VcsError> {
         let dest_str = dest.to_string_lossy().into_owned();
         let mut argv: Vec<&str> = vec!["clone"];
@@ -232,7 +225,7 @@ impl Vcs for GitClient {
         argv.push("--");
         argv.push(url);
         argv.push(&dest_str);
-        self.run_inherit(&argv)
+        self.run_to_writer(&argv, out)
     }
 
     fn sha(&self, repo: &Path, rev: &str) -> Result<String, VcsError> {
@@ -275,7 +268,12 @@ impl Vcs for GitClient {
         }
     }
 
-    fn fetch(&self, repo: &Path, spec: &FetchSpec<'_>) -> Result<(), VcsError> {
+    fn fetch(
+        &self,
+        repo: &Path,
+        spec: &FetchSpec<'_>,
+        out: &mut dyn Write,
+    ) -> Result<(), VcsError> {
         // Smart strategy: if we're being asked for a specific revision and
         // it's already resolvable here, no need to talk to the network. The
         // caller resolves moving refs (branches) to their tip before calling
@@ -308,7 +306,7 @@ impl Vcs for GitClient {
         if let Some(rev) = spec.revision {
             argv.push(rev);
         }
-        self.run_inherit(&argv)
+        self.run_to_writer(&argv, out)
     }
 
     fn checkout(&self, repo: &Path, target: &CheckoutTarget<'_>) -> Result<(), VcsError> {
@@ -330,11 +328,9 @@ impl Vcs for GitClient {
         check_success(&res)
     }
 
-    fn rebase(&self, repo: &Path, onto: &str) -> Result<(), VcsError> {
+    fn rebase(&self, repo: &Path, onto: &str, out: &mut dyn Write) -> Result<(), VcsError> {
         let repo_str = repo.to_string_lossy().into_owned();
-        // Inherited stdio: rebase can be long-running and conflict prompts
-        // belong on the user's terminal, not buffered into our error path.
-        self.run_inherit(&["-C", &repo_str, "rebase", onto])
+        self.run_to_writer(&["-C", &repo_str, "rebase", onto], out)
     }
 
     fn is_clean(&self, repo: &Path) -> Result<bool, VcsError> {
@@ -362,7 +358,12 @@ impl Vcs for GitClient {
         }
     }
 
-    fn update_submodules(&self, repo: &Path, scope: &SubmoduleScope<'_>) -> Result<(), VcsError> {
+    fn update_submodules(
+        &self,
+        repo: &Path,
+        scope: &SubmoduleScope<'_>,
+        out: &mut dyn Write,
+    ) -> Result<(), VcsError> {
         // Empty Specific scope is an explicit no-op (caller may have
         // collected an empty list from manifest-driven filtering).
         if let SubmoduleScope::Specific(paths) = scope
@@ -382,7 +383,7 @@ impl Vcs for GitClient {
                 argv.push("--");
                 argv.extend(paths.iter().copied());
             }
-            self.run_inherit(&argv)?;
+            self.run_to_writer(&argv, out)?;
         }
 
         let mut argv: Vec<&str> = vec!["-C", &repo_str, "submodule", "update", "--init"];
@@ -393,7 +394,7 @@ impl Vcs for GitClient {
             argv.push("--");
             argv.extend(paths.iter().copied());
         }
-        self.run_inherit(&argv)
+        self.run_to_writer(&argv, out)
     }
 
     fn set_manifest_rev(
@@ -494,4 +495,16 @@ fn bad_option(key: &str, detail: &str) -> VcsError {
         key: key.to_owned(),
         detail: detail.to_owned(),
     }
+}
+
+/// Forward captured bytes to the caller's writer; surface IO errors with a
+/// sentinel path so the failure shows up as `VcsError::Io`.
+fn write_capture(out: &mut dyn Write, bytes: &[u8]) -> Result<(), VcsError> {
+    if bytes.is_empty() {
+        return Ok(());
+    }
+    out.write_all(bytes).map_err(|source| VcsError::Io {
+        path: PathBuf::from("<output>"),
+        source,
+    })
 }

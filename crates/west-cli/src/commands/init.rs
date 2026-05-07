@@ -158,7 +158,8 @@ fn bootstrap(
 
     let body = || -> Result<PathBuf, InitError> {
         let vcs = vcs::from_config(config).map_err(InitError::Vcs)?;
-        vcs.clone(url, &tmp_dir, revision, None)
+        let stderr = std::io::stderr();
+        vcs.clone(url, &tmp_dir, revision, None, &mut stderr.lock())
             .map_err(InitError::Vcs)?;
 
         // Resolve manifest.path:

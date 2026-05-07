@@ -31,6 +31,7 @@
 
 use std::error::Error;
 use std::fmt;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::config::Configuration;
@@ -40,7 +41,17 @@ mod git;
 pub use git::{FetchStrategy, GitClient, GitOptions};
 
 /// Operations every VCS client supports.
-pub trait Vcs: fmt::Debug {
+///
+/// The `Send + Sync` bound lets callers share a `Box<dyn Vcs>` across
+/// threads (e.g. `west update -j N`); concrete clients hold no shared
+/// mutable state.
+///
+/// Methods that produce user-visible progress take a `&mut dyn io::Write`
+/// for that progress; the implementation forwards captured stderr/stdout
+/// to it, and the caller decides where the bytes land (terminal, per-task
+/// buffer, indicatif progress bar, …). Lookups (`sha`, `is_repo`, …) don't
+/// produce progress and don't take a writer.
+pub trait Vcs: fmt::Debug + Send + Sync {
     /// Client identifier (`"git"`, `"jj"`, …). Stable; surfaces in errors.
     fn name(&self) -> &'static str;
 
@@ -51,6 +62,8 @@ pub trait Vcs: fmt::Debug {
     /// client supports it — a commit reference; each client interprets it as
     /// the user would expect when passing it to the underlying tool.
     /// `origin` overrides the remote name (default `"origin"` for git).
+    /// Progress output (git's "Cloning into …", "Receiving objects: …") is
+    /// forwarded to `out`.
     ///
     /// Git note: passes `revision` to `git clone --branch`, which accepts
     /// branch and tag names only. Landing at a bare commit SHA requires a
@@ -61,6 +74,7 @@ pub trait Vcs: fmt::Debug {
         dest: &Path,
         revision: Option<&str>,
         origin: Option<&str>,
+        out: &mut dyn io::Write,
     ) -> Result<(), VcsError>;
 
     /// Resolve `rev` to a commit SHA in `repo`. `"HEAD"` resolves the current
@@ -74,8 +88,13 @@ pub trait Vcs: fmt::Debug {
     /// the network call is actually made (smart-skip when the requested
     /// revision is already local), how tags are handled, and whether the
     /// fetch is shallow are all driven by `tool.<client>.fetch.*` keys read
-    /// at client construction.
-    fn fetch(&self, repo: &Path, spec: &FetchSpec<'_>) -> Result<(), VcsError>;
+    /// at client construction. Progress output is forwarded to `out`.
+    fn fetch(
+        &self,
+        repo: &Path,
+        spec: &FetchSpec<'_>,
+        out: &mut dyn io::Write,
+    ) -> Result<(), VcsError>;
 
     /// Move HEAD in `repo` to `target`.
     ///
@@ -86,8 +105,8 @@ pub trait Vcs: fmt::Debug {
 
     /// Rebase the current branch in `repo` onto `onto`. Fails if the
     /// rebase has conflicts; the working tree is left in whatever state the
-    /// underlying tool leaves it.
-    fn rebase(&self, repo: &Path, onto: &str) -> Result<(), VcsError>;
+    /// underlying tool leaves it. Progress output is forwarded to `out`.
+    fn rebase(&self, repo: &Path, onto: &str, out: &mut dyn io::Write) -> Result<(), VcsError>;
 
     /// `true` when `repo`'s working tree has no uncommitted changes.
     fn is_clean(&self, repo: &Path) -> Result<bool, VcsError>;
@@ -98,13 +117,19 @@ pub trait Vcs: fmt::Debug {
 
     /// Materialize the submodules in `repo`. `scope` selects all submodules
     /// or a specific list (paths within the repo). Behavior knobs (recursion,
-    /// pre-update sync) live in `tool.<client>.submodules.*` config.
+    /// pre-update sync) live in `tool.<client>.submodules.*` config. Progress
+    /// output is forwarded to `out`.
     ///
     /// Clients that don't have a submodule concept should return a
     /// [`VcsError::CommandFailed`] when invoked on a non-empty scope; for
     /// `Specific(&[])` the call must be a no-op so callers can pass through
     /// an empty manifest list without branching.
-    fn update_submodules(&self, repo: &Path, scope: &SubmoduleScope<'_>) -> Result<(), VcsError>;
+    fn update_submodules(
+        &self,
+        repo: &Path,
+        scope: &SubmoduleScope<'_>,
+        out: &mut dyn io::Write,
+    ) -> Result<(), VcsError>;
 
     /// Record `sha` as the manifest-rev of `repo`. `reason`, if given, is
     /// recorded with the underlying ref operation so users can inspect why
