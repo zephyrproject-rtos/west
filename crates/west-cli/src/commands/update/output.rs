@@ -17,39 +17,26 @@
 //! drops in here without touching workers.
 
 use std::io::{self, Write};
-use std::path::PathBuf;
 use std::sync::Mutex;
 
 /// One project's complete output transcript. Workers fill `captured`
 /// (banner + step output + error notes), set `outcome`, and ship the
-/// whole thing to the [`Reporter`].
+/// whole thing to the [`Reporter`]. In `Output::Inherit` mode the worker
+/// writes its banner straight to the parent's stderr instead of into
+/// `captured`, so `captured` may be empty even on success.
 pub struct ProjectReport {
     pub name: String,
-    pub path: PathBuf,
     pub captured: Vec<u8>,
     pub outcome: Result<(), String>,
 }
 
 impl ProjectReport {
-    pub fn new(name: String, path: PathBuf) -> Self {
+    pub fn new(name: String) -> Self {
         Self {
             name,
-            path,
             captured: Vec::new(),
             outcome: Ok(()),
         }
-    }
-
-    /// Banner emitted at the top of every project's transcript. Match
-    /// Python's `=== updating <name> (<path>):` tone, with a leading marker
-    /// that's easy to grep.
-    pub fn write_banner(&mut self) -> io::Result<()> {
-        writeln!(
-            self.captured,
-            "=== updating {} ({})",
-            self.name,
-            self.path.display()
-        )
     }
 }
 
@@ -182,11 +169,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn project_report_banner() {
-        let mut r = ProjectReport::new("zephyr".into(), PathBuf::from("zephyr"));
-        r.write_banner().unwrap();
-        let text = String::from_utf8(r.captured).unwrap();
-        assert!(text.contains("=== updating zephyr (zephyr)"));
+    fn project_report_default_state() {
+        let r = ProjectReport::new("zephyr".into());
+        assert_eq!(r.name, "zephyr");
+        assert!(r.captured.is_empty());
+        assert!(r.outcome.is_ok());
     }
 
     #[test]

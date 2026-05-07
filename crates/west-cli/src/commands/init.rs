@@ -158,8 +158,10 @@ fn bootstrap(
 
     let body = || -> Result<PathBuf, InitError> {
         let vcs = vcs::from_config(config).map_err(InitError::Vcs)?;
-        let stderr = std::io::stderr();
-        vcs.clone(url, &tmp_dir, revision, None, &mut stderr.lock())
+        // Inherit stdio so the user sees git's live "Cloning into …" plus
+        // progress lines — git silences its progress when stdio is piped.
+        let mut out = vcs::Output::Inherit;
+        vcs.clone(url, &tmp_dir, revision, None, &mut out)
             .map_err(InitError::Vcs)?;
 
         // Resolve manifest.path:

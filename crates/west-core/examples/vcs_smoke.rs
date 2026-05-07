@@ -31,8 +31,8 @@ fn main() -> ExitCode {
 
     let client = GitClient::new(GitOptions::default());
 
-    let stderr = std::io::stderr();
-    if let Err(e) = client.clone(&url, &dest, None, None, &mut stderr.lock()) {
+    let mut out = west_core::vcs::Output::Inherit;
+    if let Err(e) = client.clone(&url, &dest, None, None, &mut out) {
         eprintln!("clone failed: {e}");
         return ExitCode::FAILURE;
     }

@@ -10,8 +10,8 @@ use tempfile::TempDir;
 
 use west_core::config::Configuration;
 use west_core::vcs::{
-    self, CheckoutTarget, FetchSpec, FetchStrategy, GitClient, GitOptions, SubmoduleScope, Vcs,
-    VcsError,
+    self, CheckoutTarget, FetchSpec, FetchStrategy, GitClient, GitOptions, Output, SubmoduleScope,
+    Vcs, VcsError,
 };
 
 // ---------- helpers ----------
@@ -156,7 +156,7 @@ fn clone_round_trip() {
     let dest = tmp.path().join("clone");
 
     let v = GitClient::new(GitOptions::default());
-    v.clone(bare.to_str().unwrap(), &dest, None, None, &mut io::sink())
+    v.clone(bare.to_str().unwrap(), &dest, None, None, &mut Output::Capture(&mut io::sink()))
         .unwrap();
 
     assert!(v.is_repo(&dest).unwrap());
@@ -191,7 +191,7 @@ fn clone_with_branch() {
         &dest,
         Some("feature"),
         None,
-        &mut io::sink(),
+        &mut Output::Capture(&mut io::sink()),
     )
     .unwrap();
 
@@ -215,7 +215,7 @@ fn clone_with_custom_origin() {
         &dest,
         None,
         Some("upstream"),
-        &mut io::sink(),
+        &mut Output::Capture(&mut io::sink()),
     )
     .unwrap();
 
@@ -233,7 +233,7 @@ fn sha_resolves_head_and_short_ref() {
     let bare = bare_source_with_one_commit(tmp.path());
     let dest = tmp.path().join("clone");
     let v = GitClient::new(GitOptions::default());
-    v.clone(bare.to_str().unwrap(), &dest, None, None, &mut io::sink())
+    v.clone(bare.to_str().unwrap(), &dest, None, None, &mut Output::Capture(&mut io::sink()))
         .unwrap();
 
     let head = v.sha(&dest, "HEAD").unwrap();
@@ -355,7 +355,7 @@ depth = -1
 fn clone_into(root: &Path, bare: &Path) -> PathBuf {
     let dest = root.join("clone");
     let v = GitClient::new(GitOptions::default());
-    v.clone(bare.to_str().unwrap(), &dest, None, None, &mut io::sink())
+    v.clone(bare.to_str().unwrap(), &dest, None, None, &mut Output::Capture(&mut io::sink()))
         .unwrap();
     dest
 }
@@ -399,7 +399,7 @@ fn fetch_smart_skips_when_revision_is_local() {
         remote: "origin",
         revision: Some(&local_head),
     };
-    v.fetch(&dest, &spec, &mut io::sink()).unwrap();
+    v.fetch(&dest, &spec, &mut Output::Capture(&mut io::sink())).unwrap();
 
     assert!(
         !fetch_head_present(&dest),
@@ -426,7 +426,7 @@ fn fetch_always_runs_even_when_revision_is_local() {
         remote: "origin",
         revision: Some(&local_head),
     };
-    v.fetch(&dest, &spec, &mut io::sink()).unwrap();
+    v.fetch(&dest, &spec, &mut Output::Capture(&mut io::sink())).unwrap();
 
     assert!(
         fetch_head_present(&dest),
@@ -452,7 +452,7 @@ fn fetch_smart_runs_when_revision_is_unknown() {
         remote: "origin",
         revision: Some(&new_sha),
     };
-    v.fetch(&dest, &spec, &mut io::sink()).unwrap();
+    v.fetch(&dest, &spec, &mut Output::Capture(&mut io::sink())).unwrap();
 
     // Smart strategy fell through to a real fetch; the new sha should now
     // be locally resolvable.
@@ -631,7 +631,7 @@ fn rebase_replays_local_commits_onto_target() {
     git(&["commit", "-q", "-m", "feature work"], &work);
 
     let v = GitClient::new(GitOptions::default());
-    v.rebase(&work, "target", &mut io::sink()).unwrap();
+    v.rebase(&work, "target", &mut Output::Capture(&mut io::sink())).unwrap();
 
     // After rebase, feature's parent should be target's tip.
     let parent = git_capture(&["rev-parse", "HEAD^"], &work);
@@ -695,7 +695,7 @@ fn update_submodules_materializes_worktree() {
         &dest,
         None,
         None,
-        &mut io::sink(),
+        &mut Output::Capture(&mut io::sink()),
     )
     .unwrap();
     assert!(!dest.join("vendor/lib/LIB").exists());
@@ -705,7 +705,7 @@ fn update_submodules_materializes_worktree() {
     // *subprocess* of `git submodule update`, so a local config on the
     // parent repo doesn't reach it. The `GIT_CONFIG_*` env vars propagate.
     let _guard = AllowFileProtocolGuard::set();
-    v.update_submodules(&dest, &SubmoduleScope::All, &mut io::sink())
+    v.update_submodules(&dest, &SubmoduleScope::All, &mut Output::Capture(&mut io::sink()))
         .unwrap();
 
     assert!(
@@ -754,20 +754,43 @@ fn fetch_writes_progress_to_supplied_writer() {
 
     let v = GitClient::new(GitOptions::default());
     let mut buf: Vec<u8> = Vec::new();
-    v.fetch(
-        &dest,
-        &FetchSpec {
-            remote: "origin",
-            revision: None,
-        },
-        &mut buf,
-    )
-    .unwrap();
+    {
+        let mut out = Output::Capture(&mut buf);
+        v.fetch(
+            &dest,
+            &FetchSpec {
+                remote: "origin",
+                revision: None,
+            },
+            &mut out,
+        )
+        .unwrap();
+    }
     let captured = String::from_utf8_lossy(&buf);
     assert!(
         captured.contains("From "),
         "expected git fetch progress in captured output; got: {captured:?}"
     );
+}
+
+#[test]
+fn clone_with_inherit_succeeds() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = tmp.path().join("clone-inherit");
+
+    let v = GitClient::new(GitOptions::default());
+    // Smoke-test the Inherit code path. We can't programmatically assert
+    // on the live git output (it goes to the test runner's stderr), but
+    // we lock the API and confirm the resulting tree is a real repo.
+    let mut out = Output::Inherit;
+    v.clone(bare.to_str().unwrap(), &dest, None, None, &mut out)
+        .unwrap();
+    assert!(v.is_repo(&dest).unwrap());
 }
 
 #[test]
@@ -782,7 +805,7 @@ fn update_submodules_specific_empty_is_noop() {
 
     let v = GitClient::new(GitOptions::default());
     // Non-submodule repo + empty Specific → must succeed without error.
-    v.update_submodules(&dest, &SubmoduleScope::Specific(&[]), &mut io::sink())
+    v.update_submodules(&dest, &SubmoduleScope::Specific(&[]), &mut Output::Capture(&mut io::sink()))
         .unwrap();
 }
 

@@ -2,13 +2,13 @@
 //! libgit2 dependency.
 
 use std::ffi::OsString;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::config::Configuration;
 
-use super::{CheckoutTarget, FetchSpec, SubmoduleScope, Vcs, VcsError};
+use super::{CheckoutTarget, FetchSpec, Output, SubmoduleScope, Vcs, VcsError};
 
 const NAME: &str = "git";
 
@@ -171,18 +171,47 @@ impl GitClient {
         })
     }
 
-    /// Run `git` capturing stdout/stderr, forwarding both to `out`. Used
-    /// by long-running operations (clone, fetch, rebase, submodule update)
-    /// where the user wants to see git's progress messages but the caller
-    /// owns the writer (terminal, per-task buffer, progress bar, …).
+    /// Run `git` for one of the long-lived ops (`clone`, `fetch`,
+    /// `rebase`, `submodule update`) routing stdio according to `out`.
     ///
-    /// stderr is forwarded before stdout so that git's status lines (which
-    /// it prints to stderr) appear in their natural order.
-    fn run_to_writer(&self, args: &[&str], out: &mut dyn Write) -> Result<(), VcsError> {
-        let res = self.run(args)?;
-        write_capture(out, &res.output.stderr)?;
-        write_capture(out, &res.output.stdout)?;
-        check_success(&res)
+    /// `Output::Inherit` attaches stdout/stderr to the parent process so
+    /// git can detect a TTY and emit live progress (the only way git ever
+    /// emits its progress lines). `Output::Capture(w)` pipes both streams
+    /// and forwards the captured bytes to `w` after the child exits — git
+    /// won't emit progress in this mode but error messages and "From …"
+    /// status lines do come through.
+    fn run_with_output(
+        &self,
+        args: &[&str],
+        out: &mut Output<'_>,
+    ) -> Result<(), VcsError> {
+        match out {
+            Output::Inherit => {
+                let status = Command::new(self.binary())
+                    .args(args)
+                    .stdin(Stdio::null())
+                    .status()
+                    .map_err(|e| io_to_err(e, NAME))?;
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(VcsError::CommandFailed {
+                        client: NAME,
+                        argv: argv_strings(args),
+                        exit_code: status.code(),
+                        // git wrote stderr to the terminal directly; we
+                        // didn't capture it.
+                        stderr: String::new(),
+                    })
+                }
+            }
+            Output::Capture(w) => {
+                let res = self.run(args)?;
+                write_capture(*w, &res.output.stderr)?;
+                write_capture(*w, &res.output.stdout)?;
+                check_success(&res)
+            }
+        }
     }
 }
 
@@ -209,7 +238,7 @@ impl Vcs for GitClient {
         dest: &Path,
         revision: Option<&str>,
         origin: Option<&str>,
-        out: &mut dyn Write,
+        out: &mut Output<'_>,
     ) -> Result<(), VcsError> {
         let dest_str = dest.to_string_lossy().into_owned();
         let mut argv: Vec<&str> = vec!["clone"];
@@ -225,7 +254,7 @@ impl Vcs for GitClient {
         argv.push("--");
         argv.push(url);
         argv.push(&dest_str);
-        self.run_to_writer(&argv, out)
+        self.run_with_output(&argv, out)
     }
 
     fn sha(&self, repo: &Path, rev: &str) -> Result<String, VcsError> {
@@ -272,7 +301,7 @@ impl Vcs for GitClient {
         &self,
         repo: &Path,
         spec: &FetchSpec<'_>,
-        out: &mut dyn Write,
+        out: &mut Output<'_>,
     ) -> Result<(), VcsError> {
         // Smart strategy: if we're being asked for a specific revision and
         // it's already resolvable here, no need to talk to the network. The
@@ -306,7 +335,7 @@ impl Vcs for GitClient {
         if let Some(rev) = spec.revision {
             argv.push(rev);
         }
-        self.run_to_writer(&argv, out)
+        self.run_with_output(&argv, out)
     }
 
     fn checkout(&self, repo: &Path, target: &CheckoutTarget<'_>) -> Result<(), VcsError> {
@@ -328,9 +357,9 @@ impl Vcs for GitClient {
         check_success(&res)
     }
 
-    fn rebase(&self, repo: &Path, onto: &str, out: &mut dyn Write) -> Result<(), VcsError> {
+    fn rebase(&self, repo: &Path, onto: &str, out: &mut Output<'_>) -> Result<(), VcsError> {
         let repo_str = repo.to_string_lossy().into_owned();
-        self.run_to_writer(&["-C", &repo_str, "rebase", onto], out)
+        self.run_with_output(&["-C", &repo_str, "rebase", onto], out)
     }
 
     fn is_clean(&self, repo: &Path) -> Result<bool, VcsError> {
@@ -362,7 +391,7 @@ impl Vcs for GitClient {
         &self,
         repo: &Path,
         scope: &SubmoduleScope<'_>,
-        out: &mut dyn Write,
+        out: &mut Output<'_>,
     ) -> Result<(), VcsError> {
         // Empty Specific scope is an explicit no-op (caller may have
         // collected an empty list from manifest-driven filtering).
@@ -383,7 +412,7 @@ impl Vcs for GitClient {
                 argv.push("--");
                 argv.extend(paths.iter().copied());
             }
-            self.run_to_writer(&argv, out)?;
+            self.run_with_output(&argv, out)?;
         }
 
         let mut argv: Vec<&str> = vec!["-C", &repo_str, "submodule", "update", "--init"];
@@ -394,7 +423,7 @@ impl Vcs for GitClient {
             argv.push("--");
             argv.extend(paths.iter().copied());
         }
-        self.run_to_writer(&argv, out)
+        self.run_with_output(&argv, out)
     }
 
     fn set_manifest_rev(
@@ -499,7 +528,7 @@ fn bad_option(key: &str, detail: &str) -> VcsError {
 
 /// Forward captured bytes to the caller's writer; surface IO errors with a
 /// sentinel path so the failure shows up as `VcsError::Io`.
-fn write_capture(out: &mut dyn Write, bytes: &[u8]) -> Result<(), VcsError> {
+fn write_capture(out: &mut dyn io::Write, bytes: &[u8]) -> Result<(), VcsError> {
     if bytes.is_empty() {
         return Ok(());
     }

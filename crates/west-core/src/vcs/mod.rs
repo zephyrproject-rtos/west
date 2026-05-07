@@ -31,7 +31,7 @@
 
 use std::error::Error;
 use std::fmt;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use crate::config::Configuration;
@@ -40,17 +40,63 @@ mod git;
 
 pub use git::{FetchStrategy, GitClient, GitOptions};
 
+/// Where progress output from a long-lived child process goes.
+///
+/// `Inherit` attaches the child's stdout/stderr to the parent process —
+/// git sees a TTY (when one exists) and emits its usual live progress;
+/// the caller doesn't get the bytes.
+///
+/// `Capture(w)` pipes both streams, captures everything, and writes it to
+/// `w` once the child exits. git won't emit progress (no TTY in a piped
+/// child); status lines and error messages still come through.
+///
+/// New variants (e.g. PTY-based live streaming) can land here without
+/// changing the trait method signatures.
+pub enum Output<'a> {
+    Inherit,
+    Capture(&'a mut dyn io::Write),
+}
+
+impl fmt::Debug for Output<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Output::Inherit => f.write_str("Output::Inherit"),
+            Output::Capture(_) => f.write_str("Output::Capture(<writer>)"),
+        }
+    }
+}
+
+impl Output<'_> {
+    /// Emit a non-vcs note from the calling command (banner, "keeping
+    /// branch X", failure tag, …) to the right destination for the
+    /// current mode. In `Inherit` mode the line goes to the parent's
+    /// stderr (so it interleaves with the child's live stderr in the
+    /// terminal); in `Capture` mode it appends to the captured writer
+    /// (so the buffer stays a self-contained transcript).
+    pub fn write_note(&mut self, msg: &str) -> io::Result<()> {
+        match self {
+            Output::Inherit => {
+                let stderr = io::stderr();
+                let mut lock = stderr.lock();
+                writeln!(lock, "{msg}")
+            }
+            Output::Capture(w) => writeln!(*w, "{msg}"),
+        }
+    }
+}
+
 /// Operations every VCS client supports.
 ///
 /// The `Send + Sync` bound lets callers share a `Box<dyn Vcs>` across
 /// threads (e.g. `west update -j N`); concrete clients hold no shared
 /// mutable state.
 ///
-/// Methods that produce user-visible progress take a `&mut dyn io::Write`
-/// for that progress; the implementation forwards captured stderr/stdout
-/// to it, and the caller decides where the bytes land (terminal, per-task
-/// buffer, indicatif progress bar, …). Lookups (`sha`, `is_repo`, …) don't
-/// produce progress and don't take a writer.
+/// Methods that produce user-visible progress take a `&mut Output<'_>`.
+/// `Inherit` keeps git's live progress on the user's terminal (the only
+/// way to make git emit it — git silences its progress when stdio is
+/// piped); `Capture` collects both streams into the caller's writer and
+/// flushes them after the child exits. Lookups (`sha`, `is_repo`, …)
+/// don't produce progress and don't take an `Output`.
 pub trait Vcs: fmt::Debug + Send + Sync {
     /// Client identifier (`"git"`, `"jj"`, …). Stable; surfaces in errors.
     fn name(&self) -> &'static str;
@@ -74,7 +120,7 @@ pub trait Vcs: fmt::Debug + Send + Sync {
         dest: &Path,
         revision: Option<&str>,
         origin: Option<&str>,
-        out: &mut dyn io::Write,
+        out: &mut Output<'_>,
     ) -> Result<(), VcsError>;
 
     /// Resolve `rev` to a commit SHA in `repo`. `"HEAD"` resolves the current
@@ -93,7 +139,7 @@ pub trait Vcs: fmt::Debug + Send + Sync {
         &self,
         repo: &Path,
         spec: &FetchSpec<'_>,
-        out: &mut dyn io::Write,
+        out: &mut Output<'_>,
     ) -> Result<(), VcsError>;
 
     /// Move HEAD in `repo` to `target`.
@@ -106,7 +152,7 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     /// Rebase the current branch in `repo` onto `onto`. Fails if the
     /// rebase has conflicts; the working tree is left in whatever state the
     /// underlying tool leaves it. Progress output is forwarded to `out`.
-    fn rebase(&self, repo: &Path, onto: &str, out: &mut dyn io::Write) -> Result<(), VcsError>;
+    fn rebase(&self, repo: &Path, onto: &str, out: &mut Output<'_>) -> Result<(), VcsError>;
 
     /// `true` when `repo`'s working tree has no uncommitted changes.
     fn is_clean(&self, repo: &Path) -> Result<bool, VcsError>;
@@ -128,7 +174,7 @@ pub trait Vcs: fmt::Debug + Send + Sync {
         &self,
         repo: &Path,
         scope: &SubmoduleScope<'_>,
-        out: &mut dyn io::Write,
+        out: &mut Output<'_>,
     ) -> Result<(), VcsError>;
 
     /// Record `sha` as the manifest-rev of `repo`. `reason`, if given, is
