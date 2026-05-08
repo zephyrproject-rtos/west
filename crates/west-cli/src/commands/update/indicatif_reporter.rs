@@ -6,27 +6,17 @@
 //! bars so the user can debug without losing context.
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
-use west_core::vcs::{ProgressEvent, ProgressSink};
+use west_core::vcs::ProgressSink;
 
 use super::output::{FailureSummary, Reporter};
-
-/// Width reserved for the project-name prefix so all bars line up.
-const NAME_WIDTH: usize = 32;
-
-/// How often a bar pulses while waiting for the first Tick (so the
-/// spinner moves visibly even on slow networks).
-const TICK_INTERVAL: Duration = Duration::from_millis(120);
+use crate::progress::{IndicatifSink, PREFIX_WIDTH, TICK_INTERVAL, spinner_style, truncate_prefix};
 
 pub struct IndicatifReporter {
     multi: MultiProgress,
-    bar_style: ProgressStyle,
-    spinner_style: ProgressStyle,
     state: Mutex<IndicatifState>,
 }
 
@@ -46,13 +36,6 @@ struct IndicatifState {
 impl IndicatifReporter {
     pub fn new(total_projects: usize) -> Self {
         let multi = MultiProgress::new();
-        let bar_style = ProgressStyle::with_template(
-            "{prefix:32!.cyan.bold} {spinner} {msg:24} [{bar:30.green/blue}] {pos}/{len}",
-        )
-        .expect("static template")
-        .progress_chars("=> ");
-        let spinner_style = ProgressStyle::with_template("{prefix:32!.cyan.bold} {spinner} {msg}")
-            .expect("static template");
 
         // Bottom summary line as a styled bar (text-only).
         let summary = multi.add(ProgressBar::new(total_projects as u64));
@@ -63,8 +46,6 @@ impl IndicatifReporter {
 
         Self {
             multi,
-            bar_style,
-            spinner_style,
             state: Mutex::new(IndicatifState {
                 summary_bar: Some(summary),
                 ..IndicatifState::default()
@@ -76,8 +57,8 @@ impl IndicatifReporter {
 impl Reporter for IndicatifReporter {
     fn sink_for_project<'a>(&'a self, project_name: &str) -> Box<dyn ProgressSink + Send + 'a> {
         let bar = self.multi.add(ProgressBar::new_spinner());
-        bar.set_prefix(truncate_prefix(project_name, NAME_WIDTH));
-        bar.set_style(self.spinner_style.clone());
+        bar.set_prefix(truncate_prefix(project_name, PREFIX_WIDTH));
+        bar.set_style(spinner_style());
         bar.set_message("waiting…");
         bar.enable_steady_tick(TICK_INTERVAL);
 
@@ -90,14 +71,7 @@ impl Reporter for IndicatifReporter {
             state.bars.insert(project_name.to_owned(), bar.clone());
         }
 
-        Box::new(IndicatifSink {
-            bar,
-            bar_style: self.bar_style.clone(),
-            spinner_style: self.spinner_style.clone(),
-            transcript,
-            current_phase: None,
-            uses_bar_style: false,
-        })
+        Box::new(IndicatifSink::new(bar, Some(transcript)))
     }
 
     fn project_finished(&self, project_name: &str, outcome: Result<(), String>) {
@@ -149,81 +123,6 @@ impl Reporter for IndicatifReporter {
         // Drop the MultiProgress; remaining bars (if any) are flushed.
         FailureSummary {
             failed: state.failed,
-        }
-    }
-}
-
-fn truncate_prefix(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        format!("{s:<max$}", max = max)
-    } else {
-        let cut = max.saturating_sub(1);
-        let mut t = s[..cut].to_owned();
-        t.push('…');
-        t
-    }
-}
-
-struct IndicatifSink {
-    bar: ProgressBar,
-    bar_style: ProgressStyle,
-    spinner_style: ProgressStyle,
-    transcript: Arc<Mutex<Vec<u8>>>,
-    current_phase: Option<String>,
-    /// Whether we've switched the bar to the "with bar" style (i.e. a
-    /// phase with a known total has arrived). Until then we use the
-    /// spinner style.
-    uses_bar_style: bool,
-}
-
-impl ProgressSink for IndicatifSink {
-    fn event(&mut self, event: ProgressEvent<'_>) {
-        match event {
-            ProgressEvent::Line(s) => {
-                if let Ok(mut g) = self.transcript.lock() {
-                    let _ = writeln!(g, "{s}");
-                }
-            }
-            ProgressEvent::Phase { name, total } => {
-                // The parser emits a fresh Phase before every Tick (it's
-                // stateless), so most Phase events are redundant repeats
-                // of the *same* phase. Only reset the position when the
-                // name actually changes — otherwise the bar visibly
-                // flashes to 0% between every tick.
-                let phase_changed = self.current_phase.as_deref() != Some(name);
-                if phase_changed {
-                    self.current_phase = Some(name.to_owned());
-                    self.bar.set_message(name.to_owned());
-                }
-                if let Some(t) = total {
-                    if !self.uses_bar_style {
-                        self.bar.set_style(self.bar_style.clone());
-                        self.uses_bar_style = true;
-                    }
-                    self.bar.set_length(t);
-                    if phase_changed {
-                        self.bar.set_position(0);
-                    }
-                } else if self.uses_bar_style {
-                    // Phase without an up-front total: revert to spinner.
-                    self.bar.set_style(self.spinner_style.clone());
-                    self.uses_bar_style = false;
-                }
-            }
-            ProgressEvent::Tick { done, total } => {
-                if let Some(t) = total {
-                    if !self.uses_bar_style {
-                        self.bar.set_style(self.bar_style.clone());
-                        self.uses_bar_style = true;
-                    }
-                    self.bar.set_length(t);
-                }
-                self.bar.set_position(done);
-            }
-            ProgressEvent::Finished => {
-                // The reporter handles bar cleanup from project_finished
-                // so we know the outcome (success/failure styling).
-            }
         }
     }
 }

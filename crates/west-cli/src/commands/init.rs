@@ -15,6 +15,7 @@
 //!   copy — only that the manifest YAML file exists there.
 
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -157,12 +158,39 @@ fn bootstrap(
 
     let body = || -> Result<PathBuf, InitError> {
         let vcs = vcs::from_config(config).map_err(InitError::Vcs)?;
-        // Native stdio so the user sees git's live "Cloning into …" plus
-        // its own progress rendering. init is a single op; no value in
-        // routing through the structured-event path.
-        let mut out = vcs::Output::Native;
-        vcs.clone(url, &tmp_dir, revision, None, &mut out)
-            .map_err(InitError::Vcs)?;
+        // On a TTY (and unless the user asked for raw output), drive a
+        // single indicatif progress bar. Otherwise hand stdio straight
+        // to the underlying tool — matches the captured-bytes-or-native
+        // policy `update` uses.
+        let raw = config
+            .get_bool("output.raw")
+            .map_err(InitError::Config)?
+            .unwrap_or(false);
+        if !raw && std::io::stderr().is_terminal() {
+            let pb = indicatif::ProgressBar::new_spinner();
+            // Show the URL's basename (e.g. `example-application`) rather
+            // than a truncated full URL — same logic init uses elsewhere
+            // when falling back from the manifest's `self.path`.
+            pb.set_prefix(crate::progress::truncate_prefix(
+                &url_basename(url),
+                crate::progress::PREFIX_WIDTH,
+            ));
+            pb.set_style(crate::progress::spinner_style());
+            pb.set_message("cloning…");
+            pb.enable_steady_tick(crate::progress::TICK_INTERVAL);
+            let mut sink = crate::progress::IndicatifSink::new(pb.clone(), None);
+            let mut out = vcs::Output::Stream(&mut sink);
+            let res = vcs.clone(url, &tmp_dir, revision, None, &mut out);
+            match &res {
+                Ok(()) => pb.finish_with_message("done"),
+                Err(_) => pb.finish_with_message("failed"),
+            }
+            res.map_err(InitError::Vcs)?;
+        } else {
+            let mut out = vcs::Output::Native;
+            vcs.clone(url, &tmp_dir, revision, None, &mut out)
+                .map_err(InitError::Vcs)?;
+        }
 
         // Resolve manifest.path:
         //   - explicit: use it; warn if it disagrees with the YAML's self.path.

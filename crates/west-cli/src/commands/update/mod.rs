@@ -169,23 +169,31 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         }
     };
 
-    // Pick the reporter (and the worker's `Output` mode) by (parallel,
-    // tty). Serial mode hands stdio straight to the underlying tool;
-    // parallel-on-TTY drives an indicatif `MultiProgress`; parallel
-    // off-TTY (CI logs) buffers per-project transcripts and flushes in
-    // arrival order at the end.
-    let parallel = settings.jobs > 1;
+    // Pick the reporter (and the worker's `Output` mode) by (raw, tty,
+    // parallel). `raw` forces serial + native stdio (interleaved native
+    // git output across N projects is unreadable). On a TTY without
+    // raw, indicatif drives a per-project bar regardless of `-j` (a
+    // `-j 1` run still gets the nice single-bar experience). Off-TTY
+    // and parallel: BufferingReporter dumps transcripts in arrival
+    // order. Off-TTY and serial without raw: SerialReporter + native,
+    // same as today's CI flow.
+    let raw = settings.raw;
     let stderr_is_tty = io::stderr().is_terminal();
-    let reporter: Box<dyn Reporter> = match (parallel, stderr_is_tty) {
-        (false, _) => Box::new(SerialReporter::new()),
-        (true, true) => Box::new(IndicatifReporter::new(projects.len())),
-        (true, false) => Box::new(BufferingReporter::new()),
+    let parallel = !raw && settings.jobs > 1;
+    let use_stream = !raw && (stderr_is_tty || parallel);
+    let jobs = if raw { 1 } else { settings.jobs };
+
+    let reporter: Box<dyn Reporter> = if raw {
+        Box::new(SerialReporter::new())
+    } else if stderr_is_tty {
+        Box::new(IndicatifReporter::new(projects.len()))
+    } else if parallel {
+        Box::new(BufferingReporter::new())
+    } else {
+        Box::new(SerialReporter::new())
     };
 
-    let pool = match rayon::ThreadPoolBuilder::new()
-        .num_threads(settings.jobs)
-        .build()
-    {
+    let pool = match rayon::ThreadPoolBuilder::new().num_threads(jobs).build() {
         Ok(p) => p,
         Err(e) => {
             eprintln!("west: failed to start worker pool: {e}");
@@ -205,7 +213,7 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
                 workspace_ref,
                 &settings,
                 reporter_ref,
-                parallel,
+                use_stream,
             );
             reporter_ref.project_finished(&project.name, outcome);
         });
@@ -229,6 +237,7 @@ struct Settings {
     jobs: usize,
     rebase: bool,
     keep_descendants: bool,
+    raw: bool,
 }
 
 impl Settings {
@@ -251,10 +260,15 @@ impl Settings {
             .get_bool("update.keep-descendants")
             .map_err(|e| e.to_string())?
             .unwrap_or(false);
+        let raw = config
+            .get_bool("output.raw")
+            .map_err(|e| e.to_string())?
+            .unwrap_or(false);
         Ok(Self {
             jobs,
             rebase,
             keep_descendants,
+            raw,
         })
     }
 }
@@ -265,16 +279,16 @@ fn run_one_project(
     workspace: &Path,
     settings: &Settings,
     reporter: &dyn Reporter,
-    parallel: bool,
+    use_stream: bool,
 ) -> Result<(), String> {
     let repo = workspace.join(&project.path);
-    if parallel {
+    if use_stream {
         let mut sink = reporter.sink_for_project(&project.name);
         let mut out = Output::Stream(sink.as_mut());
         run_project_steps(vcs, project, &repo, settings, &mut out)
     } else {
-        // Serial: native stdio, banner via stderr; the sink is unused
-        // (reporter is SerialReporter, NullSink).
+        // Native stdio: banner via stderr (the underlying tool's own
+        // progress lands directly on the terminal that follows).
         eprintln!("=== updating {} ({})", project.name, project.path.display());
         let mut out = Output::Native;
         run_project_steps(vcs, project, &repo, settings, &mut out)

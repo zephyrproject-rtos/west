@@ -7,6 +7,7 @@ use log::LevelFilter;
 
 pub mod alias;
 pub mod commands;
+pub mod progress;
 
 #[derive(Parser, Debug)]
 #[command(name = "west", version, about = "The Zephyr RTOS meta-tool")]
@@ -28,6 +29,13 @@ pub struct Cli {
     /// Repeatable.
     #[arg(long = "config-file", value_name = "PATH", action = ArgAction::Append)]
     pub config_file: Vec<PathBuf>,
+
+    /// Disable progress bars; the underlying tool's stdio is attached
+    /// directly to the terminal. For `update`, also forces `-j 1` —
+    /// interleaved native git output across N projects is unreadable.
+    /// Equivalent to `--config output.raw=true`.
+    #[arg(long, global = true)]
+    pub raw: bool,
 
     #[command(subcommand)]
     pub command: commands::Command,
@@ -81,13 +89,22 @@ pub fn run() -> ExitCode {
         .filter_level(initial.verbosity.log_level_filter())
         .init();
 
-    let loaded = match commands::config::load(&initial.config_file, &initial.config) {
+    let mut loaded = match commands::config::load(&initial.config_file, &initial.config) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("west: {e}");
             return ExitCode::FAILURE;
         }
     };
+
+    if initial.raw
+        && let Err(e) = loaded
+            .config
+            .set_inline("output.raw", west_core::config::ConfigValue::Bool(true))
+    {
+        eprintln!("west: --raw: {e}");
+        return ExitCode::FAILURE;
+    }
 
     // Resolve aliases. Re-parses argv on each iteration; aliases never inject
     // top-level flags (validated in `alias::lookup`) so the initial chdir,
