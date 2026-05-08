@@ -8,6 +8,8 @@ use config::LoadedConfig;
 pub mod config;
 pub mod exec;
 pub mod init;
+pub mod list;
+pub mod select;
 pub mod topdir;
 pub mod update;
 
@@ -22,6 +24,8 @@ pub enum Command {
     Exec(exec::ExecArgs),
     /// Initialize a west workspace.
     Init(init::InitArgs),
+    /// List projects defined in the manifest.
+    List(list::ListArgs),
     /// Print the top directory of the west workspace.
     Topdir,
     /// Update projects to their manifest revisions.
@@ -37,6 +41,7 @@ pub fn dispatch(cmd: Command, mut loaded: LoadedConfig) -> ExitCode {
         Command::Config(a) => config::run(a, &mut loaded),
         Command::Exec(a) => exec::run(a),
         Command::Init(a) => init::run(a, &mut loaded),
+        Command::List(a) => list::run(a, &mut loaded),
         Command::Topdir => topdir::run(),
         Command::Update(a) => update::run(a, &mut loaded),
         Command::External(args) => {

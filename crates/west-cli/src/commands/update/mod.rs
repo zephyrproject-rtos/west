@@ -27,7 +27,6 @@
 mod import_source;
 mod indicatif_reporter;
 mod output;
-mod select;
 
 use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
@@ -148,13 +147,14 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         }
     };
 
-    let projects = match select::select_projects(&manifest, &args.projects, &cli_group_filter) {
-        Ok(ps) => ps,
-        Err(e) => {
-            eprintln!("west: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let projects =
+        match super::select::select_projects(&manifest, &args.projects, &cli_group_filter) {
+            Ok(ps) => ps,
+            Err(e) => {
+                eprintln!("west: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
 
     if projects.is_empty() {
         eprintln!("west: no projects to update");

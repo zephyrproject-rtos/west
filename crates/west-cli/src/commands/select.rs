@@ -1,8 +1,8 @@
-//! Project selection for `west update`. Thin wrapper around
-//! `Manifest::resolve_projects` and `Manifest::is_active` plus the
-//! `--group-filter` CLI parser. Lives in the update command rather than
-//! `west_core::manifest` because it composes those data-layer methods
-//! into the command's specific selection rules.
+//! Project selection for project-iterating commands (`update`, `list`,
+//! eventually `forall`, `diff`, `status`). Composes `Manifest::is_active` and
+//! `Manifest::resolve_projects` with one CLI rule on top: positional
+//! project names bypass the active-group filter (matches Python's intent —
+//! a user who names a project explicitly wants it even if its group is off).
 
 use west_core::manifest::{GroupFilterEntry, Manifest, ManifestError, Project};
 

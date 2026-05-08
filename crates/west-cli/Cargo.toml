@@ -13,6 +13,7 @@ indicatif = "0.17"
 log = "0.4"
 rayon = "1"
 shlex = "1"
+strfmt = "0.2"
 west-core = { path = "../west-core" }
 
 [dev-dependencies]
