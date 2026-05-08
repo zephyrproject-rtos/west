@@ -2,7 +2,7 @@
 //!
 //! Reads `alias.<name>` from the loaded `Configuration` and rewrites argv to
 //! the expansion target. Recursive aliases are supported; a visited-name set
-//! prevents infinite loops (matching Python west's behavior).
+//! prevents infinite loops.
 //!
 //! Aliases must resolve to another command name as their first token: no
 //! leading `-`. Top-level flags (`-C`, `-v`/`-q`, `--config`, `--config-file`)

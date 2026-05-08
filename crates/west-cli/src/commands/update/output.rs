@@ -50,7 +50,7 @@ impl FailureSummary {
         self.failed.is_empty()
     }
 
-    /// Render Python's "<name> failed for project{s} <list>" style.
+    /// Render a one-line summary like `update failed for 2 projects: a, b`.
     pub fn render(&self) -> String {
         if self.failed.is_empty() {
             return String::new();

@@ -6,14 +6,14 @@
 
 use west_core::manifest::{GroupFilterEntry, Manifest, ManifestError, Project};
 
-/// Resolve the set of projects to update, applying Python's selection
-/// semantics:
+/// Resolve the set of projects to update.
+///
 /// - empty `selectors` ⇒ every project that's active under the manifest's
 ///   group-filter combined with `cli_filter`.
 /// - non-empty `selectors` ⇒ exactly those projects (matched by name then
-///   by relative path), **bypassing** the active-group filter — Python
-///   intentionally lets you update a project even if it's in an inactive
-///   group. Unknown selectors error.
+///   by relative path), **bypassing** the active-group filter so a user
+///   can update a named project even if it's in an inactive group.
+///   Unknown selectors error.
 pub fn select_projects<'m, S>(
     manifest: &'m Manifest,
     selectors: &[S],

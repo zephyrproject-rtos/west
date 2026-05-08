@@ -41,8 +41,7 @@ pub struct InitArgs {
     pub url: Option<String>,
 
     /// Revision (branch or tag) to check out (bootstrap mode).
-    /// `--mr` is accepted as an alias for muscle-memory carry-over from
-    /// Python west.
+    /// `--mr` is accepted as a short alias.
     #[arg(long = "revision", visible_alias = "mr")]
     pub revision: Option<String>,
 

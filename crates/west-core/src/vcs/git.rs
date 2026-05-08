@@ -13,9 +13,9 @@ use super::{CheckoutTarget, FetchSpec, Output, SubmoduleScope, Vcs, VcsError};
 const NAME: &str = "git";
 
 /// Where the manifest-rev pointer lives in a git repo. Plain
-/// `refs/heads/<name>` rather than `refs/west/<name>` to keep it visible to
-/// `git branch` and ordinary tooling — west's Python implementation has used
-/// this location for years and users expect to see it.
+/// `refs/heads/<name>` rather than `refs/west/<name>` so it stays visible
+/// to `git branch` and other ordinary tooling — this is the established
+/// location users expect from prior west releases.
 const MANIFEST_REV_REF: &str = "refs/heads/manifest-rev";
 
 #[derive(Debug)]

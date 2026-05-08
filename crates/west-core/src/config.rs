@@ -1186,9 +1186,11 @@ mod tests {
     }
 
     #[test]
-    fn read_old_python_ini_file_fails_with_clear_error() {
-        // Python's configparser writes `key = value` (no quotes around string values).
-        // That's not valid TOML — `value` is parsed as a bare key/identifier.
+    fn read_legacy_ini_file_fails_with_clear_error() {
+        // Older configparser-style files use bare `key = value` (no quotes
+        // around string values). That's not valid TOML — `value` parses
+        // as a bare key/identifier — and we want a clean MalformedToml
+        // diagnostic rather than a confusing partial-parse.
         let tmp = TempDir::new().unwrap();
         let p = tmp.path().join("v1-config");
         fs::write(&p, "[manifest]\npath = zephyr\nfile = west.yml\n").unwrap();

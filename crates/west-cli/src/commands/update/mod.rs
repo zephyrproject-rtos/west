@@ -18,11 +18,11 @@
 //!   thread pool is the right tool. We build a pool sized to
 //!   `update.jobs` and let `par_iter` schedule project-sized work.
 //!
-//! - **keep-descendants beats rebase.** Both are bools (matching Python's
-//!   `--keep-descendants` and `--rebase` flags). When both are set, the
-//!   keep-descendants branch is taken when applicable, then we fall back
-//!   through `rebase` and finally to detached checkout. Python parity
-//!   (project.py:1695).
+//! - **keep-descendants beats rebase.** Both are independently-settable
+//!   booleans. When both are on, the keep-descendants branch is taken
+//!   when applicable; otherwise we fall back through `rebase`, and
+//!   finally to detached checkout. The "keep-descendants wins" rule is
+//!   load-bearing: a user who sets both expects the safer of the two.
 
 mod import_source;
 mod output;
@@ -312,8 +312,10 @@ fn run_one_project(
     report
 }
 
-/// The Python parity sequence (project.py:1657–1740). Errors short-circuit
-/// the project; later steps don't run.
+/// Per-project sequence: ensure cloned, fetch, resolve manifest-rev,
+/// record manifest-rev, choose checkout strategy (keep-descendants /
+/// rebase / detach), then submodules. Errors short-circuit the project;
+/// later steps don't run.
 fn run_project_steps(
     vcs: &dyn Vcs,
     project: &Project,

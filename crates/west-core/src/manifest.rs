@@ -121,11 +121,12 @@ impl fmt::Display for ImportSite {
 /// the requested file's body.
 ///
 /// Returning `Ok(None)` means "the file isn't there"; the import is
-/// silently skipped (Python parity — one missing import doesn't break
-/// resolution). Returning `Err` means "the source operation itself
-/// failed"; the resolver `eprintln!`s a warning and continues with the
-/// rest of the projects, surfacing the failure once at the end via
-/// [`ManifestError::ImportSourceFailed`] only if the resolver aborts.
+/// silently skipped — one missing imported file shouldn't break the
+/// rest of resolution. Returning `Err` means "the source operation
+/// itself failed"; the resolver `eprintln!`s a warning and continues
+/// with the rest of the projects, surfacing the failure once at the
+/// end via [`ManifestError::ImportSourceFailed`] only if the resolver
+/// aborts.
 pub trait ImportSource {
     fn project_manifest(
         &self,
@@ -458,7 +459,7 @@ enum ImportSchema {
 }
 
 /// Dict form of [`ImportSchema`]. All list fields also accept a single
-/// string (Python parity); `OneOrMany` handles the deserialization.
+/// string for ergonomics; `OneOrMany` handles the deserialization.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 struct ImportMap {
@@ -548,23 +549,21 @@ impl<T: Clone> OneOrMany<T> {
 // Import resolution
 // =====================================================================
 //
-// Mirrors the Python algorithm in src/west/manifest.py around `_load_self`
-// / `_load_projects` / `_compose_imap_filters`. Differences from Python
-// recorded in trade-offs in the plan:
+// Resolution rules:
 //
-// - Cycle/depth guards are explicit (visited-sets + MAX_IMPORT_DEPTH)
-//   rather than relying on stack overflow.
+// - Cycle/depth guards are explicit: a per-site visited-set plus a
+//   `MAX_IMPORT_DEPTH` cap, instead of relying on stack overflow.
 // - Resolution order: each manifest file processes its own
 //   directly-defined projects first, then walks self/top-level imports,
 //   then per-project imports for projects that have them. First-wins
 //   means parent-defined projects beat imported ones with the same name.
-// - 0.10+ group-filter semantics only.
 
 const MANIFEST_DEFAULT_FILE: &str = "west.yml";
 
 /// Per-import filter (allowlist/blocklist of project names + paths). The
 /// resolver carries a composed filter through the recursion — parent and
-/// child rules combine according to Python's `_compose_imap_filters`.
+/// child rules combine: allowlists narrow (a project must be in both),
+/// blocklists union (any block on the chain rejects).
 #[derive(Debug, Clone, Default)]
 struct ImportFilter {
     name_allowlist: Vec<String>,
@@ -638,10 +637,9 @@ impl ImportFilter {
 }
 
 fn combine_allowlists(parent: &[String], child: &[String]) -> Vec<String> {
-    // Python's _combine_allowlists semantics: empty = no constraint, so
-    // an empty side returns the other; both empty stays empty; both
-    // populated keeps everything from either (the predicate is "in the
-    // union").
+    // Empty = no constraint, so an empty side returns the other; both
+    // empty stays empty; both populated takes the union (the gate
+    // predicate is "in either list").
     if parent.is_empty() {
         child.to_vec()
     } else if child.is_empty() {
@@ -1185,9 +1183,9 @@ impl Manifest {
     /// Algorithm: a project with no `groups:` is always active. Otherwise,
     /// walk the combined filter in order maintaining a "disabled groups"
     /// set — `-foo` adds, `+foo` removes. The project is active iff at
-    /// least one of its groups is *not* in the disabled set. (This
-    /// matches Python's "last matching ± entry wins" behavior because a
-    /// later `+foo` clears `foo` from the set, and a later `-foo` adds it.)
+    /// least one of its groups is *not* in the disabled set. (Last
+    /// matching ± entry wins as a side-effect: a later `+foo` clears
+    /// `foo` from the set, and a later `-foo` adds it.)
     pub fn is_active(&self, project: &Project, extra_filter: &[GroupFilterEntry]) -> bool {
         if project.groups.is_empty() {
             return true;
@@ -2291,8 +2289,8 @@ manifest:
     use std::collections::BTreeMap;
 
     /// Test double for [`ImportSource`] that maps project names to YAML
-    /// bodies. Returns `Ok(None)` for unmapped projects (silently
-    /// skipped, matching Python's "missing import file" behaviour).
+    /// bodies. Returns `Ok(None)` for unmapped projects, exercising the
+    /// resolver's "missing import file → silently skipped" branch.
     struct StaticImportSource {
         manifests: BTreeMap<String, String>,
         calls: RefCell<Vec<(String, String)>>,
