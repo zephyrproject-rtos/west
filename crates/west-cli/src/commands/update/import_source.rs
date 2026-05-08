@@ -16,7 +16,7 @@ use std::io;
 use std::path::Path;
 
 use west_core::manifest::{ImportSource, ImportSourceError, Project};
-use west_core::vcs::{CheckoutTarget, FetchSpec, Output, Vcs, VcsError};
+use west_core::vcs::{CheckoutTarget, FetchSpec, NullSink, Output, Vcs, VcsError};
 
 pub struct WorkspaceImportSource<'a> {
     workspace: &'a Path,
@@ -90,15 +90,14 @@ impl ImportSource for WorkspaceImportSource<'_> {
     }
 }
 
-/// Run `op` with a discarding `Output::Capture` so import-source git
-/// noise doesn't bleed onto the user's terminal before update's own
-/// banners print.
+/// Run `op` with a `NullSink` so import-source git noise doesn't bleed
+/// onto the user's terminal before update's own banners print.
 fn run_quiet<F>(op: F) -> Result<(), VcsError>
 where
     F: FnOnce(&mut Output<'_>) -> Result<(), VcsError>,
 {
-    let mut buf: Vec<u8> = Vec::new();
-    let mut out = Output::Capture(&mut buf);
+    let mut sink = NullSink;
+    let mut out = Output::Stream(&mut sink);
     op(&mut out)
 }
 

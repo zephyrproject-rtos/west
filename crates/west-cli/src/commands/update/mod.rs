@@ -25,10 +25,11 @@
 //!   load-bearing: a user who sets both expects the safer of the two.
 
 mod import_source;
+mod indicatif_reporter;
 mod output;
 mod select;
 
-use std::io::Write;
+use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -40,7 +41,8 @@ use west_core::manifest::{GroupFilterEntry, Manifest, Project, Submodules};
 use west_core::vcs::{self, CheckoutTarget, FetchSpec, Output, SubmoduleScope, Vcs, VcsError};
 
 use super::config::LoadedConfig;
-use output::{BufferingReporter, ProjectReport, Reporter, SerialReporter};
+use indicatif_reporter::IndicatifReporter;
+use output::{BufferingReporter, Reporter, SerialReporter};
 
 const DEFAULT_MANIFEST_FILE: &str = "west.yml";
 /// Hard cap on the auto-default for `update.jobs`. Beyond this, contention on
@@ -167,21 +169,17 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         }
     };
 
-    // `Inherit` keeps git's live progress on the user's terminal — the
-    // only way to get progress at all, since git silences progress lines
-    // when stdio is piped. Multi-job runs can't sensibly interleave N
-    // projects' live output, so they capture per-project and flush in
+    // Pick the reporter (and the worker's `Output` mode) by (parallel,
+    // tty). Serial mode hands stdio straight to the underlying tool;
+    // parallel-on-TTY drives an indicatif `MultiProgress`; parallel
+    // off-TTY (CI logs) buffers per-project transcripts and flushes in
     // arrival order at the end.
-    let mode = if settings.jobs == 1 {
-        Mode::Inherit
-    } else {
-        Mode::Capture
-    };
-
-    let reporter: Box<dyn Reporter> = if settings.jobs == 1 {
-        Box::new(SerialReporter::new())
-    } else {
-        Box::new(BufferingReporter::new())
+    let parallel = settings.jobs > 1;
+    let stderr_is_tty = io::stderr().is_terminal();
+    let reporter: Box<dyn Reporter> = match (parallel, stderr_is_tty) {
+        (false, _) => Box::new(SerialReporter::new()),
+        (true, true) => Box::new(IndicatifReporter::new(projects.len())),
+        (true, false) => Box::new(BufferingReporter::new()),
     };
 
     let pool = match rayon::ThreadPoolBuilder::new()
@@ -201,8 +199,15 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
 
     pool.install(|| {
         projects.par_iter().for_each(|project| {
-            let report = run_one_project(project, vcs_ref, workspace_ref, &settings, mode);
-            reporter_ref.project_finished(report);
+            let outcome = run_one_project(
+                project,
+                vcs_ref,
+                workspace_ref,
+                &settings,
+                reporter_ref,
+                parallel,
+            );
+            reporter_ref.project_finished(&project.name, outcome);
         });
     });
 
@@ -254,62 +259,26 @@ impl Settings {
     }
 }
 
-/// Decides how the per-project worker routes git stdio. Set once for the
-/// whole run from `settings.jobs`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Mode {
-    /// Live: banner via `eprintln!`, vcs ops via `Output::Inherit`.
-    Inherit,
-    /// Captured per project: banner into the buffer, vcs ops via
-    /// `Output::Capture(&mut buf)`. Buffer is shipped to the reporter for
-    /// completion-order flushing.
-    Capture,
-}
-
 fn run_one_project(
     project: &Project,
     vcs: &dyn Vcs,
     workspace: &Path,
     settings: &Settings,
-    mode: Mode,
-) -> ProjectReport {
+    reporter: &dyn Reporter,
+    parallel: bool,
+) -> Result<(), String> {
     let repo = workspace.join(&project.path);
-    let mut buf: Vec<u8> = Vec::new();
-    let outcome = match mode {
-        Mode::Inherit => {
-            eprintln!("=== updating {} ({})", project.name, project.path.display());
-            let mut out = Output::Inherit;
-            run_project_steps(vcs, project, &repo, settings, &mut out)
-        }
-        Mode::Capture => {
-            // Banner first so the buffer is a self-contained transcript.
-            let _ = writeln!(
-                buf,
-                "=== updating {} ({})",
-                project.name,
-                project.path.display()
-            );
-            let mut out = Output::Capture(&mut buf);
-            let r = run_project_steps(vcs, project, &repo, settings, &mut out);
-            // `out` (and its &mut borrow of `buf`) is dropped at end of arm.
-            r
-        }
-    };
-
-    let mut report = ProjectReport::new(project.name.clone());
-    report.captured = buf;
-    if let Err(ref e) = outcome {
-        // ERROR tag goes wherever notes go (stderr in Inherit, buffer in
-        // Capture); for Inherit we re-emit to stderr to match the banner.
-        match mode {
-            Mode::Inherit => eprintln!("ERROR: {e}"),
-            Mode::Capture => {
-                let _ = writeln!(report.captured, "ERROR: {e}");
-            }
-        }
+    if parallel {
+        let mut sink = reporter.sink_for_project(&project.name);
+        let mut out = Output::Stream(sink.as_mut());
+        run_project_steps(vcs, project, &repo, settings, &mut out)
+    } else {
+        // Serial: native stdio, banner via stderr; the sink is unused
+        // (reporter is SerialReporter, NullSink).
+        eprintln!("=== updating {} ({})", project.name, project.path.display());
+        let mut out = Output::Native;
+        run_project_steps(vcs, project, &repo, settings, &mut out)
     }
-    report.outcome = outcome;
-    report
 }
 
 /// Per-project sequence: ensure cloned, fetch, resolve manifest-rev,
@@ -379,9 +348,10 @@ fn run_project_steps(
             // new sha is already an ancestor of it.
             let is_ancestor = vcs.is_ancestor(repo, &sha, branch).map_err(stringify)?;
             if is_ancestor {
-                let _ = out.write_note(&format!(
-                    "keeping branch {branch:?} (manifest-rev is an ancestor)"
-                ));
+                note(
+                    out,
+                    &format!("keeping branch {branch:?} (manifest-rev is an ancestor)"),
+                );
                 false
             } else if settings.rebase {
                 vcs.rebase(repo, "refs/heads/manifest-rev", out)
@@ -456,6 +426,16 @@ fn run_submodules(
 
 fn stringify(e: VcsError) -> String {
     e.to_string()
+}
+
+/// Emit a non-vcs note from the worker. Native mode prints to stderr;
+/// Stream mode pushes a `Line` event into the sink so it interleaves
+/// with the captured transcript at the right point.
+fn note(out: &mut Output<'_>, msg: &str) {
+    match out {
+        Output::Native => eprintln!("{msg}"),
+        Output::Stream(sink) => sink.event(west_core::vcs::ProgressEvent::Line(msg)),
+    }
 }
 
 // =====================================================================

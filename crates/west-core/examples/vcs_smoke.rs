@@ -31,7 +31,7 @@ fn main() -> ExitCode {
 
     let client = GitClient::new(GitOptions::default());
 
-    let mut out = west_core::vcs::Output::Inherit;
+    let mut out = west_core::vcs::Output::Native;
     if let Err(e) = client.clone(&url, &dest, None, None, &mut out) {
         eprintln!("clone failed: {e}");
         return ExitCode::FAILURE;

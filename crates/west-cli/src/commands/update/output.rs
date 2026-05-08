@@ -1,44 +1,28 @@
 //! Per-project output gathering for `west update`.
 //!
-//! The trait/Vcs layer is unaware of formatting and ordering: it just
-//! writes captured progress bytes into whatever `&mut dyn io::Write` we
-//! hand it. This module owns the per-project buffer, the banner format,
-//! and the policy for *when* the buffer makes it to the user's terminal.
+//! [`Reporter`] is the seam between workers and the user-facing UI:
 //!
-//! Two implementations of [`Reporter`] in this PR:
-//! - [`SerialReporter`] writes each project's output as soon as the
-//!   project finishes — appropriate for `-j 1` and the default error
-//!   path. The serial loop produces a clean, deterministic transcript.
-//! - [`BufferingReporter`] collects finished reports across rayon workers
-//!   under a `Mutex` and flushes them in arrival order on
-//!   [`Reporter::finish`]. Used for `-j > 1`.
+//! - The worker asks the reporter for a [`ProgressSink`] (one per
+//!   project) and hands it to the vcs ops.
+//! - When the project's run finishes, the worker reports the outcome.
+//! - At the end of the whole run, the reporter is dropped and produces
+//!   a [`FailureSummary`].
 //!
-//! Both flush to `io::stderr()` today. A future indicatif-based reporter
-//! drops in here without touching workers.
+//! Three implementations:
+//! - [`SerialReporter`] — for `-j 1`. The worker uses
+//!   [`west_core::vcs::Output::Native`], so the sink is a [`NullSink`]
+//!   (never invoked); the reporter only tracks failures.
+//! - [`BufferingReporter`] — for parallel runs without a TTY. Each
+//!   project gets a [`LineSink`] writing into a per-project buffer the
+//!   reporter owns; `finish` drains them in completion order to stderr.
+//! - [`IndicatifReporter`] — for parallel runs with a TTY; lives in
+//!   its own module.
 
+use std::collections::HashMap;
 use std::io::{self, Write};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-/// One project's complete output transcript. Workers fill `captured`
-/// (banner + step output + error notes), set `outcome`, and ship the
-/// whole thing to the [`Reporter`]. In `Output::Inherit` mode the worker
-/// writes its banner straight to the parent's stderr instead of into
-/// `captured`, so `captured` may be empty even on success.
-pub struct ProjectReport {
-    pub name: String,
-    pub captured: Vec<u8>,
-    pub outcome: Result<(), String>,
-}
-
-impl ProjectReport {
-    pub fn new(name: String) -> Self {
-        Self {
-            name,
-            captured: Vec::new(),
-            outcome: Ok(()),
-        }
-    }
-}
+use west_core::vcs::{LineSink, NullSink, ProgressSink};
 
 /// Aggregated failure tally returned at the end of an update run.
 pub struct FailureSummary {
@@ -66,15 +50,25 @@ impl FailureSummary {
     }
 }
 
+/// Bridge between workers and the user-facing UI. See module docs.
 pub trait Reporter: Send + Sync {
-    /// Called by a worker once a project's transcript is complete.
-    fn project_finished(&self, report: ProjectReport);
-    /// Called once at the end of the run. Implementations may flush
-    /// pending output. Returns the aggregated failure summary.
+    /// Build a per-project sink. Lifetime is bounded by `&self` so the
+    /// sink can hold references into the reporter's state.
+    fn sink_for_project<'a>(&'a self, project_name: &str) -> Box<dyn ProgressSink + Send + 'a>;
+
+    /// Worker reports completion. The sink has already accumulated
+    /// whatever the reporter needs; this just records the outcome.
+    fn project_finished(&self, project_name: &str, outcome: Result<(), String>);
+
+    /// Called once at the end of the run. Implementations flush any
+    /// pending state and return the aggregated summary.
     fn finish(self: Box<Self>) -> FailureSummary;
 }
 
-/// Flush each report immediately on arrival. Best for `-j 1` runs.
+// =====================================================================
+// SerialReporter — `-j 1`
+// =====================================================================
+
 pub struct SerialReporter {
     failed: Mutex<Vec<(String, String)>>,
 }
@@ -94,17 +88,19 @@ impl Default for SerialReporter {
 }
 
 impl Reporter for SerialReporter {
-    fn project_finished(&self, report: ProjectReport) {
-        let stderr = io::stderr();
-        let mut lock = stderr.lock();
-        // Best-effort: if writing to stderr fails the process is in real
-        // trouble; nothing useful we can do here.
-        let _ = lock.write_all(&report.captured);
-        if let Err(e) = &report.outcome {
+    fn sink_for_project<'a>(&'a self, _project_name: &str) -> Box<dyn ProgressSink + Send + 'a> {
+        // The worker uses Output::Native in serial mode, so the sink is
+        // never invoked. Hand back a NullSink so the type-check is
+        // satisfied if the worker did decide to call into it.
+        Box::new(NullSink)
+    }
+
+    fn project_finished(&self, project_name: &str, outcome: Result<(), String>) {
+        if let Err(e) = outcome {
             self.failed
                 .lock()
                 .expect("SerialReporter mutex poisoned")
-                .push((report.name, e.clone()));
+                .push((project_name.to_owned(), e));
         }
     }
 
@@ -118,16 +114,30 @@ impl Reporter for SerialReporter {
     }
 }
 
-/// Collect reports across rayon workers and flush them at `finish` time
-/// in arrival order. Used for `-j > 1`.
+// =====================================================================
+// BufferingReporter — parallel + non-TTY
+// =====================================================================
+
 pub struct BufferingReporter {
-    pending: Mutex<Vec<ProjectReport>>,
+    state: Mutex<BufferingState>,
+}
+
+#[derive(Default)]
+struct BufferingState {
+    /// Per-project capture buffer, populated by the project's sink in
+    /// the reader thread.
+    buffers: HashMap<String, Arc<Mutex<Vec<u8>>>>,
+    /// Completion order; the order in which `project_finished` was
+    /// called from worker threads.
+    completion_order: Vec<String>,
+    /// Per-project outcomes.
+    outcomes: HashMap<String, Result<(), String>>,
 }
 
 impl BufferingReporter {
     pub fn new() -> Self {
         Self {
-            pending: Mutex::new(Vec::new()),
+            state: Mutex::new(BufferingState::default()),
         }
     }
 }
@@ -139,42 +149,76 @@ impl Default for BufferingReporter {
 }
 
 impl Reporter for BufferingReporter {
-    fn project_finished(&self, report: ProjectReport) {
-        self.pending
+    fn sink_for_project<'a>(&'a self, project_name: &str) -> Box<dyn ProgressSink + Send + 'a> {
+        let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
+        // First write the banner directly into the buffer so each
+        // project's transcript stands alone when we flush at the end.
+        {
+            let mut guard = buf.lock().expect("buffer mutex poisoned");
+            let _ = writeln!(guard, "=== updating {project_name}");
+        }
+        self.state
             .lock()
             .expect("BufferingReporter mutex poisoned")
-            .push(report);
+            .buffers
+            .insert(project_name.to_owned(), Arc::clone(&buf));
+        Box::new(BufferedSink { buffer: buf })
+    }
+
+    fn project_finished(&self, project_name: &str, outcome: Result<(), String>) {
+        let mut state = self.state.lock().expect("BufferingReporter mutex poisoned");
+        if let Err(e) = &outcome
+            && let Some(buf) = state.buffers.get(project_name)
+            && let Ok(mut g) = buf.lock()
+        {
+            let _ = writeln!(g, "ERROR: {e}");
+        }
+        state.completion_order.push(project_name.to_owned());
+        state.outcomes.insert(project_name.to_owned(), outcome);
     }
 
     fn finish(self: Box<Self>) -> FailureSummary {
-        let pending = self
-            .pending
+        let state = self
+            .state
             .into_inner()
             .expect("BufferingReporter mutex poisoned");
         let stderr = io::stderr();
         let mut lock = stderr.lock();
         let mut failed = Vec::new();
-        for report in pending {
-            let _ = lock.write_all(&report.captured);
-            if let Err(e) = report.outcome {
-                failed.push((report.name, e));
+        for name in &state.completion_order {
+            if let Some(buf) = state.buffers.get(name)
+                && let Ok(g) = buf.lock()
+            {
+                let _ = lock.write_all(&g);
+            }
+            if let Some(Err(e)) = state.outcomes.get(name) {
+                failed.push((name.clone(), e.clone()));
             }
         }
         FailureSummary { failed }
     }
 }
 
+/// Sink that pushes captured events through a [`LineSink`] writing into
+/// the reporter's per-project buffer.
+struct BufferedSink {
+    buffer: Arc<Mutex<Vec<u8>>>,
+}
+
+impl ProgressSink for BufferedSink {
+    fn event(&mut self, event: west_core::vcs::ProgressEvent<'_>) {
+        let Ok(mut buf) = self.buffer.lock() else {
+            return;
+        };
+        // Reuse LineSink's formatting on a borrowed writer.
+        let mut sink = LineSink::new(&mut *buf);
+        sink.event(event);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn project_report_default_state() {
-        let r = ProjectReport::new("zephyr".into());
-        assert_eq!(r.name, "zephyr");
-        assert!(r.captured.is_empty());
-        assert!(r.outcome.is_ok());
-    }
 
     #[test]
     fn failure_summary_renders_singular_and_plural() {
@@ -187,5 +231,14 @@ mod tests {
             failed: vec![("a".into(), "boom".into()), ("b".into(), "bang".into())],
         };
         assert_eq!(two.render(), "update failed for 2 projects: a, b");
+    }
+
+    #[test]
+    fn serial_reporter_records_failures_only() {
+        let r = Box::new(SerialReporter::new());
+        r.project_finished("a", Ok(()));
+        r.project_finished("b", Err("boom".into()));
+        let summary = r.finish();
+        assert_eq!(summary.failed, vec![("b".to_owned(), "boom".to_owned())]);
     }
 }

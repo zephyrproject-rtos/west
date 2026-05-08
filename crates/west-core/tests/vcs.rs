@@ -2,17 +2,52 @@
 //! against tempdir-backed repositories. The whole module is skipped if
 //! `git --version` doesn't run.
 
-use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 
 use tempfile::TempDir;
 
 use west_core::config::Configuration;
 use west_core::vcs::{
-    self, CheckoutTarget, FetchSpec, FetchStrategy, GitClient, GitOptions, Output, SubmoduleScope,
-    Vcs, VcsError,
+    self, CheckoutTarget, FetchSpec, FetchStrategy, GitClient, GitOptions, NullSink, Output,
+    ProgressEvent, ProgressSink, SubmoduleScope, Vcs, VcsError,
 };
+
+// Test double: collects every event into an owned vector for assertions.
+#[derive(Default)]
+struct RecordingSink {
+    events: Mutex<Vec<OwnedEvent>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum OwnedEvent {
+    Line(String),
+    Phase { name: String, total: Option<u64> },
+    Tick { done: u64, total: Option<u64> },
+    Finished,
+}
+
+impl RecordingSink {
+    fn into_events(self) -> Vec<OwnedEvent> {
+        self.events.into_inner().unwrap()
+    }
+}
+
+impl ProgressSink for RecordingSink {
+    fn event(&mut self, event: ProgressEvent<'_>) {
+        let owned = match event {
+            ProgressEvent::Line(s) => OwnedEvent::Line(s.to_owned()),
+            ProgressEvent::Phase { name, total } => OwnedEvent::Phase {
+                name: name.to_owned(),
+                total,
+            },
+            ProgressEvent::Tick { done, total } => OwnedEvent::Tick { done, total },
+            ProgressEvent::Finished => OwnedEvent::Finished,
+        };
+        self.events.lock().unwrap().push(owned);
+    }
+}
 
 // ---------- helpers ----------
 
@@ -161,7 +196,7 @@ fn clone_round_trip() {
         &dest,
         None,
         None,
-        &mut Output::Capture(&mut io::sink()),
+        &mut Output::Native,
     )
     .unwrap();
 
@@ -197,7 +232,7 @@ fn clone_with_branch() {
         &dest,
         Some("feature"),
         None,
-        &mut Output::Capture(&mut io::sink()),
+        &mut Output::Native,
     )
     .unwrap();
 
@@ -221,7 +256,7 @@ fn clone_with_custom_origin() {
         &dest,
         None,
         Some("upstream"),
-        &mut Output::Capture(&mut io::sink()),
+        &mut Output::Native,
     )
     .unwrap();
 
@@ -244,7 +279,7 @@ fn sha_resolves_head_and_short_ref() {
         &dest,
         None,
         None,
-        &mut Output::Capture(&mut io::sink()),
+        &mut Output::Native,
     )
     .unwrap();
 
@@ -372,7 +407,7 @@ fn clone_into(root: &Path, bare: &Path) -> PathBuf {
         &dest,
         None,
         None,
-        &mut Output::Capture(&mut io::sink()),
+        &mut Output::Native,
     )
     .unwrap();
     dest
@@ -417,8 +452,7 @@ fn fetch_smart_skips_when_revision_is_local() {
         remote: "origin",
         revision: Some(&local_head),
     };
-    v.fetch(&dest, &spec, &mut Output::Capture(&mut io::sink()))
-        .unwrap();
+    v.fetch(&dest, &spec, &mut Output::Native).unwrap();
 
     assert!(
         !fetch_head_present(&dest),
@@ -445,8 +479,7 @@ fn fetch_always_runs_even_when_revision_is_local() {
         remote: "origin",
         revision: Some(&local_head),
     };
-    v.fetch(&dest, &spec, &mut Output::Capture(&mut io::sink()))
-        .unwrap();
+    v.fetch(&dest, &spec, &mut Output::Native).unwrap();
 
     assert!(
         fetch_head_present(&dest),
@@ -472,8 +505,7 @@ fn fetch_smart_runs_when_revision_is_unknown() {
         remote: "origin",
         revision: Some(&new_sha),
     };
-    v.fetch(&dest, &spec, &mut Output::Capture(&mut io::sink()))
-        .unwrap();
+    v.fetch(&dest, &spec, &mut Output::Native).unwrap();
 
     // Smart strategy fell through to a real fetch; the new sha should now
     // be locally resolvable.
@@ -652,8 +684,7 @@ fn rebase_replays_local_commits_onto_target() {
     git(&["commit", "-q", "-m", "feature work"], &work);
 
     let v = GitClient::new(GitOptions::default());
-    v.rebase(&work, "target", &mut Output::Capture(&mut io::sink()))
-        .unwrap();
+    v.rebase(&work, "target", &mut Output::Native).unwrap();
 
     // After rebase, feature's parent should be target's tip.
     let parent = git_capture(&["rev-parse", "HEAD^"], &work);
@@ -717,7 +748,7 @@ fn update_submodules_materializes_worktree() {
         &dest,
         None,
         None,
-        &mut Output::Capture(&mut io::sink()),
+        &mut Output::Native,
     )
     .unwrap();
     assert!(!dest.join("vendor/lib/LIB").exists());
@@ -727,12 +758,8 @@ fn update_submodules_materializes_worktree() {
     // *subprocess* of `git submodule update`, so a local config on the
     // parent repo doesn't reach it. The `GIT_CONFIG_*` env vars propagate.
     let _guard = AllowFileProtocolGuard::set();
-    v.update_submodules(
-        &dest,
-        &SubmoduleScope::All,
-        &mut Output::Capture(&mut io::sink()),
-    )
-    .unwrap();
+    v.update_submodules(&dest, &SubmoduleScope::All, &mut Output::Native)
+        .unwrap();
 
     assert!(
         dest.join("vendor/lib/LIB").exists(),
@@ -767,7 +794,7 @@ impl Drop for AllowFileProtocolGuard {
 }
 
 #[test]
-fn fetch_writes_progress_to_supplied_writer() {
+fn fetch_emits_phase_events_when_active() {
     if !git_available() {
         eprintln!("skipping: git not installed");
         return;
@@ -775,47 +802,117 @@ fn fetch_writes_progress_to_supplied_writer() {
     let tmp = TempDir::new().unwrap();
     let bare = bare_source_with_one_commit(tmp.path());
     let dest = clone_into(tmp.path(), &bare);
-    // Add a new commit upstream so the fetch has something to report.
+    // Add a new commit upstream so the fetch actually transfers data.
     add_commit_to_bare(tmp.path(), &bare, "second");
 
     let v = GitClient::new(GitOptions::default());
-    let mut buf: Vec<u8> = Vec::new();
-    {
-        let mut out = Output::Capture(&mut buf);
-        v.fetch(
-            &dest,
-            &FetchSpec {
-                remote: "origin",
-                revision: None,
-            },
-            &mut out,
-        )
-        .unwrap();
-    }
-    let captured = String::from_utf8_lossy(&buf);
+    let mut sink = RecordingSink::default();
+    v.fetch(
+        &dest,
+        &FetchSpec {
+            remote: "origin",
+            revision: None,
+        },
+        &mut Output::Stream(&mut sink),
+    )
+    .unwrap();
+
+    let events = sink.into_events();
     assert!(
-        captured.contains("From "),
-        "expected git fetch progress in captured output; got: {captured:?}"
+        events
+            .iter()
+            .any(|e| matches!(e, OwnedEvent::Line(s) if s.starts_with("From "))),
+        "expected a `From <url>` line; got: {events:#?}"
+    );
+    assert!(
+        matches!(events.last(), Some(OwnedEvent::Finished)),
+        "expected Finished as the terminal event; got: {events:#?}"
     );
 }
 
 #[test]
-fn clone_with_inherit_succeeds() {
+fn clone_with_native_succeeds() {
     if !git_available() {
         eprintln!("skipping: git not installed");
         return;
     }
     let tmp = TempDir::new().unwrap();
     let bare = bare_source_with_one_commit(tmp.path());
-    let dest = tmp.path().join("clone-inherit");
+    let dest = tmp.path().join("clone-native");
 
     let v = GitClient::new(GitOptions::default());
-    // Smoke-test the Inherit code path. We can't programmatically assert
-    // on the live git output (it goes to the test runner's stderr), but
-    // we lock the API and confirm the resulting tree is a real repo.
-    let mut out = Output::Inherit;
-    v.clone(bare.to_str().unwrap(), &dest, None, None, &mut out)
-        .unwrap();
+    // Native code path: no programmatic assertion on git's live
+    // output (it goes to the test runner's stderr). We lock the API
+    // shape and confirm the resulting tree is a real repo.
+    v.clone(
+        bare.to_str().unwrap(),
+        &dest,
+        None,
+        None,
+        &mut Output::Native,
+    )
+    .unwrap();
+    assert!(v.is_repo(&dest).unwrap());
+}
+
+#[test]
+fn clone_streams_lines_and_terminates_with_finished() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = tmp.path().join("clone-stream");
+
+    let v = GitClient::new(GitOptions::default());
+    let mut sink = RecordingSink::default();
+    v.clone(
+        bare.to_str().unwrap(),
+        &dest,
+        None,
+        None,
+        &mut Output::Stream(&mut sink),
+    )
+    .unwrap();
+
+    let events = sink.into_events();
+    // Parser unit tests pin the phase-line semantics; here we just lock
+    // the streaming pipeline: at least one Line event survived the
+    // reader threads, and the run terminates with Finished. (Phase
+    // events depend on repo size — a single-object clone won't trigger
+    // them; that's covered by manual smoke against real repos.)
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, OwnedEvent::Line(s) if s.contains("Cloning into"))),
+        "expected a `Cloning into …` Line event; got: {events:#?}"
+    );
+    assert!(
+        matches!(events.last(), Some(OwnedEvent::Finished)),
+        "expected Finished as the terminal event; got: {events:#?}"
+    );
+}
+
+#[test]
+fn null_sink_is_a_valid_target() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = tmp.path().join("clone-null");
+
+    let v = GitClient::new(GitOptions::default());
+    v.clone(
+        bare.to_str().unwrap(),
+        &dest,
+        None,
+        None,
+        &mut Output::Stream(&mut NullSink),
+    )
+    .unwrap();
     assert!(v.is_repo(&dest).unwrap());
 }
 
@@ -831,12 +928,8 @@ fn update_submodules_specific_empty_is_noop() {
 
     let v = GitClient::new(GitOptions::default());
     // Non-submodule repo + empty Specific → must succeed without error.
-    v.update_submodules(
-        &dest,
-        &SubmoduleScope::Specific(&[]),
-        &mut Output::Capture(&mut io::sink()),
-    )
-    .unwrap();
+    v.update_submodules(&dest, &SubmoduleScope::Specific(&[]), &mut Output::Native)
+        .unwrap();
 }
 
 #[test]

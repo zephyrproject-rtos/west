@@ -157,9 +157,10 @@ fn bootstrap(
 
     let body = || -> Result<PathBuf, InitError> {
         let vcs = vcs::from_config(config).map_err(InitError::Vcs)?;
-        // Inherit stdio so the user sees git's live "Cloning into …" plus
-        // progress lines — git silences its progress when stdio is piped.
-        let mut out = vcs::Output::Inherit;
+        // Native stdio so the user sees git's live "Cloning into …" plus
+        // its own progress rendering. init is a single op; no value in
+        // routing through the structured-event path.
+        let mut out = vcs::Output::Native;
         vcs.clone(url, &tmp_dir, revision, None, &mut out)
             .map_err(InitError::Vcs)?;
 

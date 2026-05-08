@@ -1,14 +1,17 @@
 //! Git client for the [`Vcs`](super::Vcs) trait. Subprocess-based; no
 //! libgit2 dependency.
 
+mod progress;
+
 use std::ffi::OsString;
-use std::io;
+use std::io::{self, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 
 use crate::config::Configuration;
 
-use super::{CheckoutTarget, FetchSpec, Output, SubmoduleScope, Vcs, VcsError};
+use super::{CheckoutTarget, FetchSpec, Output, ProgressSink, SubmoduleScope, Vcs, VcsError};
 
 const NAME: &str = "git";
 
@@ -174,15 +177,15 @@ impl GitClient {
     /// Run `git` for one of the long-lived ops (`clone`, `fetch`,
     /// `rebase`, `submodule update`) routing stdio according to `out`.
     ///
-    /// `Output::Inherit` attaches stdout/stderr to the parent process so
-    /// git can detect a TTY and emit live progress (the only way git ever
-    /// emits its progress lines). `Output::Capture(w)` pipes both streams
-    /// and forwards the captured bytes to `w` after the child exits — git
-    /// won't emit progress in this mode but error messages and "From …"
-    /// status lines do come through.
+    /// `Output::Native` attaches the child's stdio to the parent so git
+    /// can detect a TTY and render its own progress with `\r`-overwrite.
+    /// `Output::Stream(sink)` pipes stderr (and stdout, in case rebase
+    /// or submodule diagnostics land there), spawns a reader thread per
+    /// stream that translates each line through the [`progress`] parser,
+    /// and pushes events into the sink.
     fn run_with_output(&self, args: &[&str], out: &mut Output<'_>) -> Result<(), VcsError> {
         match out {
-            Output::Inherit => {
+            Output::Native => {
                 let status = Command::new(self.binary())
                     .args(args)
                     .stdin(Stdio::null())
@@ -201,13 +204,108 @@ impl GitClient {
                     })
                 }
             }
-            Output::Capture(w) => {
-                let res = self.run(args)?;
-                write_capture(*w, &res.output.stderr)?;
-                write_capture(*w, &res.output.stdout)?;
-                check_success(&res)
-            }
+            Output::Stream(sink) => self.run_streaming(args, *sink),
         }
+    }
+
+    /// Spawn `git` with `Stdio::piped()` for stdout and stderr, run two
+    /// reader threads (one per stream) that parse each line via
+    /// [`progress::parse_line`] and push events through the supplied
+    /// sink, then `wait()` for the child and emit `Finished` on success.
+    fn run_streaming(&self, args: &[&str], sink: &mut dyn ProgressSink) -> Result<(), VcsError> {
+        let mut child = Command::new(self.binary())
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| io_to_err(e, NAME))?;
+
+        let stdout = child.stdout.take().expect("piped stdout");
+        let stderr = child.stderr.take().expect("piped stderr");
+
+        // Capture stderr verbatim too — used for the CommandFailed
+        // diagnostic if the child exits non-zero. The reader thread
+        // appends to this buffer alongside emitting events, so we have
+        // a faithful transcript without re-running.
+        let stderr_buf: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+        let shared_sink: Mutex<&mut dyn ProgressSink> = Mutex::new(sink);
+
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                stream_reader(stderr, &shared_sink, Some(&stderr_buf));
+            });
+            scope.spawn(|| {
+                stream_reader(stdout, &shared_sink, None);
+            });
+        });
+
+        let status = child.wait().map_err(|e| io_to_err(e, NAME))?;
+        if !status.success() {
+            let stderr =
+                String::from_utf8_lossy(&stderr_buf.into_inner().unwrap_or_default()).into_owned();
+            return Err(VcsError::CommandFailed {
+                client: NAME,
+                argv: argv_strings(args),
+                exit_code: status.code(),
+                stderr,
+            });
+        }
+
+        // Notify the sink that the op completed cleanly. Implementations
+        // typically use this to clear/finalise the visual.
+        let mut sink_guard = shared_sink.lock().expect("sink mutex poisoned");
+        sink_guard.event(super::ProgressEvent::Finished);
+        Ok(())
+    }
+}
+
+/// Read `stream` line-by-line, push parsed events through `sink`, and
+/// (optionally) tee bytes into `verbatim` for fault-time diagnostics.
+fn stream_reader<R: Read + Send>(
+    stream: R,
+    sink: &Mutex<&mut dyn ProgressSink>,
+    verbatim: Option<&Mutex<Vec<u8>>>,
+) {
+    // git emits progress via `\r` rewrites on the same logical line.
+    // Split on either `\r` or `\n` so we see each frame; the parser
+    // strips the trailing chars anyway.
+    let reader = BufReader::new(stream);
+    let mut line_buf = Vec::with_capacity(256);
+    for byte in reader.bytes() {
+        let Ok(byte) = byte else { break };
+        if let Some(buf) = verbatim
+            && let Ok(mut b) = buf.lock()
+        {
+            b.push(byte);
+        }
+        match byte {
+            b'\n' | b'\r' => {
+                if !line_buf.is_empty() {
+                    flush_line(&line_buf, sink);
+                    line_buf.clear();
+                }
+            }
+            other => line_buf.push(other),
+        }
+    }
+    if !line_buf.is_empty() {
+        flush_line(&line_buf, sink);
+    }
+}
+
+fn flush_line(line: &[u8], sink: &Mutex<&mut dyn ProgressSink>) {
+    let s = String::from_utf8_lossy(line);
+    let events = progress::parse_line(&s);
+    if events.is_empty() {
+        return;
+    }
+    let mut guard = match sink.lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    for event in events {
+        guard.event(event);
     }
 }
 
@@ -237,7 +335,7 @@ impl Vcs for GitClient {
         out: &mut Output<'_>,
     ) -> Result<(), VcsError> {
         let dest_str = dest.to_string_lossy().into_owned();
-        let mut argv: Vec<&str> = vec!["clone"];
+        let mut argv: Vec<&str> = vec!["clone", "--progress"];
         // `git clone --branch` accepts branch and tag names. Bare commit SHAs
         // aren't supported here; landing on one requires a follow-up checkout.
         if let Some(r) = revision {
@@ -314,7 +412,7 @@ impl Vcs for GitClient {
         let repo_str = repo.to_string_lossy().into_owned();
         let depth_arg = self.opts.fetch_depth.map(|d| format!("--depth={d}"));
 
-        let mut argv: Vec<&str> = vec!["-C", &repo_str, "fetch"];
+        let mut argv: Vec<&str> = vec!["-C", &repo_str, "fetch", "--progress"];
         if self.opts.fetch_force {
             argv.push("--force");
         }
@@ -411,7 +509,14 @@ impl Vcs for GitClient {
             self.run_with_output(&argv, out)?;
         }
 
-        let mut argv: Vec<&str> = vec!["-C", &repo_str, "submodule", "update", "--init"];
+        let mut argv: Vec<&str> = vec![
+            "-C",
+            &repo_str,
+            "submodule",
+            "update",
+            "--init",
+            "--progress",
+        ];
         if self.opts.submodules_recurse {
             argv.push("--recursive");
         }
@@ -520,16 +625,4 @@ fn bad_option(key: &str, detail: &str) -> VcsError {
         key: key.to_owned(),
         detail: detail.to_owned(),
     }
-}
-
-/// Forward captured bytes to the caller's writer; surface IO errors with a
-/// sentinel path so the failure shows up as `VcsError::Io`.
-fn write_capture(out: &mut dyn io::Write, bytes: &[u8]) -> Result<(), VcsError> {
-    if bytes.is_empty() {
-        return Ok(());
-    }
-    out.write_all(bytes).map_err(|source| VcsError::Io {
-        path: PathBuf::from("<output>"),
-        source,
-    })
 }

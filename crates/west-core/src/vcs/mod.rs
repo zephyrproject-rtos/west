@@ -31,7 +31,7 @@
 
 use std::error::Error;
 use std::fmt;
-use std::io::{self, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::config::Configuration;
@@ -42,46 +42,113 @@ pub use git::{FetchStrategy, GitClient, GitOptions};
 
 /// Where progress output from a long-lived child process goes.
 ///
-/// `Inherit` attaches the child's stdout/stderr to the parent process —
-/// git sees a TTY (when one exists) and emits its usual live progress;
-/// the caller doesn't get the bytes.
+/// `Native` attaches the child's stdout/stderr to the parent process —
+/// the underlying tool renders its own progress directly to the user's
+/// terminal. The caller doesn't get the bytes back. Use this for serial,
+/// single-operation flows where parsing adds no value.
 ///
-/// `Capture(w)` pipes both streams, captures everything, and writes it to
-/// `w` once the child exits. git won't emit progress (no TTY in a piped
-/// child); status lines and error messages still come through.
-///
-/// New variants (e.g. PTY-based live streaming) can land here without
-/// changing the trait method signatures.
+/// `Stream(sink)` requests a piped, line-by-line stream parsed into
+/// [`ProgressEvent`]s. Each implementation is expected to coax progress
+/// out of the underlying tool (for git that means injecting `--progress`
+/// so it emits even with stdio piped). Use this for parallel flows or
+/// any caller that wants to render a progress UI.
 pub enum Output<'a> {
-    Inherit,
-    Capture(&'a mut dyn io::Write),
+    Native,
+    Stream(&'a mut dyn ProgressSink),
 }
 
 impl fmt::Debug for Output<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Output::Inherit => f.write_str("Output::Inherit"),
-            Output::Capture(_) => f.write_str("Output::Capture(<writer>)"),
+            Output::Native => f.write_str("Output::Native"),
+            Output::Stream(_) => f.write_str("Output::Stream(<sink>)"),
         }
     }
 }
 
-impl Output<'_> {
-    /// Emit a non-vcs note from the calling command (banner, "keeping
-    /// branch X", failure tag, …) to the right destination for the
-    /// current mode. In `Inherit` mode the line goes to the parent's
-    /// stderr (so it interleaves with the child's live stderr in the
-    /// terminal); in `Capture` mode it appends to the captured writer
-    /// (so the buffer stays a self-contained transcript).
-    pub fn write_note(&mut self, msg: &str) -> io::Result<()> {
-        match self {
-            Output::Inherit => {
-                let stderr = io::stderr();
-                let mut lock = stderr.lock();
-                writeln!(lock, "{msg}")
+/// A single progress observation produced by a [`Vcs`] implementation.
+///
+/// The trait is intentionally narrow: it expresses the union of what
+/// real VCS tools tell us during a long-running op, in a shape the CLI
+/// can render uniformly. Each concrete client (subprocess git, future
+/// libgit2-via-`git2`, jj, …) translates its native progress mechanism
+/// into these events; the consumer never has to know which client is
+/// running.
+#[derive(Debug, Clone)]
+pub enum ProgressEvent<'a> {
+    /// Free-form line that didn't match a recognised progress pattern —
+    /// banners ("Cloning into …"), error messages, "From <url>" lines,
+    /// etc. Sinks usually preserve these verbatim for replay on failure.
+    Line(&'a str),
+    /// Phase boundary. `total` is `Some(n)` when the client announces an
+    /// up-front object/byte count; `None` otherwise.
+    Phase { name: &'a str, total: Option<u64> },
+    /// In-flight tick for the current phase. `done` is monotonically
+    /// non-decreasing within a phase; `total` may grow (server-side
+    /// discovery during fetch).
+    Tick { done: u64, total: Option<u64> },
+    /// The op finished successfully. Sinks typically clear/finalise.
+    Finished,
+}
+
+/// Consumer of [`ProgressEvent`]s emitted by [`Output::Stream`].
+///
+/// Implementations are called from a reader thread inside the client, so
+/// the trait is `Send`. Interior synchronisation is the implementation's
+/// responsibility (typically not needed — the trait method takes
+/// `&mut self`, so each invocation has exclusive access).
+pub trait ProgressSink: Send {
+    fn event(&mut self, event: ProgressEvent<'_>);
+}
+
+/// Drops every event. The "be quiet" sink — used by tests that don't
+/// assert on output and by internal client work that shouldn't surface
+/// to the user (e.g. resolving a per-project import behind the scenes).
+pub struct NullSink;
+
+impl ProgressSink for NullSink {
+    fn event(&mut self, _event: ProgressEvent<'_>) {}
+}
+
+/// Formats events back to text in a writer. Used by reporters that want
+/// a deterministic per-project transcript (no live UI), e.g. when stderr
+/// isn't a TTY and indicatif degrades to nothing.
+pub struct LineSink<W: Write + Send> {
+    writer: W,
+}
+
+impl<W: Write + Send> LineSink<W> {
+    pub fn new(writer: W) -> Self {
+        Self { writer }
+    }
+
+    pub fn into_inner(self) -> W {
+        self.writer
+    }
+}
+
+impl<W: Write + Send> ProgressSink for LineSink<W> {
+    fn event(&mut self, event: ProgressEvent<'_>) {
+        // Best-effort: a stderr/buffer write failure here is unrecoverable
+        // and doesn't usefully propagate; just drop.
+        let _ = match event {
+            ProgressEvent::Line(s) => writeln!(self.writer, "{s}"),
+            ProgressEvent::Phase { name, total: None } => {
+                writeln!(self.writer, "{name}:")
             }
-            Output::Capture(w) => writeln!(*w, "{msg}"),
-        }
+            ProgressEvent::Phase {
+                name,
+                total: Some(t),
+            } => writeln!(self.writer, "{name}: 0/{t}"),
+            ProgressEvent::Tick { done, total: None } => {
+                writeln!(self.writer, "  {done}")
+            }
+            ProgressEvent::Tick {
+                done,
+                total: Some(t),
+            } => writeln!(self.writer, "  {done}/{t}"),
+            ProgressEvent::Finished => Ok(()),
+        };
     }
 }
 
@@ -92,11 +159,10 @@ impl Output<'_> {
 /// mutable state.
 ///
 /// Methods that produce user-visible progress take a `&mut Output<'_>`.
-/// `Inherit` keeps git's live progress on the user's terminal (the only
-/// way to make git emit it — git silences its progress when stdio is
-/// piped); `Capture` collects both streams into the caller's writer and
-/// flushes them after the child exits. Lookups (`sha`, `is_repo`, …)
-/// don't produce progress and don't take an `Output`.
+/// `Native` keeps the underlying tool's stdio attached to the parent
+/// (the tool renders its own progress); `Stream(sink)` pipes stderr
+/// through a parser into structured [`ProgressEvent`]s. Lookups (`sha`,
+/// `is_repo`, …) don't produce progress and don't take an `Output`.
 pub trait Vcs: fmt::Debug + Send + Sync {
     /// Client identifier (`"git"`, `"jj"`, …). Stable; surfaces in errors.
     fn name(&self) -> &'static str;
