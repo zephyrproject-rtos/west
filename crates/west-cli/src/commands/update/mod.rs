@@ -323,21 +323,20 @@ fn run_project_steps(
     settings: &Settings,
     out: &mut Output<'_>,
 ) -> Result<(), String> {
-    // 1. Ensure cloned.
+    // 1. Ensure cloned. We deliberately don't pass `revision` here:
+    //    git clone --branch only accepts branches/tags, but manifests
+    //    routinely pin projects at bare commit SHAs (zephyr does this
+    //    for every project). Clone the remote's default branch and let
+    //    the subsequent fetch + detached checkout land us on the right
+    //    commit.
     let already_cloned = repo.exists() && vcs.is_repo(repo).unwrap_or(false);
     if !already_cloned {
         if let Some(parent) = repo.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
         }
-        vcs.clone(
-            &project.url,
-            repo,
-            Some(&project.revision),
-            Some(&project.remote_name),
-            out,
-        )
-        .map_err(stringify)?;
+        vcs.clone(&project.url, repo, None, Some(&project.remote_name), out)
+            .map_err(stringify)?;
     }
 
     // 2. Fetch (smart-skip / depth / tags / force all live in GitClient).

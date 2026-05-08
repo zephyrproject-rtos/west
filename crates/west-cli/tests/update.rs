@@ -476,3 +476,34 @@ fn update_narrow_writes_inline_config() {
         .success();
     assert!(ws.join("p1/R").exists());
 }
+
+#[test]
+#[serial]
+fn update_handles_sha_revision() {
+    // Regression test: zephyr-style manifests pin every project at a
+    // bare commit SHA. `git clone --branch <SHA>` is rejected by git
+    // ("Remote branch <SHA> not found in upstream"), so the update
+    // worker must clone without `--branch` and rely on the subsequent
+    // fetch + detached checkout.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1-first");
+    // Capture the (only) SHA on `main` and use it as the revision.
+    let sha = git_capture(&["rev-parse", "HEAD"], &p1);
+
+    let manifest = format!(
+        "manifest:\n  self:\n    path: my-manifest\n  projects:\n    - name: p1\n      url: {url}\n      revision: {sha}\n",
+        url = p1.display(),
+    );
+    let ws = init_workspace(&sb, &manifest);
+
+    sb.west()
+        .args(["-C", ws.to_str().unwrap(), "update"])
+        .assert()
+        .success();
+    assert!(ws.join("p1/R").exists());
+    let head = git_capture(&["rev-parse", "HEAD"], &ws.join("p1"));
+    assert_eq!(head, sha, "HEAD should land on the manifest's SHA");
+}

@@ -44,14 +44,13 @@ impl ImportSource for WorkspaceImportSource<'_> {
                 std::fs::create_dir_all(parent)
                     .map_err(|e| ImportSourceError(format!("create {}: {e}", parent.display())))?;
             }
+            // Don't pass `revision` to clone: git clone --branch refuses
+            // bare commit SHAs and manifests commonly pin projects at
+            // SHAs. The subsequent fetch + detached checkout below land
+            // the working tree at the right commit regardless.
             run_quiet(|out| {
-                self.vcs.clone(
-                    &project.url,
-                    &repo,
-                    Some(&project.revision),
-                    Some(&project.remote_name),
-                    out,
-                )
+                self.vcs
+                    .clone(&project.url, &repo, None, Some(&project.remote_name), out)
             })
             .map_err(stringify)?;
         }
