@@ -17,11 +17,12 @@ use std::fmt;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Mutex;
 
 use clap::Args;
 
 use west_core::config::Configuration;
-use west_core::manifest::{Manifest, Project};
+use west_core::manifest::{ImportSource, ImportSourceError, Manifest, Project};
 use west_core::vcs::{self, Vcs};
 
 use super::config::LoadedConfig;
@@ -91,7 +92,11 @@ impl Error for ListError {}
 
 pub fn run(args: ListArgs, loaded: &mut LoadedConfig) -> ExitCode {
     match run_inner(args, loaded) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::SUCCESS,
+        // Some imports were skipped because their projects aren't
+        // cloned. The warning has already been printed; signal
+        // partial success with a non-zero exit so scripts notice.
+        Ok(true) => ExitCode::FAILURE,
         Err(e @ ListError::InactiveWithPositional) => {
             eprintln!("west: {e}");
             ExitCode::from(2)
@@ -103,14 +108,23 @@ pub fn run(args: ListArgs, loaded: &mut LoadedConfig) -> ExitCode {
     }
 }
 
-fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<(), ListError> {
+/// `Ok(true)` means rendering succeeded but at least one per-project
+/// import was skipped because the importing project wasn't cloned —
+/// the listing is incomplete and the caller should signal that with a
+/// non-zero exit code.
+fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListError> {
     if args.inactive && !args.projects.is_empty() {
         return Err(ListError::InactiveWithPositional);
     }
 
     let workspace = resolve_workspace_dir()?;
     let vcs = vcs::from_config(&loaded.config).map_err(|e| ListError::Vcs(e.to_string()))?;
-    let manifest = load_manifest(&workspace, &loaded.config)?;
+    let source = ReadOnlyImportSource {
+        workspace: workspace.as_path(),
+        vcs: vcs.as_ref(),
+        skipped: Mutex::new(Vec::new()),
+    };
+    let manifest = load_manifest(&workspace, &loaded.config, &source)?;
 
     let projects: Vec<&Project> = if args.projects.is_empty() {
         manifest
@@ -147,12 +161,32 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<(), ListError>
         // truncate output; treat as success and return.
         if let Err(e) = writeln!(lock, "{line}") {
             if e.kind() == io::ErrorKind::BrokenPipe {
-                return Ok(());
+                return Ok(false);
             }
             return Err(ListError::Format(e.to_string()));
         }
     }
-    Ok(())
+
+    // Surface any imports that were skipped because their owning project
+    // wasn't cloned. The listing is real but incomplete; warn and
+    // signal partial success via a non-zero exit (returned by `run`).
+    let mut skipped = source
+        .skipped
+        .into_inner()
+        .expect("ReadOnlyImportSource skipped mutex poisoned");
+    skipped.sort();
+    skipped.dedup();
+    if !skipped.is_empty() {
+        let plural = if skipped.len() == 1 { "" } else { "s" };
+        eprintln!(
+            "west: warning: skipped import{plural} from {} uncloned project{plural}: {}",
+            skipped.len(),
+            skipped.join(", "),
+        );
+        eprintln!("    run `west update` first to enumerate imported projects");
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 // =====================================================================
@@ -283,7 +317,11 @@ fn resolve_workspace_dir() -> Result<PathBuf, ListError> {
     west_core::topdir::topdir(&cwd).map_err(|_| ListError::NotInWorkspace)
 }
 
-fn load_manifest(workspace: &Path, config: &Configuration) -> Result<Manifest, ListError> {
+fn load_manifest(
+    workspace: &Path,
+    config: &Configuration,
+    source: &ReadOnlyImportSource<'_>,
+) -> Result<Manifest, ListError> {
     let manifest_path: PathBuf = config
         .get_str("manifest.path")
         .map_err(|e| ListError::Config(e.to_string()))?
@@ -296,10 +334,46 @@ fn load_manifest(workspace: &Path, config: &Configuration) -> Result<Manifest, L
         .map_err(|e| ListError::Config(e.to_string()))?
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_MANIFEST_FILE));
-    let full = workspace.join(&manifest_path).join(&manifest_file);
-    // Lenient: don't fetch importing projects just to list. Imported
-    // entries are silently dropped (with a warning), which is the
-    // right behaviour for a read-only inspection command.
-    Manifest::from_path_lenient(&full)
+    let manifest_repo_root = workspace.join(&manifest_path);
+    let full = manifest_repo_root.join(&manifest_file);
+    // Read-only resolution: filesystem imports (self/top-level) work
+    // naturally; per-project imports only resolve for projects that
+    // are *already* cloned, so listing never triggers a fetch. An
+    // uncloned project's import is recorded in `source.skipped` for
+    // an end-of-run warning.
+    Manifest::from_path_with_imports(&full, &manifest_repo_root, source)
         .map_err(|e| ListError::Manifest(format!("manifest {}: {e}", full.display())))
+}
+
+/// `ImportSource` that reads project manifests off disk only — never
+/// fetches. For a project that isn't cloned yet, returns `Ok(None)`
+/// (so the resolver continues with a partial project list) and pushes
+/// the project name onto `skipped` so the caller can warn afterwards.
+struct ReadOnlyImportSource<'a> {
+    workspace: &'a Path,
+    vcs: &'a dyn Vcs,
+    skipped: Mutex<Vec<String>>,
+}
+
+impl ImportSource for ReadOnlyImportSource<'_> {
+    fn project_manifest(
+        &self,
+        project: &Project,
+        relative_file: &str,
+    ) -> Result<Option<String>, ImportSourceError> {
+        let repo = self.workspace.join(&project.path);
+        if !repo.exists() || !self.vcs.is_repo(&repo).unwrap_or(false) {
+            self.skipped
+                .lock()
+                .expect("ReadOnlyImportSource skipped mutex poisoned")
+                .push(project.name.clone());
+            return Ok(None);
+        }
+        let path = repo.join(relative_file);
+        match std::fs::read_to_string(&path) {
+            Ok(body) => Ok(Some(body)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(ImportSourceError(format!("read {}: {e}", path.display()))),
+        }
+    }
 }

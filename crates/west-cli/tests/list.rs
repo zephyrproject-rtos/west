@@ -469,3 +469,177 @@ fn list_cloned_key_reflects_clone_state() {
         .clone();
     assert_eq!(stdout_lines(&out), vec!["cloned".to_owned()]);
 }
+
+#[test]
+#[serial]
+fn list_warns_and_exits_nonzero_when_per_project_import_is_uncloned() {
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let q = make_bare_with_one_commit(sb.root(), "q", "q");
+
+    // Project P contains its own west.yml that pulls in Q. With
+    // `import: true`, P's west.yml needs to be readable from disk —
+    // which only happens after `west update`. We deliberately don't
+    // run update here; we expect `west list` to print P, warn that
+    // P's import was skipped, and exit non-zero.
+    let p_yml = format!(
+        "manifest:\n  projects:\n    - name: q\n      url: {}\n      revision: main\n",
+        q.display()
+    );
+    let p = make_bare_with_files(sb.root(), "p", &[("README", "p\n"), ("west.yml", &p_yml)]);
+
+    let manifest_yml = format!(
+        "manifest:\n  self:\n    path: my-manifest\n  projects:\n    - name: p\n      url: {}\n      revision: main\n      import: true\n",
+        p.display()
+    );
+    let manifest_work = sb.root().join("manifest-work");
+    std::fs::create_dir_all(&manifest_work).unwrap();
+    git(
+        &["init", "-q", "--initial-branch=main", "."],
+        &manifest_work,
+    );
+    std::fs::write(manifest_work.join("west.yml"), &manifest_yml).unwrap();
+    git(&["add", "."], &manifest_work);
+    git(&["commit", "-q", "-m", "manifest"], &manifest_work);
+    let bare = sb.root().join("manifest.git");
+    git(
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            manifest_work.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+        sb.root(),
+    );
+    let _ = std::fs::remove_dir_all(&manifest_work);
+    let workspace = sb.root().join("ws");
+    sb.west()
+        .args([
+            "init",
+            "--url",
+            bare.to_str().unwrap(),
+            workspace.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Don't run `west update` — P stays uncloned. `west list` should
+    // produce P's line, warn about the skipped import, and exit non-zero.
+    let assert = sb
+        .west()
+        .args(["-C", workspace.to_str().unwrap(), "list", "-f", "{name}"])
+        .assert()
+        .failure();
+    let stdout = stdout_lines(&assert.get_output().stdout);
+    assert_eq!(stdout, vec!["p".to_owned()]);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
+    assert!(
+        stderr.contains("skipped import") && stderr.contains("\"p\"") || stderr.contains(": p"),
+        "expected a skipped-import warning naming `p`; got: {stderr:?}"
+    );
+}
+
+/// Helper used by the warning test above — same shape as
+/// `tests/update_import.rs::make_bare_with_files`.
+fn make_bare_with_files(root: &Path, name: &str, files: &[(&str, &str)]) -> PathBuf {
+    let work = root.join(format!("work-{name}"));
+    std::fs::create_dir_all(&work).unwrap();
+    git(&["init", "-q", "--initial-branch=main", "."], &work);
+    for (filename, body) in files {
+        let path = work.join(filename);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, body).unwrap();
+    }
+    git(&["add", "."], &work);
+    git(&["commit", "-q", "-m", "initial"], &work);
+    let bare = root.join(format!("{name}.git"));
+    git(
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            work.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+        root,
+    );
+    let _ = std::fs::remove_dir_all(&work);
+    bare
+}
+
+#[test]
+#[serial]
+fn list_resolves_self_import_without_warnings() {
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1");
+    let p2 = make_bare_with_one_commit(sb.root(), "p2", "p2");
+
+    // Build a manifest repo where the root yml uses `self.import:` to
+    // pull in extras.yml — both files live in the manifest repo, no
+    // vcs needed to resolve. The list command should enumerate both
+    // projects without printing the "import: is unsupported" warning
+    // that the lenient loader emits.
+    let manifest_work = sb.root().join("manifest-work");
+    std::fs::create_dir_all(&manifest_work).unwrap();
+    git(
+        &["init", "-q", "--initial-branch=main", "."],
+        &manifest_work,
+    );
+    let root_yml = format!(
+        "manifest:\n  self:\n    path: my-manifest\n    import: extras.yml\n  projects:\n    - name: p1\n      url: {}\n      revision: main\n",
+        p1.display()
+    );
+    let extras_yml = format!(
+        "manifest:\n  projects:\n    - name: p2\n      url: {}\n      revision: main\n",
+        p2.display()
+    );
+    std::fs::write(manifest_work.join("west.yml"), root_yml).unwrap();
+    std::fs::write(manifest_work.join("extras.yml"), extras_yml).unwrap();
+    git(&["add", "."], &manifest_work);
+    git(&["commit", "-q", "-m", "manifest"], &manifest_work);
+    let bare = sb.root().join("manifest.git");
+    git(
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            manifest_work.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+        sb.root(),
+    );
+    let _ = std::fs::remove_dir_all(&manifest_work);
+
+    let workspace = sb.root().join("ws");
+    sb.west()
+        .args([
+            "init",
+            "--url",
+            bare.to_str().unwrap(),
+            workspace.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let assert = sb
+        .west()
+        .args(["-C", workspace.to_str().unwrap(), "list", "-f", "{name}"])
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
+    assert!(
+        !stderr.contains("self.import"),
+        "expected no self-import warning; got stderr: {stderr:?}"
+    );
+    let mut lines = stdout_lines(&assert.get_output().stdout);
+    lines.sort();
+    assert_eq!(lines, vec!["p1".to_owned(), "p2".to_owned()]);
+}
