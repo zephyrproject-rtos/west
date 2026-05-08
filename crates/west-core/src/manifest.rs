@@ -883,44 +883,68 @@ impl<'a> Resolver<'a> {
             .clone()
             .unwrap_or_else(|| MANIFEST_DEFAULT_FILE.to_owned());
         let abs_path = self.repo_root.join(&file_name);
-        let canonical = abs_path.canonicalize().unwrap_or_else(|_| abs_path.clone());
-        if !self.visited_files.insert(canonical.clone()) {
-            return Err(ManifestError::ImportLoop {
-                kind: site,
-                target: file_name,
-            });
-        }
 
-        let body = match fs::read_to_string(&abs_path) {
-            Ok(b) => b,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                // Python errors on missing self imports; we match that.
-                return Err(ManifestError::Io {
-                    path: abs_path,
-                    source: e,
-                });
-            }
-            Err(e) => {
-                return Err(ManifestError::Io {
-                    path: abs_path,
-                    source: e,
-                });
-            }
-        };
-
-        let parsed = parse_body_by_extension(&abs_path, &body)?;
-        parsed
-            .validate()
-            .map_err(|r| ManifestError::Validation(r.to_string()))?;
-
-        let composed = ImportFilter::compose(parent_filter, &ImportFilter::from_map(imap));
-        let prefix = match imap.path_prefix.as_deref() {
+        // Compose filter and prefix once at this level so a directory
+        // form's per-file recursions all see the same constraints.
+        let composed_filter = ImportFilter::compose(parent_filter, &ImportFilter::from_map(imap));
+        let composed_prefix = match imap.path_prefix.as_deref() {
             None | Some("") => parent_prefix.to_path_buf(),
             Some(p) => parent_prefix.join(p),
         };
 
+        // Directory form: iterate `*.yml` files in sorted order and
+        // absorb each as if it were listed explicitly. The directory
+        // itself isn't tracked in visited_files — only the leaves are,
+        // so the cycle guard still works.
+        if abs_path.is_dir() {
+            let mut entries: Vec<PathBuf> = fs::read_dir(&abs_path)
+                .map_err(|e| ManifestError::Io {
+                    path: abs_path.clone(),
+                    source: e,
+                })?
+                .filter_map(|r| r.ok())
+                .map(|e| e.path())
+                .filter(|p| p.is_file())
+                .filter(|p| p.extension().and_then(OsStr::to_str) == Some("yml"))
+                .collect();
+            entries.sort();
+            for path in entries {
+                self.absorb_one_file(&path, &composed_filter, &composed_prefix, site)?;
+            }
+            return Ok(());
+        }
+
+        self.absorb_one_file(&abs_path, &composed_filter, &composed_prefix, site)
+    }
+
+    fn absorb_one_file(
+        &mut self,
+        abs_path: &Path,
+        filter: &ImportFilter,
+        prefix: &Path,
+        site: ImportSite,
+    ) -> Result<(), ManifestError> {
+        let canonical = abs_path
+            .canonicalize()
+            .unwrap_or_else(|_| abs_path.to_path_buf());
+        if !self.visited_files.insert(canonical.clone()) {
+            return Err(ManifestError::ImportLoop {
+                kind: site,
+                target: abs_path.display().to_string(),
+            });
+        }
+
+        let body = fs::read_to_string(abs_path).map_err(|e| ManifestError::Io {
+            path: abs_path.to_path_buf(),
+            source: e,
+        })?;
+        let parsed = parse_body_by_extension(abs_path, &body)?;
+        parsed
+            .validate()
+            .map_err(|r| ManifestError::Validation(r.to_string()))?;
+
         self.depth += 1;
-        let res = self.absorb(parsed, composed, prefix);
+        let res = self.absorb(parsed, filter.clone(), prefix.to_path_buf());
         self.depth -= 1;
         self.visited_files.remove(&canonical);
         res
@@ -2666,6 +2690,55 @@ manifest:
         let m = Manifest::from_path_with_imports(&root, dir.path(), &source).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["zephyr"]);
+    }
+
+    #[test]
+    fn import_self_directory_iterates_yml_files_sorted() {
+        // Real zephyr uses `self.import: submanifests` with a directory
+        // of `*.yml` files; the resolver should pick all of them up in
+        // sorted order.
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = write_yaml(
+            dir.path(),
+            "west.yml",
+            r#"
+manifest:
+  self:
+    import: submanifests
+  projects: []
+"#,
+        );
+        let sub = dir.path().join("submanifests");
+        std::fs::create_dir(&sub).unwrap();
+        // Write in non-alphabetical order; the resolver should still
+        // visit them sorted (a.yml, b.yml).
+        write_yaml(
+            &sub,
+            "b.yml",
+            r#"
+manifest:
+  projects:
+    - name: from-b
+      url: https://b
+"#,
+        );
+        write_yaml(
+            &sub,
+            "a.yml",
+            r#"
+manifest:
+  projects:
+    - name: from-a
+      url: https://a
+"#,
+        );
+        // Non-yml files should be ignored.
+        std::fs::write(sub.join("README"), "ignore me").unwrap();
+
+        let source = StaticImportSource::new();
+        let m = Manifest::from_path_with_imports(&root, dir.path(), &source).unwrap();
+        let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["from-a", "from-b"]);
     }
 
     #[test]
