@@ -65,7 +65,7 @@ impl Reporter for IndicatifReporter {
 
         let transcript: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
         {
-            let mut state = self.state.lock().expect("indicatif state mutex poisoned");
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state
                 .transcripts
                 .insert(project_name.to_owned(), Arc::clone(&transcript));
@@ -76,7 +76,7 @@ impl Reporter for IndicatifReporter {
     }
 
     fn project_finished(&self, project_name: &str, outcome: Result<(), UpdateError>) {
-        let mut state = self.state.lock().expect("indicatif state mutex poisoned");
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let bar = state.bars.remove(project_name);
 
         if let Err(e) = outcome {
@@ -118,7 +118,7 @@ impl Reporter for IndicatifReporter {
         let state = self
             .state
             .into_inner()
-            .expect("indicatif state mutex poisoned");
+            .unwrap_or_else(|p| p.into_inner());
         if let Some(s) = &state.summary_bar {
             s.finish();
         }

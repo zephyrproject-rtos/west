@@ -104,17 +104,14 @@ impl Reporter for SerialReporter {
         if let Err(e) = outcome {
             self.failed
                 .lock()
-                .expect("SerialReporter mutex poisoned")
+                .unwrap_or_else(|p| p.into_inner())
                 .push((project_name.to_owned(), e.to_string()));
         }
     }
 
     fn finish(self: Box<Self>) -> FailureSummary {
         FailureSummary {
-            failed: self
-                .failed
-                .into_inner()
-                .expect("SerialReporter mutex poisoned"),
+            failed: self.failed.into_inner().unwrap_or_else(|p| p.into_inner()),
         }
     }
 }
@@ -159,19 +156,19 @@ impl Reporter for BufferingReporter {
         // First write the banner directly into the buffer so each
         // project's transcript stands alone when we flush at the end.
         {
-            let mut guard = buf.lock().expect("buffer mutex poisoned");
+            let mut guard = buf.lock().unwrap_or_else(|p| p.into_inner());
             let _ = writeln!(guard, "=== updating {project_name}");
         }
         self.state
             .lock()
-            .expect("BufferingReporter mutex poisoned")
+            .unwrap_or_else(|p| p.into_inner())
             .buffers
             .insert(project_name.to_owned(), Arc::clone(&buf));
         Box::new(BufferedSink { buffer: buf })
     }
 
     fn project_finished(&self, project_name: &str, outcome: Result<(), UpdateError>) {
-        let mut state = self.state.lock().expect("BufferingReporter mutex poisoned");
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let stringified = outcome.map_err(|e| {
             let msg = e.to_string();
             if let Some(buf) = state.buffers.get(project_name)
@@ -189,7 +186,7 @@ impl Reporter for BufferingReporter {
         let state = self
             .state
             .into_inner()
-            .expect("BufferingReporter mutex poisoned");
+            .unwrap_or_else(|p| p.into_inner());
         let stderr = io::stderr();
         let mut lock = stderr.lock();
         let mut failed = Vec::new();
