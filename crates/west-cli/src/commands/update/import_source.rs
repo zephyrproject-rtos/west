@@ -16,7 +16,7 @@ use std::io;
 use std::path::Path;
 
 use west_core::manifest::{ImportSource, ImportSourceError, Project};
-use west_core::vcs::{CheckoutTarget, FetchSpec, NullSink, Output, Vcs, VcsError};
+use west_core::vcs::{CheckoutTarget, CloneSpec, FetchSpec, NullSink, Output, Vcs, VcsError};
 
 pub struct WorkspaceImportSource<'a> {
     workspace: &'a Path,
@@ -49,8 +49,15 @@ impl ImportSource for WorkspaceImportSource<'_> {
             // SHAs. The subsequent fetch + detached checkout below land
             // the working tree at the right commit regardless.
             run_quiet(|out| {
-                self.vcs
-                    .clone(&project.url, &repo, None, Some(&project.remote_name), out)
+                self.vcs.clone(
+                    &CloneSpec {
+                        url: &project.url,
+                        dest: &repo,
+                        revision: None,
+                        origin: Some(&project.remote_name),
+                    },
+                    out,
+                )
             })
             .map_err(stringify)?;
         }

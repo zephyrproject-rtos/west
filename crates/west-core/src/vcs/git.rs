@@ -11,7 +11,9 @@ use std::sync::Mutex;
 
 use crate::config::Configuration;
 
-use super::{CheckoutTarget, FetchSpec, Output, ProgressSink, SubmoduleScope, Vcs, VcsError};
+use super::{
+    CheckoutTarget, CloneSpec, FetchSpec, Output, ProgressSink, SubmoduleScope, Vcs, VcsError,
+};
 
 const NAME: &str = "git";
 
@@ -326,27 +328,20 @@ impl Vcs for GitClient {
         Ok(res.output.status.success())
     }
 
-    fn clone(
-        &self,
-        url: &str,
-        dest: &Path,
-        revision: Option<&str>,
-        origin: Option<&str>,
-        out: &mut Output<'_>,
-    ) -> Result<(), VcsError> {
-        let dest_str = dest.to_string_lossy().into_owned();
+    fn clone(&self, spec: &CloneSpec<'_>, out: &mut Output<'_>) -> Result<(), VcsError> {
+        let dest_str = spec.dest.to_string_lossy().into_owned();
         let mut argv: Vec<&str> = vec!["clone", "--progress"];
         // `git clone --branch` accepts branch and tag names. Bare commit SHAs
         // aren't supported here; landing on one requires a follow-up checkout.
-        if let Some(r) = revision {
+        if let Some(r) = spec.revision {
             argv.extend(["--branch", r]);
         }
-        if let Some(o) = origin {
+        if let Some(o) = spec.origin {
             argv.extend(["--origin", o]);
         }
         // `--` to be explicit about argv boundaries.
         argv.push("--");
-        argv.push(url);
+        argv.push(spec.url);
         argv.push(&dest_str);
         self.run_with_output(&argv, out)
     }

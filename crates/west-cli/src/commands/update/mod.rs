@@ -37,7 +37,9 @@ use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::{GroupFilterEntry, Manifest, Project, Submodules};
-use west_core::vcs::{self, CheckoutTarget, FetchSpec, Output, SubmoduleScope, Vcs, VcsError};
+use west_core::vcs::{
+    self, CheckoutTarget, CloneSpec, FetchSpec, Output, SubmoduleScope, Vcs, VcsError,
+};
 
 use super::config::LoadedConfig;
 use indicatif_reporter::IndicatifReporter;
@@ -318,8 +320,16 @@ fn run_project_steps(
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
         }
-        vcs.clone(&project.url, repo, None, Some(&project.remote_name), out)
-            .map_err(stringify)?;
+        vcs.clone(
+            &CloneSpec {
+                url: &project.url,
+                dest: repo,
+                revision: None,
+                origin: Some(&project.remote_name),
+            },
+            out,
+        )
+        .map_err(stringify)?;
     }
 
     // 2. Fetch (smart-skip / depth / tags / force all live in GitClient).

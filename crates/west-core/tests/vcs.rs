@@ -10,8 +10,8 @@ use tempfile::TempDir;
 
 use west_core::config::Configuration;
 use west_core::vcs::{
-    self, CheckoutTarget, FetchSpec, FetchStrategy, GitClient, GitOptions, NullSink, Output,
-    ProgressEvent, ProgressSink, SubmoduleScope, Vcs, VcsError,
+    self, CheckoutTarget, CloneSpec, FetchSpec, FetchStrategy, GitClient, GitOptions, NullSink,
+    Output, ProgressEvent, ProgressSink, SubmoduleScope, Vcs, VcsError,
 };
 
 // Test double: collects every event into an owned vector for assertions.
@@ -192,10 +192,12 @@ fn clone_round_trip() {
 
     let v = GitClient::new(GitOptions::default());
     v.clone(
-        bare.to_str().unwrap(),
-        &dest,
-        None,
-        None,
+        &CloneSpec {
+            url: bare.to_str().unwrap(),
+            dest: &dest,
+            revision: None,
+            origin: None,
+        },
         &mut Output::Native,
     )
     .unwrap();
@@ -228,10 +230,12 @@ fn clone_with_branch() {
     let dest = tmp.path().join("clone");
     let v = GitClient::new(GitOptions::default());
     v.clone(
-        bare.to_str().unwrap(),
-        &dest,
-        Some("feature"),
-        None,
+        &CloneSpec {
+            url: bare.to_str().unwrap(),
+            dest: &dest,
+            revision: Some("feature"),
+            origin: None,
+        },
         &mut Output::Native,
     )
     .unwrap();
@@ -252,10 +256,12 @@ fn clone_with_custom_origin() {
 
     let v = GitClient::new(GitOptions::default());
     v.clone(
-        bare.to_str().unwrap(),
-        &dest,
-        None,
-        Some("upstream"),
+        &CloneSpec {
+            url: bare.to_str().unwrap(),
+            dest: &dest,
+            revision: None,
+            origin: Some("upstream"),
+        },
         &mut Output::Native,
     )
     .unwrap();
@@ -275,10 +281,12 @@ fn sha_resolves_head_and_short_ref() {
     let dest = tmp.path().join("clone");
     let v = GitClient::new(GitOptions::default());
     v.clone(
-        bare.to_str().unwrap(),
-        &dest,
-        None,
-        None,
+        &CloneSpec {
+            url: bare.to_str().unwrap(),
+            dest: &dest,
+            revision: None,
+            origin: None,
+        },
         &mut Output::Native,
     )
     .unwrap();
@@ -403,10 +411,12 @@ fn clone_into(root: &Path, bare: &Path) -> PathBuf {
     let dest = root.join("clone");
     let v = GitClient::new(GitOptions::default());
     v.clone(
-        bare.to_str().unwrap(),
-        &dest,
-        None,
-        None,
+        &CloneSpec {
+            url: bare.to_str().unwrap(),
+            dest: &dest,
+            revision: None,
+            origin: None,
+        },
         &mut Output::Native,
     )
     .unwrap();
@@ -744,10 +754,12 @@ fn update_submodules_materializes_worktree() {
     let dest = tmp.path().join("clone");
     let v = GitClient::new(GitOptions::default());
     v.clone(
-        super_bare.to_str().unwrap(),
-        &dest,
-        None,
-        None,
+        &CloneSpec {
+            url: super_bare.to_str().unwrap(),
+            dest: &dest,
+            revision: None,
+            origin: None,
+        },
         &mut Output::Native,
     )
     .unwrap();
@@ -845,10 +857,12 @@ fn clone_with_native_succeeds() {
     // output (it goes to the test runner's stderr). We lock the API
     // shape and confirm the resulting tree is a real repo.
     v.clone(
-        bare.to_str().unwrap(),
-        &dest,
-        None,
-        None,
+        &CloneSpec {
+            url: bare.to_str().unwrap(),
+            dest: &dest,
+            revision: None,
+            origin: None,
+        },
         &mut Output::Native,
     )
     .unwrap();
@@ -868,10 +882,12 @@ fn clone_streams_lines_and_terminates_with_finished() {
     let v = GitClient::new(GitOptions::default());
     let mut sink = RecordingSink::default();
     v.clone(
-        bare.to_str().unwrap(),
-        &dest,
-        None,
-        None,
+        &CloneSpec {
+            url: bare.to_str().unwrap(),
+            dest: &dest,
+            revision: None,
+            origin: None,
+        },
         &mut Output::Stream(&mut sink),
     )
     .unwrap();
@@ -906,10 +922,12 @@ fn null_sink_is_a_valid_target() {
 
     let v = GitClient::new(GitOptions::default());
     v.clone(
-        bare.to_str().unwrap(),
-        &dest,
-        None,
-        None,
+        &CloneSpec {
+            url: bare.to_str().unwrap(),
+            dest: &dest,
+            revision: None,
+            origin: None,
+        },
         &mut Output::Stream(&mut NullSink),
     )
     .unwrap();

@@ -180,7 +180,13 @@ fn bootstrap(
             pb.enable_steady_tick(crate::progress::TICK_INTERVAL);
             let mut sink = crate::progress::IndicatifSink::new(pb.clone(), None);
             let mut out = vcs::Output::Stream(&mut sink);
-            let res = vcs.clone(url, &tmp_dir, revision, None, &mut out);
+            let spec = vcs::CloneSpec {
+                url,
+                dest: &tmp_dir,
+                revision,
+                origin: None,
+            };
+            let res = vcs.clone(&spec, &mut out);
             match &res {
                 Ok(()) => pb.finish_with_message("done"),
                 Err(_) => pb.finish_with_message("failed"),
@@ -188,8 +194,13 @@ fn bootstrap(
             res.map_err(InitError::Vcs)?;
         } else {
             let mut out = vcs::Output::Native;
-            vcs.clone(url, &tmp_dir, revision, None, &mut out)
-                .map_err(InitError::Vcs)?;
+            let spec = vcs::CloneSpec {
+                url,
+                dest: &tmp_dir,
+                revision,
+                origin: None,
+            };
+            vcs.clone(&spec, &mut out).map_err(InitError::Vcs)?;
         }
 
         // Resolve manifest.path:

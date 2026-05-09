@@ -170,24 +170,10 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     /// `true` if `path` is a working copy of this VCS.
     fn is_repo(&self, path: &Path) -> Result<bool, VcsError>;
 
-    /// Clone `url` into `dest`. `revision` is a branch, tag, or — where the
-    /// client supports it — a commit reference; each client interprets it as
-    /// the user would expect when passing it to the underlying tool.
-    /// `origin` overrides the remote name (default `"origin"` for git).
-    /// Progress output (git's "Cloning into …", "Receiving objects: …") is
-    /// forwarded to `out`.
-    ///
-    /// Git note: passes `revision` to `git clone --branch`, which accepts
-    /// branch and tag names only. Landing at a bare commit SHA requires a
-    /// follow-up [`Vcs::checkout`].
-    fn clone(
-        &self,
-        url: &str,
-        dest: &Path,
-        revision: Option<&str>,
-        origin: Option<&str>,
-        out: &mut Output<'_>,
-    ) -> Result<(), VcsError>;
+    /// Clone `spec.url` into `spec.dest`. Progress output (git's "Cloning
+    /// into …", "Receiving objects: …") is forwarded to `out`. See
+    /// [`CloneSpec`] for the full set of clone parameters.
+    fn clone(&self, spec: &CloneSpec<'_>, out: &mut Output<'_>) -> Result<(), VcsError>;
 
     /// Resolve `rev` to a commit SHA in `repo`. `"HEAD"` resolves the current
     /// commit.
@@ -257,6 +243,24 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     /// Read the recorded manifest-rev of `repo`. Returns `Ok(None)` if no
     /// manifest-rev has been recorded yet (fresh clone, hand-curated dir).
     fn manifest_rev(&self, repo: &Path) -> Result<Option<String>, VcsError>;
+}
+
+/// What to clone.
+///
+/// `revision` is a branch, tag, or — where the client supports it — a
+/// commit reference; each client interprets it as the user would expect
+/// when passing it to the underlying tool. `origin` overrides the remote
+/// name (default `"origin"` for git).
+///
+/// Git note: `revision` is passed to `git clone --branch`, which accepts
+/// branch and tag names only. Landing at a bare commit SHA requires a
+/// follow-up [`Vcs::checkout`].
+#[derive(Debug, Clone, Copy)]
+pub struct CloneSpec<'a> {
+    pub url: &'a str,
+    pub dest: &'a Path,
+    pub revision: Option<&'a str>,
+    pub origin: Option<&'a str>,
 }
 
 /// What to fetch.
