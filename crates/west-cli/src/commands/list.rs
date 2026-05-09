@@ -12,8 +12,6 @@
 //! `{active}`) only run their underlying lookup when the user asked
 //! for them — relevant for workspaces with hundreds of projects.
 
-use std::error::Error;
-use std::fmt;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -52,43 +50,25 @@ pub struct ListArgs {
     pub format: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ListError {
+    #[error("not inside a west workspace (no .west/ found)")]
     NotInWorkspace,
+    #[error("{0}")]
     Config(String),
+    #[error("{0}")]
     Manifest(String),
+    #[error("{0}")]
     Vcs(String),
+    #[error("unknown format key: {{{0}}}")]
     UnknownKey(String),
+    #[error("format error: {0}")]
     Format(String),
+    #[error("project {0:?} is not cloned; cannot resolve {{sha}} (run `west update` first)")]
     UnclonedSha(String),
+    #[error("--inactive cannot be combined with project names")]
     InactiveWithPositional,
 }
-
-impl fmt::Display for ListError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ListError::NotInWorkspace => {
-                f.write_str("not inside a west workspace (no .west/ found)")
-            }
-            ListError::Config(msg) | ListError::Manifest(msg) | ListError::Vcs(msg) => {
-                f.write_str(msg)
-            }
-            ListError::UnknownKey(k) => write!(f, "unknown format key: {{{k}}}"),
-            ListError::Format(msg) => write!(f, "format error: {msg}"),
-            ListError::UnclonedSha(name) => {
-                write!(
-                    f,
-                    "project {name:?} is not cloned; cannot resolve {{sha}} (run `west update` first)"
-                )
-            }
-            ListError::InactiveWithPositional => {
-                f.write_str("--inactive cannot be combined with project names")
-            }
-        }
-    }
-}
-
-impl Error for ListError {}
 
 pub fn run(args: ListArgs, loaded: &mut LoadedConfig) -> ExitCode {
     match run_inner(args, loaded) {

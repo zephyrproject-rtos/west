@@ -6,7 +6,6 @@
 //! west's system/global/local convention.
 
 use std::collections::BTreeMap;
-use std::error::Error;
 use std::fmt;
 use std::fs;
 use std::io::Write;
@@ -109,69 +108,33 @@ impl fmt::Display for ConfigValue {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+    #[error("invalid configuration key {0:?} (expected `section.key`)")]
     InvalidKey(String),
-    InvalidValue {
-        input: String,
-        message: String,
-    },
+    #[error("invalid configuration value {input:?}: {message}")]
+    InvalidValue { input: String, message: String },
+    #[error("unknown configuration layer: {}", .0.display())]
     UnknownLayer(PathBuf),
+    #[error("io error on {}: {source}", path.display())]
     Io {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
+    #[error("malformed TOML in {}: {source}", path.display())]
     MalformedToml {
         path: PathBuf,
+        #[source]
         source: toml_edit::TomlError,
     },
+    #[error("configuration option {option:?} cannot be read as {expected}")]
     TypeMismatch {
         option: String,
         expected: &'static str,
     },
+    #[error("configuration option not found: {0}")]
     NotFound(String),
-}
-
-impl fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ConfigError::InvalidKey(k) => {
-                write!(
-                    f,
-                    "invalid configuration key {k:?} (expected `section.key`)"
-                )
-            }
-            ConfigError::InvalidValue { input, message } => {
-                write!(f, "invalid configuration value {input:?}: {message}")
-            }
-            ConfigError::UnknownLayer(p) => {
-                write!(f, "unknown configuration layer: {}", p.display())
-            }
-            ConfigError::Io { path, source } => {
-                write!(f, "io error on {}: {source}", path.display())
-            }
-            ConfigError::MalformedToml { path, source } => {
-                write!(f, "malformed TOML in {}: {source}", path.display())
-            }
-            ConfigError::TypeMismatch { option, expected } => {
-                write!(
-                    f,
-                    "configuration option {option:?} cannot be read as {expected}"
-                )
-            }
-            ConfigError::NotFound(o) => write!(f, "configuration option not found: {o}"),
-        }
-    }
-}
-
-impl Error for ConfigError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            ConfigError::Io { source, .. } => Some(source),
-            ConfigError::MalformedToml { source, .. } => Some(source),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Debug)]

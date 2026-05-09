@@ -22,7 +22,6 @@
 //! parser produced the schema.
 
 use std::collections::{HashMap, HashSet};
-use std::error::Error;
 use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
@@ -138,16 +137,9 @@ pub trait ImportSource {
 /// Opaque error type returned by [`ImportSource`] implementations. The
 /// `String` is rendered into [`ManifestError::ImportSourceFailed`]'s
 /// `detail` field.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
 pub struct ImportSourceError(pub String);
-
-impl fmt::Display for ImportSourceError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl Error for ImportSourceError {}
 
 /// Hard cap on import nesting depth — a chain longer than this returns
 /// [`ManifestError::ImportTooDeep`] rather than blowing the stack.
@@ -157,158 +149,74 @@ pub const MAX_IMPORT_DEPTH: usize = 32;
 // Errors
 // =====================================================================
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
-    Yaml(serde_saphyr::Error),
-    Toml(toml_edit::de::Error),
-    Json(serde_json::Error),
+    #[error("YAML parse error: {0}")]
+    Yaml(#[source] serde_saphyr::Error),
+    #[error("TOML parse error: {0}")]
+    Toml(#[source] toml_edit::de::Error),
+    #[error("JSON parse error: {0}")]
+    Json(#[source] serde_json::Error),
+    #[error("unsupported manifest format: {0:?} (expected .yaml/.yml/.toml/.json)")]
     UnsupportedFormat(String),
+    #[error("validation failed: {0}")]
     Validation(String),
-    UnknownRemote {
-        project: String,
-        remote: String,
-    },
+    #[error("project {project:?}: remote {remote:?} is not defined")]
+    UnknownRemote { project: String, remote: String },
+    #[error("duplicate project name: {0:?}")]
     DuplicateProjectName(String),
+    #[error("duplicate project path: {0:?}")]
     DuplicateProjectPath(String),
+    #[error("no project may be named \"manifest\" (reserved)")]
     ProjectNamedManifest,
+    #[error("project {0:?}: no remote or url and no default remote is set")]
     NoUrl(String),
-    UrlAndRemote {
-        project: String,
-    },
-    UrlAndRepoPath {
-        project: String,
-    },
-    InvalidGroup {
-        project: String,
-        group: String,
-    },
+    #[error("project {project:?}: cannot specify both `url` and `remote`")]
+    UrlAndRemote { project: String },
+    #[error("project {project:?}: cannot specify both `url` and `repo-path`")]
+    UrlAndRepoPath { project: String },
+    #[error(
+        "project {project:?}: invalid group name {group:?} \
+         (must not be empty, contain whitespace/comma/colon, or start with `+`/`-`)"
+    )]
+    InvalidGroup { project: String, group: String },
+    #[error("{origin} group filter: invalid item {item:?}: {reason}")]
     InvalidGroupFilter {
-        source: String,
+        origin: String,
         item: String,
         reason: String,
     },
-    AbsoluteProjectPath {
-        project: String,
-        path: String,
-    },
+    #[error("project {project:?} has absolute path {path:?}; must be relative to the workspace")]
+    AbsoluteProjectPath { project: String, path: String },
     /// Retired: emitted by the strict policy on legacy callers, but kept
     /// in the enum so external `match` arms don't break. New code should
     /// use [`Manifest::from_path_with_imports`] for resolution or
     /// [`Manifest::from_path_lenient`] to skip imports.
-    ImportNotSupported {
-        context: String,
-    },
+    #[error("manifest imports are not supported (found in {context})")]
+    ImportNotSupported { context: String },
     /// An import directive (self/top-level/per-project) cycles back to a
     /// file or project that's already on the resolution stack.
-    ImportLoop {
-        kind: ImportSite,
-        target: String,
-    },
+    #[error("{kind} import cycle detected: {target:?}")]
+    ImportLoop { kind: ImportSite, target: String },
     /// Nested imports exceeded [`MAX_IMPORT_DEPTH`].
-    ImportTooDeep {
-        limit: usize,
-    },
+    #[error("manifest imports nested too deeply (limit: {limit})")]
+    ImportTooDeep { limit: usize },
     /// An [`ImportSource`] callback failed for a per-project import. The
     /// resolver promotes a non-skipped error from the source into this so
     /// callers can distinguish "the source itself failed" from "the
     /// imported file isn't there."
-    ImportSourceFailed {
-        project: String,
-        detail: String,
-    },
+    #[error("import source failed for project {project:?}: {detail}")]
+    ImportSourceFailed { project: String, detail: String },
     /// `resolve_projects` was given a selector that matches no project (by
     /// name or by path).
+    #[error("unknown project name or path: {0:?}")]
     UnknownProject(String),
+    #[error("io error on {}: {source}", path.display())]
     Io {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
-}
-
-impl fmt::Display for ManifestError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ManifestError::Yaml(e) => write!(f, "YAML parse error: {e}"),
-            ManifestError::Toml(e) => write!(f, "TOML parse error: {e}"),
-            ManifestError::Json(e) => write!(f, "JSON parse error: {e}"),
-            ManifestError::UnsupportedFormat(ext) => write!(
-                f,
-                "unsupported manifest format: {ext:?} (expected .yaml/.yml/.toml/.json)"
-            ),
-            ManifestError::Validation(msg) => write!(f, "validation failed: {msg}"),
-            ManifestError::UnknownRemote { project, remote } => {
-                write!(f, "project {project:?}: remote {remote:?} is not defined")
-            }
-            ManifestError::DuplicateProjectName(name) => {
-                write!(f, "duplicate project name: {name:?}")
-            }
-            ManifestError::DuplicateProjectPath(path) => {
-                write!(f, "duplicate project path: {path:?}")
-            }
-            ManifestError::ProjectNamedManifest => {
-                write!(f, "no project may be named \"manifest\" (reserved)")
-            }
-            ManifestError::NoUrl(name) => write!(
-                f,
-                "project {name:?}: no remote or url and no default remote is set"
-            ),
-            ManifestError::UrlAndRemote { project } => {
-                write!(
-                    f,
-                    "project {project:?}: cannot specify both `url` and `remote`"
-                )
-            }
-            ManifestError::UrlAndRepoPath { project } => write!(
-                f,
-                "project {project:?}: cannot specify both `url` and `repo-path`"
-            ),
-            ManifestError::InvalidGroup { project, group } => write!(
-                f,
-                "project {project:?}: invalid group name {group:?} (must not be empty, contain whitespace/comma/colon, or start with `+`/`-`)"
-            ),
-            ManifestError::InvalidGroupFilter {
-                source,
-                item,
-                reason,
-            } => {
-                write!(f, "{source} group filter: invalid item {item:?}: {reason}")
-            }
-            ManifestError::AbsoluteProjectPath { project, path } => write!(
-                f,
-                "project {project:?} has absolute path {path:?}; must be relative to the workspace"
-            ),
-            ManifestError::ImportNotSupported { context } => {
-                write!(f, "manifest imports are not supported (found in {context})")
-            }
-            ManifestError::ImportLoop { kind, target } => {
-                write!(f, "{kind} import cycle detected: {target:?}")
-            }
-            ManifestError::ImportTooDeep { limit } => {
-                write!(f, "manifest imports nested too deeply (limit: {limit})")
-            }
-            ManifestError::ImportSourceFailed { project, detail } => {
-                write!(f, "import source failed for project {project:?}: {detail}")
-            }
-            ManifestError::UnknownProject(name) => {
-                write!(f, "unknown project name or path: {name:?}")
-            }
-            ManifestError::Io { path, source } => {
-                write!(f, "io error on {}: {source}", path.display())
-            }
-        }
-    }
-}
-
-impl Error for ManifestError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            ManifestError::Yaml(e) => Some(e),
-            ManifestError::Toml(e) => Some(e),
-            ManifestError::Json(e) => Some(e),
-            ManifestError::Io { source, .. } => Some(source),
-            _ => None,
-        }
-    }
 }
 
 // =====================================================================
@@ -1471,7 +1379,7 @@ fn parse_group_filter(
     for item in raw {
         if item.is_empty() {
             return Err(ManifestError::InvalidGroupFilter {
-                source: source.to_owned(),
+                origin: source.to_owned(),
                 item: item.clone(),
                 reason: "must begin with `+` or `-`".into(),
             });
@@ -1481,7 +1389,7 @@ fn parse_group_filter(
             b'-' => (true, &item[1..]),
             _ => {
                 return Err(ManifestError::InvalidGroupFilter {
-                    source: source.to_owned(),
+                    origin: source.to_owned(),
                     item: item.clone(),
                     reason: "must begin with `+` or `-`".into(),
                 });
@@ -1489,7 +1397,7 @@ fn parse_group_filter(
         };
         if !is_valid_group(group) {
             return Err(ManifestError::InvalidGroupFilter {
-                source: source.to_owned(),
+                origin: source.to_owned(),
                 item: item.clone(),
                 reason: format!("{group:?} is not a valid group name"),
             });

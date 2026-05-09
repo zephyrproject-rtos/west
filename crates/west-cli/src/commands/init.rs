@@ -395,37 +395,25 @@ fn url_basename(url: &str) -> String {
 // errors
 // =====================================================================
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum InitError {
+    #[error("directory is already inside a west workspace ({})", .0.display())]
     AlreadyInitialized(PathBuf),
+    #[error("{0}")]
     Generic(String),
+    #[error("io error on {}: {source}", path.display())]
     Io {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
-    Config(west_core::config::ConfigError),
-    Manifest(west_core::manifest::ManifestError),
-    Vcs(west_core::vcs::VcsError),
+    #[error(transparent)]
+    Config(#[from] west_core::config::ConfigError),
+    #[error(transparent)]
+    Manifest(#[from] west_core::manifest::ManifestError),
+    #[error(transparent)]
+    Vcs(#[from] west_core::vcs::VcsError),
 }
-
-impl std::fmt::Display for InitError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            InitError::AlreadyInitialized(p) => write!(
-                f,
-                "directory is already inside a west workspace ({})",
-                p.display()
-            ),
-            InitError::Generic(s) => f.write_str(s),
-            InitError::Io { path, source } => write!(f, "io error on {}: {source}", path.display()),
-            InitError::Config(e) => std::fmt::Display::fmt(e, f),
-            InitError::Manifest(e) => std::fmt::Display::fmt(e, f),
-            InitError::Vcs(e) => std::fmt::Display::fmt(e, f),
-        }
-    }
-}
-
-impl std::error::Error for InitError {}
 
 #[cfg(test)]
 mod tests {

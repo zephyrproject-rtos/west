@@ -10,7 +10,6 @@
 
 use std::collections::HashSet;
 use std::ffi::OsString;
-use std::fmt;
 
 use clap::Parser;
 
@@ -19,69 +18,31 @@ use west_core::config::{ConfigError, ConfigValue, Configuration};
 use crate::Cli;
 use crate::commands::Command;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum AliasError {
     /// `alias.<name>` resolves to an empty argv.
+    #[error("alias {0:?} is empty")]
     Empty(String),
     /// String form was un-parseable by shlex.
+    #[error("alias {0:?}: shell-style split failed (mismatched quotes?)")]
     Shlex(String),
     /// Array form contains a non-string element.
+    #[error("alias {name:?}: list element of type {kind} is not a string")]
     NotAString { name: String, kind: &'static str },
     /// `alias.<name>` is set but not a string-or-array-of-strings.
+    #[error("alias {name:?}: expected string or list of strings, got {kind}")]
     BadType { name: String, kind: &'static str },
     /// First token of the expansion starts with `-` (looks like a flag).
     /// Aliases must resolve to another command name as their first token.
+    #[error("alias {name:?} must begin with a command name (got {token:?})")]
     FirstTokenIsFlag { name: String, token: String },
     /// Underlying config lookup failed.
-    Config(ConfigError),
+    #[error(transparent)]
+    Config(#[from] ConfigError),
     /// argv didn't contain the subcommand token at expansion time
     /// (defensive; shouldn't happen in practice).
+    #[error("alias {0:?}: subcommand token vanished from argv")]
     SubcommandTokenMissing(String),
-}
-
-impl fmt::Display for AliasError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AliasError::Empty(name) => write!(f, "alias {name:?} is empty"),
-            AliasError::Shlex(name) => {
-                write!(
-                    f,
-                    "alias {name:?}: shell-style split failed (mismatched quotes?)"
-                )
-            }
-            AliasError::NotAString { name, kind } => write!(
-                f,
-                "alias {name:?}: list element of type {kind} is not a string"
-            ),
-            AliasError::BadType { name, kind } => write!(
-                f,
-                "alias {name:?}: expected string or list of strings, got {kind}"
-            ),
-            AliasError::FirstTokenIsFlag { name, token } => write!(
-                f,
-                "alias {name:?} must begin with a command name (got {token:?})"
-            ),
-            AliasError::Config(e) => fmt::Display::fmt(e, f),
-            AliasError::SubcommandTokenMissing(name) => {
-                write!(f, "alias {name:?}: subcommand token vanished from argv")
-            }
-        }
-    }
-}
-
-impl std::error::Error for AliasError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            AliasError::Config(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl From<ConfigError> for AliasError {
-    fn from(e: ConfigError) -> Self {
-        AliasError::Config(e)
-    }
 }
 
 /// Parse `alias.<name>` into an argv. Returns `Ok(None)` if the alias is

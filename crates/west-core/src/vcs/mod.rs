@@ -29,7 +29,6 @@
 //! stored is the client's business — git uses `refs/heads/manifest-rev`,
 //! other clients are free to choose.
 
-use std::error::Error;
 use std::fmt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -297,10 +296,17 @@ pub enum SubmoduleScope<'a> {
 
 /// Errors common to any client. Implementations wrap their tool-specific
 /// failures into one of these.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum VcsError {
     /// The client tool returned a non-zero exit code. Captures the argv and
     /// stderr for diagnostics.
+    #[error(
+        "{client} command failed (exit={}): {}{}{}",
+        match exit_code { Some(c) => c.to_string(), None => "?".to_owned() },
+        argv.join(" "),
+        if stderr.trim().is_empty() { "" } else { ": " },
+        stderr.trim(),
+    )]
     CommandFailed {
         client: &'static str,
         argv: Vec<String>,
@@ -308,84 +314,32 @@ pub enum VcsError {
         stderr: String,
     },
     /// The client tool isn't on PATH or couldn't be executed.
+    #[error("{client} client is unavailable: {source}")]
     ClientUnavailable {
         client: &'static str,
+        #[source]
         source: std::io::Error,
     },
     /// File-system I/O error around a repo or working tree.
+    #[error("io error on {}: {source}", path.display())]
     Io {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
     /// Output from the client tool didn't match the expected shape.
+    #[error("{client} produced unexpected output for `{}`: {detail}", argv.join(" "))]
     BadOutput {
         client: &'static str,
         argv: Vec<String>,
         detail: String,
     },
     /// `vcs.client` named a client we don't recognize.
+    #[error("unknown vcs.client: {0:?}")]
     UnknownClient(String),
     /// A `tool.<client>.<key>` config value had the wrong type or shape.
+    #[error("bad option {key:?}: {detail}")]
     BadOption { key: String, detail: String },
-}
-
-impl fmt::Display for VcsError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            VcsError::CommandFailed {
-                client,
-                argv,
-                exit_code,
-                stderr,
-            } => {
-                let code = match exit_code {
-                    Some(c) => c.to_string(),
-                    None => "?".to_owned(),
-                };
-                let stderr = stderr.trim();
-                write!(
-                    f,
-                    "{client} command failed (exit={code}): {}{}{}",
-                    argv.join(" "),
-                    if stderr.is_empty() { "" } else { ": " },
-                    stderr,
-                )
-            }
-            VcsError::ClientUnavailable { client, source } => {
-                write!(f, "{client} client is unavailable: {source}")
-            }
-            VcsError::Io { path, source } => {
-                write!(f, "io error on {}: {source}", path.display())
-            }
-            VcsError::BadOutput {
-                client,
-                argv,
-                detail,
-            } => {
-                write!(
-                    f,
-                    "{client} produced unexpected output for `{}`: {detail}",
-                    argv.join(" ")
-                )
-            }
-            VcsError::UnknownClient(name) => {
-                write!(f, "unknown vcs.client: {name:?}")
-            }
-            VcsError::BadOption { key, detail } => {
-                write!(f, "bad option {key:?}: {detail}")
-            }
-        }
-    }
-}
-
-impl Error for VcsError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            VcsError::ClientUnavailable { source, .. } => Some(source),
-            VcsError::Io { source, .. } => Some(source),
-            _ => None,
-        }
-    }
 }
 
 /// Read `vcs.client` from `config` and return the matching implementation.
