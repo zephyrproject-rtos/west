@@ -331,13 +331,22 @@ impl Vcs for GitClient {
     fn clone(&self, spec: &CloneSpec<'_>, out: &mut Output<'_>) -> Result<(), VcsError> {
         let dest_str = spec.dest.to_string_lossy().into_owned();
         let mut argv: Vec<&str> = vec!["clone", "--progress"];
-        // `git clone --branch` accepts branch and tag names. Bare commit SHAs
-        // aren't supported here; landing on one requires a follow-up checkout.
-        if let Some(r) = spec.revision {
-            argv.extend(["--branch", r]);
-        }
-        if let Some(o) = spec.origin {
-            argv.extend(["--origin", o]);
+        if spec.mirror {
+            // `--mirror` implies `--bare` and a refspec that mirrors every
+            // ref under `refs/*`. `--branch` / `--origin` don't apply to a
+            // bare mirror — git rejects the combination — so we ignore
+            // them in this mode.
+            argv.push("--mirror");
+        } else {
+            // `git clone --branch` accepts branch and tag names. Bare commit
+            // SHAs aren't supported here; landing on one requires a follow-up
+            // checkout.
+            if let Some(r) = spec.revision {
+                argv.extend(["--branch", r]);
+            }
+            if let Some(o) = spec.origin {
+                argv.extend(["--origin", o]);
+            }
         }
         // `--` to be explicit about argv boundaries.
         argv.push("--");
@@ -485,6 +494,7 @@ impl Vcs for GitClient {
         &self,
         repo: &Path,
         scope: &SubmoduleScope<'_>,
+        reference: Option<&Path>,
         out: &mut Output<'_>,
     ) -> Result<(), VcsError> {
         // Empty Specific scope is an explicit no-op (caller may have
@@ -509,6 +519,7 @@ impl Vcs for GitClient {
             self.run_with_output(&argv, out)?;
         }
 
+        let reference_str = reference.map(|p| p.to_string_lossy().into_owned());
         let mut argv: Vec<&str> = vec![
             "-C",
             &repo_str,
@@ -520,11 +531,20 @@ impl Vcs for GitClient {
         if self.opts.submodules_recurse {
             argv.push("--recursive");
         }
+        if let Some(r) = reference_str.as_deref() {
+            argv.extend(["--reference", r]);
+        }
         if let SubmoduleScope::Specific(paths) = scope {
             argv.push("--");
             argv.extend(paths.iter().copied());
         }
         self.run_with_output(&argv, out)
+    }
+
+    fn set_remote_url(&self, repo: &Path, remote: &str, url: &str) -> Result<(), VcsError> {
+        let repo_str = repo.to_string_lossy().into_owned();
+        let res = self.run(&["-C", &repo_str, "remote", "set-url", remote, url])?;
+        check_success(&res)
     }
 
     fn set_manifest_rev(

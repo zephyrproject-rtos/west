@@ -37,6 +37,7 @@ fn main() -> ExitCode {
         dest: &dest,
         revision: None,
         origin: None,
+        mirror: false,
     };
     if let Err(e) = client.clone(&spec, &mut out) {
         eprintln!("clone failed: {e}");

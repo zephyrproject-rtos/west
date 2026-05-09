@@ -46,4 +46,20 @@ pub(super) enum UpdateError {
     },
     #[error("update submodules: {0}")]
     Submodules(#[source] VcsError),
+    #[error("populate cache for {url}: {source}")]
+    CachePopulate {
+        url: String,
+        #[source]
+        source: VcsError,
+    },
+    #[error("refresh cache at {}: {source}", path.display())]
+    CacheRefresh {
+        path: PathBuf,
+        #[source]
+        source: VcsError,
+    },
+    #[error("set origin URL: {0}")]
+    SetRemoteUrl(#[source] VcsError),
+    #[error("cache path {} contains non-UTF-8 bytes", .0.display())]
+    NonUtf8CachePath(PathBuf),
 }

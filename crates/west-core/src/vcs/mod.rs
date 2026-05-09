@@ -223,6 +223,13 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     /// pre-update sync) live in `tool.<client>.submodules.*` config. Progress
     /// output is forwarded to `out`.
     ///
+    /// `reference`, when `Some`, names a local repository whose object
+    /// store is shared with the submodule clone — git: `--reference
+    /// <path>`. Used by the cache-aware `west update` flow to point
+    /// submodule init at a pre-populated mirror so the network round-
+    /// trips disappear. Applies once per call, so callers wanting
+    /// per-submodule references invoke `update_submodules` per submodule.
+    ///
     /// Clients that don't have a submodule concept should return a
     /// [`VcsError::CommandFailed`] when invoked on a non-empty scope; for
     /// `Specific(&[])` the call must be a no-op so callers can pass through
@@ -231,8 +238,15 @@ pub trait Vcs: fmt::Debug + Send + Sync {
         &self,
         repo: &Path,
         scope: &SubmoduleScope<'_>,
+        reference: Option<&Path>,
         out: &mut Output<'_>,
     ) -> Result<(), VcsError>;
+
+    /// Rewrite `repo`'s `<remote>` URL to `url`. After a cache-driven
+    /// clone (where the original URL pointed at a local mirror), the
+    /// caller flips the recorded URL to the project's real upstream so
+    /// subsequent fetches reach the network.
+    fn set_remote_url(&self, repo: &Path, remote: &str, url: &str) -> Result<(), VcsError>;
 
     /// Record `sha` as the manifest-rev of `repo`. `reason`, if given, is
     /// recorded with the underlying ref operation so users can inspect why
@@ -260,12 +274,18 @@ pub trait Vcs: fmt::Debug + Send + Sync {
 /// Git note: `revision` is passed to `git clone --branch`, which accepts
 /// branch and tag names only. Landing at a bare commit SHA requires a
 /// follow-up [`Vcs::checkout`].
+///
+/// `mirror = true` produces a bare mirror clone (`git clone --mirror`),
+/// suitable as a reference cache for subsequent normal clones from
+/// `dest`. In mirror mode `revision` and `origin` are ignored — they
+/// don't apply to a `--mirror` clone.
 #[derive(Debug, Clone, Copy)]
 pub struct CloneSpec<'a> {
     pub url: &'a str,
     pub dest: &'a Path,
     pub revision: Option<&'a str>,
     pub origin: Option<&'a str>,
+    pub mirror: bool,
 }
 
 /// What to fetch.

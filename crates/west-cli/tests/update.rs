@@ -507,3 +507,401 @@ fn update_handles_sha_revision() {
     let head = git_capture(&["rev-parse", "HEAD"], &ws.join("p1"));
     assert_eq!(head, sha, "HEAD should land on the manifest's SHA");
 }
+
+// ============================================================================
+// Cache flags
+// ============================================================================
+
+/// Build a manifest with `revision: <sha>` per project (instead of `main`)
+/// and a custom URL — the cache tests pin SHAs so smart-skip can avoid
+/// hitting the (deliberately non-existent) project URL.
+fn manifest_yaml_with_url_and_rev(projects: &[(&str, &str, &str)]) -> String {
+    let mut s = String::from("manifest:\n  self:\n    path: my-manifest\n  projects:\n");
+    for (name, url, rev) in projects {
+        s.push_str(&format!(
+            "    - name: {name}\n      url: {url}\n      revision: {rev}\n",
+        ));
+    }
+    s
+}
+
+#[test]
+#[serial]
+fn update_uses_name_cache_when_dir_exists() {
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1");
+    let sha = git_capture(&["rev-parse", "HEAD"], &p1);
+
+    // Pre-populate <name-cache>/p1 from p1.git. Project URL points at a
+    // nonexistent path — only the cache path can serve as clone source.
+    let cache_root = sb.root().join("name-cache");
+    let cache_p1 = cache_root.join("p1");
+    std::fs::create_dir_all(&cache_root).unwrap();
+    git(
+        &[
+            "clone",
+            "-q",
+            p1.to_str().unwrap(),
+            cache_p1.to_str().unwrap(),
+        ],
+        sb.root(),
+    );
+
+    let nonexistent = sb.root().join("nope.git");
+    let manifest =
+        manifest_yaml_with_url_and_rev(&[("p1", &nonexistent.display().to_string(), &sha)]);
+    let ws = init_workspace(&sb, &manifest);
+
+    sb.west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "update",
+            "-j",
+            "1",
+            "--fetch",
+            "smart",
+            "--name-cache",
+            cache_root.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    assert!(ws.join("p1/R").exists());
+    // Origin URL is flipped back to the manifest's url after the
+    // cache-driven clone.
+    let origin = git_capture(&["remote", "get-url", "origin"], &ws.join("p1"));
+    assert_eq!(origin, nonexistent.display().to_string());
+}
+
+#[test]
+#[serial]
+fn update_uses_path_cache_when_dir_exists() {
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1");
+    let sha = git_capture(&["rev-parse", "HEAD"], &p1);
+
+    let cache_root = sb.root().join("path-cache");
+    // Path cache uses project.path (default = project name), so layout
+    // is identical to name-cache for this manifest.
+    let cache_p1 = cache_root.join("p1");
+    std::fs::create_dir_all(&cache_root).unwrap();
+    git(
+        &[
+            "clone",
+            "-q",
+            p1.to_str().unwrap(),
+            cache_p1.to_str().unwrap(),
+        ],
+        sb.root(),
+    );
+
+    let nonexistent = sb.root().join("nope.git");
+    let manifest =
+        manifest_yaml_with_url_and_rev(&[("p1", &nonexistent.display().to_string(), &sha)]);
+    let ws = init_workspace(&sb, &manifest);
+
+    sb.west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "update",
+            "-j",
+            "1",
+            "--fetch",
+            "smart",
+            "--path-cache",
+            cache_root.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    assert!(ws.join("p1/R").exists());
+}
+
+#[test]
+#[serial]
+fn update_falls_through_when_static_cache_missing() {
+    // Static cache flag pointing at an empty directory: the worker
+    // should fall through to the project URL and clone from there.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1");
+    let manifest = manifest_yaml(&[("p1", &p1, &[])]);
+    let ws = init_workspace(&sb, &manifest);
+    let empty_cache = sb.root().join("empty-cache");
+    std::fs::create_dir_all(&empty_cache).unwrap();
+
+    sb.west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "update",
+            "--name-cache",
+            empty_cache.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    assert!(ws.join("p1/R").exists());
+    // Origin remains the project's URL — fall-through means the cache
+    // was never used so set_remote_url didn't run, but the project
+    // already has the manifest URL recorded by the normal clone path.
+    let origin = git_capture(&["remote", "get-url", "origin"], &ws.join("p1"));
+    assert_eq!(origin, p1.display().to_string());
+}
+
+#[test]
+#[serial]
+fn update_priority_name_over_path_when_both_set() {
+    // name-cache wins when both are set and have a matching directory.
+    // We prove which one was used by populating each cache from a
+    // *different* upstream — name-cache contains SHA_NAME, path-cache
+    // contains SHA_PATH. The manifest pins SHA_NAME and the project URL
+    // is unreachable; smart-fetch skips because SHA_NAME is local. If
+    // path-cache had been used instead, fetch would hit the network
+    // (SHA_NAME isn't in path-cache) and fail.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1_name_src = make_bare_with_one_commit(sb.root(), "p1-name-src", "name-content");
+    let p1_path_src = make_bare_with_one_commit(sb.root(), "p1-path-src", "path-content");
+    let sha_name = git_capture(&["rev-parse", "HEAD"], &p1_name_src);
+
+    let name_cache_root = sb.root().join("name-cache");
+    let path_cache_root = sb.root().join("path-cache");
+    std::fs::create_dir_all(&name_cache_root).unwrap();
+    std::fs::create_dir_all(&path_cache_root).unwrap();
+    git(
+        &[
+            "clone",
+            "-q",
+            p1_name_src.to_str().unwrap(),
+            name_cache_root.join("p1").to_str().unwrap(),
+        ],
+        sb.root(),
+    );
+    git(
+        &[
+            "clone",
+            "-q",
+            p1_path_src.to_str().unwrap(),
+            path_cache_root.join("p1").to_str().unwrap(),
+        ],
+        sb.root(),
+    );
+
+    let nonexistent = sb.root().join("nope.git");
+    let manifest =
+        manifest_yaml_with_url_and_rev(&[("p1", &nonexistent.display().to_string(), &sha_name)]);
+    let ws = init_workspace(&sb, &manifest);
+
+    sb.west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "update",
+            "-j",
+            "1",
+            "--fetch",
+            "smart",
+            "--name-cache",
+            name_cache_root.to_str().unwrap(),
+            "--path-cache",
+            path_cache_root.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    let head = git_capture(&["rev-parse", "HEAD"], &ws.join("p1"));
+    assert_eq!(
+        head, sha_name,
+        "name-cache should win — workspace HEAD should match the name-cache content"
+    );
+}
+
+#[test]
+#[serial]
+fn update_auto_cache_populates_then_serves_offline() {
+    // First run: auto-cache empty; west populates `<DIR>/<basename>/<md5>`
+    // as a bare mirror clone. Second run: drop the upstream bare so any
+    // network attempt would fail; the cache must serve the second
+    // workspace clone entirely offline.
+    //
+    // Offline serving only works when the manifest pin is immutable
+    // (SHA-like) — branch tips would require a refresh fetch and
+    // there's no upstream to refresh against. Pin to a SHA so the
+    // cache-refresh smart-skip path fires.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1");
+    let sha = git_capture(&["rev-parse", "HEAD"], &p1);
+    let manifest = manifest_yaml_with_url_and_rev(&[("p1", &p1.display().to_string(), &sha)]);
+    let auto_cache = sb.root().join("auto-cache");
+
+    let ws = init_workspace(&sb, &manifest);
+    sb.west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "update",
+            "-j",
+            "1",
+            "--auto-cache",
+            auto_cache.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Cache directory exists with the basename/md5 layout.
+    let entries: Vec<_> = std::fs::read_dir(auto_cache.join("p1"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect();
+    assert_eq!(entries.len(), 1, "exactly one md5 subdir");
+    let md5_dir = entries[0].path();
+    assert_eq!(
+        git_capture(&["rev-parse", "--is-bare-repository"], &md5_dir),
+        "true",
+    );
+
+    // Drop the upstream bare so only the cache can serve. Drop the
+    // workspace project tree too; the worker has to re-clone it from
+    // the cache without ever reaching the (gone) upstream URL.
+    std::fs::remove_dir_all(&p1).unwrap();
+    std::fs::remove_dir_all(ws.join("p1")).unwrap();
+    sb.west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "update",
+            "-j",
+            "1",
+            "--fetch",
+            "smart",
+            "--auto-cache",
+            auto_cache.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    assert!(ws.join("p1/R").exists(), "cache served the second clone");
+}
+
+#[test]
+#[serial]
+fn update_auto_cache_refreshes_on_subsequent_run() {
+    // First run populates the cache. We add a commit upstream and run
+    // update again — the cache directory must advance to the new
+    // upstream tip (via `git fetch origin` against the mirror clone).
+    // We assert directly on the cache's refs to avoid coupling to the
+    // workspace-level smart-skip behaviour, which is exercised
+    // separately in `update_advances_to_new_remote_commit`.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1");
+    let manifest = manifest_yaml(&[("p1", &p1, &[])]);
+    let auto_cache = sb.root().join("auto-cache");
+
+    let ws = init_workspace(&sb, &manifest);
+    sb.west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "update",
+            "-j",
+            "1",
+            "--auto-cache",
+            auto_cache.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Cache's main starts at the original commit.
+    let entries: Vec<_> = std::fs::read_dir(auto_cache.join("p1"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect();
+    let cache_dir = entries[0].path();
+    let initial_sha = git_capture(&["rev-parse", "HEAD"], &p1);
+    assert_eq!(
+        git_capture(&["rev-parse", "refs/heads/main"], &cache_dir),
+        initial_sha,
+    );
+
+    let new_sha = add_commit_to_bare(sb.root(), &p1, "second");
+    sb.west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "update",
+            "-j",
+            "1",
+            "--auto-cache",
+            auto_cache.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Cache's main has advanced.
+    assert_eq!(
+        git_capture(&["rev-parse", "refs/heads/main"], &cache_dir),
+        new_sha,
+        "cache mirror must advance via `git fetch` on subsequent run",
+    );
+}
+
+#[test]
+#[serial]
+fn update_set_remote_url_after_cache_clone() {
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1");
+    let sha = git_capture(&["rev-parse", "HEAD"], &p1);
+
+    let cache_root = sb.root().join("name-cache");
+    std::fs::create_dir_all(&cache_root).unwrap();
+    git(
+        &[
+            "clone",
+            "-q",
+            p1.to_str().unwrap(),
+            cache_root.join("p1").to_str().unwrap(),
+        ],
+        sb.root(),
+    );
+    let nonexistent = sb.root().join("not-real-url.git");
+    let project_url = nonexistent.display().to_string();
+    let manifest = manifest_yaml_with_url_and_rev(&[("p1", &project_url, &sha)]);
+    let ws = init_workspace(&sb, &manifest);
+
+    sb.west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "update",
+            "-j",
+            "1",
+            "--fetch",
+            "smart",
+            "--name-cache",
+            cache_root.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    let origin = git_capture(&["remote", "get-url", "origin"], &ws.join("p1"));
+    assert_eq!(
+        origin, project_url,
+        "origin URL must be the manifest URL, not the cache path"
+    );
+}

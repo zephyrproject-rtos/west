@@ -56,6 +56,7 @@ impl ImportSource for WorkspaceImportSource<'_> {
                         dest: &repo,
                         revision: None,
                         origin: Some(&project.remote_name),
+                        mirror: false,
                     },
                     out,
                 )

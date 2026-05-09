@@ -24,6 +24,7 @@
 //!   finally to detached checkout. The "keep-descendants wins" rule is
 //!   load-bearing: a user who sets both expects the safer of the two.
 
+mod cache;
 mod error;
 mod import_source;
 mod indicatif_reporter;
@@ -91,6 +92,23 @@ pub struct UpdateArgs {
     /// Equivalent to `--config update.rebase=true`.
     #[arg(short = 'r', long)]
     pub rebase: bool,
+
+    /// Look up cached repos at `<DIR>/<project.name>` to avoid
+    /// network round-trips. Highest priority of the three cache
+    /// flags. Equivalent to `--config update.name-cache=DIR`.
+    #[arg(long = "name-cache", value_name = "DIR")]
+    pub name_cache: Option<PathBuf>,
+
+    /// Look up cached repos at `<DIR>/<project.path>`. Lower priority
+    /// than `--name-cache`. Equivalent to `--config update.path-cache=DIR`.
+    #[arg(long = "path-cache", value_name = "DIR")]
+    pub path_cache: Option<PathBuf>,
+
+    /// Maintain auto-populated bare-mirror caches under `<DIR>`.
+    /// Lowest priority but the only mode west populates and refreshes
+    /// itself. Equivalent to `--config update.auto-cache=DIR`.
+    #[arg(long = "auto-cache", value_name = "DIR")]
+    pub auto_cache: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -246,12 +264,15 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
 // Per-project execution
 // =====================================================================
 
-#[derive(Debug, Clone, Copy)]
-struct Settings {
+#[derive(Debug)]
+pub(super) struct Settings {
     jobs: usize,
     rebase: bool,
     keep_descendants: bool,
     raw: bool,
+    pub(super) name_cache: Option<PathBuf>,
+    pub(super) path_cache: Option<PathBuf>,
+    pub(super) auto_cache: Option<PathBuf>,
 }
 
 impl Settings {
@@ -278,13 +299,26 @@ impl Settings {
             .get_bool("output.raw")
             .map_err(|e| e.to_string())?
             .unwrap_or(false);
+        let name_cache = read_cache_dir(config, "update.name-cache")?;
+        let path_cache = read_cache_dir(config, "update.path-cache")?;
+        let auto_cache = read_cache_dir(config, "update.auto-cache")?;
         Ok(Self {
             jobs,
             rebase,
             keep_descendants,
             raw,
+            name_cache,
+            path_cache,
+            auto_cache,
         })
     }
+}
+
+fn read_cache_dir(config: &Configuration, key: &str) -> Result<Option<PathBuf>, String> {
+    Ok(config
+        .get_str(key)
+        .map_err(|e| e.to_string())?
+        .map(PathBuf::from))
 }
 
 fn run_one_project(
@@ -326,6 +360,22 @@ fn run_project_steps(
     //    for every project). Clone the remote's default branch and let
     //    the subsequent fetch + detached checkout land us on the right
     //    commit.
+    //
+    // If a cache flag matched, the clone source is the cache directory
+    // (a local path) instead of the project URL. The auto-cache branch
+    // populates / refreshes the cache first so the workspace clone
+    // never hits the network. After a cache-driven clone the recorded
+    // origin URL is flipped back to the project URL — subsequent fetches
+    // go to the real remote.
+    let cache_source = cache::resolve_cache_source(project, settings);
+    // Keep the auto-cache fresh on every run — not just when we're
+    // about to clone the workspace from it. A workspace might already
+    // be cloned, but the cache should still advance to the latest
+    // upstream so subsequent fresh clones (or other workspaces sharing
+    // the same auto-cache root) hit a current mirror.
+    if let Some(cache::CacheSource::Auto(path)) = &cache_source {
+        ensure_auto_cache(vcs, project, path, out)?;
+    }
     let already_cloned = repo.exists() && vcs.is_repo(repo).unwrap_or(false);
     if !already_cloned {
         if let Some(parent) = repo.parent() {
@@ -334,19 +384,34 @@ fn run_project_steps(
                 source,
             })?;
         }
+        let clone_url = match cache_source.as_ref() {
+            Some(src) => src
+                .path()
+                .to_str()
+                .ok_or_else(|| UpdateError::NonUtf8CachePath(src.path().to_path_buf()))?,
+            None => &project.url,
+        };
         vcs.clone(
             &CloneSpec {
-                url: &project.url,
+                url: clone_url,
                 dest: repo,
                 revision: None,
                 origin: Some(&project.remote_name),
+                mirror: false,
             },
             out,
         )
         .map_err(|source| UpdateError::Clone {
-            url: project.url.clone(),
+            url: clone_url.to_owned(),
             source,
         })?;
+        // Cache-cloned: rewrite the origin URL to the real upstream so
+        // the fetch step (and every subsequent `west update`) pulls
+        // from the network, not the local cache directory.
+        if cache_source.is_some() {
+            vcs.set_remote_url(repo, &project.remote_name, &project.url)
+                .map_err(UpdateError::SetRemoteUrl)?;
+        }
     }
 
     // 2. Fetch. `Vcs::fetch` returns the sha that the requested revision
@@ -418,13 +483,86 @@ fn run_project_steps(
             })?;
     }
 
-    // 6. Submodules.
+    // 6. Submodules. If the parent project was cache-cloned and the
+    //    cache also contains the submodule sub-tree, pass it as
+    //    `--reference` to `git submodule update` so the submodule
+    //    init reuses the cached objects too.
     let scope = submodules_scope(&project.submodules);
     if !matches!(scope, ScopeOwned::Skip) {
-        run_submodules(vcs, repo, &scope, out)?;
+        run_submodules(vcs, repo, &scope, cache_source.as_ref(), out)?;
     }
 
     Ok(())
+}
+
+/// Auto-cache populator: bare-mirror-clone when missing; refresh-fetch
+/// when present.
+///
+/// SHA-like revisions (and tags) are immutable, so a populated cache
+/// already has them — we smart-skip in that case to keep the offline
+/// path working (cache → workspace clone with no network at all).
+/// Branch revisions, on the other hand, move under the user; we always
+/// run `git fetch origin` against the mirror so the cache picks up
+/// upstream commits between runs. On a `--mirror` clone the configured
+/// refspec is `+refs/*:refs/*`, so a single fetch updates everything.
+fn ensure_auto_cache(
+    vcs: &dyn Vcs,
+    project: &Project,
+    cache_path: &Path,
+    out: &mut Output<'_>,
+) -> Result<(), UpdateError> {
+    if cache_path.exists() && vcs.is_repo(cache_path).unwrap_or(false) {
+        // Smart-skip path: only when the manifest pinned a SHA-like
+        // revision and the cache already has it. The fetch we'd
+        // otherwise run is `revision: None`, which can't smart-skip.
+        if looks_like_sha(&project.revision) && vcs.sha(cache_path, &project.revision).is_ok() {
+            return Ok(());
+        }
+        vcs.fetch(
+            cache_path,
+            &FetchSpec {
+                remote: "origin",
+                revision: None,
+            },
+            out,
+        )
+        .map_err(|source| UpdateError::CacheRefresh {
+            path: cache_path.to_path_buf(),
+            source,
+        })?;
+        return Ok(());
+    }
+    if let Some(parent) = cache_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| UpdateError::CreateParent {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    vcs.clone(
+        &CloneSpec {
+            url: &project.url,
+            dest: cache_path,
+            revision: None,
+            origin: None,
+            mirror: true,
+        },
+        out,
+    )
+    .map_err(|source| UpdateError::CachePopulate {
+        url: project.url.clone(),
+        source,
+    })
+}
+
+/// Best-effort SHA detector: 4–40 hex chars. Mirrors python's
+/// `_maybe_sha`. Used by `ensure_auto_cache` to decide whether the
+/// revision is immutable (skip refresh if cached) or mutable (always
+/// refresh). False positives are harmless: a tag like `v1` doesn't
+/// match (`v` isn't hex); only ambiguous all-hex names like `abcd`
+/// would, and those are pathological.
+fn looks_like_sha(rev: &str) -> bool {
+    let len = rev.len();
+    (4..=40).contains(&len) && rev.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Owned counterpart of [`SubmoduleScope`] so we can keep the path strings
@@ -452,17 +590,39 @@ fn run_submodules(
     vcs: &dyn Vcs,
     repo: &Path,
     scope: &ScopeOwned,
+    cache_source: Option<&cache::CacheSource>,
     out: &mut Output<'_>,
 ) -> Result<(), UpdateError> {
     match scope {
         ScopeOwned::All => vcs
-            .update_submodules(repo, &SubmoduleScope::All, out)
+            // `--reference` is per-call and applies to every submodule
+            // git initialises. We don't enumerate submodules ourselves
+            // for the All scope (matches python), so cache reference
+            // doesn't apply here — pass `None`.
+            .update_submodules(repo, &SubmoduleScope::All, None, out)
             .map_err(UpdateError::Submodules),
         ScopeOwned::Skip => Ok(()),
         ScopeOwned::Specific(strings) => {
-            let refs: Vec<&str> = strings.iter().map(String::as_str).collect();
-            vcs.update_submodules(repo, &SubmoduleScope::Specific(&refs), out)
-                .map_err(UpdateError::Submodules)
+            // Per-submodule loop so each one gets its own `--reference`
+            // probe: <cache>/<sub.path> if present, else None. Single-
+            // submodule git invocations are slightly more expensive than
+            // batching, but `git submodule update --reference` applies
+            // once per call so batching wouldn't allow per-submodule
+            // refs anyway.
+            for sub_path in strings {
+                let single = [sub_path.as_str()];
+                let reference = cache_source
+                    .map(|src| src.path().join(sub_path))
+                    .filter(|p| p.is_dir());
+                vcs.update_submodules(
+                    repo,
+                    &SubmoduleScope::Specific(&single),
+                    reference.as_deref(),
+                    out,
+                )
+                .map_err(UpdateError::Submodules)?;
+            }
+            Ok(())
         }
     }
 }
@@ -519,6 +679,27 @@ fn splice_flags_into_config(args: &UpdateArgs, config: &mut Configuration) -> Re
             combined.push(ConfigValue::String(raw.clone()));
         }
         splice_inline(config, "update.group-filter", ConfigValue::List(combined))?;
+    }
+    if let Some(p) = args.name_cache.as_deref() {
+        splice_inline(
+            config,
+            "update.name-cache",
+            ConfigValue::String(p.to_string_lossy().into_owned()),
+        )?;
+    }
+    if let Some(p) = args.path_cache.as_deref() {
+        splice_inline(
+            config,
+            "update.path-cache",
+            ConfigValue::String(p.to_string_lossy().into_owned()),
+        )?;
+    }
+    if let Some(p) = args.auto_cache.as_deref() {
+        splice_inline(
+            config,
+            "update.auto-cache",
+            ConfigValue::String(p.to_string_lossy().into_owned()),
+        )?;
     }
     Ok(())
 }

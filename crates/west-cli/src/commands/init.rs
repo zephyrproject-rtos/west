@@ -187,6 +187,7 @@ fn bootstrap(
                 dest: &tmp_dir,
                 revision,
                 origin: None,
+                mirror: false,
             };
             let res = vcs.clone(&spec, &mut out);
             match &res {
@@ -201,6 +202,7 @@ fn bootstrap(
                 dest: &tmp_dir,
                 revision,
                 origin: None,
+                mirror: false,
             };
             vcs.clone(&spec, &mut out).map_err(InitError::Vcs)?;
         }

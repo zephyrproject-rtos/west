@@ -197,6 +197,7 @@ fn clone_round_trip() {
             dest: &dest,
             revision: None,
             origin: None,
+            mirror: false,
         },
         &mut Output::Native,
     )
@@ -235,6 +236,7 @@ fn clone_with_branch() {
             dest: &dest,
             revision: Some("feature"),
             origin: None,
+            mirror: false,
         },
         &mut Output::Native,
     )
@@ -261,6 +263,7 @@ fn clone_with_custom_origin() {
             dest: &dest,
             revision: None,
             origin: Some("upstream"),
+            mirror: false,
         },
         &mut Output::Native,
     )
@@ -286,6 +289,7 @@ fn sha_resolves_head_and_short_ref() {
             dest: &dest,
             revision: None,
             origin: None,
+            mirror: false,
         },
         &mut Output::Native,
     )
@@ -416,6 +420,7 @@ fn clone_into(root: &Path, bare: &Path) -> PathBuf {
             dest: &dest,
             revision: None,
             origin: None,
+            mirror: false,
         },
         &mut Output::Native,
     )
@@ -809,6 +814,7 @@ fn update_submodules_materializes_worktree() {
             dest: &dest,
             revision: None,
             origin: None,
+            mirror: false,
         },
         &mut Output::Native,
     )
@@ -820,7 +826,7 @@ fn update_submodules_materializes_worktree() {
     // *subprocess* of `git submodule update`, so a local config on the
     // parent repo doesn't reach it. The `GIT_CONFIG_*` env vars propagate.
     let _guard = AllowFileProtocolGuard::set();
-    v.update_submodules(&dest, &SubmoduleScope::All, &mut Output::Native)
+    v.update_submodules(&dest, &SubmoduleScope::All, None, &mut Output::Native)
         .unwrap();
 
     assert!(
@@ -912,6 +918,7 @@ fn clone_with_native_succeeds() {
             dest: &dest,
             revision: None,
             origin: None,
+            mirror: false,
         },
         &mut Output::Native,
     )
@@ -937,6 +944,7 @@ fn clone_streams_lines_and_terminates_with_finished() {
             dest: &dest,
             revision: None,
             origin: None,
+            mirror: false,
         },
         &mut Output::Stream(&mut sink),
     )
@@ -977,6 +985,7 @@ fn null_sink_is_a_valid_target() {
             dest: &dest,
             revision: None,
             origin: None,
+            mirror: false,
         },
         &mut Output::Stream(&mut NullSink),
     )
@@ -996,8 +1005,66 @@ fn update_submodules_specific_empty_is_noop() {
 
     let v = GitClient::new(GitOptions::default());
     // Non-submodule repo + empty Specific → must succeed without error.
-    v.update_submodules(&dest, &SubmoduleScope::Specific(&[]), &mut Output::Native)
+    v.update_submodules(
+        &dest,
+        &SubmoduleScope::Specific(&[]),
+        None,
+        &mut Output::Native,
+    )
+    .unwrap();
+}
+
+#[test]
+fn clone_mirror_creates_bare_mirror_repo() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = tmp.path().join("cache.git");
+
+    let v = GitClient::new(GitOptions::default());
+    v.clone(
+        &CloneSpec {
+            url: bare.to_str().unwrap(),
+            dest: &dest,
+            revision: None,
+            origin: None,
+            mirror: true,
+        },
+        &mut Output::Native,
+    )
+    .unwrap();
+
+    // `--mirror` produces a bare repo with `core.bare = true` and a
+    // mirror refspec. Use `git -C <dest> rev-parse --is-bare-repository`
+    // to confirm; resolve a ref from the source to confirm it landed.
+    assert_eq!(
+        git_capture(&["rev-parse", "--is-bare-repository"], &dest),
+        "true",
+    );
+    let head = v.sha(&dest, "HEAD").unwrap();
+    assert_eq!(head, git_capture(&["rev-parse", "HEAD"], &bare));
+}
+
+#[test]
+fn set_remote_url_replaces_origin() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+
+    let v = GitClient::new(GitOptions::default());
+    v.set_remote_url(&dest, "origin", "https://example.com/x.git")
         .unwrap();
+    assert_eq!(
+        git_capture(&["remote", "get-url", "origin"], &dest),
+        "https://example.com/x.git",
+    );
 }
 
 #[test]
