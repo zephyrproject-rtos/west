@@ -30,12 +30,6 @@ pub(super) enum UpdateError {
         #[source]
         source: VcsError,
     },
-    #[error("resolve revision {revision:?}: {source}")]
-    ResolveRevision {
-        revision: String,
-        #[source]
-        source: VcsError,
-    },
     #[error("record manifest-rev: {0}")]
     SetManifestRev(#[source] VcsError),
     #[error("read HEAD branch: {0}")]

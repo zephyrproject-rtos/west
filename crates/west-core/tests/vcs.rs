@@ -498,6 +498,56 @@ fn fetch_always_runs_even_when_revision_is_local() {
 }
 
 #[test]
+fn fetch_returns_resolved_sha_on_smart_skip_ignoring_stale_fetch_head() {
+    // Regression for the "leaving N commits behind" warning: previously
+    // the worker re-read FETCH_HEAD after fetch(), but on the smart-skip
+    // path FETCH_HEAD persists from a *previous* fetch and points at a
+    // different commit. fetch() now returns the actually-resolved sha so
+    // the caller never has to sniff FETCH_HEAD itself.
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    let first_sha = git_capture(&["rev-parse", "HEAD"], &dest);
+
+    // Force an active fetch of a *different* commit so FETCH_HEAD is set
+    // (and stale relative to `first_sha`).
+    let second_sha = add_commit_to_bare(tmp.path(), &bare, "second");
+    let v = GitClient::new(GitOptions::default());
+    v.fetch(
+        &dest,
+        &FetchSpec {
+            remote: "origin",
+            revision: Some(&second_sha),
+        },
+        &mut Output::Native,
+    )
+    .unwrap();
+    assert_eq!(
+        git_capture(&["rev-parse", "FETCH_HEAD^{commit}"], &dest),
+        second_sha,
+        "FETCH_HEAD should now point at the second sha"
+    );
+
+    // Smart-skip path: ask for the first sha (locally resolvable). The
+    // returned sha must be `first_sha`, not the stale `FETCH_HEAD`.
+    let returned = v
+        .fetch(
+            &dest,
+            &FetchSpec {
+                remote: "origin",
+                revision: Some(&first_sha),
+            },
+            &mut Output::Native,
+        )
+        .unwrap();
+    assert_eq!(returned, first_sha);
+}
+
+#[test]
 fn fetch_smart_runs_when_revision_is_unknown() {
     if !git_available() {
         eprintln!("skipping: git not installed");

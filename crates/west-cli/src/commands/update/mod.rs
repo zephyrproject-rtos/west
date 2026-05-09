@@ -337,38 +337,27 @@ fn run_project_steps(
         })?;
     }
 
-    // 2. Fetch (smart-skip / depth / tags / force all live in GitClient).
-    vcs.fetch(
-        repo,
-        &FetchSpec {
-            remote: &project.remote_name,
-            revision: Some(&project.revision),
-        },
-        out,
-    )
-    .map_err(|source| UpdateError::Fetch {
-        remote: project.remote_name.clone(),
-        source,
-    })?;
+    // 2. Fetch. `Vcs::fetch` returns the sha that the requested revision
+    //    now resolves to — `FETCH_HEAD^{commit}` after an active fetch, or
+    //    the locally-resolved revision on smart-skip. Don't sniff
+    //    `FETCH_HEAD` directly: it persists across runs, so on smart-skip
+    //    it's stale from a previous fetch and would point at the wrong
+    //    commit.
+    let sha = vcs
+        .fetch(
+            repo,
+            &FetchSpec {
+                remote: &project.remote_name,
+                revision: Some(&project.revision),
+            },
+            out,
+        )
+        .map_err(|source| UpdateError::Fetch {
+            remote: project.remote_name.clone(),
+            source,
+        })?;
 
-    // 3. Resolve the new manifest-rev sha. After an active fetch git's
-    //    FETCH_HEAD points at the just-fetched tip, which is what we want
-    //    even when `revision` is a branch name (git doesn't write the
-    //    matching `refs/heads/<branch>` on plain fetch). On smart-skip no
-    //    fetch ran, so FETCH_HEAD may be absent or stale — fall back to
-    //    resolving `revision` locally, which by definition is current
-    //    when smart-skip kicked in.
-    let sha = match vcs.sha(repo, "FETCH_HEAD") {
-        Ok(s) => s,
-        Err(_) => vcs
-            .sha(repo, &project.revision)
-            .map_err(|source| UpdateError::ResolveRevision {
-                revision: project.revision.clone(),
-                source,
-            })?,
-    };
-
-    // 4. Record manifest-rev.
+    // 3. Record manifest-rev.
     let reason = format!("west update: moving to {}", project.revision);
     vcs.set_manifest_rev(repo, &sha, Some(&reason))
         .map_err(UpdateError::SetManifestRev)?;

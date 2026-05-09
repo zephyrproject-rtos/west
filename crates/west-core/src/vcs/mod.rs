@@ -186,12 +186,18 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     /// revision is already local), how tags are handled, and whether the
     /// fetch is shallow are all driven by `tool.<client>.fetch.*` keys read
     /// at client construction. Progress output is forwarded to `out`.
+    ///
+    /// Returns the commit SHA that the requested revision now resolves to —
+    /// `FETCH_HEAD^{commit}` after an active fetch, or the locally-resolved
+    /// revision when smart-skip kicked in. Callers use this directly as the
+    /// new `manifest-rev` rather than re-reading `FETCH_HEAD`, which would
+    /// be stale on the smart-skip path.
     fn fetch(
         &self,
         repo: &Path,
         spec: &FetchSpec<'_>,
         out: &mut Output<'_>,
-    ) -> Result<(), VcsError>;
+    ) -> Result<String, VcsError>;
 
     /// Move HEAD in `repo` to `target`.
     ///

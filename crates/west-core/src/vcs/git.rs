@@ -391,17 +391,17 @@ impl Vcs for GitClient {
         repo: &Path,
         spec: &FetchSpec<'_>,
         out: &mut Output<'_>,
-    ) -> Result<(), VcsError> {
+    ) -> Result<String, VcsError> {
         // Smart strategy: if we're being asked for a specific revision and
         // it's already resolvable here, no need to talk to the network. The
         // caller resolves moving refs (branches) to their tip before calling
         // us, so a hit here means the commit really is current.
         if matches!(self.opts.fetch_strategy, FetchStrategy::Smart)
             && let Some(rev) = spec.revision
-            && self.sha(repo, rev).is_ok()
+            && let Ok(sha) = self.sha(repo, rev)
         {
             log::trace!("git: smart fetch skipped for {rev:?} (already local)");
-            return Ok(());
+            return Ok(sha);
         }
 
         let repo_str = repo.to_string_lossy().into_owned();
@@ -424,7 +424,12 @@ impl Vcs for GitClient {
         if let Some(rev) = spec.revision {
             argv.push(rev);
         }
-        self.run_with_output(&argv, out)
+        self.run_with_output(&argv, out)?;
+        // After an active fetch with a positional ref, `FETCH_HEAD` is the
+        // just-fetched tip — that's the canonical sha for the requested
+        // revision. For a default-refspec fetch (`revision: None`),
+        // `FETCH_HEAD`'s merge-target line is what callers get.
+        self.sha(repo, "FETCH_HEAD")
     }
 
     fn checkout(&self, repo: &Path, target: &CheckoutTarget<'_>) -> Result<(), VcsError> {

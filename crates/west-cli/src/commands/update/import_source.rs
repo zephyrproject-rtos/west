@@ -63,8 +63,12 @@ impl ImportSource for WorkspaceImportSource<'_> {
             .map_err(ImportSourceError::new)?;
         }
 
-        // 2. Fetch (smart-skip will no-op if revision is local).
-        run_quiet(|out| {
+        // 2. Fetch. The returned sha is what `project.revision` resolves to
+        //    (FETCH_HEAD^{commit} after an active fetch, the locally-
+        //    resolved revision on smart-skip). Don't sniff FETCH_HEAD
+        //    afterward — it persists across fetches and would be stale on
+        //    the smart-skip path.
+        let sha = run_quiet(|out| {
             self.vcs.fetch(
                 &repo,
                 &FetchSpec {
@@ -76,14 +80,7 @@ impl ImportSource for WorkspaceImportSource<'_> {
         })
         .map_err(ImportSourceError::new)?;
 
-        // 3. Resolve the manifest revision and record manifest-rev.
-        let sha = match self.vcs.sha(&repo, "FETCH_HEAD") {
-            Ok(s) => s,
-            Err(_) => self
-                .vcs
-                .sha(&repo, &project.revision)
-                .map_err(ImportSourceError::new)?,
-        };
+        // 3. Record manifest-rev and check out.
         self.vcs
             .set_manifest_rev(&repo, &sha, Some("west update: pre-import"))
             .map_err(ImportSourceError::new)?;
@@ -96,16 +93,19 @@ impl ImportSource for WorkspaceImportSource<'_> {
         match std::fs::read_to_string(&path) {
             Ok(body) => Ok(Some(body)),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(ImportSourceError::msg(format!("read {}: {e}", path.display()))),
+            Err(e) => Err(ImportSourceError::msg(format!(
+                "read {}: {e}",
+                path.display()
+            ))),
         }
     }
 }
 
 /// Run `op` with a `NullSink` so import-source git noise doesn't bleed
 /// onto the user's terminal before update's own banners print.
-fn run_quiet<F>(op: F) -> Result<(), VcsError>
+fn run_quiet<F, T>(op: F) -> Result<T, VcsError>
 where
-    F: FnOnce(&mut Output<'_>) -> Result<(), VcsError>,
+    F: FnOnce(&mut Output<'_>) -> Result<T, VcsError>,
 {
     let mut sink = NullSink;
     let mut out = Output::Stream(&mut sink);
