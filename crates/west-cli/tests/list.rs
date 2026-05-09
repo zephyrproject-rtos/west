@@ -171,12 +171,11 @@ fn list_default_format_shows_active_projects() {
         .stdout
         .clone();
     let lines = stdout_lines(&out);
-    assert_eq!(
-        lines.len(),
-        1,
-        "expected one active project, got: {lines:?}"
-    );
-    assert!(lines[0].starts_with("p1"), "got: {:?}", lines[0]);
+    // Synthetic manifest project (matching Python's index-0 `ManifestProject`)
+    // sits at the top, followed by the real active project.
+    assert_eq!(lines.len(), 2, "expected synthetic + p1, got: {lines:?}");
+    assert!(lines[0].starts_with("manifest"), "got: {:?}", lines[0]);
+    assert!(lines[1].starts_with("p1"), "got: {:?}", lines[1]);
 }
 
 #[test]
@@ -205,7 +204,13 @@ fn list_format_substitutes_keys() {
         .stdout
         .clone();
     let lines = stdout_lines(&out);
-    assert_eq!(lines, vec!["p1:p1:main".to_owned()]);
+    assert_eq!(
+        lines,
+        vec![
+            "manifest:my-manifest:HEAD".to_owned(),
+            "p1:p1:main".to_owned(),
+        ]
+    );
 }
 
 #[test]
@@ -230,7 +235,10 @@ fn list_all_includes_inactive() {
         .clone();
     let mut lines = stdout_lines(&out);
     lines.sort();
-    assert_eq!(lines, vec!["p1".to_owned(), "p2".to_owned()]);
+    assert_eq!(
+        lines,
+        vec!["manifest".to_owned(), "p1".to_owned(), "p2".to_owned()]
+    );
 }
 
 #[test]
@@ -373,7 +381,13 @@ fn list_format_width_and_alignment() {
         .get_output()
         .stdout
         .clone();
-    assert_eq!(stdout_lines(&out), vec!["p1      |      p1".to_owned()]);
+    assert_eq!(
+        stdout_lines(&out),
+        vec![
+            "manifest|my-manifest".to_owned(),
+            "p1      |      p1".to_owned(),
+        ]
+    );
 }
 
 #[test]
@@ -422,14 +436,12 @@ fn list_sha_for_cloned_project() {
         .stdout
         .clone();
     let lines = stdout_lines(&out);
-    assert_eq!(lines.len(), 1);
-    assert_eq!(
-        lines[0].len(),
-        40,
-        "expected 40-char sha, got: {:?}",
-        lines[0]
-    );
-    assert!(lines[0].chars().all(|c| c.is_ascii_hexdigit()));
+    // Synthetic manifest's HEAD + p1's HEAD; both 40-char hex shas.
+    assert_eq!(lines.len(), 2);
+    for line in &lines {
+        assert_eq!(line.len(), 40, "expected 40-char sha, got: {line:?}");
+        assert!(line.chars().all(|c| c.is_ascii_hexdigit()));
+    }
 }
 
 #[test]
@@ -443,7 +455,8 @@ fn list_cloned_key_reflects_clone_state() {
     let manifest = manifest_yaml(None, &[("p1", &p1, &[])]);
     let ws = init_workspace(&sb, &manifest);
 
-    // Before update: not-cloned.
+    // Before update: synthetic manifest is cloned (init created it);
+    // p1 isn't yet.
     let out = sb
         .west()
         .args(["-C", ws.to_str().unwrap(), "list", "-f", "{cloned}"])
@@ -452,9 +465,12 @@ fn list_cloned_key_reflects_clone_state() {
         .get_output()
         .stdout
         .clone();
-    assert_eq!(stdout_lines(&out), vec!["not-cloned".to_owned()]);
+    assert_eq!(
+        stdout_lines(&out),
+        vec!["cloned".to_owned(), "not-cloned".to_owned()]
+    );
 
-    // After update: cloned.
+    // After update: both cloned.
     sb.west()
         .args(["-C", ws.to_str().unwrap(), "update", "-j", "1"])
         .assert()
@@ -467,7 +483,10 @@ fn list_cloned_key_reflects_clone_state() {
         .get_output()
         .stdout
         .clone();
-    assert_eq!(stdout_lines(&out), vec!["cloned".to_owned()]);
+    assert_eq!(
+        stdout_lines(&out),
+        vec!["cloned".to_owned(), "cloned".to_owned()]
+    );
 }
 
 #[test]
@@ -534,7 +553,7 @@ fn list_warns_and_exits_nonzero_when_per_project_import_is_uncloned() {
         .assert()
         .failure();
     let stdout = stdout_lines(&assert.get_output().stdout);
-    assert_eq!(stdout, vec!["p".to_owned()]);
+    assert_eq!(stdout, vec!["manifest".to_owned(), "p".to_owned()]);
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
     assert!(
         stderr.contains("skipped import") && stderr.contains("\"p\"") || stderr.contains(": p"),
@@ -570,6 +589,155 @@ fn make_bare_with_files(root: &Path, name: &str, files: &[(&str, &str)]) -> Path
     );
     let _ = std::fs::remove_dir_all(&work);
     bare
+}
+
+#[test]
+#[serial]
+fn list_synthetic_manifest_matches_by_name_and_path() {
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1");
+    let manifest = manifest_yaml(None, &[("p1", &p1, &[])]);
+    let ws = init_workspace(&sb, &manifest);
+
+    // `west list manifest` matches the synthetic project by name.
+    let out = sb
+        .west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "list",
+            "-f",
+            "{name}",
+            "manifest",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(stdout_lines(&out), vec!["manifest".to_owned()]);
+
+    // `west list <self.path>` matches the synthetic project by path.
+    let out = sb
+        .west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "list",
+            "-f",
+            "{name}",
+            "my-manifest",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(stdout_lines(&out), vec!["manifest".to_owned()]);
+}
+
+#[test]
+#[serial]
+fn list_inactive_excludes_synthetic_manifest() {
+    // The synthetic manifest project is always "active" — `--inactive`
+    // (only-inactive) should omit it.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1");
+    let p2 = make_bare_with_one_commit(sb.root(), "p2", "p2");
+    let manifest = manifest_yaml(Some("-noisy"), &[("p1", &p1, &[]), ("p2", &p2, &["noisy"])]);
+    let ws = init_workspace(&sb, &manifest);
+
+    let out = sb
+        .west()
+        .args(["-C", ws.to_str().unwrap(), "list", "-i", "-f", "{name}"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(stdout_lines(&out), vec!["p2".to_owned()]);
+}
+
+#[test]
+#[serial]
+fn list_resolves_self_import_directory_with_yaml_extension() {
+    // Regression: directory-form `self.import:` accepts both `*.yml`
+    // and `*.yaml`. zephyr's real manifest uses `submanifests/` with
+    // `.yaml` files (see `submanifests/optional.yaml`); previously the
+    // glob matched `*.yml` only and silently dropped them.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1");
+    let p2 = make_bare_with_one_commit(sb.root(), "p2", "p2");
+
+    let manifest_work = sb.root().join("manifest-work");
+    std::fs::create_dir_all(manifest_work.join("submanifests")).unwrap();
+    git(
+        &["init", "-q", "--initial-branch=main", "."],
+        &manifest_work,
+    );
+    let root_yml = format!(
+        "manifest:\n  self:\n    path: my-manifest\n    import: submanifests\n  projects:\n    - name: p1\n      url: {}\n      revision: main\n",
+        p1.display()
+    );
+    let extras_yaml = format!(
+        "manifest:\n  projects:\n    - name: p2\n      url: {}\n      revision: main\n",
+        p2.display()
+    );
+    std::fs::write(manifest_work.join("west.yml"), root_yml).unwrap();
+    std::fs::write(
+        manifest_work.join("submanifests").join("extras.yaml"),
+        extras_yaml,
+    )
+    .unwrap();
+    git(&["add", "."], &manifest_work);
+    git(&["commit", "-q", "-m", "manifest"], &manifest_work);
+    let bare = sb.root().join("manifest.git");
+    git(
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            manifest_work.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+        sb.root(),
+    );
+    let _ = std::fs::remove_dir_all(&manifest_work);
+
+    let workspace = sb.root().join("ws");
+    sb.west()
+        .args([
+            "init",
+            "--url",
+            bare.to_str().unwrap(),
+            workspace.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let out = sb
+        .west()
+        .args(["-C", workspace.to_str().unwrap(), "list", "-f", "{name}"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let mut lines = stdout_lines(&out);
+    lines.sort();
+    assert_eq!(
+        lines,
+        vec!["manifest".to_owned(), "p1".to_owned(), "p2".to_owned()]
+    );
 }
 
 #[test]
@@ -641,5 +809,8 @@ fn list_resolves_self_import_without_warnings() {
     );
     let mut lines = stdout_lines(&assert.get_output().stdout);
     lines.sort();
-    assert_eq!(lines, vec!["p1".to_owned(), "p2".to_owned()]);
+    assert_eq!(
+        lines,
+        vec!["manifest".to_owned(), "p1".to_owned(), "p2".to_owned()]
+    );
 }

@@ -20,7 +20,7 @@ use std::sync::Mutex;
 use clap::Args;
 
 use west_core::config::Configuration;
-use west_core::manifest::{ImportSource, ImportSourceError, Manifest, Project};
+use west_core::manifest::{ImportSource, ImportSourceError, Manifest, Project, Submodules};
 use west_core::vcs::{self, Vcs};
 
 use super::config::LoadedConfig;
@@ -105,24 +105,61 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
         skipped: Mutex::new(Vec::new()),
     };
     let manifest = load_manifest(&workspace, &loaded.config, &source)?;
+    // `manifest.group-filter` is the workspace-permanent filter that
+    // sits on top of the manifest's own `group-filter:`. Every command
+    // that gates by activity has to apply it; without this, an inactive
+    // project re-enabled by the user via `+optional` (etc.) would still
+    // be filtered out.
+    let cfg_filter =
+        select::read_manifest_group_filter(&loaded.config).map_err(ListError::Config)?;
+
+    // The "manifest project" — a synthetic entry representing the
+    // manifest repo itself. Python's `Manifest.projects` exposes one of
+    // these at index 0; we inline it here in `west list` so the data
+    // layer stays free of synthetic records (commands that shouldn't
+    // operate on it, like `west update`, don't need to filter).
+    let synthetic = synthetic_manifest_project(&manifest);
 
     let projects: Vec<&Project> = if args.projects.is_empty() {
-        manifest
+        let mut acc: Vec<&Project> = Vec::new();
+        // The manifest project is always considered active; include it
+        // unless `--inactive` (which asks for *only* inactive projects).
+        if args.all || !args.inactive {
+            acc.push(&synthetic);
+        }
+        acc.extend(manifest.projects.iter().filter(|p| {
+            if args.all {
+                true
+            } else if args.inactive {
+                !manifest.is_active(p, &cfg_filter)
+            } else {
+                manifest.is_active(p, &cfg_filter)
+            }
+        }));
+        acc
+    } else {
+        // Pull positional matches for the synthetic out before falling
+        // through to `select_projects` (which only knows about the
+        // resolved real projects). `west list manifest` matches by name;
+        // `west list <self.path>` matches by path — same as Python.
+        let manifest_path_str = manifest.self_.path.to_string_lossy().into_owned();
+        let (synthetic_hits, leftover): (Vec<_>, Vec<_>) = args
             .projects
             .iter()
-            .filter(|p| {
-                if args.all {
-                    true
-                } else if args.inactive {
-                    !manifest.is_active(p, &[])
-                } else {
-                    manifest.is_active(p, &[])
-                }
-            })
-            .collect()
-    } else {
-        select::select_projects(&manifest, &args.projects, &[])
-            .map_err(|e| ListError::Manifest(e.to_string()))?
+            .partition(|s| s.as_str() == "manifest" || s.as_str() == manifest_path_str);
+
+        let mut acc: Vec<&Project> = Vec::new();
+        if !synthetic_hits.is_empty() {
+            acc.push(&synthetic);
+        }
+        if !leftover.is_empty() {
+            let leftover: Vec<&str> = leftover.iter().map(|s| s.as_str()).collect();
+            acc.extend(
+                select::select_projects(&manifest, &leftover, &[])
+                    .map_err(|e| ListError::Manifest(e.to_string()))?,
+            );
+        }
+        acc
     };
 
     let template = args.format.as_deref().unwrap_or(DEFAULT_FORMAT);
@@ -135,6 +172,7 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
             manifest: &manifest,
             workspace: workspace.as_path(),
             vcs: vcs.as_ref(),
+            cfg_filter: &cfg_filter,
         };
         let line = render(template, &ctx)?;
         // A broken pipe (head, |less q) is the natural way for users to
@@ -178,6 +216,7 @@ struct ProjectContext<'a> {
     manifest: &'a Manifest,
     workspace: &'a Path,
     vcs: &'a dyn Vcs,
+    cfg_filter: &'a [west_core::manifest::GroupFilterEntry],
 }
 
 impl ProjectContext<'_> {
@@ -189,7 +228,11 @@ impl ProjectContext<'_> {
                 .description
                 .clone()
                 .unwrap_or_else(|| "None".into())),
-            "url" => Ok(self.project.url.clone()),
+            // Empty url/revision → "N/A". Real projects are validated to
+            // have a non-empty url and a revision, so this fallback only
+            // fires for the synthetic manifest project (matches Python's
+            // `project.url or 'N/A'` rendering in `_format_project`).
+            "url" => Ok(or_na(&self.project.url)),
             "path" => Ok(self.project.path.to_string_lossy().into_owned()),
             "abspath" => Ok(self
                 .workspace
@@ -201,7 +244,7 @@ impl ProjectContext<'_> {
                 .join(&self.project.path)
                 .to_string_lossy()
                 .replace('\\', "/")),
-            "revision" => Ok(self.project.revision.clone()),
+            "revision" => Ok(or_na(&self.project.revision)),
             "remote" => Ok(self.project.remote_name.clone()),
             "clone_depth" => Ok(self
                 .project
@@ -209,7 +252,7 @@ impl ProjectContext<'_> {
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| "None".into())),
             "groups" => Ok(self.project.groups.join(",")),
-            "active" => Ok(if self.manifest.is_active(self.project, &[]) {
+            "active" => Ok(if self.manifest.is_active(self.project, self.cfg_filter) {
                 "active".into()
             } else {
                 "inactive".into()
@@ -240,6 +283,33 @@ impl ProjectContext<'_> {
         self.vcs
             .sha(&self.repo_path(), "HEAD")
             .map_err(|e| ListError::Vcs(e.to_string()))
+    }
+}
+
+/// Build the synthetic project record for the manifest repo itself.
+/// Mirrors Python's `ManifestProject` (index 0 in `Manifest.projects`):
+/// name `"manifest"` (a reserved name no real project can use),
+/// revision `"HEAD"`, no url. Path is the manifest repo's `self.path`.
+fn synthetic_manifest_project(manifest: &Manifest) -> Project {
+    Project {
+        name: "manifest".into(),
+        url: String::new(),
+        revision: "HEAD".into(),
+        path: manifest.self_.path.clone(),
+        description: None,
+        groups: Vec::new(),
+        clone_depth: None,
+        west_commands: manifest.self_.west_commands.clone(),
+        remote_name: String::new(),
+        submodules: Submodules::None,
+    }
+}
+
+fn or_na(s: &str) -> String {
+    if s.is_empty() {
+        "N/A".into()
+    } else {
+        s.to_owned()
     }
 }
 

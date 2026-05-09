@@ -823,10 +823,10 @@ impl<'a> Resolver<'a> {
             Some(p) => parent_prefix.join(p),
         };
 
-        // Directory form: iterate `*.yml` files in sorted order and
-        // absorb each as if it were listed explicitly. The directory
-        // itself isn't tracked in visited_files — only the leaves are,
-        // so the cycle guard still works.
+        // Directory form: iterate `*.yml` and `*.yaml` files in sorted
+        // order and absorb each as if it were listed explicitly. The
+        // directory itself isn't tracked in visited_files — only the
+        // leaves are, so the cycle guard still works.
         if abs_path.is_dir() {
             let mut entries: Vec<PathBuf> = fs::read_dir(&abs_path)
                 .map_err(|e| ManifestError::Io {
@@ -836,7 +836,12 @@ impl<'a> Resolver<'a> {
                 .filter_map(|r| r.ok())
                 .map(|e| e.path())
                 .filter(|p| p.is_file())
-                .filter(|p| p.extension().and_then(OsStr::to_str) == Some("yml"))
+                .filter(|p| {
+                    matches!(
+                        p.extension().and_then(OsStr::to_str),
+                        Some("yml") | Some("yaml")
+                    )
+                })
                 .collect();
             entries.sort();
             for path in entries {

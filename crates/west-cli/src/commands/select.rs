@@ -4,7 +4,10 @@
 //! project names bypass the active-group filter (matches Python's intent —
 //! a user who names a project explicitly wants it even if its group is off).
 
-use west_core::manifest::{GroupFilterEntry, Manifest, ManifestError, Project};
+use west_core::config::{ConfigValue, Configuration};
+use west_core::manifest::{
+    GroupFilterEntry, Manifest, ManifestError, Project, parse_cli_group_filter,
+};
 
 /// Resolve the set of projects to update.
 ///
@@ -31,6 +34,42 @@ where
     } else {
         manifest.resolve_projects(selectors.iter().map(|s| s.as_ref()))
     }
+}
+
+/// Read the `manifest.group-filter` workspace-config key and parse it
+/// into a list of group-filter entries. Accepts either a string
+/// (comma-separated, e.g. `+optional,-noisy`) or a list of strings;
+/// returns an empty filter when the key is unset. Mirrors Python's
+/// `_config_group_filter` — every command that gates on group activity
+/// should compose this with its own CLI-supplied filter (if any).
+pub fn read_manifest_group_filter(config: &Configuration) -> Result<Vec<GroupFilterEntry>, String> {
+    let raw: Vec<String> = match config
+        .get("manifest.group-filter")
+        .map_err(|e| e.to_string())?
+    {
+        None => return Ok(Vec::new()),
+        Some(ConfigValue::String(s)) => vec![s],
+        Some(ConfigValue::List(items)) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    ConfigValue::String(s) => out.push(s),
+                    other => {
+                        return Err(format!(
+                            "manifest.group-filter entries must be strings, got {other:?}"
+                        ));
+                    }
+                }
+            }
+            out
+        }
+        Some(other) => {
+            return Err(format!(
+                "manifest.group-filter must be a string or list, got {other:?}"
+            ));
+        }
+    };
+    parse_cli_group_filter(&raw).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
