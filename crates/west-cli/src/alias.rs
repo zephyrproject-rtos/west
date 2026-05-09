@@ -123,6 +123,7 @@ fn subcommand_token(cmd: &Command) -> String {
     match cmd {
         Command::Config(_) => "config".to_owned(),
         Command::Exec(_) => "exec".to_owned(),
+        Command::Forall(_) => "forall".to_owned(),
         Command::Init(_) => "init".to_owned(),
         Command::List(_) => "list".to_owned(),
         Command::Topdir => "topdir".to_owned(),

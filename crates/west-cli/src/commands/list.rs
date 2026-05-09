@@ -20,7 +20,7 @@ use std::sync::Mutex;
 use clap::Args;
 
 use west_core::config::Configuration;
-use west_core::manifest::{ImportSource, ImportSourceError, Manifest, Project, Submodules};
+use west_core::manifest::{ImportSource, ImportSourceError, Manifest, Project};
 use west_core::vcs::{self, Vcs};
 
 use super::config::LoadedConfig;
@@ -118,7 +118,7 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
     // these at index 0; we inline it here in `west list` so the data
     // layer stays free of synthetic records (commands that shouldn't
     // operate on it, like `west update`, don't need to filter).
-    let synthetic = synthetic_manifest_project(&manifest);
+    let synthetic = select::synthetic_manifest_project(&manifest);
 
     let projects: Vec<&Project> = if args.projects.is_empty() {
         let mut acc: Vec<&Project> = Vec::new();
@@ -283,25 +283,6 @@ impl ProjectContext<'_> {
         self.vcs
             .sha(&self.repo_path(), "HEAD")
             .map_err(|e| ListError::Vcs(e.to_string()))
-    }
-}
-
-/// Build the synthetic project record for the manifest repo itself.
-/// Mirrors Python's `ManifestProject` (index 0 in `Manifest.projects`):
-/// name `"manifest"` (a reserved name no real project can use),
-/// revision `"HEAD"`, no url. Path is the manifest repo's `self.path`.
-fn synthetic_manifest_project(manifest: &Manifest) -> Project {
-    Project {
-        name: "manifest".into(),
-        url: String::new(),
-        revision: "HEAD".into(),
-        path: manifest.self_.path.clone(),
-        description: None,
-        groups: Vec::new(),
-        clone_depth: None,
-        west_commands: manifest.self_.west_commands.clone(),
-        remote_name: String::new(),
-        submodules: Submodules::None,
     }
 }
 

@@ -6,7 +6,7 @@
 
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::{
-    GroupFilterEntry, Manifest, ManifestError, Project, parse_cli_group_filter,
+    GroupFilterEntry, Manifest, ManifestError, Project, Submodules, parse_cli_group_filter,
 };
 
 /// Resolve the set of projects to update.
@@ -33,6 +33,27 @@ where
             .collect())
     } else {
         manifest.resolve_projects(selectors.iter().map(|s| s.as_ref()))
+    }
+}
+
+/// Build the synthetic project record for the manifest repo itself.
+/// Mirrors python's `ManifestProject` (index 0 in `Manifest.projects`):
+/// name `"manifest"` (a reserved name no real project can use),
+/// revision `"HEAD"`, no url. Path is the manifest repo's `self.path`.
+/// Used by `list`, `forall`, and other project-iterating commands that
+/// need to emit / operate on the manifest repo as if it were a project.
+pub(crate) fn synthetic_manifest_project(manifest: &Manifest) -> Project {
+    Project {
+        name: "manifest".into(),
+        url: String::new(),
+        revision: "HEAD".into(),
+        path: manifest.self_.path.clone(),
+        description: None,
+        groups: Vec::new(),
+        clone_depth: None,
+        west_commands: manifest.self_.west_commands.clone(),
+        remote_name: String::new(),
+        submodules: Submodules::None,
     }
 }
 

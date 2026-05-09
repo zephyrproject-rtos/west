@@ -7,6 +7,7 @@ use config::LoadedConfig;
 
 pub mod config;
 pub mod exec;
+pub mod forall;
 pub mod init;
 pub mod list;
 pub mod select;
@@ -22,6 +23,8 @@ pub enum Command {
     /// be unambiguous about where exec's args end and the target program's
     /// args begin: `west exec -- python -c 'print(1+1)'`.
     Exec(exec::ExecArgs),
+    /// Run a shell command in each project.
+    Forall(forall::ForallArgs),
     /// Initialize a west workspace.
     Init(init::InitArgs),
     /// List projects defined in the manifest.
@@ -40,6 +43,7 @@ pub fn dispatch(cmd: Command, mut loaded: LoadedConfig) -> ExitCode {
     match cmd {
         Command::Config(a) => config::run(a, &mut loaded),
         Command::Exec(a) => exec::run(a),
+        Command::Forall(a) => forall::run(a, &mut loaded),
         Command::Init(a) => init::run(a, &mut loaded),
         Command::List(a) => list::run(a, &mut loaded),
         Command::Topdir => topdir::run(),
