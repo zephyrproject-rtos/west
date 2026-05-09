@@ -98,9 +98,11 @@ pub fn run() -> ExitCode {
     };
 
     if initial.raw
-        && let Err(e) = loaded
-            .config
-            .set_inline("output.raw", west_core::config::ConfigValue::Bool(true))
+        && let Err(e) = commands::config::splice_inline(
+            &mut loaded.config,
+            "output.raw",
+            west_core::config::ConfigValue::Bool(true),
+        )
     {
         eprintln!("west: --raw: {e}");
         return ExitCode::FAILURE;

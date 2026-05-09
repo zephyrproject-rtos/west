@@ -481,33 +481,26 @@ fn note(out: &mut Output<'_>, msg: &str) {
 // =====================================================================
 
 fn splice_flags_into_config(args: &UpdateArgs, config: &mut Configuration) -> Result<(), String> {
+    use super::config::splice_inline;
+
     if let Some(jobs) = args.jobs {
-        config
-            .set_inline("update.jobs", ConfigValue::Integer(jobs as i64))
-            .map_err(|e| e.to_string())?;
+        splice_inline(config, "update.jobs", ConfigValue::Integer(jobs as i64))?;
     }
     if args.rebase {
-        config
-            .set_inline("update.rebase", ConfigValue::Bool(true))
-            .map_err(|e| e.to_string())?;
+        splice_inline(config, "update.rebase", ConfigValue::Bool(true))?;
     }
     if args.keep_descendants {
-        config
-            .set_inline("update.keep-descendants", ConfigValue::Bool(true))
-            .map_err(|e| e.to_string())?;
+        splice_inline(config, "update.keep-descendants", ConfigValue::Bool(true))?;
     }
     if args.narrow {
-        config
-            .set_inline("tool.git.fetch.tags", ConfigValue::Bool(false))
-            .map_err(|e| e.to_string())?;
+        splice_inline(config, "tool.git.fetch.tags", ConfigValue::Bool(false))?;
     }
     if let Some(f) = args.fetch {
-        config
-            .set_inline(
-                "tool.git.fetch.strategy",
-                ConfigValue::String(f.as_config_str().to_owned()),
-            )
-            .map_err(|e| e.to_string())?;
+        splice_inline(
+            config,
+            "tool.git.fetch.strategy",
+            ConfigValue::String(f.as_config_str().to_owned()),
+        )?;
     }
     if !args.group_filter.is_empty() {
         // Append to whatever is already present in `update.group-filter`.
@@ -524,9 +517,7 @@ fn splice_flags_into_config(args: &UpdateArgs, config: &mut Configuration) -> Re
         for raw in &args.group_filter {
             combined.push(ConfigValue::String(raw.clone()));
         }
-        config
-            .set_inline("update.group-filter", ConfigValue::List(combined))
-            .map_err(|e| e.to_string())?;
+        splice_inline(config, "update.group-filter", ConfigValue::List(combined))?;
     }
     Ok(())
 }

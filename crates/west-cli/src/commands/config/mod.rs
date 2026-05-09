@@ -96,6 +96,19 @@ pub fn load(extra_files: &[PathBuf], inline_pairs: &[String]) -> Result<LoadedCo
     Ok(LoadedConfig { resolved, config })
 }
 
+/// Splice a CLI-driven (key, value) pair into `config`'s inline-overrides
+/// layer. Single home for the `set_inline` + stringify-error pair shared
+/// by `update::splice_flags_into_config`, `init::run`'s dedicated flags,
+/// and `lib::run`'s top-level `--raw` handler. Callers add their own
+/// "west: …" / `--flag-name: …` framing on the returned error.
+pub fn splice_inline(
+    config: &mut Configuration,
+    key: &str,
+    value: ConfigValue,
+) -> Result<(), String> {
+    config.set_inline(key, value).map_err(|e| e.to_string())
+}
+
 /// Resolve a `ScopeArgs` to a single layer path. Returns `Ok(None)` when no
 /// scope flag was supplied (caller decides default).
 pub fn scope_to_path(s: &ScopeArgs, r: &ResolvedConfig) -> Result<Option<PathBuf>, String> {

@@ -41,8 +41,9 @@ impl ImportSource for WorkspaceImportSource<'_> {
         let already_cloned = repo.exists() && self.vcs.is_repo(&repo).unwrap_or(false);
         if !already_cloned {
             if let Some(parent) = repo.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| ImportSourceError::msg(format!("create {}: {e}", parent.display())))?;
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    ImportSourceError::msg(format!("create {}: {e}", parent.display()))
+                })?;
             }
             // Don't pass `revision` to clone: git clone --branch refuses
             // bare commit SHAs and manifests commonly pin projects at

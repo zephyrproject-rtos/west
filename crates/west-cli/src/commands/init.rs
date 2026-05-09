@@ -63,23 +63,25 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
     // Splice dedicated flags into inline config overrides so the rest of the
     // command reads from a single source. Dedicated flags run after the
     // top-level `--config`, so they win on conflict.
-    if let Some(p) = args.manifest_path.as_deref() {
-        if let Err(e) = loaded.config.set_inline(
+    if let Some(p) = args.manifest_path.as_deref()
+        && let Err(e) = super::config::splice_inline(
+            &mut loaded.config,
             "manifest.path",
             ConfigValue::String(p.to_string_lossy().into_owned()),
-        ) {
-            eprintln!("west: {e}");
-            return ExitCode::from(2);
-        }
+        )
+    {
+        eprintln!("west: {e}");
+        return ExitCode::from(2);
     }
-    if let Some(f) = args.manifest_file.as_deref() {
-        if let Err(e) = loaded.config.set_inline(
+    if let Some(f) = args.manifest_file.as_deref()
+        && let Err(e) = super::config::splice_inline(
+            &mut loaded.config,
             "manifest.file",
             ConfigValue::String(f.to_string_lossy().into_owned()),
-        ) {
-            eprintln!("west: {e}");
-            return ExitCode::from(2);
-        }
+        )
+    {
+        eprintln!("west: {e}");
+        return ExitCode::from(2);
     }
 
     // Workspace dir.

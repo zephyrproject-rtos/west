@@ -115,10 +115,7 @@ impl Reporter for IndicatifReporter {
     }
 
     fn finish(self: Box<Self>) -> FailureSummary {
-        let state = self
-            .state
-            .into_inner()
-            .unwrap_or_else(|p| p.into_inner());
+        let state = self.state.into_inner().unwrap_or_else(|p| p.into_inner());
         if let Some(s) = &state.summary_bar {
             s.finish();
         }

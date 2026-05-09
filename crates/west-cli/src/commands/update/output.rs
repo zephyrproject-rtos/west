@@ -183,10 +183,7 @@ impl Reporter for BufferingReporter {
     }
 
     fn finish(self: Box<Self>) -> FailureSummary {
-        let state = self
-            .state
-            .into_inner()
-            .unwrap_or_else(|p| p.into_inner());
+        let state = self.state.into_inner().unwrap_or_else(|p| p.into_inner());
         let stderr = io::stderr();
         let mut lock = stderr.lock();
         let mut failed = Vec::new();

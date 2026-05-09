@@ -353,7 +353,10 @@ impl ImportSource for ReadOnlyImportSource<'_> {
         match std::fs::read_to_string(&path) {
             Ok(body) => Ok(Some(body)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(ImportSourceError::msg(format!("read {}: {e}", path.display()))),
+            Err(e) => Err(ImportSourceError::msg(format!(
+                "read {}: {e}",
+                path.display()
+            ))),
         }
     }
 }
