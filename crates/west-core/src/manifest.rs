@@ -823,10 +823,12 @@ impl<'a> Resolver<'a> {
             Some(p) => parent_prefix.join(p),
         };
 
-        // Directory form: iterate `*.yml` and `*.yaml` files in sorted
-        // order and absorb each as if it were listed explicitly. The
-        // directory itself isn't tracked in visited_files — only the
-        // leaves are, so the cycle guard still works.
+        // Directory form: iterate manifest files in sorted order and
+        // absorb each as if it were listed explicitly. Accepted
+        // extensions match the single-file form (`parse_body_by_extension`):
+        // `yml`, `yaml`, `toml`, `json`. The directory itself isn't
+        // tracked in visited_files — only the leaves are, so the cycle
+        // guard still works.
         if abs_path.is_dir() {
             let mut entries: Vec<PathBuf> = fs::read_dir(&abs_path)
                 .map_err(|e| ManifestError::Io {
@@ -839,7 +841,7 @@ impl<'a> Resolver<'a> {
                 .filter(|p| {
                     matches!(
                         p.extension().and_then(OsStr::to_str),
-                        Some("yml") | Some("yaml")
+                        Some("yml") | Some("yaml") | Some("toml") | Some("json")
                     )
                 })
                 .collect();
@@ -2675,6 +2677,59 @@ manifest:
         let m = Manifest::from_path_with_imports(&root, dir.path(), &source).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["from-a", "from-b"]);
+    }
+
+    #[test]
+    fn import_self_directory_accepts_all_manifest_extensions() {
+        // The directory glob accepts every extension the single-file
+        // form does — yml/yaml/toml/json — so a mixed-format
+        // `submanifests/` folder works.
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = write_yaml(
+            dir.path(),
+            "west.yml",
+            r#"
+manifest:
+  self:
+    import: submanifests
+  projects: []
+"#,
+        );
+        let sub = dir.path().join("submanifests");
+        std::fs::create_dir(&sub).unwrap();
+        write_yaml(
+            &sub,
+            "a.yaml",
+            r#"
+manifest:
+  projects:
+    - name: from-yaml
+      url: https://a
+"#,
+        );
+        std::fs::write(
+            sub.join("b.toml"),
+            r#"
+[manifest]
+[[manifest.projects]]
+name = "from-toml"
+url = "https://b"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            sub.join("c.json"),
+            r#"{ "manifest": { "projects": [ { "name": "from-json", "url": "https://c" } ] } }"#,
+        )
+        .unwrap();
+        // Unsupported extensions still ignored.
+        std::fs::write(sub.join("README.txt"), "ignore me").unwrap();
+
+        let source = StaticImportSource::new();
+        let m = Manifest::from_path_with_imports(&root, dir.path(), &source).unwrap();
+        let mut names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
+        names.sort();
+        assert_eq!(names, vec!["from-json", "from-toml", "from-yaml"]);
     }
 
     #[test]
