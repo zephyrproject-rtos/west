@@ -4,10 +4,19 @@
 //! current phase, and the bar fills as `Tick` events arrive. Failed
 //! projects' captured transcripts are dumped above the still-active
 //! bars so the user can debug without losing context.
+//!
+//! Each project's completion is recorded as a permanent line via
+//! [`MultiProgress::println`] and the live bar is then cleared. We do
+//! not rely on a bar's *finished* state staying visible: with many bars
+//! finishing in rapid succession the still-active set overdraws older
+//! bars, and only the bars alive at the very end remain in scrollback.
+//! The `println` route writes plain text that the terminal can't
+//! reclaim.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use console::Style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use west_core::vcs::ProgressSink;
@@ -78,34 +87,43 @@ impl Reporter for IndicatifReporter {
     fn project_finished(&self, project_name: &str, outcome: Result<(), UpdateError>) {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let bar = state.bars.remove(project_name);
+        let prefix = truncate_prefix(project_name, PREFIX_WIDTH);
 
-        if let Err(e) = outcome {
-            let msg = e.to_string();
-            // Replay the transcript above the still-active bars so the
-            // user has the failing project's context.
-            if let Some(buf) = state.transcripts.get(project_name)
-                && let Ok(g) = buf.lock()
-            {
+        match outcome {
+            Err(e) => {
+                let msg = e.to_string();
+                // Replay the transcript above the still-active bars so the
+                // user has the failing project's context.
+                if let Some(buf) = state.transcripts.get(project_name)
+                    && let Ok(g) = buf.lock()
+                {
+                    let _ = self.multi.println(format!(
+                        "--- {project_name} (failed) ---\n{}",
+                        String::from_utf8_lossy(&g).trim_end()
+                    ));
+                }
                 let _ = self.multi.println(format!(
-                    "--- {project_name} (failed) ---\n{}",
-                    String::from_utf8_lossy(&g).trim_end()
+                    "{prefix:<width$} {label} {msg}",
+                    prefix = prefix,
+                    width = PREFIX_WIDTH,
+                    label = Style::new().red().bold().apply_to("failed:"),
                 ));
+                if let Some(b) = bar {
+                    b.finish_and_clear();
+                }
+                state.failed.push((project_name.to_owned(), msg));
             }
-            let _ = self.multi.println(format!("{project_name}: ERROR: {msg}"));
-            if let Some(b) = &bar {
-                b.set_style(
-                    ProgressStyle::with_template("{prefix:32!.red.bold} {msg}")
-                        .expect("static template"),
-                );
-                b.finish_with_message("failed");
+            Ok(()) => {
+                let _ = self.multi.println(format!(
+                    "{prefix:<width$} {label}",
+                    prefix = prefix,
+                    width = PREFIX_WIDTH,
+                    label = Style::new().green().bold().apply_to("done"),
+                ));
+                if let Some(b) = bar {
+                    b.finish_and_clear();
+                }
             }
-            state.failed.push((project_name.to_owned(), msg));
-        } else if let Some(b) = &bar {
-            b.set_style(
-                ProgressStyle::with_template("{prefix:32!.green.bold} {msg}")
-                    .expect("static template"),
-            );
-            b.finish_with_message("done");
         }
 
         state.completed += 1;
