@@ -24,6 +24,8 @@ use std::sync::{Arc, Mutex};
 
 use west_core::vcs::{LineSink, NullSink, ProgressSink};
 
+use super::error::UpdateError;
+
 /// Aggregated failure tally returned at the end of an update run.
 pub struct FailureSummary {
     pub failed: Vec<(String, String)>,
@@ -58,7 +60,10 @@ pub trait Reporter: Send + Sync {
 
     /// Worker reports completion. The sink has already accumulated
     /// whatever the reporter needs; this just records the outcome.
-    fn project_finished(&self, project_name: &str, outcome: Result<(), String>);
+    /// Implementations render the error to a string at this point — the
+    /// typed structure has done its job and pattern-matching downstream
+    /// would only make this trait harder to satisfy.
+    fn project_finished(&self, project_name: &str, outcome: Result<(), UpdateError>);
 
     /// Called once at the end of the run. Implementations flush any
     /// pending state and return the aggregated summary.
@@ -95,12 +100,12 @@ impl Reporter for SerialReporter {
         Box::new(NullSink)
     }
 
-    fn project_finished(&self, project_name: &str, outcome: Result<(), String>) {
+    fn project_finished(&self, project_name: &str, outcome: Result<(), UpdateError>) {
         if let Err(e) = outcome {
             self.failed
                 .lock()
                 .expect("SerialReporter mutex poisoned")
-                .push((project_name.to_owned(), e));
+                .push((project_name.to_owned(), e.to_string()));
         }
     }
 
@@ -165,16 +170,19 @@ impl Reporter for BufferingReporter {
         Box::new(BufferedSink { buffer: buf })
     }
 
-    fn project_finished(&self, project_name: &str, outcome: Result<(), String>) {
+    fn project_finished(&self, project_name: &str, outcome: Result<(), UpdateError>) {
         let mut state = self.state.lock().expect("BufferingReporter mutex poisoned");
-        if let Err(e) = &outcome
-            && let Some(buf) = state.buffers.get(project_name)
-            && let Ok(mut g) = buf.lock()
-        {
-            let _ = writeln!(g, "ERROR: {e}");
-        }
+        let stringified = outcome.map_err(|e| {
+            let msg = e.to_string();
+            if let Some(buf) = state.buffers.get(project_name)
+                && let Ok(mut g) = buf.lock()
+            {
+                let _ = writeln!(g, "ERROR: {msg}");
+            }
+            msg
+        });
         state.completion_order.push(project_name.to_owned());
-        state.outcomes.insert(project_name.to_owned(), outcome);
+        state.outcomes.insert(project_name.to_owned(), stringified);
     }
 
     fn finish(self: Box<Self>) -> FailureSummary {
@@ -237,8 +245,16 @@ mod tests {
     fn serial_reporter_records_failures_only() {
         let r = Box::new(SerialReporter::new());
         r.project_finished("a", Ok(()));
-        r.project_finished("b", Err("boom".into()));
+        r.project_finished(
+            "b",
+            Err(UpdateError::SetManifestRev(
+                west_core::vcs::VcsError::UnknownClient("boom".into()),
+            )),
+        );
         let summary = r.finish();
-        assert_eq!(summary.failed, vec![("b".to_owned(), "boom".to_owned())]);
+        assert_eq!(summary.failed.len(), 1);
+        assert_eq!(summary.failed[0].0, "b");
+        assert!(summary.failed[0].1.contains("manifest-rev"));
+        assert!(summary.failed[0].1.contains("boom"));
     }
 }

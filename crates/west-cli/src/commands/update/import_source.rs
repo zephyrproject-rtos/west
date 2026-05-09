@@ -42,7 +42,7 @@ impl ImportSource for WorkspaceImportSource<'_> {
         if !already_cloned {
             if let Some(parent) = repo.parent() {
                 std::fs::create_dir_all(parent)
-                    .map_err(|e| ImportSourceError(format!("create {}: {e}", parent.display())))?;
+                    .map_err(|e| ImportSourceError::msg(format!("create {}: {e}", parent.display())))?;
             }
             // Don't pass `revision` to clone: git clone --branch refuses
             // bare commit SHAs and manifests commonly pin projects at
@@ -59,7 +59,7 @@ impl ImportSource for WorkspaceImportSource<'_> {
                     out,
                 )
             })
-            .map_err(stringify)?;
+            .map_err(ImportSourceError::new)?;
         }
 
         // 2. Fetch (smart-skip will no-op if revision is local).
@@ -73,26 +73,29 @@ impl ImportSource for WorkspaceImportSource<'_> {
                 out,
             )
         })
-        .map_err(stringify)?;
+        .map_err(ImportSourceError::new)?;
 
         // 3. Resolve the manifest revision and record manifest-rev.
         let sha = match self.vcs.sha(&repo, "FETCH_HEAD") {
             Ok(s) => s,
-            Err(_) => self.vcs.sha(&repo, &project.revision).map_err(stringify)?,
+            Err(_) => self
+                .vcs
+                .sha(&repo, &project.revision)
+                .map_err(ImportSourceError::new)?,
         };
         self.vcs
             .set_manifest_rev(&repo, &sha, Some("west update: pre-import"))
-            .map_err(stringify)?;
+            .map_err(ImportSourceError::new)?;
         self.vcs
             .checkout(&repo, &CheckoutTarget::Detached(&sha))
-            .map_err(stringify)?;
+            .map_err(ImportSourceError::new)?;
 
         // 4. Read the imported file.
         let path = repo.join(relative_file);
         match std::fs::read_to_string(&path) {
             Ok(body) => Ok(Some(body)),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(ImportSourceError(format!("read {}: {e}", path.display()))),
+            Err(e) => Err(ImportSourceError::msg(format!("read {}: {e}", path.display()))),
         }
     }
 }
@@ -106,8 +109,4 @@ where
     let mut sink = NullSink;
     let mut out = Output::Stream(&mut sink);
     op(&mut out)
-}
-
-fn stringify(e: VcsError) -> ImportSourceError {
-    ImportSourceError(e.to_string())
 }

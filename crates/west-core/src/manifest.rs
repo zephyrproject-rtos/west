@@ -135,11 +135,36 @@ pub trait ImportSource {
 }
 
 /// Opaque error type returned by [`ImportSource`] implementations. The
-/// `String` is rendered into [`ManifestError::ImportSourceFailed`]'s
-/// `detail` field.
+/// resolver only ever displays it (warning + skip on `Err`), so the
+/// inner error is type-erased: any [`std::error::Error`] can be wrapped
+/// via [`ImportSourceError::new`], and a free-form string message via
+/// [`ImportSourceError::msg`]. Source chaining is preserved via the
+/// transparent `#[error]` delegate.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct ImportSourceError(Box<dyn std::error::Error + Send + Sync>);
+
+impl ImportSourceError {
+    /// Wrap any concrete error implementation. The wrapped value is kept
+    /// alive for the lifetime of the `ImportSourceError`, so callers can
+    /// rely on `.source()` chaining.
+    pub fn new<E>(e: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self(Box::new(e))
+    }
+
+    /// Wrap a free-form message — for I/O-with-context errors and other
+    /// callsites that don't have an upstream `Error` value to forward.
+    pub fn msg(s: impl Into<String>) -> Self {
+        Self(Box::new(MessageError(s.into())))
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
-pub struct ImportSourceError(pub String);
+struct MessageError(String);
 
 /// Hard cap on import nesting depth — a chain longer than this returns
 /// [`ManifestError::ImportTooDeep`] rather than blowing the stack.
@@ -880,9 +905,9 @@ impl<'a> Resolver<'a> {
                 self.visited_projects.remove(&project.name);
                 return Ok(());
             }
-            Err(ImportSourceError(detail)) => {
+            Err(e) => {
                 eprintln!(
-                    "west: warning: project {:?} import failed: {detail}; skipping",
+                    "west: warning: project {:?} import failed: {e}; skipping",
                     project.name
                 );
                 self.visited_projects.remove(&project.name);

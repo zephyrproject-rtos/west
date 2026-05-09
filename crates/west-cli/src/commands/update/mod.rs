@@ -24,6 +24,7 @@
 //!   finally to detached checkout. The "keep-descendants wins" rule is
 //!   load-bearing: a user who sets both expects the safer of the two.
 
+mod error;
 mod import_source;
 mod indicatif_reporter;
 mod output;
@@ -37,11 +38,10 @@ use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::{GroupFilterEntry, Manifest, Project, Submodules};
-use west_core::vcs::{
-    self, CheckoutTarget, CloneSpec, FetchSpec, Output, SubmoduleScope, Vcs, VcsError,
-};
+use west_core::vcs::{self, CheckoutTarget, CloneSpec, FetchSpec, Output, SubmoduleScope, Vcs};
 
 use super::config::LoadedConfig;
+use error::UpdateError;
 use indicatif_reporter::IndicatifReporter;
 use output::{BufferingReporter, Reporter, SerialReporter};
 
@@ -282,7 +282,7 @@ fn run_one_project(
     settings: &Settings,
     reporter: &dyn Reporter,
     use_stream: bool,
-) -> Result<(), String> {
+) -> Result<(), UpdateError> {
     let repo = workspace.join(&project.path);
     if use_stream {
         let mut sink = reporter.sink_for_project(&project.name);
@@ -307,7 +307,7 @@ fn run_project_steps(
     repo: &Path,
     settings: &Settings,
     out: &mut Output<'_>,
-) -> Result<(), String> {
+) -> Result<(), UpdateError> {
     // 1. Ensure cloned. We deliberately don't pass `revision` here:
     //    git clone --branch only accepts branches/tags, but manifests
     //    routinely pin projects at bare commit SHAs (zephyr does this
@@ -317,8 +317,10 @@ fn run_project_steps(
     let already_cloned = repo.exists() && vcs.is_repo(repo).unwrap_or(false);
     if !already_cloned {
         if let Some(parent) = repo.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
+            std::fs::create_dir_all(parent).map_err(|source| UpdateError::CreateParent {
+                path: parent.to_path_buf(),
+                source,
+            })?;
         }
         vcs.clone(
             &CloneSpec {
@@ -329,7 +331,10 @@ fn run_project_steps(
             },
             out,
         )
-        .map_err(stringify)?;
+        .map_err(|source| UpdateError::Clone {
+            url: project.url.clone(),
+            source,
+        })?;
     }
 
     // 2. Fetch (smart-skip / depth / tags / force all live in GitClient).
@@ -341,7 +346,10 @@ fn run_project_steps(
         },
         out,
     )
-    .map_err(stringify)?;
+    .map_err(|source| UpdateError::Fetch {
+        remote: project.remote_name.clone(),
+        source,
+    })?;
 
     // 3. Resolve the new manifest-rev sha. After an active fetch git's
     //    FETCH_HEAD points at the just-fetched tip, which is what we want
@@ -352,16 +360,21 @@ fn run_project_steps(
     //    when smart-skip kicked in.
     let sha = match vcs.sha(repo, "FETCH_HEAD") {
         Ok(s) => s,
-        Err(_) => vcs.sha(repo, &project.revision).map_err(stringify)?,
+        Err(_) => vcs
+            .sha(repo, &project.revision)
+            .map_err(|source| UpdateError::ResolveRevision {
+                revision: project.revision.clone(),
+                source,
+            })?,
     };
 
     // 4. Record manifest-rev.
     let reason = format!("west update: moving to {}", project.revision);
     vcs.set_manifest_rev(repo, &sha, Some(&reason))
-        .map_err(stringify)?;
+        .map_err(UpdateError::SetManifestRev)?;
 
     // 5. Decide strategy.
-    let head_branch = vcs.head_branch(repo).map_err(stringify)?;
+    let head_branch = vcs.head_branch(repo).map_err(UpdateError::HeadBranch)?;
     let detach = match (
         settings.keep_descendants,
         settings.rebase,
@@ -370,7 +383,9 @@ fn run_project_steps(
         (true, _, Some(branch)) => {
             // keep_descendants: keep current branch checked out only if the
             // new sha is already an ancestor of it.
-            let is_ancestor = vcs.is_ancestor(repo, &sha, branch).map_err(stringify)?;
+            let is_ancestor = vcs
+                .is_ancestor(repo, &sha, branch)
+                .map_err(UpdateError::IsAncestor)?;
             if is_ancestor {
                 note(
                     out,
@@ -379,7 +394,7 @@ fn run_project_steps(
                 false
             } else if settings.rebase {
                 vcs.rebase(repo, "refs/heads/manifest-rev", out)
-                    .map_err(stringify)?;
+                    .map_err(UpdateError::Rebase)?;
                 false
             } else {
                 true
@@ -388,7 +403,7 @@ fn run_project_steps(
         (false, true, Some(_)) => {
             // rebase the current branch onto manifest-rev.
             vcs.rebase(repo, "refs/heads/manifest-rev", out)
-                .map_err(stringify)?;
+                .map_err(UpdateError::Rebase)?;
             false
         }
         _ => true,
@@ -396,7 +411,10 @@ fn run_project_steps(
 
     if detach {
         vcs.checkout(repo, &CheckoutTarget::Detached(&sha))
-            .map_err(stringify)?;
+            .map_err(|source| UpdateError::Checkout {
+                sha: sha.clone(),
+                source,
+            })?;
     }
 
     // 6. Submodules.
@@ -434,22 +452,18 @@ fn run_submodules(
     repo: &Path,
     scope: &ScopeOwned,
     out: &mut Output<'_>,
-) -> Result<(), String> {
+) -> Result<(), UpdateError> {
     match scope {
         ScopeOwned::All => vcs
             .update_submodules(repo, &SubmoduleScope::All, out)
-            .map_err(stringify),
+            .map_err(UpdateError::Submodules),
         ScopeOwned::Skip => Ok(()),
         ScopeOwned::Specific(strings) => {
             let refs: Vec<&str> = strings.iter().map(String::as_str).collect();
             vcs.update_submodules(repo, &SubmoduleScope::Specific(&refs), out)
-                .map_err(stringify)
+                .map_err(UpdateError::Submodules)
         }
     }
-}
-
-fn stringify(e: VcsError) -> String {
-    e.to_string()
 }
 
 /// Emit a non-vcs note from the worker. Native mode prints to stderr;

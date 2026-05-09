@@ -12,6 +12,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use west_core::vcs::ProgressSink;
 
+use super::error::UpdateError;
 use super::output::{FailureSummary, Reporter};
 use crate::progress::{IndicatifSink, PREFIX_WIDTH, TICK_INTERVAL, spinner_style, truncate_prefix};
 
@@ -74,11 +75,12 @@ impl Reporter for IndicatifReporter {
         Box::new(IndicatifSink::new(bar, Some(transcript)))
     }
 
-    fn project_finished(&self, project_name: &str, outcome: Result<(), String>) {
+    fn project_finished(&self, project_name: &str, outcome: Result<(), UpdateError>) {
         let mut state = self.state.lock().expect("indicatif state mutex poisoned");
         let bar = state.bars.remove(project_name);
 
-        if let Err(e) = &outcome {
+        if let Err(e) = outcome {
+            let msg = e.to_string();
             // Replay the transcript above the still-active bars so the
             // user has the failing project's context.
             if let Some(buf) = state.transcripts.get(project_name)
@@ -89,7 +91,7 @@ impl Reporter for IndicatifReporter {
                     String::from_utf8_lossy(&g).trim_end()
                 ));
             }
-            let _ = self.multi.println(format!("{project_name}: ERROR: {e}"));
+            let _ = self.multi.println(format!("{project_name}: ERROR: {msg}"));
             if let Some(b) = &bar {
                 b.set_style(
                     ProgressStyle::with_template("{prefix:32!.red.bold} {msg}")
@@ -97,7 +99,7 @@ impl Reporter for IndicatifReporter {
                 );
                 b.finish_with_message("failed");
             }
-            state.failed.push((project_name.to_owned(), e.clone()));
+            state.failed.push((project_name.to_owned(), msg));
         } else if let Some(b) = &bar {
             b.set_style(
                 ProgressStyle::with_template("{prefix:32!.green.bold} {msg}")
