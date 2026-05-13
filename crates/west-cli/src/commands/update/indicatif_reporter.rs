@@ -19,11 +19,16 @@ use std::sync::{Arc, Mutex};
 use console::Style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
-use west_core::vcs::ProgressSink;
+use west_core::vcs::{CommitSummary, ProgressSink};
 
 use super::error::UpdateError;
 use super::output::{FailureSummary, Reporter};
 use crate::progress::{IndicatifSink, PREFIX_WIDTH, TICK_INTERVAL, spinner_style, truncate_prefix};
+
+/// Max columns reserved for the commit subject on the "done" line. Keeps
+/// the line from wrapping in 80- and 100-column terminals: prefix (32) +
+/// space + "done" (4) + space + short sha (~7) + space + subject = ~80.
+const SUBJECT_WIDTH: usize = 60;
 
 pub struct IndicatifReporter {
     multi: MultiProgress,
@@ -84,7 +89,7 @@ impl Reporter for IndicatifReporter {
         Box::new(IndicatifSink::new(bar, Some(transcript)))
     }
 
-    fn project_finished(&self, project_name: &str, outcome: Result<(), UpdateError>) {
+    fn project_finished(&self, project_name: &str, outcome: Result<CommitSummary, UpdateError>) {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let bar = state.bars.remove(project_name);
         let prefix = truncate_prefix(project_name, PREFIX_WIDTH);
@@ -113,13 +118,8 @@ impl Reporter for IndicatifReporter {
                 }
                 state.failed.push((project_name.to_owned(), msg));
             }
-            Ok(()) => {
-                let _ = self.multi.println(format!(
-                    "{prefix:<width$} {label}",
-                    prefix = prefix,
-                    width = PREFIX_WIDTH,
-                    label = Style::new().green().bold().apply_to("done"),
-                ));
+            Ok(summary) => {
+                let _ = self.multi.println(render_done_line(&prefix, &summary));
                 if let Some(b) = bar {
                     b.finish_and_clear();
                 }
@@ -141,5 +141,72 @@ impl Reporter for IndicatifReporter {
         FailureSummary {
             failed: state.failed,
         }
+    }
+}
+
+/// Build the green-bold "done" line for a successful project. Splitting
+/// this out makes the rendering pure (no MultiProgress, no terminal) so
+/// the line layout can be unit-tested.
+fn render_done_line(prefix: &str, summary: &CommitSummary) -> String {
+    let subject = truncate_subject(&summary.subject, SUBJECT_WIDTH);
+    format!(
+        "{prefix:<width$} {label} {sha} {subject}",
+        prefix = prefix,
+        width = PREFIX_WIDTH,
+        label = Style::new().green().bold().apply_to("done"),
+        sha = summary.short_sha,
+    )
+}
+
+/// Truncate `s` to at most `max` columns, appending `…` if it had to be
+/// cut. ASCII-aware (commit subjects are typically ASCII; non-ASCII falls
+/// back to a byte-safe slice via `char_indices`).
+fn truncate_subject(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_owned();
+    }
+    let cut = max.saturating_sub(1);
+    let end = s.char_indices().nth(cut).map(|(i, _)| i).unwrap_or(s.len());
+    let mut out = s[..end].to_owned();
+    out.push('…');
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use console::strip_ansi_codes;
+
+    #[test]
+    fn done_line_contains_short_sha_and_subject() {
+        let prefix = truncate_prefix("zephyr", PREFIX_WIDTH);
+        let line = render_done_line(
+            &prefix,
+            &CommitSummary {
+                short_sha: "9164bd1".into(),
+                subject: "tests: Format platform in multiline".into(),
+            },
+        );
+        let plain = strip_ansi_codes(&line);
+        assert!(plain.starts_with("zephyr"), "got: {plain:?}");
+        assert!(plain.contains("done"), "got: {plain:?}");
+        assert!(plain.contains("9164bd1"), "got: {plain:?}");
+        assert!(
+            plain.contains("tests: Format platform in multiline"),
+            "got: {plain:?}"
+        );
+    }
+
+    #[test]
+    fn truncate_subject_short_passthrough() {
+        assert_eq!(truncate_subject("short", 60), "short");
+    }
+
+    #[test]
+    fn truncate_subject_long_gets_ellipsis() {
+        let long = "a".repeat(80);
+        let out = truncate_subject(&long, 60);
+        assert_eq!(out.chars().count(), 60);
+        assert!(out.ends_with('…'));
     }
 }

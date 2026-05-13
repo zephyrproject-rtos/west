@@ -12,7 +12,8 @@ use std::sync::Mutex;
 use crate::config::Configuration;
 
 use super::{
-    CheckoutTarget, CloneSpec, FetchSpec, Output, ProgressSink, SubmoduleScope, Vcs, VcsError,
+    CheckoutTarget, CloneSpec, CommitSummary, FetchSpec, Output, ProgressSink, SubmoduleScope, Vcs,
+    VcsError,
 };
 
 const NAME: &str = "git";
@@ -441,23 +442,32 @@ impl Vcs for GitClient {
         self.sha(repo, "FETCH_HEAD")
     }
 
-    fn checkout(&self, repo: &Path, target: &CheckoutTarget<'_>) -> Result<(), VcsError> {
+    fn checkout(
+        &self,
+        repo: &Path,
+        target: &CheckoutTarget<'_>,
+        out: &mut Output<'_>,
+    ) -> Result<(), VcsError> {
         let repo_str = repo.to_string_lossy().into_owned();
-        let res = match *target {
-            CheckoutTarget::Detached(rev) => self.run(&[
-                "-C",
-                &repo_str,
-                // Suppress the long detached-HEAD advice text — west is the
-                // tool, the user isn't running git directly here.
-                "-c",
-                "advice.detachedHead=false",
-                "checkout",
-                "--detach",
-                rev,
-            ])?,
-            CheckoutTarget::Branch(name) => self.run(&["-C", &repo_str, "checkout", name])?,
-        };
-        check_success(&res)
+        match *target {
+            CheckoutTarget::Detached(rev) => self.run_with_output(
+                &[
+                    "-C",
+                    &repo_str,
+                    // Suppress the long detached-HEAD advice text — west is the
+                    // tool, the user isn't running git directly here.
+                    "-c",
+                    "advice.detachedHead=false",
+                    "checkout",
+                    "--detach",
+                    rev,
+                ],
+                out,
+            ),
+            CheckoutTarget::Branch(name) => {
+                self.run_with_output(&["-C", &repo_str, "checkout", name], out)
+            }
+        }
     }
 
     fn rebase(&self, repo: &Path, onto: &str, out: &mut Output<'_>) -> Result<(), VcsError> {
@@ -593,6 +603,31 @@ impl Vcs for GitClient {
             return Ok(None);
         }
         Ok(Some(trimmed.to_owned()))
+    }
+
+    fn commit_summary(&self, repo: &Path, rev: &str) -> Result<CommitSummary, VcsError> {
+        let repo_str = repo.to_string_lossy().into_owned();
+        // %h = abbreviated sha (git decides the width based on
+        // collision risk); %x09 = literal TAB; %s = subject line.
+        // TAB is a safe separator because git collapses newlines and
+        // tabs out of `%s`.
+        let res = self.run(&["-C", &repo_str, "log", "-1", "--format=%h%x09%s", rev])?;
+        check_success(&res)?;
+        let stdout = std::str::from_utf8(&res.output.stdout).map_err(|e| VcsError::BadOutput {
+            client: NAME,
+            argv: res.argv.clone(),
+            detail: format!("non-UTF-8 stdout: {e}"),
+        })?;
+        let line = stdout.lines().next().unwrap_or("");
+        let (short, subject) = line.split_once('\t').ok_or_else(|| VcsError::BadOutput {
+            client: NAME,
+            argv: res.argv.clone(),
+            detail: format!("expected `<short>\\t<subject>`, got {line:?}"),
+        })?;
+        Ok(CommitSummary {
+            short_sha: short.to_owned(),
+            subject: subject.to_owned(),
+        })
     }
 }
 

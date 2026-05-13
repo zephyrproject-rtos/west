@@ -39,7 +39,9 @@ use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::{GroupFilterEntry, Manifest, Project, Submodules};
-use west_core::vcs::{self, CheckoutTarget, CloneSpec, FetchSpec, Output, SubmoduleScope, Vcs};
+use west_core::vcs::{
+    self, CheckoutTarget, CloneSpec, CommitSummary, FetchSpec, Output, SubmoduleScope, Vcs,
+};
 
 use super::config::LoadedConfig;
 use error::UpdateError;
@@ -328,7 +330,7 @@ fn run_one_project(
     settings: &Settings,
     reporter: &dyn Reporter,
     use_stream: bool,
-) -> Result<(), UpdateError> {
+) -> Result<CommitSummary, UpdateError> {
     let repo = workspace.join(&project.path);
     if use_stream {
         let mut sink = reporter.sink_for_project(&project.name);
@@ -353,7 +355,7 @@ fn run_project_steps(
     repo: &Path,
     settings: &Settings,
     out: &mut Output<'_>,
-) -> Result<(), UpdateError> {
+) -> Result<CommitSummary, UpdateError> {
     // 1. Ensure cloned. We deliberately don't pass `revision` here:
     //    git clone --branch only accepts branches/tags, but manifests
     //    routinely pin projects at bare commit SHAs (zephyr does this
@@ -476,7 +478,7 @@ fn run_project_steps(
     };
 
     if detach {
-        vcs.checkout(repo, &CheckoutTarget::Detached(&sha))
+        vcs.checkout(repo, &CheckoutTarget::Detached(&sha), out)
             .map_err(|source| UpdateError::Checkout {
                 sha: sha.clone(),
                 source,
@@ -492,7 +494,10 @@ fn run_project_steps(
         run_submodules(vcs, repo, &scope, cache_source.as_ref(), out)?;
     }
 
-    Ok(())
+    // 7. One-line snapshot of where HEAD landed, for the reporter to
+    //    surface in its success line / per-project transcript.
+    vcs.commit_summary(repo, "HEAD")
+        .map_err(UpdateError::CommitSummary)
 }
 
 /// Auto-cache populator: bare-mirror-clone when missing; refresh-fetch

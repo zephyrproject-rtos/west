@@ -508,6 +508,70 @@ fn update_handles_sha_revision() {
     assert_eq!(head, sha, "HEAD should land on the manifest's SHA");
 }
 
+#[test]
+#[serial]
+fn update_raw_mode_prints_head_is_now_at() {
+    // Parity with v1: in raw mode, git's stderr flows directly through —
+    // so the user sees the literal `HEAD is now at <short> <subject>`
+    // line for each project's detached checkout.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1");
+    let manifest = manifest_yaml(&[("p1", &p1, &[])]);
+    let ws = init_workspace(&sb, &manifest);
+
+    let out = sb
+        .west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "--config",
+            "output.raw=true",
+            "update",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(
+        stderr.contains("HEAD is now at"),
+        "raw-mode stderr should contain git's HEAD-is-now-at line; got:\n{stderr}"
+    );
+}
+
+#[test]
+#[serial]
+fn update_parallel_transcript_contains_head_is_now_at() {
+    // Parallel + non-TTY (the default in tests) uses BufferingReporter,
+    // which captures git's stderr into a per-project transcript and
+    // flushes it at the end. The `HEAD is now at …` line lands in the
+    // captured output.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1");
+    let p2 = make_bare_with_one_commit(sb.root(), "p2", "p2");
+    let manifest = manifest_yaml(&[("p1", &p1, &[]), ("p2", &p2, &[])]);
+    let ws = init_workspace(&sb, &manifest);
+
+    let out = sb
+        .west()
+        .args(["-C", ws.to_str().unwrap(), "update", "-j", "2"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(
+        stderr.contains("HEAD is now at"),
+        "buffering-reporter transcript should include the HEAD-is-now-at line; got:\n{stderr}"
+    );
+}
+
 // ============================================================================
 // Cache flags
 // ============================================================================

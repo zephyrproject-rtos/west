@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
-use west_core::vcs::{LineSink, NullSink, ProgressSink};
+use west_core::vcs::{CommitSummary, LineSink, NullSink, ProgressSink};
 
 use super::error::UpdateError;
 
@@ -58,12 +58,14 @@ pub trait Reporter: Send + Sync {
     /// sink can hold references into the reporter's state.
     fn sink_for_project<'a>(&'a self, project_name: &str) -> Box<dyn ProgressSink + Send + 'a>;
 
-    /// Worker reports completion. The sink has already accumulated
-    /// whatever the reporter needs; this just records the outcome.
-    /// Implementations render the error to a string at this point — the
-    /// typed structure has done its job and pattern-matching downstream
-    /// would only make this trait harder to satisfy.
-    fn project_finished(&self, project_name: &str, outcome: Result<(), UpdateError>);
+    /// Worker reports completion. On success the worker passes a
+    /// [`CommitSummary`] (short sha + subject of the new HEAD) so the
+    /// reporter can surface it in its UI. The sink has already
+    /// accumulated whatever the reporter needs; this just records the
+    /// outcome. Implementations render the error to a string at this
+    /// point — the typed structure has done its job and pattern-matching
+    /// downstream would only make this trait harder to satisfy.
+    fn project_finished(&self, project_name: &str, outcome: Result<CommitSummary, UpdateError>);
 
     /// Called once at the end of the run. Implementations flush any
     /// pending state and return the aggregated summary.
@@ -100,7 +102,10 @@ impl Reporter for SerialReporter {
         Box::new(NullSink)
     }
 
-    fn project_finished(&self, project_name: &str, outcome: Result<(), UpdateError>) {
+    fn project_finished(&self, project_name: &str, outcome: Result<CommitSummary, UpdateError>) {
+        // Raw mode is the only consumer of SerialReporter, and there
+        // git's stderr ("HEAD is now at …") already landed on the
+        // terminal. The summary adds no new information here.
         if let Err(e) = outcome {
             self.failed
                 .lock()
@@ -167,9 +172,12 @@ impl Reporter for BufferingReporter {
         Box::new(BufferedSink { buffer: buf })
     }
 
-    fn project_finished(&self, project_name: &str, outcome: Result<(), UpdateError>) {
+    fn project_finished(&self, project_name: &str, outcome: Result<CommitSummary, UpdateError>) {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        let stringified = outcome.map_err(|e| {
+        // The streaming sink already captured git's `HEAD is now at …`
+        // line into the transcript, so the new-HEAD line is in the
+        // buffer; the summary itself is unused here.
+        let stringified = outcome.map(|_| ()).map_err(|e| {
             let msg = e.to_string();
             if let Some(buf) = state.buffers.get(project_name)
                 && let Ok(mut g) = buf.lock()
@@ -238,7 +246,13 @@ mod tests {
     #[test]
     fn serial_reporter_records_failures_only() {
         let r = Box::new(SerialReporter::new());
-        r.project_finished("a", Ok(()));
+        r.project_finished(
+            "a",
+            Ok(CommitSummary {
+                short_sha: "abcdef0".into(),
+                subject: "ok".into(),
+            }),
+        );
         r.project_finished(
             "b",
             Err(UpdateError::SetManifestRev(

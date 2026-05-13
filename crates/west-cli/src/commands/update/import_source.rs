@@ -85,9 +85,11 @@ impl ImportSource for WorkspaceImportSource<'_> {
         self.vcs
             .set_manifest_rev(&repo, &sha, Some("west update: pre-import"))
             .map_err(ImportSourceError::new)?;
-        self.vcs
-            .checkout(&repo, &CheckoutTarget::Detached(&sha))
-            .map_err(ImportSourceError::new)?;
+        run_quiet(|out| {
+            self.vcs
+                .checkout(&repo, &CheckoutTarget::Detached(&sha), out)
+        })
+        .map_err(ImportSourceError::new)?;
 
         // 4. Read the imported file.
         let path = repo.join(relative_file);

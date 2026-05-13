@@ -60,6 +60,8 @@ pub(super) enum UpdateError {
     },
     #[error("set origin URL: {0}")]
     SetRemoteUrl(#[source] VcsError),
+    #[error("read HEAD commit summary: {0}")]
+    CommitSummary(#[source] VcsError),
     #[error("cache path {} contains non-UTF-8 bytes", .0.display())]
     NonUtf8CachePath(PathBuf),
 }

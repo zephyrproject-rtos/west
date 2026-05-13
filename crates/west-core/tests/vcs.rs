@@ -589,7 +589,12 @@ fn checkout_detached_lands_off_branch() {
     let head = git_capture(&["rev-parse", "HEAD"], &dest);
 
     let v = GitClient::new(GitOptions::default());
-    v.checkout(&dest, &CheckoutTarget::Detached(&head)).unwrap();
+    v.checkout(
+        &dest,
+        &CheckoutTarget::Detached(&head),
+        &mut Output::Stream(&mut NullSink),
+    )
+    .unwrap();
 
     // Detached HEAD: symbolic-ref fails; HEAD still resolves.
     let sym = Command::new("git")
@@ -618,7 +623,12 @@ fn checkout_branch_switches_to_named_branch() {
     git(&["commit", "-q", "-am", "feature"], &work);
 
     let v = GitClient::new(GitOptions::default());
-    v.checkout(&work, &CheckoutTarget::Branch("main")).unwrap();
+    v.checkout(
+        &work,
+        &CheckoutTarget::Branch("main"),
+        &mut Output::Stream(&mut NullSink),
+    )
+    .unwrap();
     let cur = git_capture(&["rev-parse", "--abbrev-ref", "HEAD"], &work);
     assert_eq!(cur, "main");
 }
@@ -716,7 +726,12 @@ fn head_branch_returns_none_when_detached() {
     let head = git_capture(&["rev-parse", "HEAD"], &dest);
 
     let v = GitClient::new(GitOptions::default());
-    v.checkout(&dest, &CheckoutTarget::Detached(&head)).unwrap();
+    v.checkout(
+        &dest,
+        &CheckoutTarget::Detached(&head),
+        &mut Output::Stream(&mut NullSink),
+    )
+    .unwrap();
     assert!(v.head_branch(&dest).unwrap().is_none());
 }
 

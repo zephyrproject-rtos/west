@@ -203,8 +203,14 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     ///
     /// `Detached(rev)` lands HEAD on the commit without binding it to a
     /// branch — the safe default for updates. `Branch(name)` switches to an
-    /// existing local branch.
-    fn checkout(&self, repo: &Path, target: &CheckoutTarget<'_>) -> Result<(), VcsError>;
+    /// existing local branch. Progress output (e.g. git's `HEAD is now at …`
+    /// line on a detached checkout) is forwarded to `out`.
+    fn checkout(
+        &self,
+        repo: &Path,
+        target: &CheckoutTarget<'_>,
+        out: &mut Output<'_>,
+    ) -> Result<(), VcsError>;
 
     /// Rebase the current branch in `repo` onto `onto`. Fails if the
     /// rebase has conflicts; the working tree is left in whatever state the
@@ -262,6 +268,10 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     /// Read the recorded manifest-rev of `repo`. Returns `Ok(None)` if no
     /// manifest-rev has been recorded yet (fresh clone, hand-curated dir).
     fn manifest_rev(&self, repo: &Path) -> Result<Option<String>, VcsError>;
+
+    /// One-line summary of `rev`: abbreviated SHA + subject. Used to
+    /// surface "what HEAD landed on" in user-facing progress output.
+    fn commit_summary(&self, repo: &Path, rev: &str) -> Result<CommitSummary, VcsError>;
 }
 
 /// What to clone.
@@ -298,6 +308,17 @@ pub struct CloneSpec<'a> {
 pub struct FetchSpec<'a> {
     pub remote: &'a str,
     pub revision: Option<&'a str>,
+}
+
+/// A one-line snapshot of a commit. Returned by [`Vcs::commit_summary`]
+/// and used by callers that want to surface "what HEAD is now at" to the
+/// user — e.g. `west update`'s parallel progress UI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitSummary {
+    /// Abbreviated SHA as the tool would print it (`git log %h`).
+    pub short_sha: String,
+    /// First line of the commit message.
+    pub subject: String,
 }
 
 /// Where to land HEAD on [`Vcs::checkout`].
