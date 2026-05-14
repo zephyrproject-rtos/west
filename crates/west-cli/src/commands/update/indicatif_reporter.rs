@@ -25,10 +25,17 @@ use super::error::UpdateError;
 use super::output::{FailureSummary, Reporter};
 use crate::progress::{IndicatifSink, PREFIX_WIDTH, TICK_INTERVAL, spinner_style, truncate_prefix};
 
-/// Max columns reserved for the commit subject on the "done" line. Keeps
-/// the line from wrapping in 80- and 100-column terminals: prefix (32) +
-/// space + "done" (4) + space + short sha (~7) + space + subject = ~80.
+/// Max columns reserved for the commit subject on the success line.
+/// Budget per row: prefix (32) + space + glyph (1) + space + sha column
+/// (12) + space + subject (60) ≈ 108 cols, fits comfortably in
+/// 110-column terminals. Only the subject is truncated; if the SHA
+/// happens to exceed `SHA_WIDTH` we keep it intact and the row shifts.
 const SUBJECT_WIDTH: usize = 60;
+
+/// Visible width of the SHA column. Sized so that all short-SHA widths
+/// observed in real Zephyr manifests (typically 7, sometimes growing
+/// to ~11 on busy repos) line up under each other.
+const SHA_WIDTH: usize = 12;
 
 pub struct IndicatifReporter {
     multi: MultiProgress,
@@ -111,7 +118,7 @@ impl Reporter for IndicatifReporter {
                     "{prefix:<width$} {label} {msg}",
                     prefix = prefix,
                     width = PREFIX_WIDTH,
-                    label = Style::new().red().bold().apply_to("failed:"),
+                    label = Style::new().red().bold().apply_to("✗"),
                 ));
                 if let Some(b) = bar {
                     b.finish_and_clear();
@@ -144,17 +151,20 @@ impl Reporter for IndicatifReporter {
     }
 }
 
-/// Build the green-bold "done" line for a successful project. Splitting
-/// this out makes the rendering pure (no MultiProgress, no terminal) so
-/// the line layout can be unit-tested.
+/// Build the success line for a finished project: green `✓`, yellow
+/// fixed-width SHA column, dimmed subject. Splitting this out makes the
+/// rendering pure (no MultiProgress, no terminal) so the line layout
+/// can be unit-tested.
 fn render_done_line(prefix: &str, summary: &CommitSummary) -> String {
     let subject = truncate_subject(&summary.subject, SUBJECT_WIDTH);
+    let padded_sha = format!("{sha:<width$}", sha = &summary.short_sha, width = SHA_WIDTH);
     format!(
-        "{prefix:<width$} {label} {sha} {subject}",
+        "{prefix:<prefix_width$} {label} {sha} {subject}",
         prefix = prefix,
-        width = PREFIX_WIDTH,
-        label = Style::new().green().bold().apply_to("done"),
-        sha = summary.short_sha,
+        prefix_width = PREFIX_WIDTH,
+        label = Style::new().green().bold().apply_to("✓"),
+        sha = Style::new().yellow().apply_to(padded_sha),
+        subject = Style::new().dim().apply_to(subject),
     )
 }
 
@@ -178,7 +188,7 @@ mod tests {
     use console::strip_ansi_codes;
 
     #[test]
-    fn done_line_contains_short_sha_and_subject() {
+    fn done_line_contains_glyph_sha_and_subject() {
         let prefix = truncate_prefix("zephyr", PREFIX_WIDTH);
         let line = render_done_line(
             &prefix,
@@ -189,11 +199,33 @@ mod tests {
         );
         let plain = strip_ansi_codes(&line);
         assert!(plain.starts_with("zephyr"), "got: {plain:?}");
-        assert!(plain.contains("done"), "got: {plain:?}");
+        assert!(plain.contains('✓'), "got: {plain:?}");
         assert!(plain.contains("9164bd1"), "got: {plain:?}");
         assert!(
             plain.contains("tests: Format platform in multiline"),
             "got: {plain:?}"
+        );
+    }
+
+    #[test]
+    fn done_line_pads_sha_to_fixed_column() {
+        let prefix = truncate_prefix("zephyr", PREFIX_WIDTH);
+        let line = render_done_line(
+            &prefix,
+            &CommitSummary {
+                short_sha: "abc1234".into(), // 7 chars, shorter than SHA_WIDTH
+                subject: "subject line".into(),
+            },
+        );
+        let plain = strip_ansi_codes(&line);
+        let sha_at = plain.find("abc1234").expect("sha in line");
+        let sub_at = plain.find("subject line").expect("subject in line");
+        // Layout: ... SHA<pad-to-SHA_WIDTH> SPACE subject
+        let expected_gap = SHA_WIDTH - "abc1234".len() + 1;
+        assert_eq!(
+            sub_at - sha_at - "abc1234".len(),
+            expected_gap,
+            "subject not aligned to SHA column; line: {plain:?}"
         );
     }
 
