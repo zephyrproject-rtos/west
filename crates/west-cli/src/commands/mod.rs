@@ -7,6 +7,7 @@ use config::LoadedConfig;
 
 pub mod config;
 pub mod exec;
+pub mod extension;
 pub mod forall;
 pub mod init;
 pub mod list;
@@ -48,13 +49,6 @@ pub fn dispatch(cmd: Command, mut loaded: LoadedConfig) -> ExitCode {
         Command::List(a) => list::run(a, &mut loaded),
         Command::Topdir => topdir::run(),
         Command::Update(a) => update::run(a, &mut loaded),
-        Command::External(args) => {
-            let name = args
-                .first()
-                .map(|a| a.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            eprintln!("west: unknown command: {name}");
-            ExitCode::FAILURE
-        }
+        Command::External(args) => extension::run(&args, &loaded),
     }
 }

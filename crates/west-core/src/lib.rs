@@ -9,3 +9,4 @@ pub mod config_paths;
 pub mod manifest;
 pub mod topdir;
 pub mod vcs;
+pub mod west_commands;
