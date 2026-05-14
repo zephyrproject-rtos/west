@@ -159,4 +159,73 @@ manifest:
         let err = select_projects(&m, &["nope"], &[]).unwrap_err();
         assert!(matches!(err, ManifestError::UnknownProject(s) if s == "nope"));
     }
+
+    fn empty_config() -> Configuration {
+        Configuration::load(Vec::<std::path::PathBuf>::new()).unwrap()
+    }
+
+    #[test]
+    fn read_manifest_group_filter_unset_returns_empty() {
+        let cfg = empty_config();
+        assert!(read_manifest_group_filter(&cfg).unwrap().is_empty());
+    }
+
+    #[test]
+    fn read_manifest_group_filter_comma_string() {
+        let mut cfg = empty_config();
+        cfg.set_inline(
+            "manifest.group-filter",
+            ConfigValue::String("+optional, -noisy".into()),
+        )
+        .unwrap();
+        let parsed = read_manifest_group_filter(&cfg).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].group, "optional");
+        assert!(!parsed[0].disabled);
+        assert_eq!(parsed[1].group, "noisy");
+        assert!(parsed[1].disabled);
+    }
+
+    #[test]
+    fn read_manifest_group_filter_list_of_strings() {
+        let mut cfg = empty_config();
+        cfg.set_inline(
+            "manifest.group-filter",
+            ConfigValue::List(vec![
+                ConfigValue::String("+optional".into()),
+                ConfigValue::String("-noisy".into()),
+            ]),
+        )
+        .unwrap();
+        let parsed = read_manifest_group_filter(&cfg).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].group, "optional");
+        assert!(!parsed[0].disabled);
+        assert_eq!(parsed[1].group, "noisy");
+        assert!(parsed[1].disabled);
+    }
+
+    #[test]
+    fn read_manifest_group_filter_rejects_non_string_list_entry() {
+        let mut cfg = empty_config();
+        cfg.set_inline(
+            "manifest.group-filter",
+            ConfigValue::List(vec![
+                ConfigValue::String("+optional".into()),
+                ConfigValue::Integer(7),
+            ]),
+        )
+        .unwrap();
+        let err = read_manifest_group_filter(&cfg).unwrap_err();
+        assert!(err.contains("entries must be strings"));
+    }
+
+    #[test]
+    fn read_manifest_group_filter_rejects_scalar_non_string() {
+        let mut cfg = empty_config();
+        cfg.set_inline("manifest.group-filter", ConfigValue::Bool(true))
+            .unwrap();
+        let err = read_manifest_group_filter(&cfg).unwrap_err();
+        assert!(err.contains("must be a string or list"));
+    }
 }
