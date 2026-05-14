@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=77.0.3"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "west"
-version = "1.5.99"
+version = "2.0.0"
 authors = [{name = "Zephyr Project", email = "devel@lists.zephyrproject.org"}]
 description = "Zephyr RTOS Project meta-tool"
 classifiers = [
@@ -13,6 +13,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Rust",
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: Microsoft :: Windows",
@@ -34,8 +35,25 @@ content-type = "text/x-rst"
 [project.urls]
 Homepage = "https://github.com/zephyrproject-rtos/west"
 
-[project.scripts]
-west = "west.app.main:main"
+# The CLI `west` binary is the compiled rust executable from
+# crates/west-cli. Maturin ships it inside the wheel under
+# `<wheel>/west-<version>.data/scripts/west` so pip installs it
+# onto PATH; no python entry-point shim involved.
+
+[tool.maturin]
+# "bin" bindings: the cargo target produces a rust binary, and
+# maturin ships it alongside the python sources.
+bindings = "bin"
+manifest-path = "crates/west-cli/Cargo.toml"
+# The python sources live in src/west/ (the established layout).
+# Maturin picks up everything under src/ as the python package.
+python-source = "src"
+# Include the YAML schema files maturin's default discovery
+# wouldn't pull in.
+include = [
+    { path = "src/west/*.yml", format = ["sdist", "wheel"] },
+    { path = "src/west/py.typed", format = ["sdist", "wheel"] },
+]
 
 [dependency-groups]
 lint = [
@@ -57,15 +75,6 @@ dev = [
     {include-group = "test"},
     {include-group = "types"},
 ]
-
-[tool.setuptools]
-package-dir = {"" = "src"}
-zip-safe = false
-include-package-data = true
-
-[tool.setuptools.packages.find]
-where = ["src"]
-namespaces = false
 
 # Note this section is only for interactive `coverage run ...` use and ignored by "gh-test"
 # below.  pytest's --cov-config= option is for passing .coveragerc file syntax and it seems to

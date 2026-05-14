@@ -77,16 +77,36 @@ fn make_bare_with_files(root: &Path, name: &str, files: &[(&str, &str)]) -> Path
     bare
 }
 
-/// Repo-root path to the python/ source directory. Used as
-/// PYTHONPATH so the spawned python3 finds `west._dispatch`.
+/// Repo-root path to the python sources (the wheel's
+/// `python-source` directory). Used as PYTHONPATH so the
+/// spawned python3 finds `west._dispatch` without needing the
+/// maturin wheel to be installed.
 fn repo_python_dir() -> PathBuf {
+    PathBuf::from(repo_root()).join("src").canonicalize().expect("src/")
+}
+
+fn repo_root() -> PathBuf {
     let manifest_dir = env!("CARGO_MANIFEST_DIR"); // crates/west-cli
-    PathBuf::from(manifest_dir)
-        .join("..")
-        .join("..")
-        .join("python")
-        .canonicalize()
-        .expect("repo python/ dir resolvable")
+    PathBuf::from(manifest_dir).join("..").join("..")
+}
+
+/// Path to the venv python (where pykwalify/pyyaml/colorama are
+/// installed). The python `west` package's full surface imports
+/// them at module load time, so a bare `python3` from PATH
+/// wouldn't be enough. Tests force the venv via `WEST_PYTHON`.
+///
+/// Important: don't canonicalize. `.venv/bin/python` is a symlink
+/// to a uv-managed canonical python; following the symlink gives
+/// you that canonical python (no venv site-packages). Python's
+/// venv detection keys off the EXECUTABLE PATH it was launched
+/// with — the symlink-in-venv path makes it pick up the venv's
+/// site-packages.
+fn venv_python() -> Option<PathBuf> {
+    let p = repo_root()
+        .join(".venv")
+        .join(if cfg!(windows) { "Scripts" } else { "bin" })
+        .join(if cfg!(windows) { "python.exe" } else { "python" });
+    p.exists().then_some(p)
 }
 
 struct Sandbox {
@@ -112,6 +132,13 @@ impl Sandbox {
             // `python3 -m west._dispatch` works without an
             // installed wheel.
             .env("PYTHONPATH", repo_python_dir());
+        // If the project's venv has been set up, use its python —
+        // the python `west` package imports colorama / pykwalify /
+        // pyyaml at module load, and the system python3 may not
+        // have those.
+        if let Some(python) = venv_python() {
+            c.env("WEST_PYTHON", python);
+        }
         c
     }
 }
@@ -283,7 +310,7 @@ class Boom(WestCommand):
     def do_add_parser(self, parser_adder):
         return parser_adder.add_parser(self.name)
     def do_run(self, args, unknown):
-        raise CommandError('intentional', returncode=42)
+        raise CommandError(returncode=42)
 "#;
     let sb = Sandbox::new();
     let yaml = "west-commands:\n  - file: scripts/boom.py\n    commands:\n      - name: boom\n        class: Boom\n";

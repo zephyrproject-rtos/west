@@ -1900,11 +1900,6 @@ class Manifest:
         return ret
 
     @property
-    def path(self) -> str | None:  # for compatibility
-        '''Deprecated. Use abspath instead.'''
-        return self.abspath
-
-    @property
     def posixpath(self):
         if self._posixpath is None and self.abspath is not None:
             self._posixpath = Path(self.abspath).as_posix()

@@ -13,11 +13,13 @@ up argparse, and dispatches `do_run`. `CommandError` is caught
 and converted to `sys.exit(returncode)`; other exceptions
 propagate (rust catches the non-zero exit and surfaces it).
 
-Phase 1: `self.manifest` / `self.config` are not populated —
-they require the full `west.manifest` / `west.configuration`
-python modules that arrive when src/west/ moves into python/.
-Extensions that read those will raise `AttributeError`; the
-bridge surfaces that as a normal command failure.
+Phase 1: ``self.manifest`` / ``self.config`` are not populated —
+they're left as ``None``. Extensions that don't read them just
+work; ones that do will surface ``AttributeError`` / ``TypeError``,
+which the bridge lets propagate (rust catches the non-zero exit
+and surfaces it). Phase 2 (Option G in python.md) will switch
+the wheel's Manifest / Configuration over to PyO3 bindings on
+``west-core`` and the bridge will wire them up here.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from pathlib import Path
 from west.commands import CommandError
 
 
-def _parse_argv(argv: list[str]) -> tuple[str, str, list[str]]:
+def _parse_argv(argv):
     """Split argv into (module_path, class_name, user_argv).
 
     The rust caller passes ``<module-path> <class-name> -- <user-argv...>``.
@@ -47,7 +49,7 @@ def _parse_argv(argv: list[str]) -> tuple[str, str, list[str]]:
     return module_path, class_name, rest
 
 
-def _load_command_class(module_path: str, class_name: str):
+def _load_command_class(module_path, class_name):
     """Load the extension's `.py` and return the named class."""
     p = Path(module_path).resolve()
     if not p.is_file():
@@ -71,7 +73,7 @@ def _load_command_class(module_path: str, class_name: str):
         )
 
 
-def main() -> int:
+def main():
     module_path, class_name, user_argv = _parse_argv(sys.argv[1:])
     topdir = os.environ.get("WEST_TOPDIR")
 
