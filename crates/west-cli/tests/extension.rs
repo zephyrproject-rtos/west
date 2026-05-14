@@ -82,7 +82,10 @@ fn make_bare_with_files(root: &Path, name: &str, files: &[(&str, &str)]) -> Path
 /// spawned python3 finds `west._dispatch` without needing the
 /// maturin wheel to be installed.
 fn repo_python_dir() -> PathBuf {
-    PathBuf::from(repo_root()).join("src").canonicalize().expect("src/")
+    PathBuf::from(repo_root())
+        .join("src")
+        .canonicalize()
+        .expect("src/")
 }
 
 fn repo_root() -> PathBuf {
@@ -105,7 +108,11 @@ fn venv_python() -> Option<PathBuf> {
     let p = repo_root()
         .join(".venv")
         .join(if cfg!(windows) { "Scripts" } else { "bin" })
-        .join(if cfg!(windows) { "python.exe" } else { "python" });
+        .join(if cfg!(windows) {
+            "python.exe"
+        } else {
+            "python"
+        });
     p.exists().then_some(p)
 }
 
