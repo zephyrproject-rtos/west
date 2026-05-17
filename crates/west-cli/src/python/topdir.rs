@@ -9,8 +9,12 @@ use pyo3::create_exception;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
+// The first arg is used as `__module__` on the resulting python class.
+// Maturin places the cdylib at `west/_west_native.abi3.so`, so the
+// fully-qualified name is `west._west_native.WestNotFound`. The macro
+// accepts a Rust path-like token; the dotted form is fine.
 create_exception!(
-    _west_native,
+    west._west_native,
     WestNotFound,
     PyRuntimeError,
     "Neither the current directory nor any parent has a west workspace."

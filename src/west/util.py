@@ -52,11 +52,10 @@ def wrap(text: str, indent: str) -> list[str]:
 
 # `_west_native` is the PyO3 extension shipped with the maturin-built
 # wheel. It's a hard dependency: `pip install west` always provides
-# it, and in-tree work needs `maturin develop -m crates/west-py/Cargo.toml`
-# once. There's no pure-python fallback by design — keeping one would
-# mean maintaining two implementations of the same walk-up logic, and
-# Phase 2's whole purpose is to delete the python copy.
-from _west_native import WestNotFound, west_topdir
+# it, and in-tree work needs `maturin develop --features pyo3` once.
+# There's no pure-python fallback by design — keeping one would mean
+# maintaining two implementations of the same walk-up logic.
+from west._west_native import WestNotFound, west_topdir
 
 
 def west_dir(start: PathType | None = None) -> str:

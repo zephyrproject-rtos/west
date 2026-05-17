@@ -5,19 +5,19 @@
 '''Pytest covering the `_west_native` PyO3 binding via the
 `src/west/util.py` re-export.
 
-Lives under `crates/west-py/tests/` rather than the repo's top-level
-`tests/` directory because the latter's `conftest.py` imports
-`west.app` (a Phase 1 carry-over: the python CLI driver was deleted
-but the test infra hasn't been ported off it yet). Keeping the
-binding test self-contained here means pytest can verify Phase 2a
-without first untangling that conftest.
+Lives under `crates/west-cli/tests/python/` rather than the repo's
+top-level `tests/` directory because the latter's `conftest.py`
+imports `west.app` (carry-over from removing the python CLI driver
+not yet untangled). Keeping the binding tests self-contained here
+means they don't need that conftest fixed first.
 
 Run with:
-    PYTHONPATH=src pytest crates/west-py/tests/
+    PYTHONPATH=src pytest crates/west-cli/tests/python/
 
 The binding is a hard dependency of `west.util` — if it isn't
-installed (run `maturin develop -m crates/west-py/Cargo.toml`),
-this file errors at import, not at the individual test level.
+installed (run `maturin develop -m crates/west-cli/Cargo.toml
+--features pyo3`), this file errors at import, not at the
+individual test level.
 '''
 
 import contextlib
@@ -31,10 +31,10 @@ import pytest
 # Make `import west` resolve to src/west/ for in-tree runs. pyproject.toml
 # already sets `pythonpath = "src"` for pytest invoked at the repo root,
 # but we don't rely on that here so the test runs from anywhere.
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-import _west_native  # noqa: E402
+from west import _west_native  # noqa: E402
 from west.util import WestNotFound, west_topdir  # noqa: E402
 
 

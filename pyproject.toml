@@ -35,19 +35,42 @@ content-type = "text/x-rst"
 [project.urls]
 Homepage = "https://github.com/zephyrproject-rtos/west"
 
-# The CLI `west` binary is the compiled rust executable from
-# crates/west-cli. Maturin ships it inside the wheel under
-# `<wheel>/west-<version>.data/scripts/west` so pip installs it
-# onto PATH; no python entry-point shim involved.
+# Maturin builds `crates/west-cli` with the `pyo3` feature, which
+# turns the crate into a hybrid:
+#  - the `[[bin]] name = "west"` target → the CLI binary, shipped at
+#    `<wheel>/west-<version>.data/scripts/west` (pip installs it onto
+#    PATH; no python entry-point shim needed).
+#  - the `[lib] crate-type = ["cdylib", "rlib"]` target → the
+#    `_west_native` python extension module, packaged into the wheel's
+#    python package so `from _west_native import ...` works after
+#    `pip install west`.
+# Both come from the same Cargo workspace, the same `cargo build`
+# pass, and ship in one wheel.
 
 [tool.maturin]
-# "bin" bindings: the cargo target produces a rust binary, and
-# maturin ships it alongside the python sources.
-bindings = "bin"
+bindings = "pyo3"
 manifest-path = "crates/west-cli/Cargo.toml"
+# Force the `pyo3` feature so the cdylib actually populates the
+# `_west_native` module. Without this, `bindings = "pyo3"` would
+# build an empty cdylib (the `#[pymodule]` is feature-gated).
+features = ["pyo3"]
+# In maturin's mixed Python/Rust layout, the rust extension is placed
+# as a SUBMODULE of the python package — `<wheel>/west/_west_native.abi3.so`
+# rather than a top-level `_west_native.abi3.so`. Callers therefore use
+# `from west._west_native import ...` to reach the binding. The dotted
+# name's last component must match the `#[pymodule] fn _west_native`
+# exported symbol.
+module-name = "west._west_native"
 # The python sources live in src/west/ (the established layout).
 # Maturin picks up everything under src/ as the python package.
 python-source = "src"
+# Wheel data dir. Files under `.wheel-data/scripts/` end up at
+# `<wheel>/west-VERSION.data/scripts/`, which pip installs to PATH
+# (PEP 427). The CLI binary belongs here. The `.wheel-data/` directory
+# is populated by `scripts/build-wheel.sh` before maturin runs —
+# maturin can't trigger an additional `cargo build --bin` itself in
+# `bindings = "pyo3"` mode (issue PyO3/maturin#368).
+data = ".wheel-data"
 # Include the YAML schema files maturin's default discovery
 # wouldn't pull in.
 include = [

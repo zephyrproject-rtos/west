@@ -20,7 +20,7 @@ use west_core::config::{ConfigError, ConfigValue};
 use west_core::config_paths::{ResolvedConfig, resolve};
 
 create_exception!(
-    _west_native,
+    west._west_native,
     MalformedConfig,
     PyException,
     "The west configuration was malformed."
@@ -38,7 +38,7 @@ create_exception!(
     frozen,
     from_py_object,
     name = "ConfigFile",
-    module = "_west_native"
+    module = "west._west_native"
 )]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[allow(clippy::upper_case_acronyms)] // python ConfigFile.ALL etc. are stable
@@ -49,7 +49,7 @@ pub enum ConfigFile {
     LOCAL = 4,
 }
 
-#[pyclass(name = "Configuration", module = "_west_native", unsendable, subclass)]
+#[pyclass(name = "Configuration", module = "west._west_native", unsendable, subclass)]
 pub struct Configuration {
     inner: west_core::config::Configuration,
     resolved: ResolvedConfig,

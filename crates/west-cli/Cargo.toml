@@ -6,6 +6,18 @@ rust-version.workspace = true
 repository.workspace = true
 license.workspace = true
 
+# `cdylib` is what maturin packages as the `_west_native` python
+# extension module; `rlib` is what `src/bin/west.rs` consumes. The
+# python module is feature-gated so `cargo install west-cli` from
+# crates.io (no `pyo3` feature) builds the CLI binary without the
+# pyo3 toolchain or libpython at all.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+pyo3 = ["dep:pyo3"]
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 console = "0.15"
@@ -18,6 +30,19 @@ shlex = "1"
 strfmt = "0.2"
 thiserror.workspace = true
 west-core = { path = "../west-core" }
+
+# Only pulled in when the `pyo3` feature is enabled (i.e., when maturin
+# is building the python wheel).
+pyo3 = { version = "0.28", features = ["extension-module", "abi3-py310"], optional = true }
+
+[build-dependencies]
+# Small dep, always included so the build script can call
+# `pyo3_build_config::add_extension_module_link_args()` when the
+# `pyo3` feature is active. macOS in particular needs
+# `-undefined dynamic_lookup` for the cdylib to leave python symbols
+# resolvable at runtime (maturin sets this itself when invoked
+# directly; plain `cargo build --features pyo3` does not).
+pyo3-build-config = "0.28"
 
 [dev-dependencies]
 assert_cmd = "2"

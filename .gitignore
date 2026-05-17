@@ -16,3 +16,11 @@ junit.xml
 
 # rust
 target/
+
+# Staging area for maturin's [tool.maturin] data directive.
+# Populated by scripts/build-wheel.sh; not source.
+.wheel-data/
+
+# Compiled extension module dropped by `maturin develop` into the
+# editable python source tree. Built artifact, not source.
+src/west/_west_native*.so

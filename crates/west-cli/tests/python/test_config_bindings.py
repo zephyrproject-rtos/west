@@ -12,12 +12,13 @@ fixtures, no dependency on the repo's broken top-level
 developer's machine is never touched.
 
 Run with:
-    PYTHONPATH=src pytest crates/west-py/tests/
+    PYTHONPATH=src pytest crates/west-cli/tests/python/
 
 The `_west_native` binding is a hard dependency of `west.configuration`;
-if it isn't installed (run `maturin develop -m crates/west-py/Cargo.toml`
-or `cargo build -p west-py` + copy the dylib), this file errors at
-import time, not at the individual test level.
+if it isn't installed (run `maturin develop -m crates/west-cli/Cargo.toml
+--features pyo3` or `cargo build -p west-cli --features pyo3` + copy
+the cdylib), this file errors at import time, not at the individual
+test level.
 '''
 
 import contextlib
@@ -29,10 +30,10 @@ from pathlib import Path
 import pytest
 
 # Make `import west` resolve to src/west/ for in-tree runs.
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-import _west_native  # noqa: E402
+from west import _west_native  # noqa: E402
 from west.configuration import Configuration, ConfigFile, MalformedConfig  # noqa: E402
 
 

@@ -1408,6 +1408,8 @@ dependencies = [
  "indicatif",
  "log",
  "md-5",
+ "pyo3",
+ "pyo3-build-config",
  "rayon",
  "serial_test",
  "shlex",
@@ -1431,15 +1433,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "toml_edit",
-]
-
-[[package]]
-name = "west-py"
-version = "2.0.0"
-dependencies = [
- "pyo3",
- "pyo3-build-config",
- "west-core",
 ]
 
 [[package]]

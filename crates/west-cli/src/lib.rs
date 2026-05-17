@@ -9,6 +9,12 @@ pub mod alias;
 pub mod commands;
 pub mod progress;
 
+// PyO3 bindings backing the python `_west_native` extension module.
+// Gated on the `pyo3` feature so `cargo install west-cli` from
+// crates.io doesn't pull pyo3 in for the python-free niche audience.
+#[cfg(feature = "pyo3")]
+mod python;
+
 #[derive(Parser, Debug)]
 #[command(name = "west", version, about = "The Zephyr RTOS meta-tool")]
 pub struct Cli {
