@@ -1,0 +1,30 @@
+[package]
+name = "west-py"
+version = "2.0.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+
+# PyO3 extension module backing the `_west_native` python import. The
+# `extension-module` feature tells the linker to leave python symbols
+# unresolved (they'll be filled in by the host interpreter at load time),
+# so this crate builds and tests under `cargo` without a libpython.
+# `abi3-py310` produces a single `.so` compatible with python 3.10+
+# (matches the wheel's `requires-python`).
+[lib]
+name = "west_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.28", features = ["extension-module", "abi3-py310"] }
+west-core = { path = "../west-core" }
+
+# `cargo build` (vs `maturin develop`) doesn't know to pass macOS its
+# `-undefined dynamic_lookup` linker flag, so plain workspace builds of
+# a pyo3 cdylib fail with "symbol(s) not found" against `_Py*` symbols.
+# `pyo3-build-config::add_extension_module_link_args()` in build.rs emits
+# the right cargo:rustc-link-arg directives per target. Maturin doesn't
+# need this — but our workspace-wide `cargo build`/`cargo test` does.
+[build-dependencies]
+pyo3-build-config = "0.28"

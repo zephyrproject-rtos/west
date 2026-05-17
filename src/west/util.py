@@ -50,8 +50,13 @@ def wrap(text: str, indent: str) -> list[str]:
     return textwrap.wrap(text, initial_indent=indent, subsequent_indent=indent)
 
 
-class WestNotFound(RuntimeError):
-    '''Neither the current directory nor any parent has a west workspace.'''
+# `_west_native` is the PyO3 extension shipped with the maturin-built
+# wheel. It's a hard dependency: `pip install west` always provides
+# it, and in-tree work needs `maturin develop -m crates/west-py/Cargo.toml`
+# once. There's no pure-python fallback by design — keeping one would
+# mean maintaining two implementations of the same walk-up logic, and
+# Phase 2's whole purpose is to delete the python copy.
+from _west_native import WestNotFound, west_topdir
 
 
 def west_dir(start: PathType | None = None) -> str:
@@ -64,29 +69,6 @@ def west_dir(start: PathType | None = None) -> str:
     Raises WestNotFound if no .west directory is found.
     '''
     return os.path.join(west_topdir(start), WEST_DIR)
-
-
-def west_topdir(start: PathType | None = None, fall_back: bool = True) -> str:
-    '''
-    Like west_dir(), but returns the path to the parent directory of the .west/
-    directory instead, where project repositories are stored
-    '''
-    cur_dir = Path(start or os.getcwd())
-
-    while True:
-        if (cur_dir / WEST_DIR).is_dir():
-            return os.fspath(cur_dir)
-
-        parent_dir = cur_dir.parent
-        if cur_dir == parent_dir:
-            # At the root. Should we fall back?
-            if fall_back and os.environ.get('ZEPHYR_BASE'):
-                return west_topdir(os.environ['ZEPHYR_BASE'], fall_back=False)
-            else:
-                raise WestNotFound(
-                    'Could not find a west workspace in this or any parent directory'
-                )
-        cur_dir = parent_dir
 
 
 def expand_path(path: PathType) -> Path:
