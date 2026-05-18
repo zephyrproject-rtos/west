@@ -7,9 +7,10 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use console::Style;
 use indicatif::{ProgressBar, ProgressStyle};
 
-use west_core::vcs::{ProgressEvent, ProgressSink};
+use west_core::vcs::{CommitSummary, ProgressEvent, ProgressSink};
 
 /// How often a bar pulses while waiting for the first Tick (so the
 /// spinner moves visibly even on slow networks).
@@ -45,6 +46,61 @@ pub fn truncate_prefix(s: &str, max: usize) -> String {
         t.push('…');
         t
     }
+}
+
+/// Max columns reserved for the commit subject on success lines.
+/// Budget per row: prefix (32) + space + glyph (1) + space + sha column
+/// (12) + space + subject (60) ≈ 108 cols, fits comfortably in
+/// 110-column terminals. Only the subject is truncated; if the SHA
+/// happens to exceed `SHA_WIDTH` we keep it intact and the row shifts.
+pub const SUBJECT_WIDTH: usize = 60;
+
+/// Visible width of the SHA column on success lines. Sized so that all
+/// short-SHA widths observed in real Zephyr manifests (typically 7,
+/// sometimes growing to ~11 on busy repos) line up under each other.
+pub const SHA_WIDTH: usize = 12;
+
+/// Build the success line for a finished project / clone: green `✓`,
+/// yellow fixed-width SHA column, dimmed subject. Pure function so
+/// the line layout can be unit-tested. Both `west update`'s
+/// per-project reporter and `west init`'s single-bar flow use this.
+pub fn render_done_line(prefix: &str, summary: &CommitSummary) -> String {
+    let subject = truncate_subject(&summary.subject, SUBJECT_WIDTH);
+    let padded_sha = format!("{sha:<width$}", sha = &summary.short_sha, width = SHA_WIDTH);
+    format!(
+        "{prefix:<prefix_width$} {label} {sha} {subject}",
+        prefix = prefix,
+        prefix_width = PREFIX_WIDTH,
+        label = Style::new().green().bold().apply_to("✓"),
+        sha = Style::new().yellow().apply_to(padded_sha),
+        subject = Style::new().dim().apply_to(subject),
+    )
+}
+
+/// Build the failure line: red `✗` + a free-form message. Pairs with
+/// [`render_done_line`] so success and failure rows have the same
+/// prefix column and glyph slot.
+pub fn render_failed_line(prefix: &str, msg: &str) -> String {
+    format!(
+        "{prefix:<prefix_width$} {label} {msg}",
+        prefix = prefix,
+        prefix_width = PREFIX_WIDTH,
+        label = Style::new().red().bold().apply_to("✗"),
+    )
+}
+
+/// Truncate `s` to at most `max` columns, appending `…` if it had to be
+/// cut. ASCII-aware (commit subjects are typically ASCII; non-ASCII falls
+/// back to a byte-safe slice via `char_indices`).
+pub fn truncate_subject(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_owned();
+    }
+    let cut = max.saturating_sub(1);
+    let end = s.char_indices().nth(cut).map(|(i, _)| i).unwrap_or(s.len());
+    let mut out = s[..end].to_owned();
+    out.push('…');
+    out
 }
 
 /// `ProgressSink` that drives a single `indicatif::ProgressBar`.
@@ -131,5 +187,79 @@ impl ProgressSink for IndicatifSink {
                 // vs error-restyle).
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use console::strip_ansi_codes;
+
+    #[test]
+    fn done_line_contains_glyph_sha_and_subject() {
+        let prefix = truncate_prefix("zephyr", PREFIX_WIDTH);
+        let line = render_done_line(
+            &prefix,
+            &CommitSummary {
+                short_sha: "9164bd1".into(),
+                subject: "tests: Format platform in multiline".into(),
+            },
+        );
+        let plain = strip_ansi_codes(&line);
+        assert!(plain.starts_with("zephyr"), "got: {plain:?}");
+        assert!(plain.contains('✓'), "got: {plain:?}");
+        assert!(plain.contains("9164bd1"), "got: {plain:?}");
+        assert!(
+            plain.contains("tests: Format platform in multiline"),
+            "got: {plain:?}"
+        );
+    }
+
+    #[test]
+    fn done_line_pads_sha_to_fixed_column() {
+        let prefix = truncate_prefix("zephyr", PREFIX_WIDTH);
+        let line = render_done_line(
+            &prefix,
+            &CommitSummary {
+                short_sha: "abc1234".into(), // 7 chars, shorter than SHA_WIDTH
+                subject: "subject line".into(),
+            },
+        );
+        let plain = strip_ansi_codes(&line);
+        let sha_at = plain.find("abc1234").expect("sha in line");
+        let sub_at = plain.find("subject line").expect("subject in line");
+        // Layout: ... SHA<pad-to-SHA_WIDTH> SPACE subject
+        let expected_gap = SHA_WIDTH - "abc1234".len() + 1;
+        assert_eq!(
+            sub_at - sha_at - "abc1234".len(),
+            expected_gap,
+            "subject not aligned to SHA column; line: {plain:?}"
+        );
+    }
+
+    #[test]
+    fn failed_line_contains_glyph_and_message() {
+        let prefix = truncate_prefix("zephyr", PREFIX_WIDTH);
+        let line = render_failed_line(&prefix, "fetch: remote unreachable");
+        let plain = strip_ansi_codes(&line);
+        assert!(plain.starts_with("zephyr"), "got: {plain:?}");
+        assert!(plain.contains('✗'), "got: {plain:?}");
+        assert!(
+            plain.contains("fetch: remote unreachable"),
+            "got: {plain:?}"
+        );
+    }
+
+    #[test]
+    fn truncate_subject_short_passthrough() {
+        assert_eq!(truncate_subject("short", 60), "short");
+    }
+
+    #[test]
+    fn truncate_subject_long_gets_ellipsis() {
+        let long = "a".repeat(80);
+        let out = truncate_subject(&long, 60);
+        assert_eq!(out.chars().count(), 60);
+        assert!(out.ends_with('…'));
     }
 }

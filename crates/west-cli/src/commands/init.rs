@@ -173,10 +173,11 @@ fn bootstrap(
             // Show the URL's basename (e.g. `example-application`) rather
             // than a truncated full URL — same logic init uses elsewhere
             // when falling back from the manifest's `self.path`.
-            pb.set_prefix(crate::progress::truncate_prefix(
+            let prefix = crate::progress::truncate_prefix(
                 &url_basename(url),
                 crate::progress::PREFIX_WIDTH,
-            ));
+            );
+            pb.set_prefix(prefix.clone());
             pb.set_style(crate::progress::spinner_style());
             pb.set_message("cloning…");
             pb.enable_steady_tick(crate::progress::TICK_INTERVAL);
@@ -190,9 +191,39 @@ fn bootstrap(
                 mirror: false,
             };
             let res = vcs.clone(&spec, &mut out);
+            // Replace the spinner with the same `✓ <sha> <subject>` /
+            // `✗ <msg>` lines `west update` uses on completion, so a
+            // bootstrap clone has the same visual shape as a per-project
+            // update. The bar is cleared first; the formatted line is
+            // emitted via `eprintln` (single bar = no MultiProgress to
+            // route through).
+            pb.finish_and_clear();
             match &res {
-                Ok(()) => pb.finish_with_message("done"),
-                Err(_) => pb.finish_with_message("failed"),
+                Ok(()) => match vcs.commit_summary(&tmp_dir, "HEAD") {
+                    Ok(summary) => {
+                        eprintln!("{}", crate::progress::render_done_line(&prefix, &summary));
+                    }
+                    Err(_) => {
+                        // SHA lookup failed despite a successful clone
+                        // (very unlikely — would mean the working tree
+                        // has no HEAD). Fall back to a minimal success
+                        // line so the user still sees the clone
+                        // finished.
+                        eprintln!("{}", crate::progress::render_done_line(
+                            &prefix,
+                            &vcs::CommitSummary {
+                                short_sha: String::new(),
+                                subject: "cloned".into(),
+                            },
+                        ));
+                    }
+                },
+                Err(e) => {
+                    eprintln!(
+                        "{}",
+                        crate::progress::render_failed_line(&prefix, &e.to_string())
+                    );
+                }
             }
             res.map_err(InitError::Vcs)?;
         } else {
