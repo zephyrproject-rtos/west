@@ -16,8 +16,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyList;
 
 use west_core::manifest::{
-    self as core, GroupFilterEntry as CoreGroupFilterEntry, ManifestError,
-    Submodule as CoreSubmodule, Submodules as CoreSubmodules,
+    self as core, GroupFilterEntry as CoreGroupFilterEntry, ImportSource, ImportSourceError,
+    ManifestError, Submodule as CoreSubmodule, Submodules as CoreSubmodules,
 };
 
 create_exception!(
@@ -291,10 +291,39 @@ impl Manifest {
     }
 
     /// Parse the manifest file at `path`. Format dispatch is by
-    /// extension (yaml/yml/toml/json).
+    /// extension (yaml/yml/toml/json). Imports in the manifest raise
+    /// `ManifestImportFailed`; use `from_path_with_imports` to resolve
+    /// them.
     #[staticmethod]
     fn from_path(path: PathBuf) -> PyResult<Self> {
         core::Manifest::from_path(&path)
+            .map(|inner| Manifest { inner })
+            .map_err(manifest_error_to_py)
+    }
+
+    /// Parse the manifest at `path`, resolving any imports via the
+    /// supplied python `callback`. `manifest_repo_root` is the
+    /// workspace-absolute path to the manifest repo (used to resolve
+    /// top-level / self-repo imports relative to the right tree).
+    ///
+    /// The callback signature is `(project_name: str,
+    /// project_path: str, relative_file: str) -> str | None`:
+    ///   - return the file's content (as a string) to feed the
+    ///     resolver,
+    ///   - return `None` to signal "this import is unavailable" (the
+    ///     resolver continues with whatever has been collected so far —
+    ///     same semantics as west's read-only flows).
+    ///
+    /// Errors raised inside the callback are surfaced as
+    /// `ManifestImportFailed`.
+    #[staticmethod]
+    fn from_path_with_imports(
+        path: PathBuf,
+        manifest_repo_root: PathBuf,
+        callback: Py<PyAny>,
+    ) -> PyResult<Self> {
+        let source = PyImportSource { callback };
+        core::Manifest::from_path_with_imports(&path, &manifest_repo_root, &source)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
     }
@@ -394,6 +423,45 @@ fn parse_cli_group_filter(items: Vec<String>) -> PyResult<Vec<GroupFilterEntry>>
     match core::parse_cli_group_filter(&items) {
         Ok(entries) => Ok(entries.iter().map(GroupFilterEntry::from_core).collect()),
         Err(e) => Err(manifest_error_to_py(e)),
+    }
+}
+
+// ---- Import resolution bridge --------------------------------------------
+
+/// Adapts a python callable to `west_core::manifest::ImportSource`.
+/// Each `project_manifest` invocation acquires the GIL, calls the
+/// python callable with `(project_name, project_path, relative_file)`,
+/// and translates the return value: `None` → resolver continues
+/// without this import; `str` → fed to the resolver as the import's
+/// content; any other type, or an exception, → `ImportSourceError`
+/// (which the rust resolver surfaces as
+/// `ManifestError::ImportSourceFailed` → `ManifestImportFailed`).
+struct PyImportSource {
+    callback: Py<PyAny>,
+}
+
+impl ImportSource for PyImportSource {
+    fn project_manifest(
+        &self,
+        project: &core::Project,
+        relative_file: &str,
+    ) -> Result<Option<String>, ImportSourceError> {
+        Python::attach(|py| {
+            let project_path = project.path.to_string_lossy();
+            let result = self
+                .callback
+                .bind(py)
+                .call1((project.name.as_str(), &*project_path, relative_file))
+                .map_err(|e| ImportSourceError::msg(format!("{}: {e}", project.name)))?;
+            if result.is_none() {
+                Ok(None)
+            } else {
+                let s: String = result
+                    .extract()
+                    .map_err(|e| ImportSourceError::msg(format!("{}: {e}", project.name)))?;
+                Ok(Some(s))
+            }
+        })
     }
 }
 
