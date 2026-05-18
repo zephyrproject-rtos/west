@@ -16,7 +16,11 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
-pyo3 = ["dep:pyo3"]
+# Pulls in pyo3 + the structured-data serializers/deserializers needed
+# by the python binding. The CLI binary doesn't need any of these for
+# its own work; `cargo install west-cli` builds a clean binary with
+# no python toolchain involved.
+pyo3 = ["dep:pyo3", "dep:serde_json", "dep:serde_yaml_ng", "dep:toml_edit"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -34,6 +38,15 @@ west-core = { path = "../west-core" }
 # Only pulled in when the `pyo3` feature is enabled (i.e., when maturin
 # is building the python wheel).
 pyo3 = { version = "0.28", features = ["extension-module", "abi3-py310"], optional = true }
+# Structured-data serialization for the python `_west_native.parse_*`
+# / `dump_*` bindings. west-core already pulls in `serde_json` and
+# `toml_edit` transitively; we list them here explicitly with
+# `optional = true` so Cargo's feature unifier keeps them out of the
+# non-pyo3 build path. `serde_yaml_ng` (the maintained successor to
+# `serde_yaml`) is the only new dep.
+serde_json = { version = "1", optional = true }
+serde_yaml_ng = { version = "0.10", optional = true }
+toml_edit = { version = "0.22", features = ["serde"], optional = true }
 
 [build-dependencies]
 # Small dep, always included so the build script can call
