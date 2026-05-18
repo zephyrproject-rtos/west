@@ -1143,6 +1143,139 @@ impl Manifest {
             .iter()
             .any(|g| !disabled.contains(g.as_str()))
     }
+
+    /// Walk the parsed manifest into a `serde_json::Value` matching the
+    /// canonical `west.yml` shape after import resolution:
+    ///
+    /// ```yaml
+    /// manifest:
+    ///   group-filter: [...]       # only if non-empty
+    ///   self: {path, west-commands?}
+    ///   projects: [...]
+    /// ```
+    ///
+    /// This is the input to the structured-data serializers the CLI
+    /// uses for `west manifest --resolve` / `--freeze`. Resolved-form
+    /// only: there's no `remotes:` / `defaults:` block, and each
+    /// project carries a direct `url` (the input-schema's
+    /// `remote:` / `repo-path:` constructs have already been resolved
+    /// away). Submodules collapse to `true` (all), are omitted
+    /// (none), or rendered as `[{path, name?}, …]` (specific).
+    pub fn to_value(&self) -> serde_json::Value {
+        use serde_json::{Map, Value, json};
+
+        let group_filter: Vec<Value> = self
+            .group_filter
+            .iter()
+            .map(|e| {
+                let sign = if e.disabled { '-' } else { '+' };
+                Value::String(format!("{sign}{}", e.group))
+            })
+            .collect();
+
+        let mut self_block = Map::new();
+        self_block.insert(
+            "path".into(),
+            Value::String(self.self_.path.to_string_lossy().into_owned()),
+        );
+        match self.self_.west_commands.as_slice() {
+            [] => {}
+            [single] => {
+                self_block.insert(
+                    "west-commands".into(),
+                    Value::String(single.to_string_lossy().into_owned()),
+                );
+            }
+            many => {
+                let arr: Vec<Value> = many
+                    .iter()
+                    .map(|p| Value::String(p.to_string_lossy().into_owned()))
+                    .collect();
+                self_block.insert("west-commands".into(), Value::Array(arr));
+            }
+        }
+
+        let projects: Vec<Value> = self.projects.iter().map(project_to_value).collect();
+
+        let mut manifest_block = Map::new();
+        if !group_filter.is_empty() {
+            manifest_block.insert("group-filter".into(), Value::Array(group_filter));
+        }
+        manifest_block.insert("self".into(), Value::Object(self_block));
+        manifest_block.insert("projects".into(), Value::Array(projects));
+
+        json!({ "manifest": Value::Object(manifest_block) })
+    }
+}
+
+/// Serialize one resolved `Project` into the canonical YAML shape.
+/// Pure function so `Manifest::to_value` can map over `self.projects`
+/// without borrowing self.
+fn project_to_value(p: &Project) -> serde_json::Value {
+    use serde_json::{Map, Value};
+
+    let mut o = Map::new();
+    o.insert("name".into(), Value::String(p.name.clone()));
+    if let Some(d) = &p.description {
+        o.insert("description".into(), Value::String(d.clone()));
+    }
+    o.insert("url".into(), Value::String(p.url.clone()));
+    o.insert("revision".into(), Value::String(p.revision.clone()));
+    // Only emit `path` when it differs from `name` — matches python's
+    // `Project.as_dict` shape and keeps the output compact for the
+    // common case (project named after its directory).
+    let path_str = p.path.to_string_lossy();
+    if path_str != p.name {
+        o.insert("path".into(), Value::String(path_str.into_owned()));
+    }
+    if let Some(d) = p.clone_depth {
+        o.insert("clone-depth".into(), Value::Number(d.into()));
+    }
+    if !p.west_commands.is_empty() {
+        match p.west_commands.as_slice() {
+            [single] => {
+                o.insert(
+                    "west-commands".into(),
+                    Value::String(single.to_string_lossy().into_owned()),
+                );
+            }
+            many => {
+                let arr: Vec<Value> = many
+                    .iter()
+                    .map(|p| Value::String(p.to_string_lossy().into_owned()))
+                    .collect();
+                o.insert("west-commands".into(), Value::Array(arr));
+            }
+        }
+    }
+    if !p.groups.is_empty() {
+        let arr: Vec<Value> = p.groups.iter().cloned().map(Value::String).collect();
+        o.insert("groups".into(), Value::Array(arr));
+    }
+    match &p.submodules {
+        Submodules::None => {}
+        Submodules::All => {
+            o.insert("submodules".into(), Value::Bool(true));
+        }
+        Submodules::Specific(items) => {
+            let arr: Vec<Value> = items
+                .iter()
+                .map(|s| {
+                    let mut sub = Map::new();
+                    sub.insert(
+                        "path".into(),
+                        Value::String(s.path.to_string_lossy().into_owned()),
+                    );
+                    if let Some(n) = &s.name {
+                        sub.insert("name".into(), Value::String(n.clone()));
+                    }
+                    Value::Object(sub)
+                })
+                .collect();
+            o.insert("submodules".into(), Value::Array(arr));
+        }
+    }
+    Value::Object(o)
 }
 
 /// Parse user-supplied group-filter strings (CLI flag `--group-filter`).
@@ -1460,9 +1593,110 @@ fn is_valid_group(g: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn yaml(s: &str) -> Result<Manifest, ManifestError> {
         Manifest::from_yaml_str(s)
+    }
+
+    #[test]
+    fn to_value_emits_canonical_shape() {
+        let m = yaml(
+            r#"
+manifest:
+  group-filter: [-noisy]
+  self:
+    path: my-manifest
+    west-commands: scripts/wc.yml
+  projects:
+    - name: alpha
+      url: https://example.com/alpha
+      revision: main
+      groups: [optional]
+    - name: beta
+      url: https://example.com/beta
+      path: external/beta
+      submodules: true
+"#,
+        )
+        .unwrap();
+        let v = m.to_value();
+        assert_eq!(
+            v,
+            json!({
+                "manifest": {
+                    "group-filter": ["-noisy"],
+                    "self": {
+                        "path": "my-manifest",
+                        "west-commands": "scripts/wc.yml"
+                    },
+                    "projects": [
+                        {
+                            "name": "alpha",
+                            "url": "https://example.com/alpha",
+                            "revision": "main",
+                            "groups": ["optional"]
+                        },
+                        {
+                            "name": "beta",
+                            "url": "https://example.com/beta",
+                            "revision": "master",
+                            "path": "external/beta",
+                            "submodules": true
+                        }
+                    ]
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn to_value_emits_submodule_list_form() {
+        let m = yaml(
+            r#"
+manifest:
+  projects:
+    - name: a
+      url: https://x
+      submodules:
+        - path: sub1
+        - path: sub2
+          name: named
+"#,
+        )
+        .unwrap();
+        let v = m.to_value();
+        let subs = &v["manifest"]["projects"][0]["submodules"];
+        assert_eq!(
+            *subs,
+            json!([{"path": "sub1"}, {"path": "sub2", "name": "named"}])
+        );
+    }
+
+    #[test]
+    fn to_value_omits_optional_empty_fields() {
+        let m = yaml(
+            r#"
+manifest:
+  projects:
+    - name: a
+      url: https://x
+"#,
+        )
+        .unwrap();
+        let v = m.to_value();
+        let proj = &v["manifest"]["projects"][0];
+        // Default rev still emits — it's always present after resolution.
+        assert!(proj.get("revision").is_some());
+        // None of the truly-optional fields appear.
+        assert!(proj.get("description").is_none());
+        assert!(proj.get("path").is_none()); // path == name → elided
+        assert!(proj.get("clone-depth").is_none());
+        assert!(proj.get("groups").is_none());
+        assert!(proj.get("west-commands").is_none());
+        assert!(proj.get("submodules").is_none());
+        // Top-level: no group-filter when manifest doesn't set one.
+        assert!(v["manifest"].get("group-filter").is_none());
     }
 
     #[test]

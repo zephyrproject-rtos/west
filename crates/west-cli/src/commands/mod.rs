@@ -11,6 +11,7 @@ pub mod extension;
 pub mod forall;
 pub mod init;
 pub mod list;
+pub mod manifest;
 pub mod select;
 pub mod topdir;
 pub mod update;
@@ -30,6 +31,8 @@ pub enum Command {
     Init(init::InitArgs),
     /// List projects defined in the manifest.
     List(list::ListArgs),
+    /// Inspect, validate, resolve, or freeze the workspace manifest.
+    Manifest(manifest::ManifestArgs),
     /// Print the top directory of the west workspace.
     Topdir,
     /// Update projects to their manifest revisions.
@@ -47,6 +50,7 @@ pub fn dispatch(cmd: Command, mut loaded: LoadedConfig) -> ExitCode {
         Command::Forall(a) => forall::run(a, &mut loaded),
         Command::Init(a) => init::run(a, &mut loaded),
         Command::List(a) => list::run(a, &mut loaded),
+        Command::Manifest(a) => manifest::run(a, &mut loaded),
         Command::Topdir => topdir::run(),
         Command::Update(a) => update::run(a, &mut loaded),
         Command::External(args) => extension::run(&args, &loaded),
