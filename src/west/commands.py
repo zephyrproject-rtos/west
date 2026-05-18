@@ -22,15 +22,8 @@ from types import ModuleType
 from typing import NoReturn
 
 import colorama
-import pykwalify
 
-try:
-    from yaml import CSafeLoader as SafeLoader
-except ImportError:
-    from yaml import SafeLoader  # type: ignore
-
-import yaml
-
+from west import _west_native
 from west.configuration import Configuration
 from west.manifest import Manifest, Project
 from west.util import PathType, escapes_directory, quote_sh_list
@@ -42,8 +35,6 @@ west commands subclass.
 This package also provides support for extension commands.'''
 
 __all__ = ['CommandContextError', 'CommandError', 'WestCommand']
-
-_EXT_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'west-commands-schema.yml')
 
 # Cache which maps files implementing extension commands to their
 # imported modules.
@@ -687,18 +678,18 @@ def _ext_specs(project):
         if not os.path.exists(spec_file):
             continue
 
-        # Load the spec file and check the schema.
+        # Load the spec file. Schema validation against
+        # `west-commands.yml`'s structure is owned by the rust core
+        # (`west_core::west_commands::WestCommandsFile`); the rust
+        # binary runs that check during its own extension discovery.
+        # The python path here just parses the file as structured
+        # data — a malformed key shape surfaces as a KeyError /
+        # TypeError below.
         with open(spec_file) as f:
             try:
-                commands_spec = yaml.load(f.read(), Loader=SafeLoader)
-            except yaml.YAMLError as e:
+                commands_spec = _west_native.parse_yaml(f.read())
+            except ValueError as e:
                 raise ExtensionCommandError from e
-        try:
-            pykwalify.core.Core(
-                source_data=commands_spec, schema_files=[_EXT_SCHEMA_PATH]
-            ).validate()
-        except pykwalify.errors.SchemaError as e:
-            raise ExtensionCommandError from e
 
         for commands_desc in commands_spec['west-commands']:
             ret.extend(_ext_specs_from_desc(project, commands_desc))
