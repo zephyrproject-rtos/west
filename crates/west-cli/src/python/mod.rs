@@ -7,11 +7,13 @@
 use pyo3::prelude::*;
 
 mod config;
+mod manifest;
 mod topdir;
 
 #[pymodule]
 fn _west_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     topdir::register(m)?;
     config::register(m)?;
+    manifest::register(m)?;
     Ok(())
 }

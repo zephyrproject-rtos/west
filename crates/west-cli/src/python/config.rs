@@ -49,7 +49,12 @@ pub enum ConfigFile {
     LOCAL = 4,
 }
 
-#[pyclass(name = "Configuration", module = "west._west_native", unsendable, subclass)]
+#[pyclass(
+    name = "Configuration",
+    module = "west._west_native",
+    unsendable,
+    subclass
+)]
 pub struct Configuration {
     inner: west_core::config::Configuration,
     resolved: ResolvedConfig,
@@ -87,12 +92,7 @@ impl Configuration {
     }
 
     #[pyo3(signature = (option, default=false, configfile=ConfigFile::ALL))]
-    fn getboolean(
-        &self,
-        option: &str,
-        default: bool,
-        configfile: ConfigFile,
-    ) -> PyResult<bool> {
+    fn getboolean(&self, option: &str, default: bool, configfile: ConfigFile) -> PyResult<bool> {
         let paths = self.paths_for(configfile);
         for layer in paths.iter().rev() {
             match self.inner.get_bool_in(option, layer) {
@@ -256,20 +256,13 @@ impl Configuration {
     /// Iterable of (option, value) pairs for the requested scope.
     /// Values are coerced to python via [`config_value_to_py`].
     #[pyo3(signature = (configfile=ConfigFile::ALL))]
-    fn items<'py>(
-        &self,
-        py: Python<'py>,
-        configfile: ConfigFile,
-    ) -> PyResult<Bound<'py, PyList>> {
+    fn items<'py>(&self, py: Python<'py>, configfile: ConfigFile) -> PyResult<Bound<'py, PyList>> {
         let mut merged: std::collections::BTreeMap<String, ConfigValue> =
             std::collections::BTreeMap::new();
         let paths = self.paths_for(configfile);
         // Low → high precedence so later layers overwrite earlier.
         for layer in &paths {
-            let items = self
-                .inner
-                .items_in(layer)
-                .map_err(config_error_to_py)?;
+            let items = self.inner.items_in(layer).map_err(config_error_to_py)?;
             for (k, v) in items {
                 merged.insert(k, v);
             }
@@ -278,7 +271,8 @@ impl Configuration {
             .into_iter()
             .map(|(k, v)| {
                 let value = config_value_to_py(py, &v)?;
-                let tuple = pyo3::types::PyTuple::new(py, [k.into_pyobject(py)?.into_any(), value])?;
+                let tuple =
+                    pyo3::types::PyTuple::new(py, [k.into_pyobject(py)?.into_any(), value])?;
                 Ok(tuple.into_any())
             })
             .collect();
@@ -358,9 +352,8 @@ fn pyany_to_config_value(value: &Bound<'_, PyAny>) -> PyResult<ConfigValue> {
         return Ok(ConfigValue::String(s));
     }
     if let Ok(seq) = value.try_iter() {
-        let items: PyResult<Vec<ConfigValue>> = seq
-            .map(|item| pyany_to_config_value(&item?))
-            .collect();
+        let items: PyResult<Vec<ConfigValue>> =
+            seq.map(|item| pyany_to_config_value(&item?)).collect();
         return Ok(ConfigValue::List(items?));
     }
     Err(PyTypeError::new_err(format!(
