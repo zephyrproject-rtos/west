@@ -153,13 +153,38 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         }
     };
 
-    let manifest = match load_manifest(&workspace, &loaded.config, vcs.as_ref()) {
+    // Decide whether to drive an indicatif progress bar for any
+    // import-resolution clones the manifest load triggers. Same rule
+    // the main worker pool uses below: TTY + non-raw → indicatif;
+    // otherwise (raw or non-TTY) git stdio attaches natively to the
+    // parent's terminal. Reading `output.raw` direct here keeps us
+    // from having to hoist `Settings::from_config`, which validates
+    // a bunch of other update-specific knobs we don't need yet.
+    let raw_for_import = loaded
+        .config
+        .get_bool("output.raw")
+        .ok()
+        .flatten()
+        .unwrap_or(false);
+    let import_progress = (!raw_for_import && io::stderr().is_terminal())
+        .then(import_source::ImportProgress::new);
+
+    let manifest = match load_manifest(
+        &workspace,
+        &loaded.config,
+        vcs.as_ref(),
+        import_progress.as_ref(),
+    ) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("west: {e}");
             return ExitCode::FAILURE;
         }
     };
+    // Drop the import-progress MultiProgress before the main worker
+    // pool creates its own — keeps the two from fighting over the
+    // terminal.
+    drop(import_progress);
 
     let cli_group_filter = match read_cli_group_filter(&loaded.config) {
         Ok(f) => f,
@@ -748,6 +773,7 @@ fn load_manifest(
     workspace: &Path,
     config: &Configuration,
     vcs: &dyn Vcs,
+    import_progress: Option<&import_source::ImportProgress>,
 ) -> Result<Manifest, String> {
     let manifest_path: PathBuf = config
         .get_str("manifest.path")
@@ -761,7 +787,10 @@ fn load_manifest(
         .unwrap_or_else(|| PathBuf::from(DEFAULT_MANIFEST_FILE));
     let manifest_repo_root = workspace.join(&manifest_path);
     let full = manifest_repo_root.join(&manifest_file);
-    let source = import_source::WorkspaceImportSource::new(workspace, vcs);
+    let mut source = import_source::WorkspaceImportSource::new(workspace, vcs);
+    if let Some(p) = import_progress {
+        source = source.with_progress(p);
+    }
     Manifest::from_path_with_imports(&full, &manifest_repo_root, &source)
         .map_err(|e| format!("manifest {}: {e}", full.display()))
 }
