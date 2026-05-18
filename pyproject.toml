@@ -1,6 +1,14 @@
 [build-system]
 requires = ["maturin>=1.7,<2.0"]
-build-backend = "maturin"
+# Custom PEP 517 wrapper around maturin's backend. The wrapper
+# pre-builds the CLI binary via `cargo build --features pyo3` and
+# stages it where maturin's `[tool.maturin] data` directive can pick
+# it up, so a vanilla `pip install .` ends up with both the python
+# extension AND the `west` binary on PATH. See `_build_backend.py`
+# for details and the link to PyO3/maturin#368 (the upstream gap
+# this works around).
+build-backend = "_build_backend"
+backend-path = ["."]
 
 [project]
 name = "west"
@@ -67,8 +75,8 @@ python-source = "src"
 # Wheel data dir. Files under `.wheel-data/scripts/` end up at
 # `<wheel>/west-VERSION.data/scripts/`, which pip installs to PATH
 # (PEP 427). The CLI binary belongs here. The `.wheel-data/` directory
-# is populated by `scripts/build-wheel.sh` before maturin runs —
-# maturin can't trigger an additional `cargo build --bin` itself in
+# is populated by `_build_backend.py` before maturin runs — maturin
+# can't trigger an additional `cargo build --bin` itself in
 # `bindings = "pyo3"` mode (issue PyO3/maturin#368).
 data = ".wheel-data"
 # Include the YAML schema files maturin's default discovery
