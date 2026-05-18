@@ -132,6 +132,22 @@ pub trait ImportSource {
         project: &Project,
         relative_file: &str,
     ) -> Result<Option<String>, ImportSourceError>;
+
+    /// Where this project's working tree lives on disk, used by the
+    /// resolver to anchor *filesystem*-style imports (`self.import:
+    /// <dir>/`, top-level `import: <file>`) that appear inside the
+    /// manifest body returned by [`Self::project_manifest`].
+    ///
+    /// The default returns `None`, in which case the resolver falls
+    /// back to the outer manifest repo root for nested filesystem
+    /// imports — fine for in-memory test sources, wrong for any
+    /// source that materializes projects on disk. Implementations
+    /// like `WorkspaceImportSource` / `ReadOnlyImportSource` override
+    /// to return `Some(workspace.join(&project.path))`.
+    fn project_root(&self, project: &Project) -> Option<PathBuf> {
+        let _ = project;
+        None
+    }
 }
 
 /// Opaque error type returned by [`ImportSource`] implementations. The
@@ -655,7 +671,14 @@ fn flatten_imports(schema: &ImportSchema) -> Vec<ImportMap> {
 }
 
 struct Resolver<'a> {
-    repo_root: &'a Path,
+    /// Filesystem base for the manifest currently being absorbed.
+    /// Starts as the workspace manifest's repo root; swapped to a
+    /// project's working-tree root inside
+    /// [`Self::absorb_project_import`] so that a project-imported
+    /// manifest's nested `self.import: <dir>/` resolves against the
+    /// importing project, not the outer manifest repo. Restored on
+    /// the way out.
+    current_repo_root: PathBuf,
     source: &'a dyn ImportSource,
     projects: Vec<Project>,
     seen_names: HashSet<String>,
@@ -671,7 +694,7 @@ struct Resolver<'a> {
 impl<'a> Resolver<'a> {
     fn new(repo_root: &'a Path, source: &'a dyn ImportSource) -> Self {
         Self {
-            repo_root,
+            current_repo_root: repo_root.to_path_buf(),
             source,
             projects: Vec::new(),
             seen_names: HashSet::new(),
@@ -813,7 +836,12 @@ impl<'a> Resolver<'a> {
             .file
             .clone()
             .unwrap_or_else(|| MANIFEST_DEFAULT_FILE.to_owned());
-        let abs_path = self.repo_root.join(&file_name);
+        // Resolve against the manifest currently being absorbed —
+        // for the root manifest this equals `self.repo_root`; for a
+        // project-imported manifest body this is the project's
+        // working-tree root (set by `absorb_project_import` via
+        // `ImportSource::project_root`).
+        let abs_path = self.current_repo_root.join(&file_name);
 
         // Compose filter and prefix once at this level so a directory
         // form's per-file recursions all see the same constraints.
@@ -936,9 +964,23 @@ impl<'a> Resolver<'a> {
             Some(p) => parent_prefix.join(p),
         };
 
+        // Anchor filesystem imports inside the project-imported body
+        // to the project's own working tree. The save/swap/restore
+        // dance lets nested project-imports below this point continue
+        // to use *their* project root rather than the outer manifest
+        // repo root. If the source can't provide a root (in-memory
+        // test sources), keep the outer root — matches the existing
+        // resolver behaviour and the trait's documented fallback.
+        let saved_repo_root = self.current_repo_root.clone();
+        if let Some(root) = self.source.project_root(project) {
+            self.current_repo_root = root;
+        }
+
         self.depth += 1;
         let res = self.absorb(parsed, composed, prefix);
         self.depth -= 1;
+
+        self.current_repo_root = saved_repo_root;
         self.visited_projects.remove(&project.name);
         res
     }
@@ -2465,8 +2507,12 @@ manifest:
     /// Test double for [`ImportSource`] that maps project names to YAML
     /// bodies. Returns `Ok(None)` for unmapped projects, exercising the
     /// resolver's "missing import file → silently skipped" branch.
+    /// Optionally overrides [`ImportSource::project_root`] per project,
+    /// which lets tests verify that filesystem imports inside a
+    /// project-imported body resolve against the correct base.
     struct StaticImportSource {
         manifests: BTreeMap<String, String>,
+        roots: BTreeMap<String, PathBuf>,
         calls: RefCell<Vec<(String, String)>>,
     }
 
@@ -2474,11 +2520,16 @@ manifest:
         fn new() -> Self {
             Self {
                 manifests: BTreeMap::new(),
+                roots: BTreeMap::new(),
                 calls: RefCell::new(Vec::new()),
             }
         }
         fn with(mut self, project: &str, body: &str) -> Self {
             self.manifests.insert(project.to_owned(), body.to_owned());
+            self
+        }
+        fn with_root(mut self, project: &str, root: PathBuf) -> Self {
+            self.roots.insert(project.to_owned(), root);
             self
         }
     }
@@ -2493,6 +2544,10 @@ manifest:
                 .borrow_mut()
                 .push((project.name.clone(), file.to_owned()));
             Ok(self.manifests.get(&project.name).cloned())
+        }
+
+        fn project_root(&self, project: &Project) -> Option<PathBuf> {
+            self.roots.get(&project.name).cloned()
         }
     }
 
@@ -2811,6 +2866,114 @@ manifest:
         assert_eq!(names, vec!["zephyr", "cmsis"]);
         assert_eq!(source.calls.borrow().len(), 1);
         assert_eq!(source.calls.borrow()[0].0, "zephyr");
+    }
+
+    /// Regression: when a project-imported manifest body has its own
+    /// `self.import: <dir>/`, the resolver must anchor that
+    /// filesystem walk against the *project's* working tree, not the
+    /// outer manifest repo. This is the Zephyr setup: example-application
+    /// imports zephyr's west.yml, which in turn does
+    /// `self.import: submanifests/` — and `submanifests/` lives inside
+    /// the zephyr clone, not next to example-application's manifest.
+    #[test]
+    fn project_imported_body_self_import_resolves_against_project_root() {
+        // The outer manifest repo.
+        let outer = tempfile::TempDir::new().unwrap();
+        let outer_root = write_yaml(
+            outer.path(),
+            "west.yml",
+            r#"
+manifest:
+  projects:
+    - name: zephyr
+      url: https://example.com/zephyr
+      import: true
+"#,
+        );
+
+        // The project's working tree, with `submanifests/extras.yml`.
+        let project_root_dir = tempfile::TempDir::new().unwrap();
+        let submanifests = project_root_dir.path().join("submanifests");
+        std::fs::create_dir_all(&submanifests).unwrap();
+        std::fs::write(
+            submanifests.join("extras.yml"),
+            r#"
+manifest:
+  projects:
+    - name: cmsis
+      url: https://example.com/cmsis
+"#,
+        )
+        .unwrap();
+
+        // Source returns zephyr's manifest body inline; its `project_root`
+        // points the resolver at the temp project tree so the
+        // `self.import: submanifests` inside zephyr's body resolves
+        // there, not next to `outer/west.yml`.
+        let source = StaticImportSource::new()
+            .with(
+                "zephyr",
+                r#"
+manifest:
+  self:
+    import: submanifests
+  projects: []
+"#,
+            )
+            .with_root("zephyr", project_root_dir.path().to_path_buf());
+
+        let m = Manifest::from_path_with_imports(&outer_root, outer.path(), &source).unwrap();
+        let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["zephyr", "cmsis"]);
+    }
+
+    /// Negative: same shape as above but the source returns
+    /// `project_root = None` (default). The resolver falls back to the
+    /// outer manifest repo for the nested filesystem import — same
+    /// `submanifests/` directory next to `outer/west.yml` IS read,
+    /// confirming the fallback path still works for in-memory sources.
+    #[test]
+    fn project_imported_body_self_import_falls_back_when_no_project_root() {
+        let outer = tempfile::TempDir::new().unwrap();
+        let outer_root = write_yaml(
+            outer.path(),
+            "west.yml",
+            r#"
+manifest:
+  projects:
+    - name: zephyr
+      url: https://example.com/zephyr
+      import: true
+"#,
+        );
+        // Place the imported submanifest next to outer/west.yml — the
+        // fallback's natural location.
+        let submanifests = outer.path().join("submanifests");
+        std::fs::create_dir_all(&submanifests).unwrap();
+        std::fs::write(
+            submanifests.join("extras.yml"),
+            r#"
+manifest:
+  projects:
+    - name: cmsis
+      url: https://example.com/cmsis
+"#,
+        )
+        .unwrap();
+
+        let source = StaticImportSource::new().with(
+            "zephyr",
+            r#"
+manifest:
+  self:
+    import: submanifests
+  projects: []
+"#,
+        );
+
+        let m = Manifest::from_path_with_imports(&outer_root, outer.path(), &source).unwrap();
+        let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["zephyr", "cmsis"]);
     }
 
     #[test]

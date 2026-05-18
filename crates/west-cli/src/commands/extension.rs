@@ -324,6 +324,10 @@ struct ReadOnlyImportSource<'a> {
 }
 
 impl ImportSource for ReadOnlyImportSource<'_> {
+    fn project_root(&self, project: &Project) -> Option<PathBuf> {
+        Some(self.workspace.join(&project.path))
+    }
+
     fn project_manifest(
         &self,
         project: &Project,

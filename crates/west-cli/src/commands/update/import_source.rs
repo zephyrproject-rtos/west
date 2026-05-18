@@ -81,6 +81,10 @@ impl<'a> WorkspaceImportSource<'a> {
 }
 
 impl ImportSource for WorkspaceImportSource<'_> {
+    fn project_root(&self, project: &Project) -> Option<std::path::PathBuf> {
+        Some(self.workspace.join(&project.path))
+    }
+
     fn project_manifest(
         &self,
         project: &Project,
