@@ -28,6 +28,8 @@ use indicatif::{MultiProgress, ProgressBar};
 use west_core::manifest::{ImportSource, ImportSourceError, Project};
 use west_core::vcs::{CheckoutTarget, CloneSpec, CommitSummary, FetchSpec, Output, Vcs, VcsError};
 
+use super::Settings;
+use super::cache;
 use crate::progress::{
     IndicatifSink, PREFIX_WIDTH, TICK_INTERVAL, render_done_line, render_failed_line,
     spinner_style, truncate_prefix,
@@ -63,6 +65,7 @@ pub struct WorkspaceImportSource<'a> {
     workspace: &'a Path,
     vcs: &'a dyn Vcs,
     progress: Option<&'a ImportProgress>,
+    settings: Option<&'a Settings>,
 }
 
 impl<'a> WorkspaceImportSource<'a> {
@@ -71,11 +74,21 @@ impl<'a> WorkspaceImportSource<'a> {
             workspace,
             vcs,
             progress: None,
+            settings: None,
         }
     }
 
     pub fn with_progress(mut self, progress: &'a ImportProgress) -> Self {
         self.progress = Some(progress);
+        self
+    }
+
+    /// Route import-resolution clones through the cache helper so the
+    /// auto-cache mirror gets populated during import resolution.
+    /// Without this the main worker pool would re-clone the project
+    /// across the network when it later processes the same project.
+    pub fn with_settings(mut self, settings: &'a Settings) -> Self {
+        self.settings = Some(settings);
         self
     }
 }
@@ -94,8 +107,7 @@ impl ImportSource for WorkspaceImportSource<'_> {
 
         match self.progress {
             None => {
-                self.materialize_native(project, &repo)
-                    .map_err(ImportSourceError::new)?;
+                self.materialize_native(project, &repo)?;
             }
             Some(progress) => {
                 self.materialize_with_progress(project, &repo, progress)?;
@@ -118,7 +130,11 @@ impl ImportSource for WorkspaceImportSource<'_> {
 impl WorkspaceImportSource<'_> {
     /// Native-stdio path. Git's own progress goes to the parent's
     /// terminal. Used in `--raw` / non-TTY modes.
-    fn materialize_native(&self, project: &Project, repo: &Path) -> Result<String, VcsError> {
+    fn materialize_native(
+        &self,
+        project: &Project,
+        repo: &Path,
+    ) -> Result<String, ImportSourceError> {
         let mut out = Output::Native;
         self.materialize(project, repo, &mut out)
     }
@@ -164,41 +180,60 @@ impl WorkspaceImportSource<'_> {
                     .println(render_failed_line(&prefix, &e.to_string()));
             }
         }
-        result.map(|_| ()).map_err(ImportSourceError::new)
+        result.map(|_| ())
     }
 
     /// Run the actual clone / fetch / set-manifest-rev / checkout
     /// sequence. Returns the SHA the working tree was checked out to —
     /// the progress path uses it to look up the commit subject for
     /// the done line.
+    ///
+    /// When [`Settings`] is attached the initial clone is routed through
+    /// [`cache::clone_via_cache`] so the auto-cache mirror is populated
+    /// once during import resolution; the main worker pool then reuses
+    /// the same cache (smart-skipped fetch) instead of re-cloning the
+    /// project across the network.
     fn materialize(
         &self,
         project: &Project,
         repo: &Path,
         out: &mut Output<'_>,
-    ) -> Result<String, VcsError> {
+    ) -> Result<String, ImportSourceError> {
         let already_cloned = repo.exists() && self.vcs.is_repo(repo).unwrap_or(false);
         if !already_cloned {
-            if let Some(parent) = repo.parent() {
-                std::fs::create_dir_all(parent).map_err(|source| VcsError::Io {
-                    path: parent.to_path_buf(),
-                    source,
-                })?;
+            match self.settings {
+                Some(settings) => {
+                    cache::clone_via_cache(self.vcs, project, settings, repo, out)
+                        .map_err(ImportSourceError::new)?;
+                }
+                None => {
+                    if let Some(parent) = repo.parent() {
+                        std::fs::create_dir_all(parent)
+                            .map_err(|source| VcsError::Io {
+                                path: parent.to_path_buf(),
+                                source,
+                            })
+                            .map_err(ImportSourceError::new)?;
+                    }
+                    // Don't pass `revision` to clone: git clone --branch
+                    // refuses bare commit SHAs and manifests commonly pin
+                    // projects at SHAs. The subsequent fetch + detached
+                    // checkout below land the working tree at the right
+                    // commit regardless.
+                    self.vcs
+                        .clone(
+                            &CloneSpec {
+                                url: &project.url,
+                                dest: repo,
+                                revision: None,
+                                origin: Some(&project.remote_name),
+                                mirror: false,
+                            },
+                            out,
+                        )
+                        .map_err(ImportSourceError::new)?;
+                }
             }
-            // Don't pass `revision` to clone: git clone --branch refuses
-            // bare commit SHAs and manifests commonly pin projects at
-            // SHAs. The subsequent fetch + detached checkout below land
-            // the working tree at the right commit regardless.
-            self.vcs.clone(
-                &CloneSpec {
-                    url: &project.url,
-                    dest: repo,
-                    revision: None,
-                    origin: Some(&project.remote_name),
-                    mirror: false,
-                },
-                out,
-            )?;
         }
 
         // Fetch. The returned sha is what `project.revision` resolves to
@@ -206,19 +241,24 @@ impl WorkspaceImportSource<'_> {
         // resolved revision on smart-skip). Don't sniff FETCH_HEAD
         // afterward — it persists across fetches and would be stale on
         // the smart-skip path.
-        let sha = self.vcs.fetch(
-            repo,
-            &FetchSpec {
-                remote: &project.remote_name,
-                revision: Some(&project.revision),
-            },
-            out,
-        )?;
+        let sha = self
+            .vcs
+            .fetch(
+                repo,
+                &FetchSpec {
+                    remote: &project.remote_name,
+                    revision: Some(&project.revision),
+                },
+                out,
+            )
+            .map_err(ImportSourceError::new)?;
 
         self.vcs
-            .set_manifest_rev(repo, &sha, Some("west update: pre-import"))?;
+            .set_manifest_rev(repo, &sha, Some("west update: pre-import"))
+            .map_err(ImportSourceError::new)?;
         self.vcs
-            .checkout(repo, &CheckoutTarget::Detached(&sha), out)?;
+            .checkout(repo, &CheckoutTarget::Detached(&sha), out)
+            .map_err(ImportSourceError::new)?;
         Ok(sha)
     }
 }

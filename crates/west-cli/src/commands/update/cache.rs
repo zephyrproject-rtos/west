@@ -21,8 +21,10 @@ use std::path::{Path, PathBuf};
 
 use md5::{Digest, Md5};
 use west_core::manifest::Project;
+use west_core::vcs::{CloneSpec, FetchSpec, Output, Vcs};
 
 use super::Settings;
+use super::error::UpdateError;
 
 /// Where the worker should source `project`'s clone from.
 pub(super) enum CacheSource {
@@ -72,6 +74,125 @@ pub(super) fn resolve_cache_source(project: &Project, settings: &Settings) -> Op
 /// the same basename.
 pub(super) fn auto_cache_path(dir: &Path, url: &str) -> PathBuf {
     dir.join(url_basename(url)).join(md5_hex(url))
+}
+
+/// Populate / refresh an auto-cache mirror at `cache_path` for
+/// `project`. First-time: mirror-clones the project URL. Subsequent
+/// runs: smart-skips when the manifest pins a SHA the cache already
+/// has, otherwise fetches all refs. Called both by
+/// `WorkspaceImportSource::materialize` (the import-resolution
+/// phase) and by the main worker pool (per-project update).
+pub(super) fn ensure_auto_cache(
+    vcs: &dyn Vcs,
+    project: &Project,
+    cache_path: &Path,
+    out: &mut Output<'_>,
+) -> Result<(), UpdateError> {
+    if cache_path.exists() && vcs.is_repo(cache_path).unwrap_or(false) {
+        // Smart-skip path: only when the manifest pinned a SHA-like
+        // revision and the cache already has it. The fetch we'd
+        // otherwise run is `revision: None`, which can't smart-skip.
+        if looks_like_sha(&project.revision) && vcs.sha(cache_path, &project.revision).is_ok() {
+            return Ok(());
+        }
+        vcs.fetch(
+            cache_path,
+            &FetchSpec {
+                remote: "origin",
+                revision: None,
+            },
+            out,
+        )
+        .map_err(|source| UpdateError::CacheRefresh {
+            path: cache_path.to_path_buf(),
+            source,
+        })?;
+        return Ok(());
+    }
+    if let Some(parent) = cache_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| UpdateError::CreateParent {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    vcs.clone(
+        &CloneSpec {
+            url: &project.url,
+            dest: cache_path,
+            revision: None,
+            origin: None,
+            mirror: true,
+        },
+        out,
+    )
+    .map_err(|source| UpdateError::CachePopulate {
+        url: project.url.clone(),
+        source,
+    })
+}
+
+/// Populate the auto-cache (if configured) and clone `project` into
+/// `dest`. The clone source is the cache directory when a cache
+/// flag matched; otherwise the project URL directly. After a
+/// cache-driven clone the recorded remote URL is rewritten to the
+/// project's real upstream so subsequent fetches go to the network.
+///
+/// Caller must guarantee `dest` is not already a valid git repo;
+/// this function only handles the "first clone" case.
+pub(super) fn clone_via_cache(
+    vcs: &dyn Vcs,
+    project: &Project,
+    settings: &Settings,
+    dest: &Path,
+    out: &mut Output<'_>,
+) -> Result<(), UpdateError> {
+    let cache_source = resolve_cache_source(project, settings);
+    if let Some(CacheSource::Auto(path)) = &cache_source {
+        ensure_auto_cache(vcs, project, path, out)?;
+    }
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| UpdateError::CreateParent {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    let clone_url = match cache_source.as_ref() {
+        Some(src) => src
+            .path()
+            .to_str()
+            .ok_or_else(|| UpdateError::NonUtf8CachePath(src.path().to_path_buf()))?,
+        None => &project.url,
+    };
+    vcs.clone(
+        &CloneSpec {
+            url: clone_url,
+            dest,
+            revision: None,
+            origin: Some(&project.remote_name),
+            mirror: false,
+        },
+        out,
+    )
+    .map_err(|source| UpdateError::Clone {
+        url: clone_url.to_owned(),
+        source,
+    })?;
+    if cache_source.is_some() {
+        vcs.set_remote_url(dest, &project.remote_name, &project.url)
+            .map_err(UpdateError::SetRemoteUrl)?;
+    }
+    Ok(())
+}
+
+/// Best-effort SHA detector: 4–40 hex chars. Mirrors python's
+/// `_maybe_sha`. Used by [`ensure_auto_cache`] to decide whether the
+/// revision is immutable (skip refresh if cached) or mutable (always
+/// refresh). False positives are harmless: a tag like `v1` doesn't
+/// match (`v` isn't hex); only ambiguous all-hex names like `abcd`
+/// would, and those are pathological.
+fn looks_like_sha(rev: &str) -> bool {
+    let len = rev.len();
+    (4..=40).contains(&len) && rev.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Hex md5 of `url`. Lowercase, 32 chars. Matches python's

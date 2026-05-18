@@ -40,7 +40,7 @@ use rayon::prelude::*;
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::{GroupFilterEntry, Manifest, Project, Submodules};
 use west_core::vcs::{
-    self, CheckoutTarget, CloneSpec, CommitSummary, FetchSpec, Output, SubmoduleScope, Vcs,
+    self, CheckoutTarget, CommitSummary, FetchSpec, Output, SubmoduleScope, Vcs,
 };
 
 use super::config::LoadedConfig;
@@ -153,26 +153,33 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         }
     };
 
+    // Hoisted so [`load_manifest`] can hand `Settings` to the import
+    // source — the auto-cache lives in `update.auto-cache` and any
+    // import-resolution clones must route through the same cache the
+    // main worker pool uses, so a single network transfer per
+    // imported project covers both phases. Validation errors here
+    // surface before any clone happens.
+    let settings = match Settings::from_config(&loaded.config) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("west: {e}");
+            return ExitCode::from(2);
+        }
+    };
+
     // Decide whether to drive an indicatif progress bar for any
     // import-resolution clones the manifest load triggers. Same rule
     // the main worker pool uses below: TTY + non-raw → indicatif;
     // otherwise (raw or non-TTY) git stdio attaches natively to the
-    // parent's terminal. Reading `output.raw` direct here keeps us
-    // from having to hoist `Settings::from_config`, which validates
-    // a bunch of other update-specific knobs we don't need yet.
-    let raw_for_import = loaded
-        .config
-        .get_bool("output.raw")
-        .ok()
-        .flatten()
-        .unwrap_or(false);
-    let import_progress = (!raw_for_import && io::stderr().is_terminal())
+    // parent's terminal.
+    let import_progress = (!settings.raw && io::stderr().is_terminal())
         .then(import_source::ImportProgress::new);
 
     let manifest = match load_manifest(
         &workspace,
         &loaded.config,
         vcs.as_ref(),
+        &settings,
         import_progress.as_ref(),
     ) {
         Ok(m) => m,
@@ -219,14 +226,6 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         eprintln!("west: no projects to update");
         return ExitCode::SUCCESS;
     }
-
-    let settings = match Settings::from_config(&loaded.config) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("west: {e}");
-            return ExitCode::from(2);
-        }
-    };
 
     // Pick the reporter (and the worker's `Output` mode) by (raw, tty,
     // parallel). `raw` forces serial + native stdio (interleaved native
@@ -394,51 +393,22 @@ fn run_project_steps(
     // never hits the network. After a cache-driven clone the recorded
     // origin URL is flipped back to the project URL — subsequent fetches
     // go to the real remote.
+    //
+    // Auto-cache refresh runs unconditionally (not just when we'd
+    // clone from it): a workspace might already be cloned, but the
+    // cache should still advance to the latest upstream so other
+    // workspaces sharing the same auto-cache root hit a current
+    // mirror. The `WorkspaceImportSource` flow (import-resolution
+    // clone of import-providing projects) calls the same
+    // [`cache::clone_via_cache`] helper, so a project that gets
+    // touched by both phases hits the network exactly once.
     let cache_source = cache::resolve_cache_source(project, settings);
-    // Keep the auto-cache fresh on every run — not just when we're
-    // about to clone the workspace from it. A workspace might already
-    // be cloned, but the cache should still advance to the latest
-    // upstream so subsequent fresh clones (or other workspaces sharing
-    // the same auto-cache root) hit a current mirror.
     if let Some(cache::CacheSource::Auto(path)) = &cache_source {
-        ensure_auto_cache(vcs, project, path, out)?;
+        cache::ensure_auto_cache(vcs, project, path, out)?;
     }
     let already_cloned = repo.exists() && vcs.is_repo(repo).unwrap_or(false);
     if !already_cloned {
-        if let Some(parent) = repo.parent() {
-            std::fs::create_dir_all(parent).map_err(|source| UpdateError::CreateParent {
-                path: parent.to_path_buf(),
-                source,
-            })?;
-        }
-        let clone_url = match cache_source.as_ref() {
-            Some(src) => src
-                .path()
-                .to_str()
-                .ok_or_else(|| UpdateError::NonUtf8CachePath(src.path().to_path_buf()))?,
-            None => &project.url,
-        };
-        vcs.clone(
-            &CloneSpec {
-                url: clone_url,
-                dest: repo,
-                revision: None,
-                origin: Some(&project.remote_name),
-                mirror: false,
-            },
-            out,
-        )
-        .map_err(|source| UpdateError::Clone {
-            url: clone_url.to_owned(),
-            source,
-        })?;
-        // Cache-cloned: rewrite the origin URL to the real upstream so
-        // the fetch step (and every subsequent `west update`) pulls
-        // from the network, not the local cache directory.
-        if cache_source.is_some() {
-            vcs.set_remote_url(repo, &project.remote_name, &project.url)
-                .map_err(UpdateError::SetRemoteUrl)?;
-        }
+        cache::clone_via_cache(vcs, project, settings, repo, out)?;
     }
 
     // 2. Fetch. `Vcs::fetch` returns the sha that the requested revision
@@ -523,76 +493,6 @@ fn run_project_steps(
     //    surface in its success line / per-project transcript.
     vcs.commit_summary(repo, "HEAD")
         .map_err(UpdateError::CommitSummary)
-}
-
-/// Auto-cache populator: bare-mirror-clone when missing; refresh-fetch
-/// when present.
-///
-/// SHA-like revisions (and tags) are immutable, so a populated cache
-/// already has them — we smart-skip in that case to keep the offline
-/// path working (cache → workspace clone with no network at all).
-/// Branch revisions, on the other hand, move under the user; we always
-/// run `git fetch origin` against the mirror so the cache picks up
-/// upstream commits between runs. On a `--mirror` clone the configured
-/// refspec is `+refs/*:refs/*`, so a single fetch updates everything.
-fn ensure_auto_cache(
-    vcs: &dyn Vcs,
-    project: &Project,
-    cache_path: &Path,
-    out: &mut Output<'_>,
-) -> Result<(), UpdateError> {
-    if cache_path.exists() && vcs.is_repo(cache_path).unwrap_or(false) {
-        // Smart-skip path: only when the manifest pinned a SHA-like
-        // revision and the cache already has it. The fetch we'd
-        // otherwise run is `revision: None`, which can't smart-skip.
-        if looks_like_sha(&project.revision) && vcs.sha(cache_path, &project.revision).is_ok() {
-            return Ok(());
-        }
-        vcs.fetch(
-            cache_path,
-            &FetchSpec {
-                remote: "origin",
-                revision: None,
-            },
-            out,
-        )
-        .map_err(|source| UpdateError::CacheRefresh {
-            path: cache_path.to_path_buf(),
-            source,
-        })?;
-        return Ok(());
-    }
-    if let Some(parent) = cache_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|source| UpdateError::CreateParent {
-            path: parent.to_path_buf(),
-            source,
-        })?;
-    }
-    vcs.clone(
-        &CloneSpec {
-            url: &project.url,
-            dest: cache_path,
-            revision: None,
-            origin: None,
-            mirror: true,
-        },
-        out,
-    )
-    .map_err(|source| UpdateError::CachePopulate {
-        url: project.url.clone(),
-        source,
-    })
-}
-
-/// Best-effort SHA detector: 4–40 hex chars. Mirrors python's
-/// `_maybe_sha`. Used by `ensure_auto_cache` to decide whether the
-/// revision is immutable (skip refresh if cached) or mutable (always
-/// refresh). False positives are harmless: a tag like `v1` doesn't
-/// match (`v` isn't hex); only ambiguous all-hex names like `abcd`
-/// would, and those are pathological.
-fn looks_like_sha(rev: &str) -> bool {
-    let len = rev.len();
-    (4..=40).contains(&len) && rev.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Owned counterpart of [`SubmoduleScope`] so we can keep the path strings
@@ -773,6 +673,7 @@ fn load_manifest(
     workspace: &Path,
     config: &Configuration,
     vcs: &dyn Vcs,
+    settings: &Settings,
     import_progress: Option<&import_source::ImportProgress>,
 ) -> Result<Manifest, String> {
     let manifest_path: PathBuf = config
@@ -787,7 +688,8 @@ fn load_manifest(
         .unwrap_or_else(|| PathBuf::from(DEFAULT_MANIFEST_FILE));
     let manifest_repo_root = workspace.join(&manifest_path);
     let full = manifest_repo_root.join(&manifest_file);
-    let mut source = import_source::WorkspaceImportSource::new(workspace, vcs);
+    let mut source =
+        import_source::WorkspaceImportSource::new(workspace, vcs).with_settings(settings);
     if let Some(p) = import_progress {
         source = source.with_progress(p);
     }
