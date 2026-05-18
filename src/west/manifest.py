@@ -27,13 +27,6 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, NoReturn
 
-import yaml
-
-try:
-    from yaml import CSafeLoader as SafeLoader
-except ImportError:  # pragma: no cover
-    from yaml import SafeLoader  # type: ignore
-
 from west import _west_native, util
 from west._west_native import (
     GroupFilterEntry,
@@ -178,18 +171,19 @@ def validate(data: Any) -> dict[str, Any]:
 
     Accepts a YAML string or a dict. Validation happens by handing the
     data to the rust parser; on success the parsed dict form is
-    returned. The rust parser is the source of truth for the schema.
+    returned. The rust parser (and its garde-derived schema rules)
+    are the source of truth for what counts as valid.
     '''
     if isinstance(data, dict):
-        yaml_str = yaml.safe_dump(data, sort_keys=False)
+        yaml_str = _west_native.dump_yaml(data)
     elif isinstance(data, str):
         yaml_str = data
     else:
         raise MalformedManifest(f'validate(): expected str or dict, got {type(data).__name__}')
-    # Parse to surface schema errors. The return value is discarded —
-    # we just want the side effect of validation.
+    # Parse to surface schema errors. The Manifest object itself is
+    # discarded — we just want the side effect of validation.
     _west_native.Manifest.from_yaml_str(yaml_str)
-    parsed = yaml.load(yaml_str, Loader=SafeLoader)
+    parsed = _west_native.parse_yaml(yaml_str)
     if not isinstance(parsed, dict):
         raise MalformedManifest('manifest top level must be a mapping')
     return parsed
@@ -673,7 +667,7 @@ class Manifest:
 
     def _init_from_data(self, source_data: str | dict) -> None:
         if isinstance(source_data, dict):
-            yaml_str = yaml.safe_dump(source_data, sort_keys=False)
+            yaml_str = _west_native.dump_yaml(source_data)
         else:
             yaml_str = source_data
         self._native = _west_native.Manifest.from_yaml_str(yaml_str)
@@ -855,8 +849,13 @@ class Manifest:
         manifest_block['projects'] = projects
         return {'manifest': manifest_block}
 
-    def as_yaml(self, active_only: bool = False, **kwargs: Any) -> str:
-        return yaml.safe_dump(self.as_dict(active_only=active_only), **kwargs)
+    def as_yaml(self, active_only: bool = False) -> str:
+        '''YAML serialization of `as_dict(active_only=...)`.
+
+        Output is emitted by the rust serializer (`serde_yaml_ng`);
+        the legacy `**kwargs` passthrough to `yaml.safe_dump` is gone.
+        '''
+        return _west_native.dump_yaml(self.as_dict(active_only=active_only))
 
     def as_frozen_dict(self, active_only: bool = False) -> dict[str, Any]:
         '''Like `as_dict`, but with each project's `revision` replaced
@@ -883,5 +882,6 @@ class Manifest:
         manifest_block['projects'] = frozen_projects
         return {'manifest': manifest_block}
 
-    def as_frozen_yaml(self, active_only: bool = False, **kwargs: Any) -> str:
-        return yaml.safe_dump(self.as_frozen_dict(active_only=active_only), **kwargs)
+    def as_frozen_yaml(self, active_only: bool = False) -> str:
+        '''YAML serialization of `as_frozen_dict(active_only=...)`.'''
+        return _west_native.dump_yaml(self.as_frozen_dict(active_only=active_only))
