@@ -30,8 +30,6 @@ requires-python = ">=3.10"
 dependencies = [
     "colorama~=0.4",
     "packaging~=25.0",
-    "pykwalify~=1.8",
-    "pyyaml~=6.0",
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -79,10 +77,9 @@ python-source = "src"
 # can't trigger an additional `cargo build --bin` itself in
 # `bindings = "pyo3"` mode (issue PyO3/maturin#368).
 data = ".wheel-data"
-# Include the YAML schema files maturin's default discovery
-# wouldn't pull in.
+# Pull `py.typed` (PEP 561 marker) into both sdist and wheel —
+# maturin's default file discovery would skip it.
 include = [
-    { path = "src/west/*.yml", format = ["sdist", "wheel"] },
     { path = "src/west/py.typed", format = ["sdist", "wheel"] },
 ]
 
@@ -98,7 +95,6 @@ test = [
 ]
 types = [
     "mypy~=1.18",
-    "types-pyyaml~=6.0",
 ]
 dev = [
     "poethepoet~=0.37",

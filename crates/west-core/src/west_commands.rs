@@ -17,8 +17,9 @@
 //! The data layer just parses; discovery / dispatch / spawning is
 //! a CLI concern and lives in `west-cli`.
 //!
-//! Matches python's `src/west/west-commands-schema.yml` (the
-//! pykwalify schema) and the parsing in `src/west/commands.py`.
+//! Schema is enforced by garde derives on the private `SchemaFile`
+//! struct in this module — the python pykwalify schema this once
+//! mirrored has been retired alongside the python wrapper rewrite.
 
 use std::ffi::OsStr;
 use std::fs;
