@@ -62,17 +62,63 @@ pub struct Configuration {
 
 #[pymethods]
 impl Configuration {
+    /// Construct a Configuration for a workspace.
+    ///
+    /// `topdir` resolves the system/global/local layer stack via
+    /// `west_core::config_paths::resolve()`. `extra_files`, if
+    /// supplied, are appended at the top of the file-backed
+    /// precedence stack — same shape as the rust CLI's
+    /// `--config-file PATH` flag. Each extra path is added to the
+    /// resolver's local layer set so `get_search_paths(LOCAL)` and
+    /// `set(..., configfile=LOCAL)` operate on a sensible set.
     #[new]
-    #[pyo3(signature = (topdir=None))]
-    fn py_new(topdir: Option<PathBuf>) -> PyResult<Self> {
-        let resolved = resolve(topdir.as_deref());
+    #[pyo3(signature = (topdir=None, extra_files=None))]
+    fn py_new(
+        topdir: Option<PathBuf>,
+        extra_files: Option<Vec<PathBuf>>,
+    ) -> PyResult<Self> {
+        let mut resolved = resolve(topdir.as_deref());
+        if let Some(extras) = extra_files {
+            // Extras are highest-precedence file-backed layers —
+            // append them to the local-layer set so the resolver's
+            // path-mapping matches the CLI's `--config-file PATH`
+            // semantics. The list is treated as ordered: each later
+            // entry overrides earlier ones, and all override the
+            // default LOCAL layer.
+            for extra in extras {
+                if !resolved.global_confd.contains(&extra)
+                    && resolved.local.as_ref() != Some(&extra)
+                {
+                    resolved.global_confd.push(extra);
+                }
+            }
+        }
         let inner = west_core::config::Configuration::load(resolved.layer_paths())
             .map_err(config_error_to_py)?;
         Ok(Configuration { inner, resolved })
     }
 
+    /// Attach a `NAME=VALUE` style inline override. The value is
+    /// parsed the same way the CLI's `--config` flag parses it:
+    /// bare strings stay strings, numerics / bools / arrays go
+    /// through the TOML parser. The override sits at top precedence
+    /// (above every file-backed layer) and is read-only — it doesn't
+    /// get written to disk.
+    fn set_inline(&mut self, option: &str, value: &str) -> PyResult<()> {
+        let cv = west_core::config::ConfigValue::parse(value).map_err(config_error_to_py)?;
+        self.inner
+            .set_inline(option, cv)
+            .map_err(config_error_to_py)
+    }
+
     /// String accessor. Walks `configfile`'s layers high → low; returns
     /// `default` if the option isn't set anywhere.
+    ///
+    /// `ConfigFile.ALL` (the default) consults inline overrides
+    /// before any file-backed layer; specific scopes
+    /// (`LOCAL`/`GLOBAL`/`SYSTEM`) ignore inline (matches the rust
+    /// CLI's behaviour — inline overrides are read-only and aren't
+    /// scoped to a single file).
     #[pyo3(signature = (option, default=None, configfile=ConfigFile::ALL))]
     fn get(
         &self,
@@ -80,6 +126,13 @@ impl Configuration {
         default: Option<String>,
         configfile: ConfigFile,
     ) -> PyResult<Option<String>> {
+        if configfile == ConfigFile::ALL {
+            return match self.inner.get_str(option) {
+                Ok(Some(v)) => Ok(Some(v)),
+                Ok(None) => Ok(default),
+                Err(e) => Err(config_error_to_py(e)),
+            };
+        }
         let paths = self.paths_for(configfile);
         for layer in paths.iter().rev() {
             match self.inner.get_str_in(option, layer) {
@@ -93,6 +146,13 @@ impl Configuration {
 
     #[pyo3(signature = (option, default=false, configfile=ConfigFile::ALL))]
     fn getboolean(&self, option: &str, default: bool, configfile: ConfigFile) -> PyResult<bool> {
+        if configfile == ConfigFile::ALL {
+            return match self.inner.get_bool(option) {
+                Ok(Some(v)) => Ok(v),
+                Ok(None) => Ok(default),
+                Err(e) => Err(config_error_to_py(e)),
+            };
+        }
         let paths = self.paths_for(configfile);
         for layer in paths.iter().rev() {
             match self.inner.get_bool_in(option, layer) {
@@ -111,6 +171,13 @@ impl Configuration {
         default: Option<i64>,
         configfile: ConfigFile,
     ) -> PyResult<Option<i64>> {
+        if configfile == ConfigFile::ALL {
+            return match self.inner.get_i64(option) {
+                Ok(Some(v)) => Ok(Some(v)),
+                Ok(None) => Ok(default),
+                Err(e) => Err(config_error_to_py(e)),
+            };
+        }
         let paths = self.paths_for(configfile);
         for layer in paths.iter().rev() {
             match self.inner.get_i64_in(option, layer) {
@@ -129,6 +196,13 @@ impl Configuration {
         default: Option<f64>,
         configfile: ConfigFile,
     ) -> PyResult<Option<f64>> {
+        if configfile == ConfigFile::ALL {
+            return match self.inner.get_f64(option) {
+                Ok(Some(v)) => Ok(Some(v)),
+                Ok(None) => Ok(default),
+                Err(e) => Err(config_error_to_py(e)),
+            };
+        }
         let paths = self.paths_for(configfile);
         for layer in paths.iter().rev() {
             match self.inner.get_f64_in(option, layer) {

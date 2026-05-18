@@ -2,24 +2,22 @@
 
 Invoked by the rust CLI as::
 
-    python -m west._dispatch <module-path> <class-name> -- <user-argv...>
+    python -m west._dispatch <module-path> <class-name>
+        [--inline-config NAME=VALUE]...
+        [--extra-config-file PATH]...
+        -- <user-argv...>
 
 Environment:
     WEST_TOPDIR — absolute path to the workspace root.
 
 The bridge loads the user's extension `.py` file via importlib,
-instantiates the named class (a `WestCommand` subclass), wires
-up argparse, and dispatches `do_run`. `CommandError` is caught
-and converted to `sys.exit(returncode)`; other exceptions
-propagate (rust catches the non-zero exit and surfaces it).
-
-Phase 1: ``self.manifest`` / ``self.config`` are not populated —
-they're left as ``None``. Extensions that don't read them just
-work; ones that do will surface ``AttributeError`` / ``TypeError``,
-which the bridge lets propagate (rust catches the non-zero exit
-and surfaces it). Phase 2 (Option G in python.md) will switch
-the wheel's Manifest / Configuration over to PyO3 bindings on
-``west-core`` and the bridge will wire them up here.
+instantiates the named class (a `WestCommand` subclass), constructs
+a `Configuration` + `Manifest` for the workspace (matching the
+rust binary's view, including any `--config` / `--config-file`
+overrides the user supplied), wires up argparse, and dispatches
+`do_run`. `CommandError` is caught and converted to
+`sys.exit(returncode)`; other exceptions propagate (rust catches
+the non-zero exit and surfaces it).
 """
 
 from __future__ import annotations
@@ -31,22 +29,59 @@ import sys
 from pathlib import Path
 
 from west.commands import CommandError
+from west.configuration import Configuration
+from west.manifest import Manifest
 
 
 def _parse_argv(argv):
-    """Split argv into (module_path, class_name, user_argv).
+    """Split argv into (module_path, class_name, inline_overrides,
+    extra_config_files, user_argv).
 
-    The rust caller passes ``<module-path> <class-name> -- <user-argv...>``.
-    The literal ``--`` separator is removed here.
+    The rust caller passes::
+
+        <module-path> <class-name>
+            [--inline-config NAME=VALUE]...
+            [--extra-config-file PATH]...
+            -- <user-argv...>
+
+    The literal ``--`` separator is removed. The two override lists
+    preserve their CLI order (later entries override earlier ones,
+    matching the rust binary's own behaviour).
     """
     if len(argv) < 2:
         raise SystemExit(
             "west._dispatch: expected at least <module-path> <class-name>"
         )
     module_path, class_name, *rest = argv
-    if rest and rest[0] == "--":
-        rest = rest[1:]
-    return module_path, class_name, rest
+
+    inline_overrides: list[tuple[str, str]] = []
+    extra_config_files: list[str] = []
+    i = 0
+    while i < len(rest) and rest[i] != "--":
+        flag = rest[i]
+        if flag == "--inline-config":
+            i += 1
+            if i >= len(rest):
+                raise SystemExit("west._dispatch: --inline-config requires NAME=VALUE")
+            pair = rest[i]
+            if "=" not in pair:
+                raise SystemExit(
+                    f"west._dispatch: --inline-config expected NAME=VALUE, got {pair!r}"
+                )
+            name, _, value = pair.partition("=")
+            inline_overrides.append((name, value))
+        elif flag == "--extra-config-file":
+            i += 1
+            if i >= len(rest):
+                raise SystemExit("west._dispatch: --extra-config-file requires PATH")
+            extra_config_files.append(rest[i])
+        else:
+            raise SystemExit(f"west._dispatch: unexpected flag before --: {flag!r}")
+        i += 1
+    # `i` is either past-end or points at the `--`. Strip the
+    # separator if present.
+    user_argv = rest[i + 1 :] if i < len(rest) else []
+    return module_path, class_name, inline_overrides, extra_config_files, user_argv
 
 
 def _load_command_class(module_path, class_name):
@@ -73,8 +108,38 @@ def _load_command_class(module_path, class_name):
         )
 
 
+def _build_config(topdir, inline_overrides, extra_config_files):
+    """Construct a `Configuration` matching the rust binary's view.
+
+    The rust binary loads system/global/local from disk, appends any
+    `--config-file PATH` paths at top file precedence, then attaches
+    `--config NAME=VALUE` pairs as read-only inline overrides on top.
+    We mirror that exactly so `self.config.get(...)` from inside the
+    extension sees the same values the rust binary would see.
+
+    Returns `None` outside a workspace — the extension may have
+    `requires_workspace=False` and not care.
+    """
+    if topdir is None:
+        return None
+    cfg = Configuration(topdir=topdir, extra_files=extra_config_files or None)
+    for name, value in inline_overrides:
+        cfg.set_inline(name, value)
+    return cfg
+
+
+def _build_manifest(topdir, config):
+    """Construct a `Manifest` for the workspace, or `None` when
+    we're outside a workspace."""
+    if topdir is None:
+        return None
+    return Manifest.from_topdir(topdir=topdir, config=config)
+
+
 def main():
-    module_path, class_name, user_argv = _parse_argv(sys.argv[1:])
+    module_path, class_name, inline_overrides, extra_config_files, user_argv = _parse_argv(
+        sys.argv[1:]
+    )
     topdir = os.environ.get("WEST_TOPDIR")
 
     cls = _load_command_class(module_path, class_name)
@@ -92,8 +157,16 @@ def main():
     # via parse_known_args.
     args, unknown = cmd.parser.parse_known_args(user_argv)
 
+    # Construction order: config first, then manifest (manifest can
+    # consult config for `manifest.path` etc.). Both may be `None`
+    # when no `WEST_TOPDIR` is in env — extensions that declare
+    # `requires_workspace=False` handle that themselves; the rest
+    # will surface a clean error from `WestCommand.run`.
+    config = _build_config(topdir, inline_overrides, extra_config_files)
+    manifest = _build_manifest(topdir, config) if cmd.requires_workspace else None
+
     try:
-        cmd.run(args, unknown, topdir, manifest=None, config=None)
+        cmd.run(args, unknown, topdir, manifest=manifest, config=config)
     except CommandError as e:
         if str(e):
             print(f"west: {e}", file=sys.stderr)

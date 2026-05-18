@@ -116,7 +116,7 @@ pub(crate) fn run(args: &[OsString], loaded: &LoadedConfig) -> ExitCode {
         }
     };
 
-    match spawn(&spec, &user_argv, &workspace) {
+    match spawn(&spec, &user_argv, &workspace, loaded) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("west: {e}");
@@ -148,18 +148,30 @@ fn spawn(
     spec: &ExtensionSpec,
     user_argv: &[&OsString],
     workspace: &Path,
+    loaded: &LoadedConfig,
 ) -> Result<ExitCode, ExtensionError> {
     let python = resolve_python();
-    let status = Command::new(&python)
-        .arg("-m")
+    let mut cmd = Command::new(&python);
+    cmd.arg("-m")
         .arg("west._dispatch")
         .arg(&spec.module_path)
-        .arg(&spec.class)
-        .arg("--")
+        .arg(&spec.class);
+    // Forward the binary's `--config NAME=VALUE` and `--config-file
+    // PATH` flags so the python `Configuration` the dispatcher builds
+    // sees the same layer stack + inline overrides as the rust
+    // binary. Each flag is a repeatable `--inline-config k=v` /
+    // `--extra-config-file p` argpair that `_dispatch.py` collects
+    // before the `--` user-argv separator.
+    for pair in &loaded.inline_pairs {
+        cmd.arg("--inline-config").arg(pair);
+    }
+    for path in &loaded.extra_files {
+        cmd.arg("--extra-config-file").arg(path);
+    }
+    cmd.arg("--")
         .args(user_argv.iter().map(|s| s.as_os_str()))
-        .env("WEST_TOPDIR", workspace)
-        .status()
-        .map_err(ExtensionError::Spawn)?;
+        .env("WEST_TOPDIR", workspace);
+    let status = cmd.status().map_err(ExtensionError::Spawn)?;
     let code = status.code().unwrap_or(1);
     Ok(if code == 0 {
         ExitCode::SUCCESS

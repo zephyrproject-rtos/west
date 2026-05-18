@@ -64,6 +64,15 @@ impl ScopeArgs {
 pub struct LoadedConfig {
     pub resolved: ResolvedConfig,
     pub config: Configuration,
+    /// `--config-file PATH` paths the user supplied, in order. Held
+    /// for downstream commands that need to forward them along
+    /// (e.g. `extension::spawn` re-passes them to `_dispatch.py` so
+    /// python extensions see the same layer stack the rust binary
+    /// did).
+    pub extra_files: Vec<PathBuf>,
+    /// `--config NAME=VALUE` strings the user supplied, in order.
+    /// Same forwarding need as `extra_files`.
+    pub inline_pairs: Vec<String>,
 }
 
 /// Discover the workspace topdir (best-effort), resolve the conventional layer
@@ -93,7 +102,12 @@ pub fn load(extra_files: &[PathBuf], inline_pairs: &[String]) -> Result<LoadedCo
             .set_inline(name, value)
             .map_err(|e| format!("--config {pair:?}: {e}"))?;
     }
-    Ok(LoadedConfig { resolved, config })
+    Ok(LoadedConfig {
+        resolved,
+        config,
+        extra_files: extra_files.to_vec(),
+        inline_pairs: inline_pairs.to_vec(),
+    })
 }
 
 /// Splice a CLI-driven (key, value) pair into `config`'s inline-overrides
