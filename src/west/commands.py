@@ -21,7 +21,23 @@ from pathlib import Path
 from types import ModuleType
 from typing import NoReturn
 
-import colorama
+# Enable ANSI escape interpretation on Windows 10 1607+ (Aug 2016)
+# and later — conhost, Windows Terminal, cmd.exe on Win11,
+# PowerShell, VS Code's terminal. Pre-1607 Windows is silently
+# not-enabled here; escapes will print literally on those, which
+# is acceptable since they're out of mainstream support. No-op on
+# non-Windows.
+if sys.platform == "win32":
+    import ctypes as _ctypes
+
+    _ENABLE_VT = 0x0004
+    _k32 = _ctypes.windll.kernel32
+    for _handle_id in (-11, -12):  # STD_OUTPUT_HANDLE, STD_ERROR_HANDLE
+        _h = _k32.GetStdHandle(_handle_id)
+        _mode = _ctypes.c_ulong()
+        if _k32.GetConsoleMode(_h, _ctypes.byref(_mode)):
+            _k32.SetConsoleMode(_h, _mode.value | _ENABLE_VT)
+    del _handle_id, _h, _mode, _ENABLE_VT, _k32, _ctypes
 
 from west import _west_native
 from west.configuration import Configuration
@@ -105,14 +121,42 @@ class Verbosity(IntEnum):
     DBG_EXTREME = 6
 
 
-#: Color used (when applicable) for printing with inf()
-INF_COLOR = colorama.Fore.LIGHTGREEN_EX
+# ANSI escape codes for the log-level palette. These are the
+# exact strings colorama's Fore.LIGHT{GREEN,YELLOW,RED}_EX and
+# Style.RESET_ALL emit (ECMA-48 SGR codes), inlined so the
+# project doesn't carry colorama just for the constants table.
+_ANSI_INFO = "\x1b[92m"  # bright green
+_ANSI_WARN = "\x1b[93m"  # bright yellow
+_ANSI_ERR = "\x1b[91m"  # bright red
+_ANSI_RESET = "\x1b[0m"
 
-#: Color used (when applicable) for printing with wrn()
-WRN_COLOR = colorama.Fore.LIGHTYELLOW_EX
+#: Color used (when applicable) for printing with inf().
+#: Kept as part of the public API surface for any extension
+#: that imports it; equivalent to the inline `_ANSI_INFO`.
+INF_COLOR = _ANSI_INFO
 
-#: Color used (when applicable) for printing with err() and die()
-ERR_COLOR = colorama.Fore.LIGHTRED_EX
+#: Color used (when applicable) for printing with wrn().
+WRN_COLOR = _ANSI_WARN
+
+#: Color used (when applicable) for printing with err() and die().
+ERR_COLOR = _ANSI_ERR
+
+# NO_COLOR is the no-color.org convention honoured by cargo,
+# clap, ripgrep, fd, bat. Colorama doesn't honour it; we add it
+# as a side benefit of taking ownership of the styling code.
+# (Pre-existing behaviour: escapes were emitted whenever
+# ``color_ui`` was True, regardless of TTY — colorama was
+# imported but never `init()`-ed, so its implicit isatty-strip
+# wasn't active. We preserve that; NO_COLOR is the new opt-out.)
+_NO_COLOR = "NO_COLOR" in os.environ
+
+
+def _styled(text: str, ansi: str) -> str:
+    '''Return ``text`` wrapped in ``ansi`` + reset, or ``text``
+    unchanged if NO_COLOR is set.'''
+    if _NO_COLOR:
+        return text
+    return f"{ansi}{text}{_ANSI_RESET}"
 
 
 class WestCommand(ABC):
@@ -447,17 +491,10 @@ class WestCommand(ABC):
         if not self.color_ui:
             colorize = False
 
-        # This approach colorizes any sep= and end= text too, as expected.
-        #
-        # colorama automatically strips the ANSI escapes when stdout isn't a
-        # terminal (by wrapping sys.stdout).
+        text = ' '.join(str(a) for a in args)
         if colorize:
-            print(INF_COLOR, end='')
-
-        print(*args, end=end)
-
-        if colorize:
-            self._reset_colors(sys.stdout)
+            text = _styled(text, _ANSI_INFO)
+        print(text, end=end, flush=True)
 
     def banner(self, *args):
         '''Prints args as a "banner" using inf().
@@ -485,14 +522,10 @@ class WestCommand(ABC):
         if self.verbosity < Verbosity.WRN:
             return
 
+        text = 'WARNING: ' + ' '.join(str(a) for a in args)
         if self.color_ui:
-            print(WRN_COLOR, end='', file=sys.stderr)
-
-        print('WARNING: ', end='', file=sys.stderr)
-        print(*args, end=end, file=sys.stderr)
-
-        if self.color_ui:
-            self._reset_colors(sys.stderr)
+            text = _styled(text, _ANSI_WARN)
+        print(text, end=end, file=sys.stderr, flush=True)
 
     def err(self, *args, fatal: bool = False, end: str = '\n'):
         '''Print an error.
@@ -512,14 +545,11 @@ class WestCommand(ABC):
         if self.verbosity < Verbosity.ERR:
             return
 
+        prefix = 'FATAL ERROR: ' if fatal else 'ERROR: '
+        text = prefix + ' '.join(str(a) for a in args)
         if self.color_ui:
-            print(ERR_COLOR, end='', file=sys.stderr)
-
-        print('FATAL ERROR: ' if fatal else 'ERROR: ', end='', file=sys.stderr)
-        print(*args, end=end, file=sys.stderr)
-
-        if self.color_ui:
-            self._reset_colors(sys.stderr)
+            text = _styled(text, _ANSI_ERR)
+        print(text, end=end, file=sys.stderr, flush=True)
 
     def die(self, *args, exit_code: int = 1) -> NoReturn:
         '''Print a fatal error using err(), and abort the program.
@@ -541,16 +571,6 @@ class WestCommand(ABC):
     def color_ui(self) -> bool:
         '''Should we colorize output?'''
         return self.config.getboolean('color.ui', default=True) if self.has_config else True
-
-    #
-    # Internal APIs. Not for public consumption.
-    #
-
-    def _reset_colors(self, file):
-        # The flush=True avoids issues with unrelated output from
-        # commands (usually Git) becoming colorized, due to the final
-        # attribute reset ANSI escape getting line-buffered
-        print(colorama.Style.RESET_ALL, end='', file=file, flush=True)
 
 
 #

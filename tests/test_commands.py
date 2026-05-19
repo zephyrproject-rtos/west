@@ -32,9 +32,9 @@ COL_YELLOW = "\x1b[93m"
 COL_OFF = "\x1b[0m"
 
 EXPECTED_LOG_DEFAULT = f'{TEST_STR}\n'
-EXPECTED_LOG_WARNING = f'{COL_YELLOW}WARNING: {TEST_STR}\n{COL_OFF}'
-EXPECTED_LOG_ERROR = f'{COL_RED}ERROR: {TEST_STR}\n{COL_OFF}'
-EXPECTED_LOG_FATAL_ERROR = f'{COL_RED}FATAL ERROR: {TEST_STR}\n{COL_OFF}'
+EXPECTED_LOG_WARNING = f'{COL_YELLOW}WARNING: {TEST_STR}{COL_OFF}\n'
+EXPECTED_LOG_ERROR = f'{COL_RED}ERROR: {TEST_STR}{COL_OFF}\n'
+EXPECTED_LOG_FATAL_ERROR = f'{COL_RED}FATAL ERROR: {TEST_STR}{COL_OFF}\n'
 
 TEST_CASES_LOG = [
     # max_log_level, log_cmd, expected_stdout, expected_stderr
@@ -120,3 +120,68 @@ def test_die(capsys, test_case):
     stderr = captured.err
     assert stderr == exp_err
     assert stdout == exp_out
+
+
+# ----- env-var / config gating ----------------------------------------------
+
+def test_no_color_env_disables_colors(monkeypatch, capsys):
+    '''Setting NO_COLOR strips escapes from all log levels, matching
+    the no-color.org convention. Module-level `_NO_COLOR` is read
+    at import time, so the test reloads `west.commands`.'''
+    import importlib
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    import west.commands as wc
+    importlib.reload(wc)
+
+    class Impl(wc.WestCommand):
+        def do_add_parser(self):
+            pass
+
+        def do_run(self):
+            pass
+
+    c = Impl(name="x", help="y", description="z")
+    c.verbosity = wc.Verbosity.DBG_EXTREME
+
+    c.inf(TEST_STR, colorize=True)
+    c.wrn(TEST_STR)
+    c.err(TEST_STR)
+
+    captured = capsys.readouterr()
+    assert "\x1b[" not in captured.out, captured.out
+    assert "\x1b[" not in captured.err, captured.err
+    assert captured.out == f'{TEST_STR}\n'
+    assert captured.err == f'WARNING: {TEST_STR}\nERROR: {TEST_STR}\n'
+
+    # Reload again without NO_COLOR so subsequent tests see colored
+    # output again.
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    importlib.reload(wc)
+
+
+def test_color_ui_false_disables_colors(capsys):
+    '''A workspace with `color.ui = false` suppresses colors even
+    when NO_COLOR is unset. Uses an inline subclass that hard-codes
+    `color_ui` to False (no Configuration plumbing needed).'''
+    class Impl(WestCommand):
+        def do_add_parser(self):
+            pass
+
+        def do_run(self):
+            pass
+
+        @property
+        def color_ui(self) -> bool:
+            return False
+
+    c = Impl(name="x", help="y", description="z")
+    c.verbosity = Verbosity.DBG_EXTREME
+
+    c.inf(TEST_STR, colorize=True)
+    c.wrn(TEST_STR)
+    c.err(TEST_STR)
+
+    captured = capsys.readouterr()
+    assert "\x1b[" not in captured.out, captured.out
+    assert "\x1b[" not in captured.err, captured.err
