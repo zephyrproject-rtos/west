@@ -1,0 +1,502 @@
+//! `west diff` — show per-project diffs across the workspace.
+//!
+//! Iterates cloned projects (active by default, all with `--all`),
+//! delegates the actual diff to [`Vcs::diff`] (so future Mercurial /
+//! Sapling clients drop in without touching this module), and emits
+//! per-project banner + body. Parallel runs buffer each project's
+//! body into a `Vec<u8>` and drain in workspace order so output
+//! stays interleave-free.
+//!
+//! UX improvements over v1:
+//!
+//! - `--exit-code` returns 1 when any project has a non-empty diff,
+//!   for CI / scripting. v1 always exited 0.
+//! - `--color {always,never,auto}` (default `auto`) replaces the
+//!   config-only `color.ui` gate. `auto` checks the real stdout's
+//!   TTY-ness (we resolve once at command start because workers
+//!   capture into pipes and would otherwise force `never`).
+//! - `-q/--quiet` (top-level, global) suppresses all chrome —
+//!   per-project banners AND the tail "Empty diff in N projects."
+//!   line. The diff bodies themselves are unaffected. Lives on
+//!   `Cli` rather than `DiffArgs` so `west -q diff` and
+//!   `west diff -q` behave identically; `lib.rs` splices the
+//!   choice into `output.quiet` for subcommands to read.
+//! - `-j/--jobs N` runs per-project diffs in parallel via rayon;
+//!   per-project bodies buffer and drain in workspace order so
+//!   parallel output stays contiguous.
+//! - `--` forwards extra args to the underlying tool (`west diff
+//!   -- --stat` runs `git diff --stat` per project).
+//!
+//! Iteration / cloned-only filter / synthetic-manifest-project
+//! handling all mirror `forall`'s shape.
+
+use std::io::{self, IsTerminal, Write};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use std::sync::Mutex;
+
+use clap::{Args, ValueEnum};
+use console::Style;
+use rayon::prelude::*;
+
+use west_core::config::{ConfigValue, Configuration};
+use west_core::manifest::{ImportSource, ImportSourceError, Manifest, Project};
+use west_core::vcs::{self, ColorMode, DiffOutcome, DiffSpec, Vcs, VcsError};
+
+use super::config::LoadedConfig;
+use super::select;
+
+const DEFAULT_MANIFEST_FILE: &str = "west.yml";
+const MAX_DEFAULT_JOBS: usize = 8;
+
+#[derive(Args, Debug)]
+pub struct DiffArgs {
+    /// Project names or paths. Empty = every active cloned project.
+    #[arg(value_name = "PROJECT")]
+    pub projects: Vec<String>,
+
+    /// Include inactive projects.
+    #[arg(short, long)]
+    pub all: bool,
+
+    /// Compare against `manifest-rev` instead of HEAD.
+    #[arg(short = 'm', long)]
+    pub manifest: bool,
+
+    /// Exit 1 if any project has a non-empty diff. Mirrors
+    /// `git diff --exit-code`; v1 didn't expose this.
+    #[arg(long = "exit-code")]
+    pub exit_code: bool,
+
+    /// Colorize diff output. `auto` (default) emits color when
+    /// stdout is a TTY.
+    #[arg(long, value_enum, default_value_t = ColorArg::Auto)]
+    pub color: ColorArg,
+
+    /// Maximum projects to diff concurrently. Twin of `diff.jobs`
+    /// config key; defaults to `min(num_cpus, 8)`.
+    #[arg(short = 'j', long, value_name = "N")]
+    pub jobs: Option<usize>,
+
+    /// Extra arguments forwarded verbatim to the VCS's diff
+    /// command. The `--` separator is required because `PROJECT`
+    /// (variadic) takes everything before it: `west diff -- --stat`.
+    #[arg(last = true, allow_hyphen_values = true)]
+    pub extra: Vec<String>,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+pub enum ColorArg {
+    Always,
+    Never,
+    Auto,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum DiffError {
+    #[error("not inside a west workspace (no .west/ found)")]
+    NotInWorkspace,
+    #[error("{0}")]
+    Config(String),
+    #[error("{0}")]
+    Manifest(String),
+    #[error("{0}")]
+    Vcs(String),
+    #[error("uncloned {plural}: {names}\n  Hint: run \"west update\" and retry.",
+            plural = if names.contains(',') { "projects" } else { "project" })]
+    UnclonedPositional { names: String },
+}
+
+pub fn run(args: DiffArgs, loaded: &mut LoadedConfig) -> ExitCode {
+    if let Err(e) = splice_flags_into_config(&args, &mut loaded.config) {
+        eprintln!("west: {e}");
+        return ExitCode::from(2);
+    }
+
+    match run_inner(args, loaded) {
+        Ok(Outcome::AllEmpty) => ExitCode::SUCCESS,
+        Ok(Outcome::SomeNonEmpty { exit_code_flag: false }) => ExitCode::SUCCESS,
+        Ok(Outcome::SomeNonEmpty { exit_code_flag: true }) => ExitCode::from(1),
+        Ok(Outcome::Failures) => ExitCode::FAILURE,
+        Err(e @ DiffError::UnclonedPositional { .. }) => {
+            eprintln!("west: {e}");
+            ExitCode::from(2)
+        }
+        Err(e) => {
+            eprintln!("west: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Top-level outcome — drives the dispatched ExitCode.
+enum Outcome {
+    /// Every project's diff was empty (or no projects matched).
+    AllEmpty,
+    /// At least one project had a non-empty diff. `exit_code_flag`
+    /// carries the user's `--exit-code` choice so the caller can
+    /// translate to ExitCode::from(1) when set.
+    SomeNonEmpty { exit_code_flag: bool },
+    /// At least one project's diff call failed (binary crash, repo
+    /// missing, etc.). End-of-run summary already printed.
+    Failures,
+}
+
+fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffError> {
+    let workspace = resolve_workspace_dir()?;
+    let vcs = vcs::from_config(&loaded.config).map_err(|e| DiffError::Vcs(e.to_string()))?;
+
+    let source = ReadOnlyImportSource {
+        workspace: workspace.as_path(),
+        vcs: vcs.as_ref(),
+        skipped: Mutex::new(Vec::new()),
+    };
+    let manifest = load_manifest(&workspace, &loaded.config, &source)?;
+
+    let cfg_filter =
+        select::read_manifest_group_filter(&loaded.config).map_err(DiffError::Config)?;
+    let synthetic = select::synthetic_manifest_project(&manifest);
+
+    // Candidate set: same shape as forall, with one exception —
+    // when `--manifest` is set, the synthetic manifest project is
+    // excluded automatically. The self-project tree isn't visited
+    // by `west update` (the manifest is the source of truth, not
+    // a target), so `refs/heads/manifest-rev` never exists there
+    // and a diff against it would error.
+    let candidates: Vec<&Project> = if args.projects.is_empty() {
+        let mut acc: Vec<&Project> = Vec::new();
+        if !args.manifest && (args.all || manifest.is_active(&synthetic, &cfg_filter)) {
+            acc.push(&synthetic);
+        }
+        acc.extend(
+            manifest
+                .projects
+                .iter()
+                .filter(|p| args.all || manifest.is_active(p, &cfg_filter)),
+        );
+        acc
+    } else {
+        let manifest_path_str = manifest.self_.path.to_string_lossy().into_owned();
+        let (synthetic_hits, leftover): (Vec<_>, Vec<_>) = args
+            .projects
+            .iter()
+            .partition(|s| s.as_str() == "manifest" || s.as_str() == manifest_path_str);
+        let mut acc: Vec<&Project> = Vec::new();
+        // See the empty-positionals branch: `--manifest` excludes
+        // the synthetic project unconditionally.
+        if !synthetic_hits.is_empty() && !args.manifest {
+            acc.push(&synthetic);
+        }
+        if !leftover.is_empty() {
+            let leftover: Vec<&str> = leftover.iter().map(|s| s.as_str()).collect();
+            acc.extend(
+                select::select_projects(&manifest, &leftover, &cfg_filter)
+                    .map_err(|e| DiffError::Manifest(e.to_string()))?,
+            );
+        }
+        acc
+    };
+
+    // Cloned-only filter; named positionals that point at uncloned
+    // projects error out (matches forall).
+    let mut uncloned_positional: Vec<String> = Vec::new();
+    let projects: Vec<&Project> = candidates
+        .into_iter()
+        .filter(|p| {
+            let abs = workspace.join(&p.path);
+            let cloned = abs.exists() && vcs.is_repo(&abs).unwrap_or(false);
+            if !cloned && !args.projects.is_empty() {
+                uncloned_positional.push(p.name.clone());
+            }
+            cloned
+        })
+        .collect();
+    if !uncloned_positional.is_empty() {
+        return Err(DiffError::UnclonedPositional {
+            names: uncloned_positional.join(", "),
+        });
+    }
+
+    if projects.is_empty() {
+        eprintln!("west: diff: no projects matched");
+        return Ok(Outcome::AllEmpty);
+    }
+
+    let settings = Settings::from_config(&loaded.config).map_err(DiffError::Config)?;
+    let parallel = !settings.raw && settings.jobs > 1 && projects.len() > 1;
+    let jobs = if parallel { settings.jobs } else { 1 };
+
+    // Resolve color once: workers capture into pipes, so git's own
+    // TTY heuristic would always pick "never". We force either
+    // Always or Never explicitly based on the real stdout.
+    let resolved_color = match args.color {
+        ColorArg::Always => ColorMode::Always,
+        ColorArg::Never => ColorMode::Never,
+        ColorArg::Auto => {
+            if io::stdout().is_terminal() {
+                ColorMode::Always
+            } else {
+                ColorMode::Never
+            }
+        }
+    };
+
+    let from_rev: Option<&str> = if args.manifest { Some("manifest-rev") } else { None };
+
+    // Per-project work. par_iter().map().collect() preserves input
+    // order so the drain below sees workspace order regardless of
+    // completion order.
+    let outcomes: Vec<ProjectOutcome> = if parallel {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(jobs)
+            .build()
+            .map_err(|e| DiffError::Config(format!("failed to start worker pool: {e}")))?;
+        pool.install(|| {
+            projects
+                .par_iter()
+                .map(|p| {
+                    diff_one(
+                        p,
+                        &workspace,
+                        vcs.as_ref(),
+                        from_rev,
+                        resolved_color,
+                        &args.extra,
+                    )
+                })
+                .collect()
+        })
+    } else {
+        projects
+            .iter()
+            .map(|p| {
+                diff_one(
+                    p,
+                    &workspace,
+                    vcs.as_ref(),
+                    from_rev,
+                    resolved_color,
+                    &args.extra,
+                )
+            })
+            .collect()
+    };
+
+    // Drain: banners + bodies for non-empty, count empties,
+    // collect failures.
+    let mut stdout = io::stdout().lock();
+    let mut empty_count: usize = 0;
+    let mut had_nonempty = false;
+    let mut failures: Vec<(String, String)> = Vec::new();
+    let banner_style = Style::new().bold();
+    for o in outcomes {
+        match o.result {
+            Ok(DiffOutcome::Empty) => empty_count += 1,
+            Ok(DiffOutcome::NonEmpty) => {
+                had_nonempty = true;
+                if !settings.quiet {
+                    let _ = writeln!(
+                        stdout,
+                        "{}",
+                        banner_style.apply_to(format!(
+                            "=== diff in {} ({})",
+                            o.name,
+                            o.path.display(),
+                        )),
+                    );
+                }
+                let _ = stdout.write_all(&o.body);
+            }
+            Err(e) => failures.push((o.name, e.to_string())),
+        }
+    }
+    // Suppress the chrome under `--quiet`: banner is already gated
+    // above, and the tail summary line ("Empty diff in N
+    // projects.") is the only other chrome `west diff` produces.
+    if !settings.quiet && had_nonempty && empty_count > 0 {
+        let _ = writeln!(
+            stdout,
+            "Empty diff in {empty_count} project{}.",
+            if empty_count == 1 { "" } else { "s" }
+        );
+    }
+    drop(stdout);
+
+    if !failures.is_empty() {
+        for (name, msg) in &failures {
+            eprintln!("west: diff failed for {name}: {msg}");
+        }
+        let names: Vec<&str> = failures.iter().map(|(n, _)| n.as_str()).collect();
+        eprintln!(
+            "west: diff failed for {} project{}: {}",
+            names.len(),
+            if names.len() == 1 { "" } else { "s" },
+            names.join(", "),
+        );
+        return Ok(Outcome::Failures);
+    }
+
+    if had_nonempty {
+        Ok(Outcome::SomeNonEmpty {
+            exit_code_flag: args.exit_code,
+        })
+    } else {
+        Ok(Outcome::AllEmpty)
+    }
+}
+
+struct ProjectOutcome {
+    name: String,
+    path: PathBuf,
+    body: Vec<u8>,
+    result: Result<DiffOutcome, VcsError>,
+}
+
+fn diff_one(
+    project: &Project,
+    workspace: &Path,
+    vcs: &dyn Vcs,
+    from_rev: Option<&str>,
+    color: ColorMode,
+    extra: &[String],
+) -> ProjectOutcome {
+    let abspath = workspace.join(&project.path);
+    let path_prefix = project.path.to_string_lossy().into_owned();
+    let spec = DiffSpec {
+        from_rev,
+        to_rev: None,
+        color,
+        path_prefix: Some(&path_prefix),
+        extra_args: extra,
+    };
+    let mut body = Vec::new();
+    let result = vcs.diff(&abspath, &spec, &mut body);
+    ProjectOutcome {
+        name: project.name.clone(),
+        path: project.path.clone(),
+        body,
+        result,
+    }
+}
+
+// =========================================================================
+// Settings + workspace + manifest (mirrors forall.rs)
+// =========================================================================
+
+#[derive(Debug)]
+struct Settings {
+    jobs: usize,
+    raw: bool,
+    /// True when the top-level `-q/--quiet` was given (spliced
+    /// into `output.quiet` by `lib.rs::run`). Subcommands read
+    /// from one canonical place so `-q` works at any position —
+    /// `west -q diff` and `west diff -q` are equivalent.
+    quiet: bool,
+}
+
+impl Settings {
+    fn from_config(config: &Configuration) -> Result<Self, String> {
+        let jobs = match config.get("diff.jobs").map_err(|e| e.to_string())? {
+            None => default_jobs(),
+            Some(ConfigValue::Integer(i)) if i >= 1 => i as usize,
+            Some(ConfigValue::Integer(i)) => {
+                return Err(format!("diff.jobs must be a positive integer (got {i})"));
+            }
+            Some(other) => {
+                return Err(format!("diff.jobs must be an integer (got {other:?})"));
+            }
+        };
+        let raw = config
+            .get_bool("output.raw")
+            .map_err(|e| e.to_string())?
+            .unwrap_or(false);
+        let quiet = config
+            .get_bool("output.quiet")
+            .map_err(|e| e.to_string())?
+            .unwrap_or(false);
+        Ok(Self { jobs, raw, quiet })
+    }
+}
+
+fn splice_flags_into_config(args: &DiffArgs, config: &mut Configuration) -> Result<(), String> {
+    if let Some(jobs) = args.jobs {
+        super::config::splice_inline(config, "diff.jobs", ConfigValue::Integer(jobs as i64))?;
+    }
+    Ok(())
+}
+
+fn default_jobs() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .clamp(1, MAX_DEFAULT_JOBS)
+}
+
+fn resolve_workspace_dir() -> Result<PathBuf, DiffError> {
+    let cwd = std::env::current_dir()
+        .map_err(|e| DiffError::Config(format!("cannot get current directory: {e}")))?;
+    west_core::topdir::topdir(&cwd).map_err(|_| DiffError::NotInWorkspace)
+}
+
+fn load_manifest(
+    workspace: &Path,
+    config: &Configuration,
+    source: &dyn ImportSource,
+) -> Result<Manifest, DiffError> {
+    let manifest_path: PathBuf = config
+        .get_str("manifest.path")
+        .map_err(|e| DiffError::Config(e.to_string()))?
+        .map(PathBuf::from)
+        .ok_or_else(|| DiffError::Config("manifest.path is not set in workspace config".into()))?;
+    let manifest_file: PathBuf = config
+        .get_str("manifest.file")
+        .map_err(|e| DiffError::Config(e.to_string()))?
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_MANIFEST_FILE));
+    let manifest_repo_root = workspace.join(&manifest_path);
+    let full = manifest_repo_root.join(&manifest_file);
+    Manifest::from_path_with_imports(&full, &manifest_repo_root, source)
+        .map_err(|e| DiffError::Manifest(format!("manifest {}: {e}", full.display())))
+}
+
+/// Same shape as the `forall` / `list` / `extension` read-only
+/// source: filesystem imports resolve cleanly; per-project imports
+/// for uncloned projects return `Ok(None)` so the resolver
+/// continues with whatever projects are actually on disk. The
+/// `skipped` log isn't surfaced — diff doesn't need to warn about
+/// it since uncloned projects get filtered out below anyway.
+struct ReadOnlyImportSource<'a> {
+    workspace: &'a Path,
+    vcs: &'a dyn Vcs,
+    skipped: Mutex<Vec<String>>,
+}
+
+impl ImportSource for ReadOnlyImportSource<'_> {
+    fn project_root(&self, project: &Project) -> Option<PathBuf> {
+        Some(self.workspace.join(&project.path))
+    }
+
+    fn project_manifest(
+        &self,
+        project: &Project,
+        relative_file: &str,
+    ) -> Result<Option<String>, ImportSourceError> {
+        let repo = self.workspace.join(&project.path);
+        if !repo.exists() || !self.vcs.is_repo(&repo).unwrap_or(false) {
+            self.skipped
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .push(project.name.clone());
+            return Ok(None);
+        }
+        let path = repo.join(relative_file);
+        match std::fs::read_to_string(&path) {
+            Ok(body) => Ok(Some(body)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(ImportSourceError::msg(format!(
+                "read {}: {e}",
+                path.display()
+            ))),
+        }
+    }
+}

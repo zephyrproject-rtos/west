@@ -63,11 +63,24 @@ pub struct Cli {
 // entirely.
 #[derive(Args, Debug)]
 pub struct VerbosityArgs {
-    /// Increase logging verbosity.
-    #[arg(short = 'v', long = "verbose", action = ArgAction::Count, conflicts_with = "quiet")]
+    /// Increase logging verbosity. Composes with `-q`: the net is
+    /// `verbose - quiet`, used for both `log_level_filter` and
+    /// the `output.quiet` splice. `west -q -v` is a no-op.
+    #[arg(short = 'v', long = "verbose", action = ArgAction::Count, global = true)]
     pub verbose: u8,
-    /// Decrease logging verbosity.
-    #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
+    /// Decrease logging verbosity. Also suppresses per-project
+    /// chrome (banners, summary lines) in commands that emit it
+    /// (`west diff`, …).
+    ///
+    /// Marked `global = true` so `-q` is accepted at any position
+    /// — `west -q diff` and `west diff -q` behave identically.
+    /// Without `global`, clap routes `-q` after the subcommand to
+    /// a subcommand-local flag if one exists, which made `-q`'s
+    /// meaning depend on its position. See the inline splice
+    /// below: when set, we splice `output.quiet = true` into the
+    /// config so subcommands have a single canonical place to
+    /// read the choice from.
+    #[arg(short = 'q', long = "quiet", action = ArgAction::Count, global = true)]
     pub quiet: u8,
 }
 
@@ -111,6 +124,25 @@ pub fn run() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    // "Net-quiet" — `-v` cancels `-q`. `west -q -v diff` produces
+    // net 0 and shouldn't suppress chrome. Mirrors the same
+    // verbose - quiet arithmetic `log_level_filter` uses for the
+    // env_logger threshold; both consume the same primitive so
+    // `-q` and `-v` compose consistently across log level AND
+    // banner suppression.
+    let net_verbosity =
+        i32::from(initial.verbosity.verbose) - i32::from(initial.verbosity.quiet);
+    if net_verbosity < 0
+        && let Err(e) = commands::config::splice_inline(
+            &mut loaded.config,
+            "output.quiet",
+            west_core::config::ConfigValue::Bool(true),
+        )
+    {
+        eprintln!("west: -q: {e}");
+        return ExitCode::FAILURE;
+    }
 
     if initial.raw
         && let Err(e) = commands::config::splice_inline(

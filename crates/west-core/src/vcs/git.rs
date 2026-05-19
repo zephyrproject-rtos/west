@@ -12,8 +12,8 @@ use std::sync::Mutex;
 use crate::config::Configuration;
 
 use super::{
-    CheckoutTarget, CloneSpec, CommitSummary, FetchSpec, Output, ProgressSink, SubmoduleScope, Vcs,
-    VcsError,
+    CheckoutTarget, CloneSpec, ColorMode, CommitSummary, DiffOutcome, DiffSpec, FetchSpec, Output,
+    ProgressSink, SubmoduleScope, Vcs, VcsError,
 };
 
 const NAME: &str = "git";
@@ -628,6 +628,87 @@ impl Vcs for GitClient {
             short_sha: short.to_owned(),
             subject: subject.to_owned(),
         })
+    }
+
+    fn diff(
+        &self,
+        repo: &Path,
+        spec: &DiffSpec<'_>,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<DiffOutcome, VcsError> {
+        let repo_str = repo.to_string_lossy().into_owned();
+        // Build the argv: `-C <repo> diff --exit-code [--color=…]
+        // [--src-prefix=… --dst-prefix=…] [from] [to] -- [extra]`.
+        // `--exit-code` is what gives us the empty/non-empty split
+        // via the process exit code.
+        let mut args: Vec<String> = vec![
+            "-C".to_owned(),
+            repo_str,
+            "diff".to_owned(),
+            "--exit-code".to_owned(),
+        ];
+        match spec.color {
+            ColorMode::Always => args.push("--color=always".to_owned()),
+            ColorMode::Never => args.push("--color=never".to_owned()),
+            // Auto = no flag; git applies its own heuristic. Note that
+            // capturing stdout to a pipe (our case) makes git's
+            // heuristic decide "never" — callers that want color in
+            // a captured buffer should pass `Always` explicitly.
+            ColorMode::Auto => {}
+        }
+        if let Some(prefix) = spec.path_prefix {
+            args.push(format!("--src-prefix={prefix}/"));
+            args.push(format!("--dst-prefix={prefix}/"));
+        }
+        if let Some(from) = spec.from_rev {
+            args.push(from.to_owned());
+        }
+        if let Some(to) = spec.to_rev {
+            args.push(to.to_owned());
+        }
+        // Forward extras inline rather than after a `--` separator.
+        // git's `--` ends the option list and treats everything
+        // after as pathspecs — but our callers typically pass diff
+        // FLAGS (`--stat`, `-w`, `--name-only`). Users who want
+        // pathspecs supply the `--` themselves inside extra_args.
+        if !spec.extra_args.is_empty() {
+            args.extend(spec.extra_args.iter().cloned());
+        }
+
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let res = self.run(&arg_refs)?;
+
+        // git's --exit-code: 0 = no diff, 1 = diff present, ≥2 = error.
+        let outcome = match res.output.status.code() {
+            Some(0) => DiffOutcome::Empty,
+            Some(1) => DiffOutcome::NonEmpty,
+            Some(code) => {
+                return Err(VcsError::CommandFailed {
+                    client: NAME,
+                    argv: res.argv,
+                    exit_code: Some(code),
+                    stderr: String::from_utf8_lossy(&res.output.stderr).into_owned(),
+                });
+            }
+            None => {
+                return Err(VcsError::CommandFailed {
+                    client: NAME,
+                    argv: res.argv,
+                    exit_code: None,
+                    stderr: String::from_utf8_lossy(&res.output.stderr).into_owned(),
+                });
+            }
+        };
+
+        // Write the diff body even for `Empty` — stdout will be
+        // empty in that case, so this is a zero-byte write, which
+        // simplifies the contract for callers (the writer is always
+        // populated with whatever stdout produced).
+        writer.write_all(&res.output.stdout).map_err(|source| VcsError::Io {
+            path: repo.to_path_buf(),
+            source,
+        })?;
+        Ok(outcome)
     }
 }
 

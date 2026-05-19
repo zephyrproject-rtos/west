@@ -59,12 +59,13 @@ pub fn run(args: HelpArgs, loaded: &LoadedConfig) -> ExitCode {
 }
 
 fn print_top_level_help(loaded: &LoadedConfig) -> ExitCode {
-    // clap's render produces the same body as `west --help` (Usage
-    // + Commands + Options sections). Print it as-is, then append
-    // the extension and alias sections that clap doesn't know
-    // about.
+    // Render the LONG help (matches `west --help`). `render_help`
+    // would give the short form (one-liners + "see more with
+    // '--help'") which differs visibly from `--help` when any
+    // option has multi-paragraph docs. Symmetric with the
+    // per-subcommand path below, which re-parses with `--help`.
     let mut app = Cli::command();
-    let help_str = app.render_help().to_string();
+    let help_str = app.render_long_help().to_string();
     print!("{help_str}");
 
     // Extension commands. Only available inside a workspace with a

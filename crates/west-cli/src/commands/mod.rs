@@ -6,6 +6,7 @@ use clap::Subcommand;
 use config::LoadedConfig;
 
 pub mod config;
+pub mod diff;
 pub mod exec;
 pub mod extension;
 pub mod forall;
@@ -21,6 +22,8 @@ pub mod update;
 pub enum Command {
     /// Read or write west configuration values.
     Config(config::ConfigArgs),
+    /// Show per-project diffs across the workspace.
+    Diff(diff::DiffArgs),
     /// Run an external program. Useful with aliases to invoke `west` itself
     /// with top-level flags that aliases can't carry directly. Use `--` to
     /// be unambiguous about where exec's args end and the target program's
@@ -49,6 +52,7 @@ pub enum Command {
 pub fn dispatch(cmd: Command, mut loaded: LoadedConfig) -> ExitCode {
     match cmd {
         Command::Config(a) => config::run(a, &mut loaded),
+        Command::Diff(a) => diff::run(a, &mut loaded),
         Command::Exec(a) => exec::run(a),
         Command::Forall(a) => forall::run(a, &mut loaded),
         Command::Help(a) => help::run(a, &loaded),

@@ -272,6 +272,22 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     /// One-line summary of `rev`: abbreviated SHA + subject. Used to
     /// surface "what HEAD landed on" in user-facing progress output.
     fn commit_summary(&self, repo: &Path, rev: &str) -> Result<CommitSummary, VcsError>;
+
+    /// Compute a diff for `repo` and write it to `writer`. Returns
+    /// whether the diff was non-empty — semantics mirror
+    /// `git diff --exit-code`.
+    ///
+    /// Genuine tool failures (binary crashed, repo isn't a working
+    /// copy, …) surface as [`VcsError::CommandFailed`]. The
+    /// non-empty / empty axis isn't an error: writers that want
+    /// to gate on it (`west diff --exit-code`) inspect the returned
+    /// [`DiffOutcome`].
+    fn diff(
+        &self,
+        repo: &Path,
+        spec: &DiffSpec<'_>,
+        writer: &mut dyn Write,
+    ) -> Result<DiffOutcome, VcsError>;
 }
 
 /// What to clone.
@@ -339,6 +355,59 @@ pub enum SubmoduleScope<'a> {
     /// A specific list of submodule paths (relative to the repo root). An
     /// empty slice is a no-op.
     Specific(&'a [&'a str]),
+}
+
+/// Inputs for [`Vcs::diff`].
+///
+/// Both revisions default to the underlying tool's defaults — for git
+/// that's `HEAD` for `from_rev` and the working tree for `to_rev`, so
+/// `from_rev=None, to_rev=None` produces `git diff` (working tree vs
+/// HEAD). Setting `from_rev=Some("manifest-rev")` switches to a diff
+/// against the recorded manifest revision.
+#[derive(Debug, Clone)]
+pub struct DiffSpec<'a> {
+    /// Revision to diff FROM. `None` selects the tool's default base.
+    pub from_rev: Option<&'a str>,
+    /// Revision to diff TO. `None` selects the working tree.
+    pub to_rev: Option<&'a str>,
+    /// Color preference for the diff body.
+    pub color: ColorMode,
+    /// Path prefix prepended to source/destination paths in the diff
+    /// output. `west diff` passes the workspace-relative project path
+    /// so the output is unambiguous when several projects' diffs are
+    /// concatenated.
+    pub path_prefix: Option<&'a str>,
+    /// Extra arguments forwarded verbatim to the underlying tool's
+    /// diff command (everything after the user's `--` separator).
+    pub extra_args: &'a [String],
+}
+
+/// Color preference for diff output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorMode {
+    /// Force ANSI escapes regardless of the writer.
+    Always,
+    /// Strip ANSI escapes regardless of the writer.
+    Never,
+    /// Let the underlying tool decide based on its own heuristics.
+    /// Note: clients usually default to `Never` when stdout is a pipe,
+    /// which is the case when [`Vcs::diff`] captures into a `Vec<u8>`.
+    /// Callers that want color in captured output should pass `Always`.
+    Auto,
+}
+
+/// Result of a [`Vcs::diff`] call.
+///
+/// Diff failures (e.g. git crashed, exit code ≥ 2) surface as
+/// [`VcsError::CommandFailed`]. The `Empty` / `NonEmpty` split mirrors
+/// `git diff --exit-code`: 0 → no diff, 1 → diff present.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffOutcome {
+    /// The working tree (or `to_rev`) matches `from_rev` byte-for-byte.
+    /// Nothing was written to the writer.
+    Empty,
+    /// The diff body was written to the writer.
+    NonEmpty,
 }
 
 /// Errors common to any client. Implementations wrap their tool-specific
