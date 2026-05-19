@@ -255,6 +255,101 @@ fn is_cloned(path: &Path, vcs: &dyn Vcs) -> bool {
     path.exists() && vcs.is_repo(path).unwrap_or(false)
 }
 
+/// One project's contribution to the workspace's extension command
+/// catalog. Used by `west help` to render the
+/// "extension commands from project X (path: Y):" sections.
+#[derive(Debug)]
+pub(crate) struct ProjectExtensions {
+    /// Project name (matches manifest.projects[].name, or the
+    /// literal "manifest" for the self-project).
+    pub(crate) project: String,
+    /// Workspace-relative path, the way the manifest declares it.
+    pub(crate) path: PathBuf,
+    /// `(command-name, help-text)` pairs in declaration order. Help
+    /// is the `help:` field from `west-commands.yml`; absent fields
+    /// become an empty string in the output.
+    pub(crate) commands: Vec<(String, String)>,
+}
+
+/// Discover extensions and return them grouped by project, in
+/// manifest order, for the `west help` listing. Aligns with python
+/// v1's "extension commands from project <name> (path: <path>):"
+/// section format. Uncloned and yaml-less projects are silently
+/// excluded — same contract as `discover`.
+pub(crate) fn list_for_help(
+    loaded: &LoadedConfig,
+) -> Result<Vec<ProjectExtensions>, ExtensionError> {
+    let workspace = resolve_workspace_dir()?;
+    let vcs = vcs::from_config(&loaded.config).map_err(|e| ExtensionError::Vcs(e.to_string()))?;
+    let source = ReadOnlyImportSource {
+        workspace: &workspace,
+        vcs: vcs.as_ref(),
+        skipped: Mutex::new(Vec::new()),
+    };
+    let manifest = load_manifest(&workspace, &loaded.config, &source)?;
+
+    let mut groups: Vec<ProjectExtensions> = Vec::new();
+
+    // Self-project ("manifest") first. Matches the order the
+    // dispatcher uses and python v1's section order.
+    let self_root = workspace.join(&manifest.self_.path);
+    if is_cloned(&self_root, vcs.as_ref()) {
+        let mut commands: Vec<(String, String)> = Vec::new();
+        for yml in &manifest.self_.west_commands {
+            collect_commands_into(&self_root, yml, &mut commands)?;
+        }
+        if !commands.is_empty() {
+            groups.push(ProjectExtensions {
+                project: "manifest".to_owned(),
+                path: manifest.self_.path.clone(),
+                commands,
+            });
+        }
+    }
+
+    for project in &manifest.projects {
+        let project_root = workspace.join(&project.path);
+        if !is_cloned(&project_root, vcs.as_ref()) {
+            continue;
+        }
+        let mut commands: Vec<(String, String)> = Vec::new();
+        for yml in &project.west_commands {
+            collect_commands_into(&project_root, yml, &mut commands)?;
+        }
+        if !commands.is_empty() {
+            groups.push(ProjectExtensions {
+                project: project.name.clone(),
+                path: project.path.clone(),
+                commands,
+            });
+        }
+    }
+
+    Ok(groups)
+}
+
+fn collect_commands_into(
+    project_root: &Path,
+    yml_rel: &Path,
+    out: &mut Vec<(String, String)>,
+) -> Result<(), ExtensionError> {
+    let yml_abs = project_root.join(yml_rel);
+    if !yml_abs.exists() {
+        return Ok(());
+    }
+    let file =
+        WestCommandsFile::from_path(&yml_abs).map_err(|source| ExtensionError::YamlParse {
+            path: yml_abs.clone(),
+            source: Box::new(source),
+        })?;
+    for entry in file.entries {
+        for cmd in entry.commands {
+            out.push((cmd.name, cmd.help.unwrap_or_default()));
+        }
+    }
+    Ok(())
+}
+
 /// Pick which python interpreter to spawn. Order:
 ///
 /// 1. `WEST_PYTHON` env var (explicit override).

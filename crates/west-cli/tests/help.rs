@@ -2,11 +2,34 @@
 //! `tests/alias.rs`; per-test isolated `WEST_CONFIG_*` so aliases
 //! written in one test don't leak to another.
 
+use std::path::Path;
+
 use assert_cmd::Command;
 use serial_test::serial;
 use tempfile::TempDir;
 
 const BIN: &str = "west";
+
+fn git_available() -> bool {
+    std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn git(args: &[&str], cwd: &Path) {
+    let status = std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@example.com")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@example.com")
+        .status()
+        .unwrap_or_else(|e| panic!("git {args:?}: {e}"));
+    assert!(status.success(), "git {args:?} failed");
+}
 
 struct Sandbox {
     _tmp: TempDir,
@@ -46,15 +69,82 @@ impl Sandbox {
 
 #[test]
 #[serial]
-fn help_no_arg_matches_top_level_dash_dash_help() {
-    // `west help` and `west --help` produce identical output —
-    // anything else would surprise the user.
+fn help_no_arg_starts_with_clap_top_level_help() {
+    // `west help` builds on top of `west --help` — every line of
+    // clap's standard help should appear at the start, with our
+    // extension/alias sections + footer appended below. Asserting
+    // prefix-equality (rather than byte-identity) keeps the test
+    // resilient to the appended sections.
     let sb = Sandbox::new();
-    let h = sb.west().args(["help"]).assert().success();
-    let dh = sb.west().args(["--help"]).assert().success();
-    assert_eq!(
-        std::str::from_utf8(h.get_output().stdout.as_slice()).unwrap(),
-        std::str::from_utf8(dh.get_output().stdout.as_slice()).unwrap(),
+    let help_out = sb.west().args(["help"]).assert().success();
+    let flag_out = sb.west().args(["--help"]).assert().success();
+    let help_str = std::str::from_utf8(help_out.get_output().stdout.as_slice()).unwrap();
+    let flag_str = std::str::from_utf8(flag_out.get_output().stdout.as_slice()).unwrap();
+    assert!(
+        help_str.starts_with(flag_str),
+        "`west help` output should start with `west --help` output. \
+         help: {help_str:?}\n\nflag: {flag_str:?}",
+    );
+}
+
+#[test]
+#[serial]
+fn help_no_arg_appends_footer_pointer() {
+    // The footer is the navigation hint v1 ships with — verify
+    // it's in place so users discover `west help <command>`.
+    let sb = Sandbox::new();
+    let out = sb.west().args(["help"]).assert().success();
+    let s = std::str::from_utf8(out.get_output().stdout.as_slice()).unwrap();
+    assert!(
+        s.contains("Run \"west help <command>\" for help on each <command>."),
+        "expected footer line in: {s}",
+    );
+}
+
+#[test]
+#[serial]
+fn help_no_arg_lists_configured_aliases() {
+    // Set a couple of aliases at the global layer; both should
+    // appear in the "aliases:" section. Empty aliases render as
+    // `<empty>` per python v1.
+    let sb = Sandbox::new();
+    sb.west()
+        .args(["config", "set", "--global", "alias.up", "update"])
+        .assert()
+        .success();
+    sb.west()
+        .args(["config", "set", "--global", "alias.menuconfig",
+               "build --pristine never -t menuconfig"])
+        .assert()
+        .success();
+
+    let out = sb.west().args(["help"]).assert().success();
+    let s = std::str::from_utf8(out.get_output().stdout.as_slice()).unwrap();
+    assert!(s.contains("aliases:"), "missing aliases header in: {s}");
+    // No colon after the name — the two-column listing matches
+    // clap's `Commands:` shape (`  <name>    <description>`).
+    assert!(
+        s.contains("  up ") && s.contains("update"),
+        "missing `up` alias in: {s}",
+    );
+    assert!(
+        s.contains("  menuconfig ")
+            && s.contains("build --pristine never -t menuconfig"),
+        "missing `menuconfig` alias in: {s}",
+    );
+}
+
+#[test]
+#[serial]
+fn help_no_arg_no_aliases_omits_aliases_section() {
+    // Aliases section is conditional — clean workspace shouldn't
+    // grow an empty `aliases:` header.
+    let sb = Sandbox::new();
+    let out = sb.west().args(["help"]).assert().success();
+    let s = std::str::from_utf8(out.get_output().stdout.as_slice()).unwrap();
+    assert!(
+        !s.contains("aliases:"),
+        "unexpected aliases section in: {s}",
     );
 }
 
@@ -152,6 +242,94 @@ fn help_alias_cycle_terminates() {
     assert!(
         stderr.contains("alias cycle"),
         "expected alias-cycle error in stderr: {stderr}"
+    );
+}
+
+#[test]
+#[serial]
+fn help_no_arg_lists_extension_commands_grouped_by_project() {
+    // Bootstrap a workspace whose self-project declares
+    // `west-commands.yml`. After `west init`, the self-project is
+    // automatically cloned (it's the manifest repo). The help
+    // listing should surface its extensions under
+    // `extension commands from project manifest (path: my-manifest):`.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+
+    let manifest_yaml = "\
+manifest:
+  self:
+    path: my-manifest
+    west-commands: scripts/west-commands.yml
+  projects: []
+";
+    let west_commands_yaml = "\
+west-commands:
+- file: scripts/hello.py
+  commands:
+  - name: hello
+    class: Hello
+    help: say hi to the world
+  - name: silent
+    class: Silent
+";
+    // Stand up a manifest repo + bare clone, then `west init`.
+    let manifest_work = sb.workspace.parent().unwrap().join("manifest-work");
+    std::fs::create_dir_all(manifest_work.join("scripts")).unwrap();
+    std::fs::write(manifest_work.join("west.yml"), manifest_yaml).unwrap();
+    std::fs::write(
+        manifest_work.join("scripts/west-commands.yml"),
+        west_commands_yaml,
+    )
+    .unwrap();
+    std::fs::write(manifest_work.join("scripts/hello.py"), "# stub\n").unwrap();
+    git(&["init", "-q", "--initial-branch=main", "."], &manifest_work);
+    git(&["add", "."], &manifest_work);
+    git(&["commit", "-q", "-m", "initial"], &manifest_work);
+    let bare = sb.workspace.parent().unwrap().join("manifest.git");
+    git(
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            manifest_work.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+        sb.workspace.parent().unwrap(),
+    );
+
+    // Re-init the workspace in the sandbox's `ws/` dir.
+    let _ = std::fs::remove_dir_all(&sb.workspace);
+    sb.west()
+        .current_dir(sb.workspace.parent().unwrap())
+        .args([
+            "init",
+            "--url",
+            bare.to_str().unwrap(),
+            sb.workspace.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let out = sb.west().args(["help"]).assert().success();
+    let s = std::str::from_utf8(out.get_output().stdout.as_slice()).unwrap();
+    assert!(
+        s.contains("extension commands from project manifest (path: my-manifest):"),
+        "missing extension-section header in: {s}",
+    );
+    // No colon after the name — matches clap's `Commands:` shape.
+    assert!(
+        s.contains("  hello ") && s.contains("say hi to the world"),
+        "missing `hello` entry with help text in: {s}",
+    );
+    // Even names without a help string get a leading-indented row;
+    // assert the bare-name form (with a trailing newline character)
+    // so we're not matching a substring of some longer line.
+    assert!(
+        s.contains("\n  silent\n"),
+        "missing bare `silent` entry (no help text — should still render): {s}",
     );
 }
 
