@@ -17,6 +17,7 @@ pub mod manifest;
 pub mod select;
 pub mod topdir;
 pub mod update;
+pub mod workspace;
 
 #[derive(Subcommand, Debug)]
 pub enum Command {

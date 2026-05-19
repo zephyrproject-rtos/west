@@ -15,19 +15,16 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::Mutex;
 
 use clap::Args;
 
-use west_core::config::Configuration;
-use west_core::manifest::{ImportSource, ImportSourceError, Manifest, Project};
+use west_core::manifest::{Manifest, Project};
 use west_core::vcs::{self, Vcs};
 
 use super::config::LoadedConfig;
 use super::select;
 
 const DEFAULT_FORMAT: &str = "{name:12} {path:28} {revision:40} {url}";
-const DEFAULT_MANIFEST_FILE: &str = "west.yml";
 
 #[derive(Args, Debug)]
 pub struct ListArgs {
@@ -70,6 +67,16 @@ pub enum ListError {
     InactiveWithPositional,
 }
 
+impl From<super::workspace::WorkspaceError> for ListError {
+    fn from(e: super::workspace::WorkspaceError) -> Self {
+        match e {
+            super::workspace::WorkspaceError::NotInWorkspace => ListError::NotInWorkspace,
+            super::workspace::WorkspaceError::Config(s) => ListError::Config(s),
+            super::workspace::WorkspaceError::Manifest(s) => ListError::Manifest(s),
+        }
+    }
+}
+
 pub fn run(args: ListArgs, loaded: &mut LoadedConfig) -> ExitCode {
     match run_inner(args, loaded) {
         Ok(false) => ExitCode::SUCCESS,
@@ -97,14 +104,10 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
         return Err(ListError::InactiveWithPositional);
     }
 
-    let workspace = resolve_workspace_dir()?;
+    let workspace = super::workspace::resolve_workspace_dir()?;
     let vcs = vcs::from_config(&loaded.config).map_err(|e| ListError::Vcs(e.to_string()))?;
-    let source = ReadOnlyImportSource {
-        workspace: workspace.as_path(),
-        vcs: vcs.as_ref(),
-        skipped: Mutex::new(Vec::new()),
-    };
-    let manifest = load_manifest(&workspace, &loaded.config, &source)?;
+    let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
+    let manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
     // `manifest.group-filter` is the workspace-permanent filter that
     // sits on top of the manifest's own `group-filter:`. Every command
     // that gates by activity has to apply it; without this, an inactive
@@ -188,10 +191,7 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
     // Surface any imports that were skipped because their owning project
     // wasn't cloned. The listing is real but incomplete; warn and
     // signal partial success via a non-zero exit (returned by `run`).
-    let mut skipped = source
-        .skipped
-        .into_inner()
-        .expect("ReadOnlyImportSource skipped mutex poisoned");
+    let mut skipped = source.skipped();
     skipped.sort();
     skipped.dedup();
     if !skipped.is_empty() {
@@ -339,79 +339,3 @@ fn parse_back_listerror(msg: &str) -> ListError {
     ListError::Format(msg.to_owned())
 }
 
-// =====================================================================
-// Workspace + manifest loading
-// =====================================================================
-
-fn resolve_workspace_dir() -> Result<PathBuf, ListError> {
-    let cwd = std::env::current_dir().map_err(|e| ListError::Config(e.to_string()))?;
-    west_core::topdir::topdir(&cwd).map_err(|_| ListError::NotInWorkspace)
-}
-
-fn load_manifest(
-    workspace: &Path,
-    config: &Configuration,
-    source: &ReadOnlyImportSource<'_>,
-) -> Result<Manifest, ListError> {
-    let manifest_path: PathBuf = config
-        .get_str("manifest.path")
-        .map_err(|e| ListError::Config(e.to_string()))?
-        .map(PathBuf::from)
-        .ok_or_else(|| {
-            ListError::Config("manifest.path is not set in workspace config".to_owned())
-        })?;
-    let manifest_file: PathBuf = config
-        .get_str("manifest.file")
-        .map_err(|e| ListError::Config(e.to_string()))?
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_MANIFEST_FILE));
-    let manifest_repo_root = workspace.join(&manifest_path);
-    let full = manifest_repo_root.join(&manifest_file);
-    // Read-only resolution: filesystem imports (self/top-level) work
-    // naturally; per-project imports only resolve for projects that
-    // are *already* cloned, so listing never triggers a fetch. An
-    // uncloned project's import is recorded in `source.skipped` for
-    // an end-of-run warning.
-    Manifest::from_path_with_imports(&full, &manifest_repo_root, source)
-        .map_err(|e| ListError::Manifest(format!("manifest {}: {e}", full.display())))
-}
-
-/// `ImportSource` that reads project manifests off disk only — never
-/// fetches. For a project that isn't cloned yet, returns `Ok(None)`
-/// (so the resolver continues with a partial project list) and pushes
-/// the project name onto `skipped` so the caller can warn afterwards.
-struct ReadOnlyImportSource<'a> {
-    workspace: &'a Path,
-    vcs: &'a dyn Vcs,
-    skipped: Mutex<Vec<String>>,
-}
-
-impl ImportSource for ReadOnlyImportSource<'_> {
-    fn project_root(&self, project: &Project) -> Option<PathBuf> {
-        Some(self.workspace.join(&project.path))
-    }
-
-    fn project_manifest(
-        &self,
-        project: &Project,
-        relative_file: &str,
-    ) -> Result<Option<String>, ImportSourceError> {
-        let repo = self.workspace.join(&project.path);
-        if !repo.exists() || !self.vcs.is_repo(&repo).unwrap_or(false) {
-            self.skipped
-                .lock()
-                .expect("ReadOnlyImportSource skipped mutex poisoned")
-                .push(project.name.clone());
-            return Ok(None);
-        }
-        let path = repo.join(relative_file);
-        match std::fs::read_to_string(&path) {
-            Ok(body) => Ok(Some(body)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(ImportSourceError::msg(format!(
-                "read {}: {e}",
-                path.display()
-            ))),
-        }
-    }
-}

@@ -38,13 +38,12 @@ use console::Style;
 use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
-use west_core::manifest::{ImportSource, ImportSourceError, Manifest, Project};
-use west_core::vcs::{self, Vcs};
+use west_core::manifest::Project;
+use west_core::vcs;
 
 use super::config::LoadedConfig;
 use super::select;
 
-const DEFAULT_MANIFEST_FILE: &str = "west.yml";
 /// Same default cap as `update`: beyond ~8 concurrent shell jobs the
 /// shared resources (disk, terminal output) drown out the gain.
 const MAX_DEFAULT_JOBS: usize = 8;
@@ -101,6 +100,16 @@ enum ForallError {
     Spawn(#[source] io::Error),
 }
 
+impl From<super::workspace::WorkspaceError> for ForallError {
+    fn from(e: super::workspace::WorkspaceError) -> Self {
+        match e {
+            super::workspace::WorkspaceError::NotInWorkspace => ForallError::NotInWorkspace,
+            super::workspace::WorkspaceError::Config(s) => ForallError::Config(s),
+            super::workspace::WorkspaceError::Manifest(s) => ForallError::Manifest(s),
+        }
+    }
+}
+
 pub fn run(args: ForallArgs, loaded: &mut LoadedConfig) -> ExitCode {
     if let Err(e) = splice_flags_into_config(&args, &mut loaded.config) {
         eprintln!("west: {e}");
@@ -124,17 +133,13 @@ pub fn run(args: ForallArgs, loaded: &mut LoadedConfig) -> ExitCode {
 /// `Ok(true)` = every project's shell command exited 0;
 /// `Ok(false)` = at least one failed (summary already printed).
 fn run_inner(args: ForallArgs, loaded: &mut LoadedConfig) -> Result<bool, ForallError> {
-    let workspace = resolve_workspace_dir()?;
+    let workspace = super::workspace::resolve_workspace_dir()?;
     let vcs = vcs::from_config(&loaded.config).map_err(|e| ForallError::Vcs(e.to_string()))?;
 
     // Read-only manifest resolution: per-project imports for uncloned
     // projects are skipped silently (we'll filter to cloned anyway).
-    let source = ReadOnlyImportSource {
-        workspace: workspace.as_path(),
-        vcs: vcs.as_ref(),
-        skipped: Mutex::new(Vec::new()),
-    };
-    let manifest = load_manifest(&workspace, &loaded.config, &source)?;
+    let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
+    let manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
 
     // Workspace-permanent group filter (`manifest.group-filter` config
     // key) layered on the manifest's own filter — same plumbing as
@@ -455,72 +460,3 @@ fn default_jobs() -> usize {
         .clamp(1, MAX_DEFAULT_JOBS)
 }
 
-fn resolve_workspace_dir() -> Result<PathBuf, ForallError> {
-    let cwd = std::env::current_dir()
-        .map_err(|e| ForallError::Config(format!("cannot get current directory: {e}")))?;
-    west_core::topdir::topdir(&cwd).map_err(|_| ForallError::NotInWorkspace)
-}
-
-fn load_manifest(
-    workspace: &Path,
-    config: &Configuration,
-    source: &dyn ImportSource,
-) -> Result<Manifest, ForallError> {
-    let manifest_path: PathBuf = config
-        .get_str("manifest.path")
-        .map_err(|e| ForallError::Config(e.to_string()))?
-        .map(PathBuf::from)
-        .ok_or_else(|| {
-            ForallError::Config("manifest.path is not set in workspace config".into())
-        })?;
-    let manifest_file: PathBuf = config
-        .get_str("manifest.file")
-        .map_err(|e| ForallError::Config(e.to_string()))?
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_MANIFEST_FILE));
-    let manifest_repo_root = workspace.join(&manifest_path);
-    let full = manifest_repo_root.join(&manifest_file);
-    Manifest::from_path_with_imports(&full, &manifest_repo_root, source)
-        .map_err(|e| ForallError::Manifest(format!("manifest {}: {e}", full.display())))
-}
-
-/// Same shape as `list`'s read-only import source: filesystem
-/// imports resolve cleanly; per-project imports for uncloned
-/// projects return `Ok(None)` so the resolver continues with a
-/// partial project list (cloned-only filtering downstream picks up
-/// the rest).
-struct ReadOnlyImportSource<'a> {
-    workspace: &'a Path,
-    vcs: &'a dyn Vcs,
-    skipped: Mutex<Vec<String>>,
-}
-
-impl ImportSource for ReadOnlyImportSource<'_> {
-    fn project_root(&self, project: &Project) -> Option<PathBuf> {
-        Some(self.workspace.join(&project.path))
-    }
-
-    fn project_manifest(
-        &self,
-        project: &Project,
-        relative_file: &str,
-    ) -> Result<Option<String>, ImportSourceError> {
-        let repo = self.workspace.join(&project.path);
-        if !repo.exists() || !self.vcs.is_repo(&repo).unwrap_or(false) {
-            self.skipped
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .push(project.name.clone());
-            return Ok(None);
-        }
-        let path = repo.join(relative_file);
-        match std::fs::read_to_string(&path) {
-            Ok(body) => Ok(Some(body)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(ImportSourceError::msg(format!(
-                "read {}: {e}",
-                path.display()
-            ))),
-        }
-    }
-}

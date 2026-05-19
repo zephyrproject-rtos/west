@@ -27,15 +27,12 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
-use std::sync::Mutex;
 
-use west_core::manifest::{ImportSource, ImportSourceError, Manifest, Project};
+use west_core::manifest::Manifest;
 use west_core::vcs::{self, Vcs};
 use west_core::west_commands::{WestCommandsError, WestCommandsFile};
 
 use super::config::LoadedConfig;
-
-const DEFAULT_MANIFEST_FILE: &str = "west.yml";
 
 /// Where to find one extension command's python implementation.
 #[derive(Debug, Clone)]
@@ -74,6 +71,16 @@ pub(crate) enum ExtensionError {
     Spawn(#[source] std::io::Error),
 }
 
+impl From<super::workspace::WorkspaceError> for ExtensionError {
+    fn from(e: super::workspace::WorkspaceError) -> Self {
+        match e {
+            super::workspace::WorkspaceError::NotInWorkspace => ExtensionError::NotInWorkspace,
+            super::workspace::WorkspaceError::Config(s) => ExtensionError::Config(s),
+            super::workspace::WorkspaceError::Manifest(s) => ExtensionError::Manifest(s),
+        }
+    }
+}
+
 /// Top-level entry from `Command::External(args)`. Returns an
 /// `ExitCode` so the dispatch arm can return directly without
 /// further mapping.
@@ -93,7 +100,7 @@ pub(crate) fn run(args: &[OsString], loaded: &LoadedConfig) -> ExitCode {
     // command" error (matches python, matches pre-extension rust
     // behaviour). Don't pretend their typo is "an extension we
     // couldn't find".
-    let workspace = match resolve_workspace_dir() {
+    let workspace = match super::workspace::resolve_workspace_dir() {
         Ok(w) => w,
         Err(_) => {
             eprintln!("west: unknown command: {name}");
@@ -134,12 +141,8 @@ fn find_spec(
     loaded: &LoadedConfig,
 ) -> Result<Option<ExtensionSpec>, ExtensionError> {
     let vcs = vcs::from_config(&loaded.config).map_err(|e| ExtensionError::Vcs(e.to_string()))?;
-    let source = ReadOnlyImportSource {
-        workspace,
-        vcs: vcs.as_ref(),
-        skipped: Mutex::new(Vec::new()),
-    };
-    let manifest = load_manifest(workspace, &loaded.config, &source)?;
+    let source = super::workspace::ReadOnlyImportSource::new(workspace, vcs.as_ref());
+    let manifest = super::workspace::load_manifest(workspace, &loaded.config, &source)?;
     let extensions = discover(workspace, &manifest, vcs.as_ref())?;
     Ok(extensions.get(name).cloned())
 }
@@ -279,14 +282,10 @@ pub(crate) struct ProjectExtensions {
 pub(crate) fn list_for_help(
     loaded: &LoadedConfig,
 ) -> Result<Vec<ProjectExtensions>, ExtensionError> {
-    let workspace = resolve_workspace_dir()?;
+    let workspace = super::workspace::resolve_workspace_dir()?;
     let vcs = vcs::from_config(&loaded.config).map_err(|e| ExtensionError::Vcs(e.to_string()))?;
-    let source = ReadOnlyImportSource {
-        workspace: &workspace,
-        vcs: vcs.as_ref(),
-        skipped: Mutex::new(Vec::new()),
-    };
-    let manifest = load_manifest(&workspace, &loaded.config, &source)?;
+    let source = super::workspace::ReadOnlyImportSource::new(&workspace, vcs.as_ref());
+    let manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
 
     let mut groups: Vec<ProjectExtensions> = Vec::new();
 
@@ -377,73 +376,3 @@ fn resolve_python() -> PathBuf {
 }
 
 // =====================================================================
-// Workspace + manifest loading (mirror of list / forall)
-// =====================================================================
-
-fn resolve_workspace_dir() -> Result<PathBuf, ExtensionError> {
-    let cwd = std::env::current_dir()
-        .map_err(|e| ExtensionError::Config(format!("cannot get current directory: {e}")))?;
-    west_core::topdir::topdir(&cwd).map_err(|_| ExtensionError::NotInWorkspace)
-}
-
-fn load_manifest(
-    workspace: &Path,
-    config: &west_core::config::Configuration,
-    source: &dyn ImportSource,
-) -> Result<Manifest, ExtensionError> {
-    let manifest_path: PathBuf = config
-        .get_str("manifest.path")
-        .map_err(|e| ExtensionError::Config(e.to_string()))?
-        .map(PathBuf::from)
-        .ok_or_else(|| {
-            ExtensionError::Config("manifest.path is not set in workspace config".into())
-        })?;
-    let manifest_file: PathBuf = config
-        .get_str("manifest.file")
-        .map_err(|e| ExtensionError::Config(e.to_string()))?
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_MANIFEST_FILE));
-    let manifest_repo_root = workspace.join(&manifest_path);
-    let full = manifest_repo_root.join(&manifest_file);
-    Manifest::from_path_with_imports(&full, &manifest_repo_root, source)
-        .map_err(|e| ExtensionError::Manifest(format!("manifest {}: {e}", full.display())))
-}
-
-/// Same shape as `list` / `forall`: read-only manifest import
-/// source. Filesystem imports work as normal; per-project imports
-/// for uncloned projects are skipped silently.
-struct ReadOnlyImportSource<'a> {
-    workspace: &'a Path,
-    vcs: &'a dyn Vcs,
-    skipped: Mutex<Vec<String>>,
-}
-
-impl ImportSource for ReadOnlyImportSource<'_> {
-    fn project_root(&self, project: &Project) -> Option<PathBuf> {
-        Some(self.workspace.join(&project.path))
-    }
-
-    fn project_manifest(
-        &self,
-        project: &Project,
-        relative_file: &str,
-    ) -> Result<Option<String>, ImportSourceError> {
-        let repo = self.workspace.join(&project.path);
-        if !repo.exists() || !self.vcs.is_repo(&repo).unwrap_or(false) {
-            self.skipped
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .push(project.name.clone());
-            return Ok(None);
-        }
-        let path = repo.join(relative_file);
-        match std::fs::read_to_string(&path) {
-            Ok(body) => Ok(Some(body)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(ImportSourceError::msg(format!(
-                "read {}: {e}",
-                path.display()
-            ))),
-        }
-    }
-}

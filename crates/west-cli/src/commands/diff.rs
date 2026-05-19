@@ -33,20 +33,18 @@
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::Mutex;
 
 use clap::{Args, ValueEnum};
 use console::Style;
 use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
-use west_core::manifest::{ImportSource, ImportSourceError, Manifest, Project};
+use west_core::manifest::Project;
 use west_core::vcs::{self, ColorMode, DiffOutcome, DiffSpec, Vcs, VcsError};
 
 use super::config::LoadedConfig;
 use super::select;
 
-const DEFAULT_MANIFEST_FILE: &str = "west.yml";
 const MAX_DEFAULT_JOBS: usize = 8;
 
 #[derive(Args, Debug)]
@@ -107,6 +105,16 @@ enum DiffError {
     UnclonedPositional { names: String },
 }
 
+impl From<super::workspace::WorkspaceError> for DiffError {
+    fn from(e: super::workspace::WorkspaceError) -> Self {
+        match e {
+            super::workspace::WorkspaceError::NotInWorkspace => DiffError::NotInWorkspace,
+            super::workspace::WorkspaceError::Config(s) => DiffError::Config(s),
+            super::workspace::WorkspaceError::Manifest(s) => DiffError::Manifest(s),
+        }
+    }
+}
+
 pub fn run(args: DiffArgs, loaded: &mut LoadedConfig) -> ExitCode {
     if let Err(e) = splice_flags_into_config(&args, &mut loaded.config) {
         eprintln!("west: {e}");
@@ -143,15 +151,11 @@ enum Outcome {
 }
 
 fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffError> {
-    let workspace = resolve_workspace_dir()?;
+    let workspace = super::workspace::resolve_workspace_dir()?;
     let vcs = vcs::from_config(&loaded.config).map_err(|e| DiffError::Vcs(e.to_string()))?;
 
-    let source = ReadOnlyImportSource {
-        workspace: workspace.as_path(),
-        vcs: vcs.as_ref(),
-        skipped: Mutex::new(Vec::new()),
-    };
-    let manifest = load_manifest(&workspace, &loaded.config, &source)?;
+    let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
+    let manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
 
     let cfg_filter =
         select::read_manifest_group_filter(&loaded.config).map_err(DiffError::Config)?;
@@ -432,71 +436,3 @@ fn default_jobs() -> usize {
         .clamp(1, MAX_DEFAULT_JOBS)
 }
 
-fn resolve_workspace_dir() -> Result<PathBuf, DiffError> {
-    let cwd = std::env::current_dir()
-        .map_err(|e| DiffError::Config(format!("cannot get current directory: {e}")))?;
-    west_core::topdir::topdir(&cwd).map_err(|_| DiffError::NotInWorkspace)
-}
-
-fn load_manifest(
-    workspace: &Path,
-    config: &Configuration,
-    source: &dyn ImportSource,
-) -> Result<Manifest, DiffError> {
-    let manifest_path: PathBuf = config
-        .get_str("manifest.path")
-        .map_err(|e| DiffError::Config(e.to_string()))?
-        .map(PathBuf::from)
-        .ok_or_else(|| DiffError::Config("manifest.path is not set in workspace config".into()))?;
-    let manifest_file: PathBuf = config
-        .get_str("manifest.file")
-        .map_err(|e| DiffError::Config(e.to_string()))?
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_MANIFEST_FILE));
-    let manifest_repo_root = workspace.join(&manifest_path);
-    let full = manifest_repo_root.join(&manifest_file);
-    Manifest::from_path_with_imports(&full, &manifest_repo_root, source)
-        .map_err(|e| DiffError::Manifest(format!("manifest {}: {e}", full.display())))
-}
-
-/// Same shape as the `forall` / `list` / `extension` read-only
-/// source: filesystem imports resolve cleanly; per-project imports
-/// for uncloned projects return `Ok(None)` so the resolver
-/// continues with whatever projects are actually on disk. The
-/// `skipped` log isn't surfaced — diff doesn't need to warn about
-/// it since uncloned projects get filtered out below anyway.
-struct ReadOnlyImportSource<'a> {
-    workspace: &'a Path,
-    vcs: &'a dyn Vcs,
-    skipped: Mutex<Vec<String>>,
-}
-
-impl ImportSource for ReadOnlyImportSource<'_> {
-    fn project_root(&self, project: &Project) -> Option<PathBuf> {
-        Some(self.workspace.join(&project.path))
-    }
-
-    fn project_manifest(
-        &self,
-        project: &Project,
-        relative_file: &str,
-    ) -> Result<Option<String>, ImportSourceError> {
-        let repo = self.workspace.join(&project.path);
-        if !repo.exists() || !self.vcs.is_repo(&repo).unwrap_or(false) {
-            self.skipped
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .push(project.name.clone());
-            return Ok(None);
-        }
-        let path = repo.join(relative_file);
-        match std::fs::read_to_string(&path) {
-            Ok(body) => Ok(Some(body)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(ImportSourceError::msg(format!(
-                "read {}: {e}",
-                path.display()
-            ))),
-        }
-    }
-}
