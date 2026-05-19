@@ -121,6 +121,7 @@ pub fn resolve_loop(mut argv: Vec<OsString>, cfg: &Configuration) -> Result<Cli,
 
 fn subcommand_token(cmd: &Command) -> String {
     match cmd {
+        Command::Compare(_) => "compare".to_owned(),
         Command::Config(_) => "config".to_owned(),
         Command::Diff(_) => "diff".to_owned(),
         Command::Exec(_) => "exec".to_owned(),

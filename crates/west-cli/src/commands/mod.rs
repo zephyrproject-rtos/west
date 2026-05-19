@@ -5,6 +5,7 @@ use clap::Subcommand;
 
 use config::LoadedConfig;
 
+pub mod compare;
 pub mod config;
 pub mod diff;
 pub mod exec;
@@ -22,6 +23,8 @@ pub mod workspace;
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    /// Compare each project's state against the manifest.
+    Compare(compare::CompareArgs),
     /// Read or write west configuration values.
     Config(config::ConfigArgs),
     /// Show per-project diffs across the workspace.
@@ -55,6 +58,7 @@ pub enum Command {
 
 pub fn dispatch(cmd: Command, mut loaded: LoadedConfig) -> ExitCode {
     match cmd {
+        Command::Compare(a) => compare::run(a, &mut loaded),
         Command::Config(a) => config::run(a, &mut loaded),
         Command::Diff(a) => diff::run(a, &mut loaded),
         Command::Exec(a) => exec::run(a),
