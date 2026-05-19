@@ -243,7 +243,11 @@ fn run_serial(
     workspace: &Path,
     projects: &[&Project],
 ) -> Result<bool, ForallError> {
-    let bold = Style::new().bold();
+    // Bright green + bold matches python v1's banner palette
+    // (`colorama.Fore.LIGHTGREEN_EX`). console::Style's
+    // auto-detect (against stderr) strips the colour when
+    // stderr isn't a TTY.
+    let bold = Style::new().green().bright().bold().for_stderr();
     let mut failed: Vec<String> = Vec::new();
     for project in projects {
         let abspath = workspace.join(&project.path);
@@ -326,7 +330,11 @@ fn run_parallel(
     });
 
     let outcomes = outcomes.into_inner().unwrap_or_else(|p| p.into_inner());
-    let bold = Style::new().bold();
+    // Bright green + bold matches python v1's banner palette
+    // (`colorama.Fore.LIGHTGREEN_EX`). console::Style's
+    // auto-detect (against stderr) strips the colour when
+    // stderr isn't a TTY.
+    let bold = Style::new().green().bright().bold().for_stderr();
     let stderr = io::stderr();
     let mut lock = stderr.lock();
     let mut failed: Vec<String> = Vec::new();

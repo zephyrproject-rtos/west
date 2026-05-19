@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
+use console::Style;
 use west_core::vcs::{CommitSummary, LineSink, NullSink, ProgressSink};
 
 use super::error::UpdateError;
@@ -160,9 +161,18 @@ impl Reporter for BufferingReporter {
         let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
         // First write the banner directly into the buffer so each
         // project's transcript stands alone when we flush at the end.
+        // Bright green + bold matches the rest of west's banner
+        // palette (python v1's `colorama.Fore.LIGHTGREEN_EX`);
+        // `for_stderr()` makes console gate the colour on stderr's
+        // TTY-ness, which is where the buffer is eventually drained.
+        let banner_style = Style::new().green().bright().bold().for_stderr();
         {
             let mut guard = buf.lock().unwrap_or_else(|p| p.into_inner());
-            let _ = writeln!(guard, "=== updating {project_name}");
+            let _ = writeln!(
+                guard,
+                "{}",
+                banner_style.apply_to(format!("=== updating {project_name}"))
+            );
         }
         self.state
             .lock()

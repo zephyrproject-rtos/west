@@ -35,6 +35,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Args, ValueEnum};
+use console::Style;
 use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
@@ -363,7 +364,18 @@ fn run_one_project(
     } else {
         // Native stdio: banner via stderr (the underlying tool's own
         // progress lands directly on the terminal that follows).
-        eprintln!("=== updating {} ({})", project.name, project.path.display());
+        // Bright green + bold matches python v1's banner palette
+        // (`colorama.Fore.LIGHTGREEN_EX`); console's auto-detect on
+        // stderr strips the colour when stderr isn't a TTY.
+        let banner_style = Style::new().green().bright().bold().for_stderr();
+        eprintln!(
+            "{}",
+            banner_style.apply_to(format!(
+                "=== updating {} ({})",
+                project.name,
+                project.path.display()
+            ))
+        );
         let mut out = Output::Native;
         run_project_steps(vcs, project, &repo, settings, &mut out)
     }

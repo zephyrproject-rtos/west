@@ -292,7 +292,19 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
     let mut empty_count: usize = 0;
     let mut had_nonempty = false;
     let mut failures: Vec<(String, String)> = Vec::new();
-    let banner_style = Style::new().bold();
+    // Bright green + bold matches python v1's banner palette
+    // (`colorama.Fore.LIGHTGREEN_EX`, plus a bold modifier for
+    // extra prominence at the row-density of multi-project runs).
+    // `force_styling(true)` overrides console's CLICOLOR-style
+    // auto-strip so the banner stays coloured under `--color
+    // always` even when stdout is a pipe — matches what we did
+    // for the diff body (passing `--color=always` to git
+    // regardless of git's own TTY heuristic).
+    let banner_style = match resolved_color {
+        ColorMode::Always => Style::new().green().bright().bold().force_styling(true),
+        ColorMode::Never => Style::new().force_styling(false),
+        ColorMode::Auto => Style::new().green().bright().bold(),
+    };
     for o in outcomes {
         match o.result {
             Ok(DiffOutcome::Empty) => empty_count += 1,

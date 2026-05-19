@@ -262,7 +262,16 @@ fn run_inner(args: StatusArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Sta
     let mut clean_count: usize = 0;
     let mut had_dirty = false;
     let mut failures: Vec<(String, String)> = Vec::new();
-    let banner_style = Style::new().bold();
+    // Bright green + bold matches python v1's banner palette
+    // (`colorama.Fore.LIGHTGREEN_EX`). `force_styling(true)`
+    // overrides console's auto-strip so banners stay coloured
+    // under `--color always` even when stdout is captured — same
+    // reasoning as the diff path.
+    let banner_style = match resolved_color {
+        ColorMode::Always => Style::new().green().bright().bold().force_styling(true),
+        ColorMode::Never => Style::new().force_styling(false),
+        ColorMode::Auto => Style::new().green().bright().bold(),
+    };
     for o in outcomes {
         match o.result {
             Ok(StatusOutcome::Clean) if !args.long => {

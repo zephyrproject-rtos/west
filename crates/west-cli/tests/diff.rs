@@ -382,6 +382,86 @@ fn diff_extra_args_forwarded_to_git() {
 
 #[test]
 #[serial]
+fn diff_color_always_emits_colored_banner() {
+    // The per-project `=== diff in <name>` banner uses bright
+    // green + bold, matching python v1's banner palette
+    // (`colorama.Fore.LIGHTGREEN_EX`). When the user passes
+    // `--color always`, the banner stays coloured even when
+    // stdout is captured (assert_cmd's pipe).
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let alpha = make_bare_with_one_commit(sb.root(), "alpha", "A");
+    let yaml = manifest_yaml(&[("alpha", &alpha)]);
+    let ws = init_workspace(&sb, &yaml);
+    update_all(&sb, &ws);
+    touch(&ws, "alpha", "R", "CHANGED");
+
+    let out = sb
+        .west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "diff",
+            "--color",
+            "always",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    // Find the banner line and confirm it's wrapped in colour
+    // escapes. `\x1b[1;92m` (bold + bright green) or its
+    // variants — accept any escape sequence preceding the
+    // banner text.
+    let banner_line = stdout
+        .lines()
+        .find(|l| l.contains("=== diff in alpha"))
+        .unwrap_or_else(|| panic!("missing banner: {stdout:?}"));
+    assert!(
+        banner_line.starts_with("\x1b["),
+        "banner not coloured under --color always: {banner_line:?}"
+    );
+}
+
+#[test]
+#[serial]
+fn diff_color_never_strips_banner_color() {
+    // The mirror: `--color never` must yield a plain banner.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let alpha = make_bare_with_one_commit(sb.root(), "alpha", "A");
+    let yaml = manifest_yaml(&[("alpha", &alpha)]);
+    let ws = init_workspace(&sb, &yaml);
+    update_all(&sb, &ws);
+    touch(&ws, "alpha", "R", "CHANGED");
+
+    let out = sb
+        .west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "diff",
+            "--color",
+            "never",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let banner_line = stdout
+        .lines()
+        .find(|l| l.contains("=== diff in alpha"))
+        .unwrap_or_else(|| panic!("missing banner: {stdout:?}"));
+    assert!(
+        !banner_line.contains("\x1b["),
+        "banner has colour escapes despite --color never: {banner_line:?}"
+    );
+}
+
+#[test]
+#[serial]
 fn diff_color_always_includes_ansi_when_piped() {
     if !git_available() {
         return;

@@ -331,6 +331,79 @@ fn status_uncloned_positional_errors() {
 
 #[test]
 #[serial]
+fn status_color_always_emits_colored_banner() {
+    // The per-project `=== status of <name>` banner uses bright
+    // green + bold (python v1 palette). `--color always` keeps
+    // it coloured under capture (assert_cmd's pipe).
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let alpha = make_bare_with_one_commit(sb.root(), "alpha", "A");
+    let yaml = manifest_yaml(&[("alpha", &alpha)]);
+    let ws = init_workspace(&sb, &yaml);
+    update_all(&sb, &ws);
+    touch(&ws, "alpha", "R", "CHANGED");
+
+    let out = sb
+        .west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "status",
+            "--color",
+            "always",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let banner_line = stdout
+        .lines()
+        .find(|l| l.contains("=== status of alpha"))
+        .unwrap_or_else(|| panic!("missing banner: {stdout:?}"));
+    assert!(
+        banner_line.starts_with("\x1b["),
+        "banner not coloured under --color always: {banner_line:?}"
+    );
+}
+
+#[test]
+#[serial]
+fn status_color_never_strips_banner_color() {
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let alpha = make_bare_with_one_commit(sb.root(), "alpha", "A");
+    let yaml = manifest_yaml(&[("alpha", &alpha)]);
+    let ws = init_workspace(&sb, &yaml);
+    update_all(&sb, &ws);
+    touch(&ws, "alpha", "R", "CHANGED");
+
+    let out = sb
+        .west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "status",
+            "--color",
+            "never",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let banner_line = stdout
+        .lines()
+        .find(|l| l.contains("=== status of alpha"))
+        .unwrap_or_else(|| panic!("missing banner: {stdout:?}"));
+    assert!(
+        !banner_line.contains("\x1b["),
+        "banner has colour escapes despite --color never: {banner_line:?}"
+    );
+}
+
+#[test]
+#[serial]
 fn status_short_color_always_includes_ansi() {
     // Short mode now honours `--color always` — regression
     // check for the bug where the default mode was always
