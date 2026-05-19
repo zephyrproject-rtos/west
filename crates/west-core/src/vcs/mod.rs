@@ -288,6 +288,21 @@ pub trait Vcs: fmt::Debug + Send + Sync {
         spec: &DiffSpec<'_>,
         writer: &mut dyn Write,
     ) -> Result<DiffOutcome, VcsError>;
+
+    /// Inspect `repo`'s working tree state and write a status
+    /// summary to `writer`. The clean/dirty axis is reported via
+    /// the returned [`StatusOutcome`]; the writer always receives
+    /// whatever the underlying tool produces for the requested
+    /// [`StatusMode`].
+    ///
+    /// Genuine tool failures (binary crashed, repo isn't a working
+    /// copy) surface as [`VcsError::CommandFailed`].
+    fn status(
+        &self,
+        repo: &Path,
+        spec: &StatusSpec<'_>,
+        writer: &mut dyn Write,
+    ) -> Result<StatusOutcome, VcsError>;
 }
 
 /// What to clone.
@@ -408,6 +423,41 @@ pub enum DiffOutcome {
     Empty,
     /// The diff body was written to the writer.
     NonEmpty,
+}
+
+/// Inputs for [`Vcs::status`].
+#[derive(Debug, Clone)]
+pub struct StatusSpec<'a> {
+    /// How verbose the rendered output should be. `Short` keeps the
+    /// per-project body to one line per change (porcelain v1 shape);
+    /// `Long` is the full "On branch X / Changes not staged" text.
+    pub mode: StatusMode,
+    /// Color preference for the displayed output.
+    pub color: ColorMode,
+    /// Extra args forwarded verbatim to the underlying tool.
+    pub extra_args: &'a [String],
+}
+
+/// Output mode for [`Vcs::status`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusMode {
+    /// One line per changed path (git: `--porcelain=v1` / `-s`).
+    /// Clean trees produce empty output, which is what makes the
+    /// "skip clean projects" default useful in `west status`.
+    Short,
+    /// Full human-oriented text (git: bare `status`). Clean trees
+    /// produce a banner-style message like "nothing to commit"; the
+    /// caller decides whether to print it.
+    Long,
+}
+
+/// Result of a [`Vcs::status`] call. `Clean` means no uncommitted
+/// changes (and the writer may still hold descriptive text in
+/// `Long` mode); `Dirty` means at least one change present.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusOutcome {
+    Clean,
+    Dirty,
 }
 
 /// Errors common to any client. Implementations wrap their tool-specific

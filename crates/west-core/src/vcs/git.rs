@@ -13,7 +13,7 @@ use crate::config::Configuration;
 
 use super::{
     CheckoutTarget, CloneSpec, ColorMode, CommitSummary, DiffOutcome, DiffSpec, FetchSpec, Output,
-    ProgressSink, SubmoduleScope, Vcs, VcsError,
+    ProgressSink, StatusMode, StatusOutcome, StatusSpec, SubmoduleScope, Vcs, VcsError,
 };
 
 const NAME: &str = "git";
@@ -708,6 +708,76 @@ impl Vcs for GitClient {
             path: repo.to_path_buf(),
             source,
         })?;
+        Ok(outcome)
+    }
+
+    fn status(
+        &self,
+        repo: &Path,
+        spec: &StatusSpec<'_>,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<StatusOutcome, VcsError> {
+        let repo_str = repo.to_string_lossy().into_owned();
+
+        // Detection: porcelain v1 is stable across git versions and
+        // always produces empty stdout on a clean tree. One call,
+        // unambiguous Clean/Dirty result.
+        let porcelain = self.run(&["-C", &repo_str, "status", "--porcelain=v1"])?;
+        check_success(&porcelain)?;
+        let outcome = if porcelain.output.stdout.is_empty() {
+            StatusOutcome::Clean
+        } else {
+            StatusOutcome::Dirty
+        };
+
+        // Display: run `git status [-s]` separately so it honours the
+        // user's color preference. We deliberately don't reuse the
+        // porcelain output for Short mode display — porcelain is
+        // intentionally colorless, but `git status -s` colours the
+        // status letters interactively (M/A/D/?). Users at the
+        // terminal expect that colouring.
+        //
+        // `git status` doesn't accept `--color=…` directly the way
+        // `git diff` does (verified by tests). The canonical way to
+        // force colour on/off is the top-level `-c color.status=…`
+        // (and `color.ui=…` for older gits).
+        let mut args: Vec<String> = Vec::new();
+        match spec.color {
+            ColorMode::Always => {
+                args.extend([
+                    "-c".to_owned(),
+                    "color.status=always".to_owned(),
+                    "-c".to_owned(),
+                    "color.ui=always".to_owned(),
+                ]);
+            }
+            ColorMode::Never => {
+                args.extend([
+                    "-c".to_owned(),
+                    "color.status=never".to_owned(),
+                    "-c".to_owned(),
+                    "color.ui=never".to_owned(),
+                ]);
+            }
+            ColorMode::Auto => {}
+        }
+        args.extend(["-C".to_owned(), repo_str, "status".to_owned()]);
+        if matches!(spec.mode, StatusMode::Short) {
+            args.push("-s".to_owned());
+        }
+        if !spec.extra_args.is_empty() {
+            args.extend(spec.extra_args.iter().cloned());
+        }
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let display = self.run(&arg_refs)?;
+        check_success(&display)?;
+        writer
+            .write_all(&display.output.stdout)
+            .map_err(|source| VcsError::Io {
+                path: repo.to_path_buf(),
+                source,
+            })?;
+
         Ok(outcome)
     }
 }

@@ -129,6 +129,7 @@ fn subcommand_token(cmd: &Command) -> String {
         Command::Init(_) => "init".to_owned(),
         Command::List(_) => "list".to_owned(),
         Command::Manifest(_) => "manifest".to_owned(),
+        Command::Status(_) => "status".to_owned(),
         Command::Topdir => "topdir".to_owned(),
         Command::Update(_) => "update".to_owned(),
         Command::External(args) => args
