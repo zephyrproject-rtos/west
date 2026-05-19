@@ -12,7 +12,13 @@ backend-path = ["."]
 
 [project]
 name = "west"
-version = "2.0.0"
+# Sourced from `[workspace.package] version` in the root Cargo.toml.
+# Maturin populates this from `cargo metadata` during build; the
+# `_build_backend.py` wrapper re-exports maturin's
+# `prepare_metadata_for_build_wheel` (and the editable variant)
+# unchanged, so both `pip install .` and `pip install -e .` end up
+# with the right version. Bump in Cargo.toml, not here.
+dynamic = ["version"]
 authors = [{name = "Zephyr Project", email = "devel@lists.zephyrproject.org"}]
 description = "Zephyr RTOS Project meta-tool"
 classifiers = [

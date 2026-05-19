@@ -3,6 +3,12 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
+# Single source of truth for the project version. Both crates
+# (`west-core`, `west-cli`) inherit via `version.workspace = true`;
+# `pyproject.toml` declares `dynamic = ["version"]` and maturin
+# reads this through `cargo metadata` at build time. Bump here,
+# nowhere else.
+version = "2.0.0-alpha1"
 edition = "2024"
 rust-version = "1.93.0"
 repository = "https://github.com/zephyrproject-rtos/west"
