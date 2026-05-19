@@ -16,7 +16,16 @@ pub mod progress;
 mod python;
 
 #[derive(Parser, Debug)]
-#[command(name = "west", version, about = "The Zephyr RTOS meta-tool")]
+#[command(
+    name = "west",
+    version,
+    about = "The Zephyr RTOS meta-tool",
+    // We provide our own `Help` subcommand (commands::help) so we
+    // can resolve aliases and extension commands in addition to
+    // built-ins. Without disabling clap's auto-help, both compete
+    // for the `help` name.
+    disable_help_subcommand = true
+)]
 pub struct Cli {
     /// Run as if west was started in <DIR>.
     #[arg(short = 'C', value_name = "DIR")]
