@@ -166,27 +166,67 @@ def is_group(raw_group: Any) -> bool:
     return all(c.isalnum() or c in ('_', '-') for c in raw_group)
 
 
-def validate(data: Any) -> dict[str, Any]:
+# Per-format `(parser, schema-parser)` tuple table. The
+# `schema-parser` is the binding's strict garde-validated entry
+# point — it raises `MalformedManifest` on both format-level
+# (parse) AND schema-level errors, with the error message
+# referencing the original input language. The `parser` returns
+# the raw dict for `validate()`'s return value.
+_VALIDATE_PARSERS = {
+    'yaml': (_west_native.parse_yaml, _west_native.Manifest.from_yaml_str),
+    'json': (_west_native.parse_json, _west_native.Manifest.from_json_str),
+    'toml': (_west_native.parse_toml, _west_native.Manifest.from_toml_str),
+}
+
+
+def validate(data: Any, fmt: str = 'yaml') -> dict[str, Any]:
     '''Validate manifest data and return it as a dict.
 
-    Accepts a YAML string or a dict. Validation happens by handing the
-    data to the rust parser; on success the parsed dict form is
-    returned. The rust parser (and its garde-derived schema rules)
-    are the source of truth for what counts as valid.
+    *data* is either:
+
+    - a ``dict`` (already-parsed manifest) — *fmt* is ignored;
+    - a ``str`` containing the manifest in YAML, JSON, or TOML —
+      *fmt* selects the parser. Defaults to ``'yaml'`` for
+      backward compatibility.
+
+    Raises:
+
+    - ``TypeError`` if *data* is neither a dict nor a string.
+    - ``ValueError`` if *fmt* isn't one of ``'yaml'`` / ``'json'``
+      / ``'toml'``.
+    - ``MalformedManifest`` if the parser rejects *data*, the
+      parsed structure isn't a top-level mapping, or schema
+      validation fails.
     '''
     if isinstance(data, dict):
-        yaml_str = _west_native.dump_yaml(data)
-    elif isinstance(data, str):
-        yaml_str = data
-    else:
-        raise MalformedManifest(f'validate(): expected str or dict, got {type(data).__name__}')
-    # Parse to surface schema errors. The Manifest object itself is
-    # discarded — we just want the side effect of validation.
-    _west_native.Manifest.from_yaml_str(yaml_str)
-    parsed = _west_native.parse_yaml(yaml_str)
-    if not isinstance(parsed, dict):
-        raise MalformedManifest('manifest top level must be a mapping')
-    return parsed
+        # `from_dict` hands the dict straight to rust via PyO3 →
+        # `serde_json::Value` (no intermediate JSON text). Faster
+        # than `dump_json + from_json_str` and clearer in intent:
+        # "this dict is already parsed; just validate it."
+        _west_native.Manifest.from_dict(data)
+        return data
+    if isinstance(data, str):
+        try:
+            parser, schema_parse = _VALIDATE_PARSERS[fmt]
+        except KeyError as e:
+            raise ValueError(
+                f'validate(): unknown format {fmt!r}; '
+                f'expected one of: {", ".join(_VALIDATE_PARSERS)}',
+            ) from e
+        # `schema_parse` catches both format-level parse errors
+        # and schema-level violations, raising
+        # `MalformedManifest` with a format-tagged message either
+        # way. Running it before `parser` keeps the error message
+        # in the input's native language (a malformed TOML report
+        # would otherwise come from `parse_toml`'s ValueError
+        # before we even reached the schema step — same outcome,
+        # but the schema parser's message is richer).
+        schema_parse(data)
+        # If we got here the input is valid; parsing succeeds.
+        return parser(data)
+    raise TypeError(
+        f'validate(): expected str or dict, got {type(data).__name__}',
+    )
 
 
 # ----------------------------------------------------------------------

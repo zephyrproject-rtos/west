@@ -20,6 +20,8 @@ use west_core::manifest::{
     ManifestError, Submodule as CoreSubmodule, Submodules as CoreSubmodules,
 };
 
+use super::data::py_to_value;
+
 create_exception!(
     west._west_native,
     MalformedManifest,
@@ -286,6 +288,23 @@ impl Manifest {
     #[staticmethod]
     fn from_json_str(s: &str) -> PyResult<Self> {
         core::Manifest::from_json_str(s)
+            .map(|inner| Manifest { inner })
+            .map_err(manifest_error_to_py)
+    }
+
+    /// Construct from an already-parsed python `dict` (or any
+    /// mapping/sequence/scalar tree the structured-data
+    /// converter accepts). Useful when the caller already holds the data
+    /// in-memory (e.g. `west.manifest.validate(d)` where `d` is
+    /// a dict).
+    ///
+    /// Internally: python value → `serde_json::Value` (via the
+    /// same `py_to_value` the `dump_*` bindings use) →
+    /// `Manifest::from_value`. No JSON text round-trip.
+    #[staticmethod]
+    fn from_dict(value: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let v = py_to_value(value)?;
+        core::Manifest::from_value(v)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
     }

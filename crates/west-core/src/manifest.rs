@@ -1027,6 +1027,18 @@ impl Manifest {
         validate_and_resolve(file, ImportPolicy::Strict)
     }
 
+    /// Construct from an already-parsed [`serde_json::Value`].
+    ///
+    /// Like [`Manifest::from_json_str`] but skips the textual
+    /// parse step — useful when the caller produced the
+    /// `Value` from a non-string source (the python binding
+    /// passes a `dict` straight in as a `Value` via PyO3's
+    /// `from_pyobject` path).
+    pub fn from_value(value: serde_json::Value) -> Result<Self, ManifestError> {
+        let file: ManifestFile = serde_json::from_value(value).map_err(ManifestError::Json)?;
+        validate_and_resolve(file, ImportPolicy::Strict)
+    }
+
     /// Sniff `.yaml` / `.yml` / `.toml` / `.json` from the path's extension.
     pub fn from_path(path: &Path) -> Result<Self, ManifestError> {
         Self::from_path_with(path, ImportPolicy::Strict)

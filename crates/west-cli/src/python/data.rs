@@ -116,7 +116,10 @@ fn value_to_py<'py>(py: Python<'py>, v: &Value) -> PyResult<Bound<'py, PyAny>> {
 /// Extract a `serde_json::Value` from any python value. Bool is
 /// checked before int because `bool` is an `int` subclass in python
 /// and would otherwise collapse `True` to `Number(1)`.
-fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
+///
+/// `pub(super)` so the `Manifest.from_dict` binding can reuse this
+/// path (python dict → `Value` → `Manifest`, no JSON detour).
+pub(super) fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if value.is_none() {
         return Ok(Value::Null);
     }
