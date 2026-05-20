@@ -54,6 +54,7 @@ pub(crate) fn synthetic_manifest_project(manifest: &Manifest) -> Project {
         west_commands: manifest.self_.west_commands.clone(),
         remote_name: String::new(),
         submodules: Submodules::None,
+        userdata: manifest.self_.userdata.clone(),
     }
 }
 

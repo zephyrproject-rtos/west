@@ -48,6 +48,9 @@ pub struct ManifestRepo {
     pub path: PathBuf,
     /// Relative paths to west-commands YAML files inside the manifest repo.
     pub west_commands: Vec<PathBuf>,
+    /// Opaque payload carried verbatim from `manifest.self.userdata`. West
+    /// itself does not interpret it; extensions read it via the manifest API.
+    pub userdata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -67,6 +70,9 @@ pub struct Project {
     /// `defaults.remote`, or `"origin"` as a final fallback.
     pub remote_name: String,
     pub submodules: Submodules,
+    /// Opaque payload carried verbatim from the project's `userdata:` key.
+    /// Free-form by design — any YAML/TOML/JSON value.
+    pub userdata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -330,6 +336,9 @@ struct SelfSchema {
     #[garde(skip)]
     #[serde(rename = "import", default)]
     import: Option<ImportSchema>,
+    #[garde(skip)]
+    #[serde(default)]
+    userdata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Validate)]
@@ -373,12 +382,11 @@ struct ProjectSchema {
     #[garde(skip)]
     #[serde(rename = "import", default)]
     import: Option<ImportSchema>,
-    /// Parsed and held only to avoid `deny_unknown_fields` rejecting it. Typed
-    /// access deferred until a real consumer exists.
-    #[allow(dead_code)]
+    /// Opaque payload passed through to `Project::userdata`. Free-form by
+    /// spec — no schema constraints beyond "it's a YAML/TOML/JSON value".
     #[garde(skip)]
     #[serde(default)]
-    userdata: Option<serde::de::IgnoredAny>,
+    userdata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1248,6 +1256,9 @@ impl Manifest {
                 self_block.insert("west-commands".into(), Value::Array(arr));
             }
         }
+        if let Some(u) = &self.self_.userdata {
+            self_block.insert("userdata".into(), u.clone());
+        }
 
         let projects: Vec<Value> = self.projects.iter().map(project_to_value).collect();
 
@@ -1328,6 +1339,9 @@ fn project_to_value(p: &Project) -> serde_json::Value {
                 .collect();
             o.insert("submodules".into(), Value::Array(arr));
         }
+    }
+    if let Some(u) = &p.userdata {
+        o.insert("userdata".into(), u.clone());
     }
     Value::Object(o)
 }
@@ -1569,6 +1583,7 @@ fn resolve_project(
         west_commands,
         remote_name,
         submodules,
+        userdata: ps.userdata,
     })
 }
 
@@ -1577,6 +1592,7 @@ fn build_self(s: Option<SelfSchema>) -> ManifestRepo {
         path: None,
         west_commands: None,
         import: None,
+        userdata: None,
     });
     ManifestRepo {
         path: PathBuf::from(s.path.unwrap_or_else(|| "manifest".to_owned())),
@@ -1587,6 +1603,7 @@ fn build_self(s: Option<SelfSchema>) -> ManifestRepo {
             .into_iter()
             .map(PathBuf::from)
             .collect(),
+        userdata: s.userdata,
     }
 }
 

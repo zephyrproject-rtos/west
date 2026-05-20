@@ -20,7 +20,7 @@ use west_core::manifest::{
     ManifestError, Submodule as CoreSubmodule, Submodules as CoreSubmodules,
 };
 
-use super::data::py_to_value;
+use super::data::{py_to_value, value_to_py};
 
 create_exception!(
     west._west_native,
@@ -166,6 +166,10 @@ pub struct Project {
     /// Stored as the rust-side enum so `submodules` getter can pick
     /// the right python representation lazily.
     submodules: CoreSubmodules,
+    /// Opaque payload from `userdata:`. Surfaced via a getter (rather
+    /// than `#[pyo3(get)]`) because `Value` isn't an
+    /// `IntoPyObject` and the conversion needs the GIL token.
+    userdata: Option<serde_json::Value>,
 }
 
 #[pymethods]
@@ -184,6 +188,17 @@ impl Project {
                         .into_any(),
                 )
             }
+        }
+    }
+
+    /// Free-form `userdata:` payload. Returns `None` when absent;
+    /// otherwise a python value mirroring the parsed YAML/TOML/JSON
+    /// structure (dict / list / str / int / float / bool / None).
+    #[getter]
+    fn userdata<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        match &self.userdata {
+            Some(v) => value_to_py(py, v),
+            None => Ok(py.None().into_bound(py)),
         }
     }
 
@@ -212,6 +227,7 @@ impl Project {
                 .map(|p| p.to_string_lossy().into_owned())
                 .collect(),
             submodules: p.submodules.clone(),
+            userdata: p.userdata.clone(),
         }
     }
 }
@@ -232,10 +248,21 @@ pub struct ManifestRepo {
     path: String,
     #[pyo3(get)]
     west_commands: Vec<String>,
+    /// `manifest.self.userdata`, surfaced verbatim. See `Project::userdata`
+    /// for the conversion contract.
+    userdata: Option<serde_json::Value>,
 }
 
 #[pymethods]
 impl ManifestRepo {
+    #[getter]
+    fn userdata<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        match &self.userdata {
+            Some(v) => value_to_py(py, v),
+            None => Ok(py.None().into_bound(py)),
+        }
+    }
+
     fn __repr__(&self) -> String {
         format!("ManifestRepo(path={:?})", self.path)
     }
@@ -250,6 +277,7 @@ impl ManifestRepo {
                 .iter()
                 .map(|p| p.to_string_lossy().into_owned())
                 .collect(),
+            userdata: r.userdata.clone(),
         }
     }
 }
@@ -415,6 +443,7 @@ impl Manifest {
             west_commands: project.west_commands.iter().map(PathBuf::from).collect(),
             remote_name: project.remote_name.clone(),
             submodules: project.submodules.clone(),
+            userdata: project.userdata.clone(),
         };
         let extra: Vec<CoreGroupFilterEntry> = extra_filter
             .into_iter()

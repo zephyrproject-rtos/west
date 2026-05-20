@@ -82,7 +82,10 @@ fn dump_json(value: &Bound<'_, PyAny>) -> PyResult<String> {
 // ---- serde_json::Value ↔ python -----------------------------------------
 
 /// Convert a `serde_json::Value` into a fresh python object.
-fn value_to_py<'py>(py: Python<'py>, v: &Value) -> PyResult<Bound<'py, PyAny>> {
+///
+/// `pub(super)` so the `Project.userdata` / `ManifestRepo.userdata`
+/// getters in the manifest binding can reuse it.
+pub(super) fn value_to_py<'py>(py: Python<'py>, v: &Value) -> PyResult<Bound<'py, PyAny>> {
     match v {
         Value::Null => Ok(py.None().into_bound(py)),
         Value::Bool(b) => Ok(b.into_pyobject(py)?.to_owned().into_any()),

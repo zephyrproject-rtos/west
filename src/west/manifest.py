@@ -292,7 +292,6 @@ class Project:
         cls,
         native: _west_native.Project,
         topdir: PathType | None = None,
-        userdata: Any | None = None,
     ) -> Project:
         return cls(
             name=native.name,
@@ -306,7 +305,7 @@ class Project:
             topdir=topdir,
             remote_name=native.remote_name,
             groups=list(native.groups),
-            userdata=userdata,
+            userdata=native.userdata,
         )
 
     def __eq__(self, other: object) -> bool:
@@ -765,11 +764,13 @@ class Manifest:
         # rest are wrappers over the native projects, with `topdir`
         # injected from the workspace context.
         repo_relpath_for_mp = repo_relpath if repo_relpath is not None else native.self_.path
+        self_userdata = native.self_.userdata
+        self.userdata = self_userdata
         mp = ManifestProject(
             path=repo_relpath_for_mp,
             west_commands=list(native.self_.west_commands) or None,
             topdir=self.topdir,
-            userdata=None,
+            userdata=self_userdata,
         )
         self._projects: list[Project] = [mp]
         for np in native.projects:
