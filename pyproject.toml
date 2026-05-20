@@ -85,6 +85,17 @@ data = ".wheel-data"
 include = [
     { path = "src/west/py.typed", format = ["sdist", "wheel"] },
 ]
+# Pass `--locked` to cargo: forbid lockfile mutation during the build
+# and SHA-256-verify every fetched crate against `Cargo.lock`. Pins
+# exact transitive versions for sdist-from-source installs (`pip
+# install west` when no matching wheel exists) and blocks a hijacked
+# registry from substituting a tampered crate.
+#
+# Not `frozen = true`: that implies `--offline`, which fails on any
+# machine whose cargo registry cache hasn't already seen our deps —
+# i.e. every first-time end-user install. Checksums already give the
+# supply-chain guarantee; offline-only just hurts UX.
+locked = true
 
 [dependency-groups]
 lint = [
