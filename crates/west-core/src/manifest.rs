@@ -28,7 +28,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use garde::Validate;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 // =====================================================================
 // Public types
@@ -45,7 +45,16 @@ pub struct Manifest {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ManifestRepo {
     /// Relative path of the manifest repo within the workspace. Default `"manifest"`.
+    /// Workspace-side consumers want the resolved value; for the literal as
+    /// it appeared in the manifest (or `None` when omitted) use [`path_raw`].
+    ///
+    /// [`path_raw`]: ManifestRepo::path_raw
     pub path: PathBuf,
+    /// `manifest.self.path` exactly as written. `None` when the key was
+    /// absent — distinct from `Some("manifest")`. Surfaced because the
+    /// python contract uses this to populate `Manifest.path_raw` and to
+    /// decide whether the synthetic `ManifestProject` has a path at all.
+    pub path_raw: Option<PathBuf>,
     /// Relative paths to west-commands YAML files inside the manifest repo.
     pub west_commands: Vec<PathBuf>,
     /// Opaque payload carried verbatim from `manifest.self.userdata`. West
@@ -327,9 +336,15 @@ struct DefaultsSchema {
 #[derive(Debug, Clone, Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 struct SelfSchema {
+    /// Double-`Option` so the schema can distinguish three states:
+    /// `None` (key absent → no path; resolved default applies),
+    /// `Some(None)` (key present but `null` / empty scalar → rejected),
+    /// `Some(Some(s))` (key present with a real value). Emptiness is
+    /// enforced post-parse in `build_self`; the wording is part of the
+    /// public API so it lives there rather than in a garde message.
     #[garde(skip)]
-    #[serde(default)]
-    path: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_path")]
+    path: Option<Option<String>>,
     #[garde(skip)]
     #[serde(rename = "west-commands", default)]
     west_commands: Option<OneOrMany<String>>,
@@ -721,7 +736,7 @@ impl<'a> Resolver<'a> {
     fn absorb_root(&mut self, file: ManifestFile) -> Result<(), ManifestError> {
         self.version = file.manifest.version.clone();
         let self_section = file.manifest.self_.clone();
-        self.self_ = Some(build_self(self_section));
+        self.self_ = Some(build_self(self_section)?);
         self.absorb(file, ImportFilter::default(), PathBuf::new())
     }
 
@@ -1484,7 +1499,7 @@ fn resolve(file: ManifestFile, policy: ImportPolicy) -> Result<Manifest, Manifes
     }
 
     let group_filter = parse_group_filter(&m.group_filter, "manifest")?;
-    let self_ = build_self(m.self_);
+    let self_ = build_self(m.self_)?;
 
     Ok(Manifest {
         version: m.version,
@@ -1587,15 +1602,39 @@ fn resolve_project(
     })
 }
 
-fn build_self(s: Option<SelfSchema>) -> ManifestRepo {
-    let s = s.unwrap_or(SelfSchema {
-        path: None,
-        west_commands: None,
-        import: None,
-        userdata: None,
-    });
-    ManifestRepo {
-        path: PathBuf::from(s.path.unwrap_or_else(|| "manifest".to_owned())),
+/// Returns `Ok(Some(_))` whenever the key was present, so `Option<Option<T>>`
+/// can carry both "absent" (`None`) and "explicitly null" (`Some(None)`).
+fn deserialize_optional_path<'de, D>(d: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<String>::deserialize(d).map(Some)
+}
+
+fn build_self(s: Option<SelfSchema>) -> Result<ManifestRepo, ManifestError> {
+    let Some(s) = s else {
+        return Ok(ManifestRepo::default_with_path("manifest"));
+    };
+    // `path:` (null) and `path: ""` both count as "present but empty";
+    // distinguished from the absent case by the outer Option layer.
+    let resolved_path = match &s.path {
+        None => None,
+        Some(None) => {
+            return Err(ManifestError::Validation(
+                "self.path must be nonempty if present".to_owned(),
+            ));
+        }
+        Some(Some(p)) if p.is_empty() => {
+            return Err(ManifestError::Validation(
+                "self.path must be nonempty if present".to_owned(),
+            ));
+        }
+        Some(Some(p)) => Some(p.clone()),
+    };
+    let path_raw = resolved_path.as_ref().map(PathBuf::from);
+    Ok(ManifestRepo {
+        path: PathBuf::from(resolved_path.unwrap_or_else(|| "manifest".to_owned())),
+        path_raw,
         west_commands: s
             .west_commands
             .map(OneOrMany::into_vec)
@@ -1604,6 +1643,17 @@ fn build_self(s: Option<SelfSchema>) -> ManifestRepo {
             .map(PathBuf::from)
             .collect(),
         userdata: s.userdata,
+    })
+}
+
+impl ManifestRepo {
+    fn default_with_path(p: &str) -> Self {
+        ManifestRepo {
+            path: PathBuf::from(p),
+            path_raw: None,
+            west_commands: Vec::new(),
+            userdata: None,
+        }
     }
 }
 

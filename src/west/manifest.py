@@ -23,6 +23,7 @@ import logging
 import os
 import shlex
 import subprocess
+import warnings
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, NoReturn
@@ -524,7 +525,10 @@ class ManifestProject(Project):
         self.clone_depth: int | None = None
         self.groups: GroupsType = []
         self.userdata: Any = userdata
-        self._path: str = os.fspath(path) if path else ''  # type: ignore[assignment]
+        # `None` when the manifest YAML had no `self.path:` and no
+        # workspace config supplied one. Distinct from `""`: legacy
+        # callers test `mp.path is None`.
+        self._path: str | None = os.fspath(path) if path else None  # type: ignore[assignment]
         self.topdir: str | None = os.fspath(topdir) if topdir else None
         self._abspath: str | None = None
         self._posixpath: str | None = None
@@ -684,7 +688,10 @@ class Manifest:
         self.abspath: str | None = None
         self.posixpath: str | None = None
         self.relative_path: str | None = None
-        self.yaml_path: str | None = None
+        # Literal `manifest.self.path:` from the YAML. `None` when the
+        # key was omitted — distinct from the resolved default
+        # `"manifest"`. See also the deprecated `yaml_path` alias below.
+        self.path_raw: str | None = None
         self.repo_path: str | None = None
         self.repo_abspath: str | None = None
         self.repo_posixpath: str | None = None
@@ -756,14 +763,14 @@ class Manifest:
         repo_relpath: str | None,
         manifest_file: str | None,
     ) -> None:
-        self.yaml_path = native.self_.path
+        self.path_raw = native.self_.path_raw
         self.group_filter = [
             f'-{e.group}' if e.disabled else f'+{e.group}' for e in native.group_filter
         ]
         # Project list: index 0 is the synthetic ManifestProject; the
         # rest are wrappers over the native projects, with `topdir`
         # injected from the workspace context.
-        repo_relpath_for_mp = repo_relpath if repo_relpath is not None else native.self_.path
+        repo_relpath_for_mp = repo_relpath if repo_relpath is not None else native.self_.path_raw
         self_userdata = native.self_.userdata
         self.userdata = self_userdata
         mp = ManifestProject(
@@ -781,6 +788,16 @@ class Manifest:
     @property
     def projects(self) -> list[Project]:
         return list(self._projects)
+
+    @property
+    def yaml_path(self) -> str | None:
+        '''Deprecated alias for :attr:`path_raw`.'''
+        warnings.warn(
+            'Manifest.yaml_path is deprecated; use Manifest.path_raw instead.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.path_raw
 
     def is_active(
         self,

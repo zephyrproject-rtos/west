@@ -244,8 +244,14 @@ impl Project {
 )]
 #[derive(Clone)]
 pub struct ManifestRepo {
+    /// Resolved manifest-repo path. `"manifest"` when the manifest omitted
+    /// `self.path:`.
     #[pyo3(get)]
     path: String,
+    /// Literal `self.path:` as written in the manifest. `None` when omitted —
+    /// distinct from `Some("manifest")`.
+    #[pyo3(get)]
+    path_raw: Option<String>,
     #[pyo3(get)]
     west_commands: Vec<String>,
     /// `manifest.self.userdata`, surfaced verbatim. See `Project::userdata`
@@ -272,6 +278,7 @@ impl ManifestRepo {
     fn from_core(r: &core::ManifestRepo) -> Self {
         ManifestRepo {
             path: r.path.to_string_lossy().into_owned(),
+            path_raw: r.path_raw.as_ref().map(|p| p.to_string_lossy().into_owned()),
             west_commands: r
                 .west_commands
                 .iter()
