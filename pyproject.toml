@@ -159,6 +159,13 @@ ignore_missing_imports = true
 # You can override any pytest option via pytest argument `-o key=value`.
 # E.g. unset option `-o pythonpath=` to use the installed west in tests
 pythonpath = "src"
+# Active test root. `tests-legacy/` sits alongside as the
+# carry-over from removing the python CLI driver; its
+# `conftest.py` still imports the gone `west.app` module and
+# would error at collection time. Restricting discovery to
+# `tests/` keeps the active suite green while individual legacy
+# files migrate over.
+testpaths = ["tests"]
 
 [tool.poe.tasks.test]
 cmd = "python -m pytest -W error"

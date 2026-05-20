@@ -5,25 +5,16 @@
 '''Pytest covering the structured-data parse/dump bindings.
 
 All three formats (YAML, TOML, JSON) route through a single
-`serde_json::Value` intermediate on the rust side. These tests pin
-down the python-visible behaviour: type coverage in both directions,
-round-trips, and the rough edges (TOML's table-only root, NaN
-floats, bool vs int).
-
-Run with:
-    PYTHONPATH=src pytest crates/west-cli/tests/python/
+`serde_json::Value` intermediate on the rust side. These tests
+pin down the python-visible behaviour: type coverage in both
+directions, round-trips, and the rough edges (TOML's table-only
+root, NaN floats, bool vs int).
 '''
 
 import math
-import sys
-from pathlib import Path
 
 import pytest
-
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-sys.path.insert(0, str(_REPO_ROOT / "src"))
-
-from west._west_native import (  # noqa: E402
+from west._west_native import (
     dump_json,
     dump_toml,
     dump_yaml,
@@ -31,7 +22,6 @@ from west._west_native import (  # noqa: E402
     parse_toml,
     parse_yaml,
 )
-
 
 # ---- Parse: scalar types --------------------------------------------------
 

@@ -2,39 +2,17 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-'''Pytest covering the PyO3 `Manifest` binding (data-layer cut).
-
-Layout matches the other binding tests in this directory: self-
-contained, no dependency on the repo's top-level `tests/conftest.py`.
-
-Run with:
-    PYTHONPATH=src pytest crates/west-cli/tests/python/
-
-This file covers the binding surface only. The python wrapper layer
-that re-exports these as `west.manifest.{Manifest, Project, ...}`
-(plus workspace concerns like `from_topdir` and git helpers) is a
-separate commit.
-'''
-
-import sys
-from pathlib import Path
+'''Pytest covering the PyO3 `Manifest` binding (data-layer cut).'''
 
 import pytest
-
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-sys.path.insert(0, str(_REPO_ROOT / "src"))
-
-from west._west_native import (  # noqa: E402
-    GroupFilterEntry,
+from west._west_native import (
+    MalformedManifest,
     Manifest,
     ManifestImportFailed,
     ManifestRepo,
-    MalformedManifest,
-    Project,
     Submodule,
     parse_cli_group_filter,
 )
-
 
 # A small but representative manifest used by most tests.
 SIMPLE_YAML = """\

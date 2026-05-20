@@ -5,36 +5,19 @@
 '''Pytest covering the PyO3 `Configuration` binding via the
 `src/west/configuration.py` re-export.
 
-Same layout pattern as `test_util_bindings.py`: self-contained
-fixtures, no dependency on the repo's broken top-level
-`tests/conftest.py`. Tests override `WEST_CONFIG_SYSTEM` and
-`WEST_CONFIG_GLOBAL` to tempfiles so user/system config on the
-developer's machine is never touched.
-
-Run with:
-    PYTHONPATH=src pytest crates/west-cli/tests/python/
-
-The `_west_native` binding is a hard dependency of `west.configuration`;
-if it isn't installed (run `maturin develop -m crates/west-cli/Cargo.toml
---features pyo3` or `cargo build -p west-cli --features pyo3` + copy
-the cdylib), this file errors at import time, not at the individual
-test level.
+Tests override `WEST_CONFIG_SYSTEM` and `WEST_CONFIG_GLOBAL` to
+tempfiles so user/system config on the developer's machine is
+never touched.
 '''
 
 import contextlib
 import os
-import sys
 import tempfile
-from pathlib import Path
 
 import pytest
 
-# Make `import west` resolve to src/west/ for in-tree runs.
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-sys.path.insert(0, str(_REPO_ROOT / "src"))
-
-from west import _west_native  # noqa: E402
-from west.configuration import Configuration, ConfigFile, MalformedConfig  # noqa: E402
+from west import _west_native
+from west.configuration import ConfigFile, Configuration, MalformedConfig
 
 
 @contextlib.contextmanager
