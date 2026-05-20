@@ -23,6 +23,6 @@ system/global/conf.d/local layer resolution lives in
 `west_core::config_paths`.
 '''
 
-from west._west_native import Configuration, ConfigFile, MalformedConfig
+from west._west_native import ConfigFile, Configuration, MalformedConfig
 
 __all__ = ['Configuration', 'ConfigFile', 'MalformedConfig']

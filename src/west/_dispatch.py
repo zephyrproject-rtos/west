@@ -49,9 +49,7 @@ def _parse_argv(argv):
     matching the rust binary's own behaviour).
     """
     if len(argv) < 2:
-        raise SystemExit(
-            "west._dispatch: expected at least <module-path> <class-name>"
-        )
+        raise SystemExit("west._dispatch: expected at least <module-path> <class-name>")
     module_path, class_name, *rest = argv
 
     inline_overrides: list[tuple[str, str]] = []
@@ -93,19 +91,15 @@ def _load_command_class(module_path, class_name):
     # do `from sibling_module import …` — matches python `west`'s
     # `_commands_module_from_file` behaviour.
     sys.path.insert(0, str(p.parent))
-    spec = importlib.util.spec_from_file_location(
-        f"west.commands.ext.{class_name}", str(p)
-    )
+    spec = importlib.util.spec_from_file_location(f"west.commands.ext.{class_name}", str(p))
     if spec is None or spec.loader is None:
         raise SystemExit(f"west._dispatch: failed to load spec for {module_path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     try:
         return getattr(module, class_name)
-    except AttributeError:
-        raise SystemExit(
-            f"west._dispatch: class {class_name!r} not found in {module_path}"
-        )
+    except AttributeError as e:
+        raise SystemExit(f"west._dispatch: class {class_name!r} not found in {module_path}") from e
 
 
 def _build_config(topdir, inline_overrides, extra_config_files):

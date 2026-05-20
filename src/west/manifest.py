@@ -373,8 +373,7 @@ class Project:
                 ret['submodules'] = True
         else:  # list[Submodule]
             ret['submodules'] = [
-                {'path': s.path, **({'name': s.name} if s.name else {})}
-                for s in self.submodules
+                {'path': s.path, **({'name': s.name} if s.name else {})} for s in self.submodules
             ]
         if self.userdata:
             ret['userdata'] = self.userdata
@@ -632,9 +631,9 @@ class Manifest:
             override = None
         else:
             manifest_repo_abs = Path(
-                subprocess.check_output(
-                    ['git', 'rev-parse', '--show-toplevel'], cwd=start
-                )[:-1].decode('utf-8')
+                subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], cwd=start)[
+                    :-1
+                ].decode('utf-8')
             ).resolve()
             override = {
                 'manifest.path': str(manifest_repo_abs.relative_to(topdir)),
@@ -683,6 +682,16 @@ class Manifest:
         # resolver, but accept it for API compatibility.
         del importer
         del import_flags
+
+        # `source_data` is the "literal manifest, ignore the
+        # workspace" path; `topdir` / `config` are the
+        # "discover via workspace" path. Mixing them is
+        # ambiguous — fail fast with the v1 wording so callers
+        # that historically gated on these messages keep working.
+        if source_data is not None and topdir is not None:
+            raise ValueError('both topdir and source_data were given')
+        if source_data is not None and config is not None:
+            raise ValueError('both source_data and config were given')
 
         self.topdir: str | None = os.fspath(topdir) if topdir else None
         self.abspath: str | None = None
@@ -738,9 +747,7 @@ class Manifest:
         manifest_repo_root = topdir / repo_relpath
         manifest_path = manifest_repo_root / manifest_file
         if not manifest_path.is_file():
-            raise FileNotFoundError(
-                errno.ENOENT, os.strerror(errno.ENOENT), str(manifest_path)
-            )
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(manifest_path))
         importer = _filesystem_importer(topdir)
         self._native = _west_native.Manifest.from_path_with_imports(
             manifest_path, manifest_repo_root, importer
@@ -814,11 +821,7 @@ class Manifest:
             # Caller passed a Project not from this manifest. Fall back
             # to a python-side evaluation against the manifest's filter.
             return self._python_is_active(project, extra_filter)
-        extra = (
-            _west_native.parse_cli_group_filter(list(extra_filter))
-            if extra_filter
-            else None
-        )
+        extra = _west_native.parse_cli_group_filter(list(extra_filter)) if extra_filter else None
         return self._native.is_active(native_proj, extra)
 
     def _python_is_active(
@@ -925,9 +928,7 @@ class Manifest:
                 continue
             entry = p.as_dict()
             if not p.is_cloned():
-                raise RuntimeError(
-                    f'cannot freeze: project {p.name} is not cloned'
-                )
+                raise RuntimeError(f'cannot freeze: project {p.name} is not cloned')
             entry['revision'] = p.sha(QUAL_MANIFEST_REV_BRANCH)
             frozen_projects.append(entry)
         manifest_block: dict[str, Any] = {}

@@ -537,6 +537,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
+    { name = "pyyaml" },
     { name = "ruff" },
 ]
 lint = [
@@ -547,6 +548,7 @@ test = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
+    { name = "pyyaml" },
 ]
 types = [
     { name = "mypy" },
@@ -562,6 +564,7 @@ dev = [
     { name = "pytest", specifier = ">=8.4,<10.0" },
     { name = "pytest-cov", specifier = "~=7.0" },
     { name = "pytest-xdist", specifier = ">=3" },
+    { name = "pyyaml", specifier = "~=6.0" },
     { name = "ruff", specifier = "~=0.13" },
 ]
 lint = [{ name = "ruff", specifier = "~=0.13" }]
@@ -570,5 +573,6 @@ test = [
     { name = "pytest", specifier = ">=8.4,<10.0" },
     { name = "pytest-cov", specifier = "~=7.0" },
     { name = "pytest-xdist", specifier = ">=3" },
+    { name = "pyyaml", specifier = "~=6.0" },
 ]
 types = [{ name = "mypy", specifier = "~=1.18" }]

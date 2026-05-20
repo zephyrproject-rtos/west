@@ -124,6 +124,7 @@ def test_die(capsys, test_case):
 
 # ----- env-var / config gating ----------------------------------------------
 
+
 def test_no_color_env_disables_colors(monkeypatch, capsys):
     '''Setting NO_COLOR strips escapes from all log levels, matching
     the no-color.org convention. Module-level `_NO_COLOR` is read
@@ -132,6 +133,7 @@ def test_no_color_env_disables_colors(monkeypatch, capsys):
 
     monkeypatch.setenv("NO_COLOR", "1")
     import west.commands as wc
+
     importlib.reload(wc)
 
     class Impl(wc.WestCommand):
@@ -164,6 +166,7 @@ def test_color_ui_false_disables_colors(capsys):
     '''A workspace with `color.ui = false` suppresses colors even
     when NO_COLOR is unset. Uses an inline subclass that hard-codes
     `color_ui` to False (no Configuration plumbing needed).'''
+
     class Impl(WestCommand):
         def do_add_parser(self):
             pass

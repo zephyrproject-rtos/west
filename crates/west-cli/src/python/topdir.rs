@@ -41,6 +41,7 @@ fn west_topdir(start: Option<PathBuf>) -> PyResult<String> {
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("WEST_DIR", west_core::WEST_DIR)?;
     m.add("WestNotFound", m.py().get_type::<WestNotFound>())?;
     m.add_function(wrap_pyfunction!(west_topdir, m)?)?;
     Ok(())

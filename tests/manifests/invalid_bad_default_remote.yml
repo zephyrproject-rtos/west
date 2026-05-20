@@ -1,0 +1,11 @@
+manifest:
+  defaults:
+    remote: doesnotexist
+
+  remotes:
+    - name: testremote
+      url-base: https://example.com
+
+  projects:
+    - name: foo
+      remote: testremote

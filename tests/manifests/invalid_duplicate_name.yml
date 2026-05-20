@@ -1,0 +1,7 @@
+manifests:
+  projects:
+    - name: foo
+      url: x
+    - name: foo
+      url: y
+

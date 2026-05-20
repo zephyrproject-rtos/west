@@ -1,0 +1,10 @@
+manifest:
+  remotes:
+    - name: testremote
+      url-base: https://example.com
+
+  projects:
+    - name: testproject
+      remote: testremote
+      west-commands:
+        this-key-is-invalid: so-is-this-value

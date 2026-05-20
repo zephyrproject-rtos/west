@@ -1,0 +1,9 @@
+# No project element may explicitly specify both a remote and a URL.
+manifest:
+  remotes:
+    - name: remote1
+      url-base: https://example.com
+  projects:
+    - name: project1
+      remote: remote1
+      url: https://example.com/explicit-project-url

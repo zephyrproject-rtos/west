@@ -10,6 +10,25 @@ import textwrap
 from collections.abc import Iterable
 from pathlib import Path
 
+# `_west_native` is the PyO3 extension shipped with the maturin-built
+# wheel. It's a hard dependency: `pip install west` always provides
+# it, and in-tree work needs `maturin develop --features pyo3` once.
+# There's no pure-python fallback by design — keeping one would mean
+# maintaining two implementations of the same walk-up logic.
+from west._west_native import WEST_DIR, WestNotFound, west_topdir
+
+__all__ = [
+    'WEST_DIR',
+    'PathType',
+    'WestNotFound',
+    'escapes_directory',
+    'expand_path',
+    'quote_sh_list',
+    'west_dir',
+    'west_topdir',
+    'wrap',
+]
+
 # What west's APIs accept for paths.
 #
 # Here, os.PathLike objects should return str from their __fspath__
@@ -18,8 +37,6 @@ from pathlib import Path
 # as os.PathLike[str] if TYPE_CHECKING and plain os.PathLike
 # otherwise, but it doesn't seem worth it.
 PathType = str | os.PathLike
-
-WEST_DIR = '.west'
 
 
 def escapes_directory(path: PathType, directory: PathType) -> bool:
@@ -48,14 +65,6 @@ def quote_sh_list(cmd: Iterable[str | os.PathLike]) -> str:
 def wrap(text: str, indent: str) -> list[str]:
     '''Convenience routine for wrapping text to a consistent indent.'''
     return textwrap.wrap(text, initial_indent=indent, subsequent_indent=indent)
-
-
-# `_west_native` is the PyO3 extension shipped with the maturin-built
-# wheel. It's a hard dependency: `pip install west` always provides
-# it, and in-tree work needs `maturin develop --features pyo3` once.
-# There's no pure-python fallback by design — keeping one would mean
-# maintaining two implementations of the same walk-up logic.
-from west._west_native import WestNotFound, west_topdir
 
 
 def west_dir(start: PathType | None = None) -> str:

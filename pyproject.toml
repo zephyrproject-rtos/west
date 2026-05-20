@@ -106,6 +106,7 @@ test = [
     "pytest>=8.4,<10.0",
     "pytest-cov~=7.0",
     "pytest-xdist>=3",
+    "pyyaml~=6.0",
 ]
 types = [
     "mypy~=1.18",
@@ -134,6 +135,10 @@ source = [
 
 [tool.ruff]
 line-length = 100
+# Carry-over tests from before the rust port. They migrate into
+# `tests/` one by one; until each lands there's no value in
+# linting code that's about to be rewritten or deleted.
+extend-exclude = ["tests-legacy"]
 
 [tool.ruff.lint]
 extend-select = [
