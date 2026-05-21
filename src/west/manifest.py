@@ -880,8 +880,15 @@ class Manifest:
         # Bundle the parsed manifest with its workspace filters into a
         # `LoadedManifest`. From here on `is_active()` consults
         # `manifest.project-filter` + `manifest.group-filter` in one call,
-        # matching the rust CLI commands. Validation already happened
-        # above (via `ProjectFilter.from_config`); this just composes.
+        # matching the rust CLI commands. Filter syntax validation
+        # already happened above (via `ProjectFilter.from_config`); this
+        # composes the two layers AND performs the cross-check between
+        # manifest project names and the CSV-form project-filter
+        # (commas/whitespace in a name make it unreachable). The
+        # cross-check is a hard error when project-filter is non-empty
+        # (surfaces as `MalformedConfig` via `load_error_to_py`); empty
+        # filter downgrades to `log::warn!(target: "west.manifest", …)`
+        # which `pyo3-log` routes to this module's logger.
         self._loaded = _west_native.LoadedManifest.from_components(self._native, cfg)
         self.abspath = os.fspath(manifest_path)
         self.posixpath = manifest_path.as_posix()

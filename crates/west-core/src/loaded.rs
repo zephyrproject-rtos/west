@@ -153,6 +153,15 @@ pub enum ProjectFilterError {
     /// value "<raw>": <reason>` once `Display`-ed.
     #[error("invalid \"manifest.project-filter\" option value \"{raw}\": {reason}")]
     BadEntry { raw: String, reason: String },
+    /// A project name in the loaded manifest contains a character (comma
+    /// or whitespace) that can't be referenced from a
+    /// `manifest.project-filter` value (whose on-disk form is a CSV
+    /// string and whose entries are whitespace-trimmed). Triggered only
+    /// when a non-empty project-filter is present — without it the same
+    /// situation is surfaced as a warning instead.
+    #[error("project \"{name}\" contains comma (\",\") or whitespace; \
+             such names cannot be referenced from manifest.project-filter")]
+    UnreachableProjectName { name: String },
     /// Reading the option from `Configuration` itself failed (I/O, syntax).
     #[error(transparent)]
     Config(#[from] ConfigError),
@@ -194,6 +203,13 @@ impl LoadedManifest {
     /// Build from an already-parsed `manifest` plus a workspace
     /// `Configuration`. Reads `manifest.group-filter` and
     /// `manifest.project-filter` from `config`, validating each.
+    /// Checks every project name for characters that would make it
+    /// unreachable from a CSV-form `manifest.project-filter` value:
+    /// when the filter is non-empty this is a hard error
+    /// ([`ProjectFilterError::UnreachableProjectName`]), otherwise
+    /// the diagnostic surfaces as `log::warn!(target: "west.manifest",
+    /// …)` — captured by python's `logging.getLogger("west.manifest")`
+    /// via `pyo3-log` and by the CLI binary's `env_logger`.
     pub fn from_manifest_and_config(
         manifest: Manifest,
         config: &Configuration,
@@ -201,7 +217,24 @@ impl LoadedManifest {
         let config_group_filter =
             read_manifest_group_filter(config).map_err(LoadError::GroupFilter)?;
         let project_filter = ProjectFilter::from_config(config)?;
-        Ok(Self::new(manifest, config_group_filter, project_filter))
+        for project in &manifest.projects {
+            if !name_reachable_via_filter(&project.name) {
+                if project_filter.is_empty() {
+                    log::warn!(target: "west.manifest", "{}", unreachable_name_message(&project.name));
+                } else {
+                    return Err(LoadError::ProjectFilter(
+                        ProjectFilterError::UnreachableProjectName {
+                            name: project.name.clone(),
+                        },
+                    ));
+                }
+            }
+        }
+        Ok(Self {
+            manifest,
+            config_group_filter,
+            project_filter,
+        })
     }
 
     /// `true` if `project` should be considered active in this
@@ -268,6 +301,23 @@ pub enum LoadError {
     GroupFilter(String),
     #[error(transparent)]
     ProjectFilter(#[from] ProjectFilterError),
+}
+
+/// Return `false` for project names that can't be referenced in a
+/// CSV-form `manifest.project-filter` value: commas split entries and
+/// each entry is whitespace-trimmed, so neither character can appear
+/// in a name the user might want to match.
+fn name_reachable_via_filter(name: &str) -> bool {
+    !name.contains(',') && !name.chars().any(char::is_whitespace)
+}
+
+/// Shared wording so the warning and the error message string compare
+/// identically — the python tests check for both via the same substring.
+fn unreachable_name_message(name: &str) -> String {
+    format!(
+        "project \"{name}\" contains comma (\",\") or whitespace; \
+         such names cannot be referenced from manifest.project-filter"
+    )
 }
 
 /// `Regex::is_match` is partial; project-filter wants `fullmatch` semantics.
