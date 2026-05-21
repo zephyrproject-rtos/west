@@ -184,7 +184,8 @@ fn action_resolve(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), Manif
     let workspace = super::workspace::resolve_workspace_dir()?;
     let vcs = vcs::from_config(&loaded.config).map_err(|e| ManifestCmdError::Vcs(e.to_string()))?;
     let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
-    let manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let manifest = &loaded_manifest.manifest;
     let (_root, full) = manifest_paths(&workspace, &loaded.config)?;
 
     let format = select_format(args.format, &full);
@@ -197,7 +198,8 @@ fn action_freeze(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), Manife
     let workspace = super::workspace::resolve_workspace_dir()?;
     let vcs = vcs::from_config(&loaded.config).map_err(|e| ManifestCmdError::Vcs(e.to_string()))?;
     let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
-    let manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let manifest = &loaded_manifest.manifest;
     let (_root, full) = manifest_paths(&workspace, &loaded.config)?;
 
     // Build the canonical value, then rewrite each project's revision
@@ -232,7 +234,8 @@ fn action_untracked(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), Man
     let workspace = super::workspace::resolve_workspace_dir()?;
     let vcs = vcs::from_config(&loaded.config).map_err(|e| ManifestCmdError::Vcs(e.to_string()))?;
     let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
-    let manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let manifest = &loaded_manifest.manifest;
 
     // Owned roots: directories west and its projects manage. A
     // directory that matches one of these gets pruned outright; a

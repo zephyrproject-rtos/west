@@ -1448,6 +1448,7 @@ dependencies = [
  "dirs",
  "garde",
  "log",
+ "regex",
  "serde",
  "serde-saphyr",
  "serde_json",

@@ -139,15 +139,10 @@ fn run_inner(args: ForallArgs, loaded: &mut LoadedConfig) -> Result<bool, Forall
     // Read-only manifest resolution: per-project imports for uncloned
     // projects are skipped silently (we'll filter to cloned anyway).
     let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
-    let manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let manifest = &loaded_manifest.manifest;
 
-    // Workspace-permanent group filter (`manifest.group-filter` config
-    // key) layered on the manifest's own filter — same plumbing as
-    // `list` and `update`.
-    let cfg_filter =
-        select::read_manifest_group_filter(&loaded.config).map_err(ForallError::Config)?;
-
-    let synthetic = select::synthetic_manifest_project(&manifest);
+    let synthetic = select::synthetic_manifest_project(manifest);
 
     // Step 1: candidate set (positional resolution + activity gate).
     let mut candidates: Vec<&Project> = if args.projects.is_empty() {
@@ -155,14 +150,14 @@ fn run_inner(args: ForallArgs, loaded: &mut LoadedConfig) -> Result<bool, Forall
         // Synthetic manifest project: always-active (no groups), so
         // `--inactive`-only filters don't apply here. Include unless
         // someone later asks for an inactive-only mode.
-        if args.all || manifest.is_active(&synthetic, &cfg_filter) {
+        if args.all || loaded_manifest.is_active(&synthetic, &[]) {
             acc.push(&synthetic);
         }
         acc.extend(
             manifest
                 .projects
                 .iter()
-                .filter(|p| args.all || manifest.is_active(p, &cfg_filter)),
+                .filter(|p| args.all || loaded_manifest.is_active(p, &[])),
         );
         acc
     } else {
@@ -182,7 +177,7 @@ fn run_inner(args: ForallArgs, loaded: &mut LoadedConfig) -> Result<bool, Forall
         if !leftover.is_empty() {
             let leftover: Vec<&str> = leftover.iter().map(|s| s.as_str()).collect();
             acc.extend(
-                select::select_projects(&manifest, &leftover, &cfg_filter)
+                select::select_projects(&loaded_manifest, &leftover, &[])
                     .map_err(|e| ForallError::Manifest(e.to_string()))?,
             );
         }

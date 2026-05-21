@@ -18,7 +18,8 @@ use std::process::ExitCode;
 
 use clap::Args;
 
-use west_core::manifest::{Manifest, Project};
+use west_core::loaded::LoadedManifest;
+use west_core::manifest::Project;
 use west_core::vcs::{self, Vcs};
 
 use super::config::LoadedConfig;
@@ -107,21 +108,15 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
     let workspace = super::workspace::resolve_workspace_dir()?;
     let vcs = vcs::from_config(&loaded.config).map_err(|e| ListError::Vcs(e.to_string()))?;
     let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
-    let manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
-    // `manifest.group-filter` is the workspace-permanent filter that
-    // sits on top of the manifest's own `group-filter:`. Every command
-    // that gates by activity has to apply it; without this, an inactive
-    // project re-enabled by the user via `+optional` (etc.) would still
-    // be filtered out.
-    let cfg_filter =
-        select::read_manifest_group_filter(&loaded.config).map_err(ListError::Config)?;
+    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let manifest = &loaded_manifest.manifest;
 
     // The "manifest project" — a synthetic entry representing the
     // manifest repo itself. Python's `Manifest.projects` exposes one of
     // these at index 0; we inline it here in `west list` so the data
     // layer stays free of synthetic records (commands that shouldn't
     // operate on it, like `west update`, don't need to filter).
-    let synthetic = select::synthetic_manifest_project(&manifest);
+    let synthetic = select::synthetic_manifest_project(manifest);
 
     let projects: Vec<&Project> = if args.projects.is_empty() {
         let mut acc: Vec<&Project> = Vec::new();
@@ -134,9 +129,9 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
             if args.all {
                 true
             } else if args.inactive {
-                !manifest.is_active(p, &cfg_filter)
+                !loaded_manifest.is_active(p, &[])
             } else {
-                manifest.is_active(p, &cfg_filter)
+                loaded_manifest.is_active(p, &[])
             }
         }));
         acc
@@ -158,7 +153,7 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
         if !leftover.is_empty() {
             let leftover: Vec<&str> = leftover.iter().map(|s| s.as_str()).collect();
             acc.extend(
-                select::select_projects(&manifest, &leftover, &[])
+                select::select_projects(&loaded_manifest, &leftover, &[])
                     .map_err(|e| ListError::Manifest(e.to_string()))?,
             );
         }
@@ -172,10 +167,9 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
     for project in projects {
         let ctx = ProjectContext {
             project,
-            manifest: &manifest,
+            loaded: &loaded_manifest,
             workspace: workspace.as_path(),
             vcs: vcs.as_ref(),
-            cfg_filter: &cfg_filter,
         };
         let line = render(template, &ctx)?;
         // A broken pipe (head, |less q) is the natural way for users to
@@ -213,10 +207,9 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
 
 struct ProjectContext<'a> {
     project: &'a Project,
-    manifest: &'a Manifest,
+    loaded: &'a LoadedManifest,
     workspace: &'a Path,
     vcs: &'a dyn Vcs,
-    cfg_filter: &'a [west_core::manifest::GroupFilterEntry],
 }
 
 impl ProjectContext<'_> {
@@ -252,7 +245,7 @@ impl ProjectContext<'_> {
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| "None".into())),
             "groups" => Ok(self.project.groups.join(",")),
-            "active" => Ok(if self.manifest.is_active(self.project, self.cfg_filter) {
+            "active" => Ok(if self.loaded.is_active(self.project, &[]) {
                 "active".into()
             } else {
                 "inactive".into()

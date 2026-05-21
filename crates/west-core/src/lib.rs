@@ -6,6 +6,7 @@ pub struct WestNotFound;
 
 pub mod config;
 pub mod config_paths;
+pub mod loaded;
 pub mod manifest;
 pub mod topdir;
 pub mod vcs;

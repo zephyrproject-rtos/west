@@ -10,6 +10,7 @@ license.workspace = true
 dirs = "5"
 garde = { version = "0.20", features = ["derive", "regex"] }
 log = "0.4"
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde-saphyr = "0.0.26"
 serde_json = "1"

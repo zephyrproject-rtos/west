@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use west_core::config::Configuration;
+use west_core::loaded::{LoadedManifest, ProjectFilter, ProjectFilterError};
 use west_core::manifest::{ImportPolicy, ImportSource, ImportSourceError, Manifest, Project};
 use west_core::vcs::Vcs;
 
@@ -50,10 +51,32 @@ pub(crate) fn resolve_workspace_dir() -> Result<PathBuf, WorkspaceError> {
 }
 
 /// Load the manifest at `<workspace>/<manifest.path>/<manifest.file>`
-/// using `source` for import resolution. The two config keys are
-/// read here so callers don't need their own copies; `manifest.file`
-/// defaults to `west.yml`.
+/// using `source` for import resolution, **plus** the workspace's
+/// `manifest.group-filter` and `manifest.project-filter` so the
+/// returned [`LoadedManifest`] can answer activity queries by itself.
+/// Every project-iterating command should route through this entry
+/// rather than `Manifest::from_path*` directly — the wrapper makes
+/// project-filter bypasses a type error rather than a silent bug.
 pub(crate) fn load_manifest(
+    workspace: &Path,
+    config: &Configuration,
+    source: &dyn ImportSource,
+) -> Result<LoadedManifest, WorkspaceError> {
+    let manifest = load_bare_manifest(workspace, config, source)?;
+    let config_group_filter = super::select::read_manifest_group_filter(config)
+        .map_err(WorkspaceError::Config)?;
+    let project_filter = ProjectFilter::from_config(config).map_err(WorkspaceError::from)?;
+    Ok(LoadedManifest::new(
+        manifest,
+        config_group_filter,
+        project_filter,
+    ))
+}
+
+/// Lower-level entry that returns the raw `Manifest` without any
+/// workspace-config-derived filters. Used by `update`, which assembles
+/// its own [`LoadedManifest`] around an in-flight `WorkspaceImportSource`.
+pub(crate) fn load_bare_manifest(
     workspace: &Path,
     config: &Configuration,
     source: &dyn ImportSource,
@@ -79,6 +102,12 @@ pub(crate) fn load_manifest(
         ImportPolicy::RESOLVE_ALL,
     )
     .map_err(|e| WorkspaceError::Manifest(format!("manifest {}: {e}", full.display())))
+}
+
+impl From<ProjectFilterError> for WorkspaceError {
+    fn from(e: ProjectFilterError) -> Self {
+        WorkspaceError::Config(e.to_string())
+    }
 }
 
 /// Read-only `ImportSource` for commands that don't materialize

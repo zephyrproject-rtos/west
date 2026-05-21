@@ -171,22 +171,21 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
     let vcs = vcs::from_config(&loaded.config).map_err(|e| CompareError::Vcs(e.to_string()))?;
 
     let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
-    let manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let manifest = &loaded_manifest.manifest;
 
-    let cfg_filter =
-        select::read_manifest_group_filter(&loaded.config).map_err(CompareError::Config)?;
-    let synthetic = select::synthetic_manifest_project(&manifest);
+    let synthetic = select::synthetic_manifest_project(manifest);
 
     let candidates: Vec<&Project> = if args.projects.is_empty() {
         let mut acc: Vec<&Project> = Vec::new();
-        if args.all || manifest.is_active(&synthetic, &cfg_filter) {
+        if args.all || loaded_manifest.is_active(&synthetic, &[]) {
             acc.push(&synthetic);
         }
         acc.extend(
             manifest
                 .projects
                 .iter()
-                .filter(|p| args.all || manifest.is_active(p, &cfg_filter)),
+                .filter(|p| args.all || loaded_manifest.is_active(p, &[])),
         );
         acc
     } else {
@@ -202,7 +201,7 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
         if !leftover.is_empty() {
             let leftover: Vec<&str> = leftover.iter().map(|s| s.as_str()).collect();
             acc.extend(
-                select::select_projects(&manifest, &leftover, &cfg_filter)
+                select::select_projects(&loaded_manifest, &leftover, &[])
                     .map_err(|e| CompareError::Manifest(e.to_string()))?,
             );
         }

@@ -5,6 +5,7 @@
 //! a user who names a project explicitly wants it even if its group is off).
 
 use west_core::config::{ConfigValue, Configuration};
+use west_core::loaded::LoadedManifest;
 use west_core::manifest::{
     GroupFilterEntry, Manifest, ManifestError, Project, Submodules, parse_cli_group_filter,
 };
@@ -18,7 +19,7 @@ use west_core::manifest::{
 ///   can update a named project even if it's in an inactive group.
 ///   Unknown selectors error.
 pub fn select_projects<'m, S>(
-    manifest: &'m Manifest,
+    loaded: &'m LoadedManifest,
     selectors: &[S],
     cli_filter: &[GroupFilterEntry],
 ) -> Result<Vec<&'m Project>, ManifestError>
@@ -26,13 +27,16 @@ where
     S: AsRef<str>,
 {
     if selectors.is_empty() {
-        Ok(manifest
+        Ok(loaded
+            .manifest
             .projects
             .iter()
-            .filter(|p| manifest.is_active(p, cli_filter))
+            .filter(|p| loaded.is_active(p, cli_filter))
             .collect())
     } else {
-        manifest.resolve_projects(selectors.iter().map(|s| s.as_ref()))
+        loaded
+            .manifest
+            .resolve_projects(selectors.iter().map(|s| s.as_ref()))
     }
 }
 
@@ -97,15 +101,20 @@ pub fn read_manifest_group_filter(config: &Configuration) -> Result<Vec<GroupFil
 #[cfg(test)]
 mod tests {
     use super::*;
+    use west_core::loaded::ProjectFilter;
     use west_core::manifest::Manifest;
 
     fn yaml(src: &str) -> Manifest {
         Manifest::from_yaml_str(src).unwrap()
     }
 
+    fn loaded(src: &str) -> LoadedManifest {
+        LoadedManifest::new(yaml(src), Vec::new(), ProjectFilter::empty())
+    }
+
     #[test]
     fn empty_selectors_returns_active_projects() {
-        let m = yaml(
+        let lm = loaded(
             r#"
 manifest:
   group-filter: [-noisy]
@@ -117,7 +126,7 @@ manifest:
       groups: [noisy]
 "#,
         );
-        let picked: Vec<&str> = select_projects(&m, &[] as &[&str], &[])
+        let picked: Vec<&str> = select_projects(&lm, &[] as &[&str], &[])
             .unwrap()
             .iter()
             .map(|p| p.name.as_str())
@@ -127,7 +136,7 @@ manifest:
 
     #[test]
     fn positionals_bypass_group_filter() {
-        let m = yaml(
+        let lm = loaded(
             r#"
 manifest:
   group-filter: [-noisy]
@@ -139,7 +148,7 @@ manifest:
       groups: [noisy]
 "#,
         );
-        let picked: Vec<&str> = select_projects(&m, &["b"], &[])
+        let picked: Vec<&str> = select_projects(&lm, &["b"], &[])
             .unwrap()
             .iter()
             .map(|p| p.name.as_str())
@@ -149,7 +158,7 @@ manifest:
 
     #[test]
     fn unknown_positional_errors() {
-        let m = yaml(
+        let lm = loaded(
             r#"
 manifest:
   projects:
@@ -157,7 +166,7 @@ manifest:
       url: https://x
 "#,
         );
-        let err = select_projects(&m, &["nope"], &[]).unwrap_err();
+        let err = select_projects(&lm, &["nope"], &[]).unwrap_err();
         assert!(matches!(err, ManifestError::UnknownProject(s) if s == "nope"));
     }
 

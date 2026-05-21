@@ -142,8 +142,8 @@ fn find_spec(
 ) -> Result<Option<ExtensionSpec>, ExtensionError> {
     let vcs = vcs::from_config(&loaded.config).map_err(|e| ExtensionError::Vcs(e.to_string()))?;
     let source = super::workspace::ReadOnlyImportSource::new(workspace, vcs.as_ref());
-    let manifest = super::workspace::load_manifest(workspace, &loaded.config, &source)?;
-    let extensions = discover(workspace, &manifest, vcs.as_ref())?;
+    let loaded_manifest = super::workspace::load_manifest(workspace, &loaded.config, &source)?;
+    let extensions = discover(workspace, &loaded_manifest.manifest, vcs.as_ref())?;
     Ok(extensions.get(name).cloned())
 }
 
@@ -285,7 +285,8 @@ pub(crate) fn list_for_help(
     let workspace = super::workspace::resolve_workspace_dir()?;
     let vcs = vcs::from_config(&loaded.config).map_err(|e| ExtensionError::Vcs(e.to_string()))?;
     let source = super::workspace::ReadOnlyImportSource::new(&workspace, vcs.as_ref());
-    let manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let manifest = &loaded_manifest.manifest;
 
     let mut groups: Vec<ProjectExtensions> = Vec::new();
 

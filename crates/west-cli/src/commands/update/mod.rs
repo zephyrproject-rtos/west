@@ -39,6 +39,7 @@ use console::Style;
 use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
+use west_core::loaded::{LoadedManifest, ProjectFilter};
 use west_core::manifest::{GroupFilterEntry, ImportPolicy, Manifest, Project, Submodules};
 use west_core::vcs::{
     self, CheckoutTarget, CommitSummary, FetchSpec, Output, SubmoduleScope, Vcs,
@@ -201,27 +202,38 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    // Workspace-permanent `manifest.group-filter` (e.g. `+optional`)
-    // applies on top of the manifest's own `group-filter:` regardless
-    // of which command is running. Compose with `update`'s own
-    // CLI/config filter before handing to selection.
-    let mut effective_filter = match super::select::read_manifest_group_filter(&loaded.config) {
+    // Wrap the raw Manifest with the workspace-derived filters
+    // (`manifest.group-filter`, `manifest.project-filter`) so every
+    // activity check inside `select_projects` honors them. The CLI's
+    // own `--group-filter` is layered on top via the `cli_filter`
+    // argument to `select_projects`.
+    let config_group_filter = match super::select::read_manifest_group_filter(&loaded.config) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("west: {e}");
             return ExitCode::from(2);
         }
     };
-    effective_filter.extend(cli_group_filter);
+    let project_filter = match ProjectFilter::from_config(&loaded.config) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("west: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let loaded_manifest = LoadedManifest::new(manifest, config_group_filter, project_filter);
 
-    let projects =
-        match super::select::select_projects(&manifest, &args.projects, &effective_filter) {
-            Ok(ps) => ps,
-            Err(e) => {
-                eprintln!("west: {e}");
-                return ExitCode::FAILURE;
-            }
-        };
+    let projects = match super::select::select_projects(
+        &loaded_manifest,
+        &args.projects,
+        &cli_group_filter,
+    ) {
+        Ok(ps) => ps,
+        Err(e) => {
+            eprintln!("west: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     if projects.is_empty() {
         eprintln!("west: no projects to update");
