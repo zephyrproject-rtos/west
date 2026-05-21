@@ -34,8 +34,8 @@ use std::sync::Arc;
 
 use regex::Regex;
 
-use crate::config::{ConfigError, Configuration};
-use crate::manifest::{GroupFilterEntry, Manifest, Project};
+use crate::config::{ConfigError, ConfigValue, Configuration};
+use crate::manifest::{GroupFilterEntry, Manifest, Project, parse_cli_group_filter};
 
 /// One `+regex` / `-regex` element of `manifest.project-filter`.
 #[derive(Debug, Clone)]
@@ -75,28 +75,34 @@ impl ProjectFilter {
     /// unset.
     pub fn from_config(config: &Configuration) -> Result<Self, ProjectFilterError> {
         // Prefer the array form. Fall back to a CSV string only if
-        // the option is stored as a single string scalar.
-        let raw_entries: Vec<String> = match config.get_list_str("manifest.project-filter") {
-            Ok(Some(list)) => list,
-            Ok(None) => return Ok(Self::empty()),
-            Err(ConfigError::TypeMismatch { .. }) => match config
-                .get_str("manifest.project-filter")
-                .map_err(ProjectFilterError::Config)?
-            {
-                Some(csv) => csv
-                    .split(',')
-                    .map(|s| s.trim().to_owned())
-                    .filter(|s| !s.is_empty())
-                    .collect(),
-                None => return Ok(Self::empty()),
-            },
-            Err(e) => return Err(ProjectFilterError::Config(e)),
-        };
-        // Display form for error messages (matches legacy: the joined
-        // CSV equivalent, regardless of which storage shape was on
-        // disk — callers wanting whitespace fidelity for diagnostics
-        // can format their own).
-        let raw_for_msg = raw_entries.join(",");
+        // the option is stored as a single string scalar. The
+        // diagnostic shape preserves the user's original CSV string
+        // (whitespace and all) when stored as a string, since
+        // legacy callers test error messages by substring against
+        // the raw form they passed in.
+        let (raw_entries, raw_for_msg): (Vec<String>, String) =
+            match config.get_list_str("manifest.project-filter") {
+                Ok(Some(list)) => {
+                    let display = list.join(",");
+                    (list, display)
+                }
+                Ok(None) => return Ok(Self::empty()),
+                Err(ConfigError::TypeMismatch { .. }) => match config
+                    .get_str("manifest.project-filter")
+                    .map_err(ProjectFilterError::Config)?
+                {
+                    Some(csv) => {
+                        let entries: Vec<String> = csv
+                            .split(',')
+                            .map(|s| s.trim().to_owned())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        (entries, csv)
+                    }
+                    None => return Ok(Self::empty()),
+                },
+                Err(e) => return Err(ProjectFilterError::Config(e)),
+            };
         let mut entries = Vec::with_capacity(raw_entries.len());
         for element in raw_entries {
             if !element.starts_with('+') && !element.starts_with('-') {
@@ -169,9 +175,10 @@ pub struct LoadedManifest {
 }
 
 impl LoadedManifest {
-    /// Wrap a `manifest` with explicit filter state. Most callers
-    /// should use one of the [`load_*`] helpers instead so the
-    /// filters come from a single canonical source.
+    /// Wrap a `manifest` with explicit filter state. Prefer
+    /// [`LoadedManifest::from_manifest_and_config`] when you have a
+    /// workspace `Configuration` in hand — it pulls both filters from
+    /// the canonical place once.
     pub fn new(
         manifest: Manifest,
         config_group_filter: Vec<GroupFilterEntry>,
@@ -182,6 +189,19 @@ impl LoadedManifest {
             config_group_filter,
             project_filter,
         }
+    }
+
+    /// Build from an already-parsed `manifest` plus a workspace
+    /// `Configuration`. Reads `manifest.group-filter` and
+    /// `manifest.project-filter` from `config`, validating each.
+    pub fn from_manifest_and_config(
+        manifest: Manifest,
+        config: &Configuration,
+    ) -> Result<Self, LoadError> {
+        let config_group_filter =
+            read_manifest_group_filter(config).map_err(LoadError::GroupFilter)?;
+        let project_filter = ProjectFilter::from_config(config)?;
+        Ok(Self::new(manifest, config_group_filter, project_filter))
     }
 
     /// `true` if `project` should be considered active in this
@@ -205,6 +225,51 @@ impl LoadedManifest {
     }
 }
 
+/// Read the `manifest.group-filter` workspace-config key as a list of
+/// parsed [`GroupFilterEntry`] values. Accepts either a comma-separated
+/// string (`"+optional,-noisy"`) or a TOML array of strings; the unset
+/// option yields an empty list. The returned filter is meant to be
+/// stored on [`LoadedManifest::config_group_filter`] and composed with
+/// any caller-supplied CLI filter at evaluation time.
+pub fn read_manifest_group_filter(config: &Configuration) -> Result<Vec<GroupFilterEntry>, String> {
+    let raw: Vec<String> = match config
+        .get("manifest.group-filter")
+        .map_err(|e| e.to_string())?
+    {
+        None => return Ok(Vec::new()),
+        Some(ConfigValue::String(s)) => vec![s],
+        Some(ConfigValue::List(items)) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    ConfigValue::String(s) => out.push(s),
+                    other => {
+                        return Err(format!(
+                            "manifest.group-filter entries must be strings, got {other:?}"
+                        ));
+                    }
+                }
+            }
+            out
+        }
+        Some(other) => {
+            return Err(format!(
+                "manifest.group-filter must be a string or list, got {other:?}"
+            ));
+        }
+    };
+    parse_cli_group_filter(&raw).map_err(|e| e.to_string())
+}
+
+/// Aggregate error for [`LoadedManifest::from_manifest_and_config`].
+#[derive(Debug, thiserror::Error)]
+pub enum LoadError {
+    #[error("{0}")]
+    GroupFilter(String),
+    #[error(transparent)]
+    ProjectFilter(#[from] ProjectFilterError),
+}
+
 /// `Regex::is_match` is partial; project-filter wants `fullmatch` semantics.
 /// Anchoring with `\A` / `\z` would alter the user's pattern; compare against
 /// captured match bounds instead.
@@ -212,5 +277,115 @@ fn is_fullmatch(re: &Regex, name: &str) -> bool {
     match re.find(name) {
         Some(m) => m.start() == 0 && m.end() == name.len(),
         None => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Configuration;
+
+    fn empty_config() -> Configuration {
+        Configuration::load(Vec::<std::path::PathBuf>::new()).unwrap()
+    }
+
+    #[test]
+    fn read_manifest_group_filter_unset_returns_empty() {
+        let cfg = empty_config();
+        assert!(read_manifest_group_filter(&cfg).unwrap().is_empty());
+    }
+
+    #[test]
+    fn read_manifest_group_filter_comma_string() {
+        let mut cfg = empty_config();
+        cfg.set_inline(
+            "manifest.group-filter",
+            ConfigValue::String("+optional, -noisy".into()),
+        )
+        .unwrap();
+        let parsed = read_manifest_group_filter(&cfg).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].group, "optional");
+        assert!(!parsed[0].disabled);
+        assert_eq!(parsed[1].group, "noisy");
+        assert!(parsed[1].disabled);
+    }
+
+    #[test]
+    fn read_manifest_group_filter_list_of_strings() {
+        let mut cfg = empty_config();
+        cfg.set_inline(
+            "manifest.group-filter",
+            ConfigValue::List(vec![
+                ConfigValue::String("+optional".into()),
+                ConfigValue::String("-noisy".into()),
+            ]),
+        )
+        .unwrap();
+        let parsed = read_manifest_group_filter(&cfg).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].group, "optional");
+        assert!(!parsed[0].disabled);
+        assert_eq!(parsed[1].group, "noisy");
+        assert!(parsed[1].disabled);
+    }
+
+    #[test]
+    fn read_manifest_group_filter_rejects_non_string_list_entry() {
+        let mut cfg = empty_config();
+        cfg.set_inline(
+            "manifest.group-filter",
+            ConfigValue::List(vec![
+                ConfigValue::String("+optional".into()),
+                ConfigValue::Integer(7),
+            ]),
+        )
+        .unwrap();
+        let err = read_manifest_group_filter(&cfg).unwrap_err();
+        assert!(err.contains("entries must be strings"));
+    }
+
+    #[test]
+    fn read_manifest_group_filter_rejects_scalar_non_string() {
+        let mut cfg = empty_config();
+        cfg.set_inline("manifest.group-filter", ConfigValue::Bool(true))
+            .unwrap();
+        let err = read_manifest_group_filter(&cfg).unwrap_err();
+        assert!(err.contains("must be a string or list"));
+    }
+
+    #[test]
+    fn project_filter_decide_last_match_wins() {
+        // Build directly; `from_config` is exercised through the
+        // workspace-loading tests in tests/.
+        let pat = |s| Arc::new(Regex::new(s).unwrap());
+        let pf = ProjectFilter {
+            entries: vec![
+                ProjectFilterEntry {
+                    pattern: pat("foo"),
+                    make_active: false,
+                },
+                ProjectFilterEntry {
+                    pattern: pat("foo"),
+                    make_active: true,
+                },
+            ],
+        };
+        assert_eq!(pf.decide("foo"), Some(true)); // last `+foo` wins
+        assert_eq!(pf.decide("bar"), None);
+    }
+
+    #[test]
+    fn project_filter_decide_uses_fullmatch() {
+        let pat = |s| Arc::new(Regex::new(s).unwrap());
+        let pf = ProjectFilter {
+            entries: vec![ProjectFilterEntry {
+                pattern: pat("foo"),
+                make_active: false,
+            }],
+        };
+        // "foobar" must NOT match "foo" — fullmatch semantics.
+        assert_eq!(pf.decide("foobar"), None);
+        assert_eq!(pf.decide("foo"), Some(false));
     }
 }

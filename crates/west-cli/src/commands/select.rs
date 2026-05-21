@@ -4,10 +4,9 @@
 //! project names bypass the active-group filter (matches Python's intent —
 //! a user who names a project explicitly wants it even if its group is off).
 
-use west_core::config::{ConfigValue, Configuration};
 use west_core::loaded::LoadedManifest;
 use west_core::manifest::{
-    GroupFilterEntry, Manifest, ManifestError, Project, Submodules, parse_cli_group_filter,
+    GroupFilterEntry, Manifest, ManifestError, Project, Submodules,
 };
 
 /// Resolve the set of projects to update.
@@ -62,41 +61,12 @@ pub(crate) fn synthetic_manifest_project(manifest: &Manifest) -> Project {
     }
 }
 
-/// Read the `manifest.group-filter` workspace-config key and parse it
-/// into a list of group-filter entries. Accepts either a string
-/// (comma-separated, e.g. `+optional,-noisy`) or a list of strings;
-/// returns an empty filter when the key is unset. Mirrors Python's
-/// `_config_group_filter` — every command that gates on group activity
-/// should compose this with its own CLI-supplied filter (if any).
-pub fn read_manifest_group_filter(config: &Configuration) -> Result<Vec<GroupFilterEntry>, String> {
-    let raw: Vec<String> = match config
-        .get("manifest.group-filter")
-        .map_err(|e| e.to_string())?
-    {
-        None => return Ok(Vec::new()),
-        Some(ConfigValue::String(s)) => vec![s],
-        Some(ConfigValue::List(items)) => {
-            let mut out = Vec::with_capacity(items.len());
-            for item in items {
-                match item {
-                    ConfigValue::String(s) => out.push(s),
-                    other => {
-                        return Err(format!(
-                            "manifest.group-filter entries must be strings, got {other:?}"
-                        ));
-                    }
-                }
-            }
-            out
-        }
-        Some(other) => {
-            return Err(format!(
-                "manifest.group-filter must be a string or list, got {other:?}"
-            ));
-        }
-    };
-    parse_cli_group_filter(&raw).map_err(|e| e.to_string())
-}
+// `read_manifest_group_filter` was hoisted into
+// `west_core::loaded::read_manifest_group_filter` so it can be shared by
+// `LoadedManifest::from_manifest_and_config` and external callers. The
+// re-export below preserves the historical import path for in-CLI uses
+// (`super::select::read_manifest_group_filter`).
+pub use west_core::loaded::read_manifest_group_filter;
 
 #[cfg(test)]
 mod tests {
@@ -170,72 +140,6 @@ manifest:
         assert!(matches!(err, ManifestError::UnknownProject(s) if s == "nope"));
     }
 
-    fn empty_config() -> Configuration {
-        Configuration::load(Vec::<std::path::PathBuf>::new()).unwrap()
-    }
-
-    #[test]
-    fn read_manifest_group_filter_unset_returns_empty() {
-        let cfg = empty_config();
-        assert!(read_manifest_group_filter(&cfg).unwrap().is_empty());
-    }
-
-    #[test]
-    fn read_manifest_group_filter_comma_string() {
-        let mut cfg = empty_config();
-        cfg.set_inline(
-            "manifest.group-filter",
-            ConfigValue::String("+optional, -noisy".into()),
-        )
-        .unwrap();
-        let parsed = read_manifest_group_filter(&cfg).unwrap();
-        assert_eq!(parsed.len(), 2);
-        assert_eq!(parsed[0].group, "optional");
-        assert!(!parsed[0].disabled);
-        assert_eq!(parsed[1].group, "noisy");
-        assert!(parsed[1].disabled);
-    }
-
-    #[test]
-    fn read_manifest_group_filter_list_of_strings() {
-        let mut cfg = empty_config();
-        cfg.set_inline(
-            "manifest.group-filter",
-            ConfigValue::List(vec![
-                ConfigValue::String("+optional".into()),
-                ConfigValue::String("-noisy".into()),
-            ]),
-        )
-        .unwrap();
-        let parsed = read_manifest_group_filter(&cfg).unwrap();
-        assert_eq!(parsed.len(), 2);
-        assert_eq!(parsed[0].group, "optional");
-        assert!(!parsed[0].disabled);
-        assert_eq!(parsed[1].group, "noisy");
-        assert!(parsed[1].disabled);
-    }
-
-    #[test]
-    fn read_manifest_group_filter_rejects_non_string_list_entry() {
-        let mut cfg = empty_config();
-        cfg.set_inline(
-            "manifest.group-filter",
-            ConfigValue::List(vec![
-                ConfigValue::String("+optional".into()),
-                ConfigValue::Integer(7),
-            ]),
-        )
-        .unwrap();
-        let err = read_manifest_group_filter(&cfg).unwrap_err();
-        assert!(err.contains("entries must be strings"));
-    }
-
-    #[test]
-    fn read_manifest_group_filter_rejects_scalar_non_string() {
-        let mut cfg = empty_config();
-        cfg.set_inline("manifest.group-filter", ConfigValue::Bool(true))
-            .unwrap();
-        let err = read_manifest_group_filter(&cfg).unwrap_err();
-        assert!(err.contains("must be a string or list"));
-    }
+    // `read_manifest_group_filter`'s tests live next to its definition
+    // in `west_core::loaded`.
 }

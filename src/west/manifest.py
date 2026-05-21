@@ -166,59 +166,6 @@ def manifest_path() -> str:
     return os.fspath(full)
 
 
-def _read_project_filter(cfg: Configuration) -> tuple[list[str], str] | None:
-    # Read the `manifest.project-filter` config option in either of its
-    # accepted on-disk shapes — a native TOML array of strings, or a legacy
-    # CSV string — and return `(entries, raw_for_messages)`, or `None` when
-    # the option isn't set. CSV form preserves the original string for use
-    # in error messages (whitespace and all); TOML-array form joins the
-    # array with `,` for display.
-    try:
-        entries = cfg.get_list_str('manifest.project-filter')
-    except RuntimeError:
-        # Stored as a string; fall back to CSV form.
-        raw = cfg.get('manifest.project-filter')
-        if raw is None:
-            return None
-        return [e.strip() for e in raw.split(',') if e.strip()], raw
-    if entries is None:
-        return None
-    return entries, ','.join(entries)
-
-
-def _validate_project_filter(cfg: Configuration) -> None:
-    # Validate `manifest.project-filter` against the legacy contract:
-    # each entry must start with `+` or `-` and carry a non-empty,
-    # syntactically valid regular expression. Raises `MalformedConfig`
-    # with the legacy message shape `invalid "manifest.project-filter"
-    # option value "<raw>": <reason>` on any failure.
-    import re
-
-    read = _read_project_filter(cfg)
-    if read is None:
-        return
-    entries, raw = read
-    for element in entries:
-        if not element.startswith(('+', '-')):
-            raise MalformedConfig(
-                f'invalid "manifest.project-filter" option value "{raw}": '
-                f'element "{element}" does not start with "+" or "-"'
-            )
-        pattern = element[1:]
-        if not pattern:
-            raise MalformedConfig(
-                f'invalid "manifest.project-filter" option value "{raw}": '
-                f'a bare "+" or "-" contains no regular expression'
-            )
-        try:
-            re.compile(pattern)
-        except re.error as e:
-            raise MalformedConfig(
-                f'invalid "manifest.project-filter" option value "{raw}": '
-                f'invalid regular expression "{pattern}": {e}'
-            ) from e
-
-
 def is_group(raw_group: Any) -> bool:
     '''Return True if *raw_group* is a syntactically valid group name.'''
     if not isinstance(raw_group, str) or not raw_group:
@@ -626,24 +573,41 @@ def _default_importer(project: Project, file: str) -> NoReturn:
     raise ManifestImportFailed(f'{project.name}:{file}')
 
 
-def _filesystem_importer(topdir: Path) -> Callable[[str, str, str], str | None]:
+def _filesystem_importer(
+    topdir: Path, project_filter: _west_native.ProjectFilter
+) -> tuple[Callable[[str, str, str], str | None], list[str]]:
     '''Build a read-only ImportSource callback for `Manifest.from_path_with_imports`.
 
     Reads import files directly off the workspace's project directories.
-    A project that isn't cloned simply yields `None`, telling the
-    resolver to continue with whatever has already been collected.
+    Projects that the workspace config has marked inactive via
+    `manifest.project-filter` short-circuit to `None` — the
+    project-filter decision comes from the rust binding's
+    :py:class:`west._west_native.ProjectFilter`, so the regex semantics
+    match :py:class:`west._west_native.LoadedManifest.is_active` exactly.
+
+    Returns `(callback, errors)`. `errors` is a list the callback appends
+    to whenever an *active* project's import file is missing or
+    unreadable; the rust resolver swallows source-side `Err` returns with
+    a warning by design, so the caller is expected to inspect `errors`
+    after the resolver returns and raise `ManifestImportFailed` if any
+    were recorded.
     '''
+    errors: list[str] = []
 
     def _read(name: str, project_path: str, relative_file: str) -> str | None:
+        if project_filter.decide(name) is False:
+            return None
         full = topdir / project_path / relative_file
         try:
             return full.read_text(encoding='utf-8')
         except FileNotFoundError:
+            errors.append(f'{name}:{relative_file}: file not found')
             return None
         except OSError as e:
-            raise ManifestImportFailed(f'{name}:{relative_file}: {e}') from e
+            errors.append(f'{name}:{relative_file}: {e}')
+            return None
 
-    return _read
+    return _read, errors
 
 
 def _adapt_legacy_importer(
@@ -811,7 +775,12 @@ class Manifest:
         # `manifest.project-filter` entries (`+regex` / `-regex`). Only
         # `_init_from_topdir` reads them from the workspace config; the
         # `from_data` path leaves this empty.
-        self._project_filter: list[str] = []
+        # Workspace-aware view of the manifest (`LoadedManifest` from the
+        # rust binding) — bundles `manifest.group-filter` and
+        # `manifest.project-filter` so `is_active()` consults both in one
+        # call. Populated by `_init_from_topdir`; `from_data()` leaves
+        # it `None` since there's no workspace.
+        self._loaded: _west_native.LoadedManifest | None = None
 
         if source_data is not None:
             self._init_from_data(source_data, importer, import_flags)
@@ -875,23 +844,29 @@ class Manifest:
                 raise MalformedConfig('no local manifest.path option')
             repo_relpath = mp
             manifest_file = cfg.get('manifest.file', _WEST_YML) or _WEST_YML
-        _validate_project_filter(cfg)
-        read = _read_project_filter(cfg)
-        self._project_filter = read[0] if read is not None else []
+        # Parse + validate `manifest.project-filter` *before* the native
+        # parse so the importer can short-circuit for inactive projects.
+        # Invalid filter values surface as `MalformedConfig` here.
+        project_filter = _west_native.ProjectFilter.from_config(cfg)
         manifest_repo_root = topdir / repo_relpath
         manifest_path = manifest_repo_root / manifest_file
         if not manifest_path.is_file():
             raise MalformedConfig(f'manifest file not found: {manifest_path}')
         # Legacy: an explicit `importer=` argument on a workspace flow replaces
         # the filesystem reader. The rust resolver still drives the calls.
-        native_importer = (
-            _adapt_legacy_importer(importer)
-            if importer is not None
-            else _filesystem_importer(topdir)
-        )
+        if importer is not None:
+            native_importer = _adapt_legacy_importer(importer)
+            importer_errors: list[str] = []
+        else:
+            native_importer, importer_errors = _filesystem_importer(topdir, project_filter)
         self._native = _west_native.Manifest.from_path_with_imports(
             manifest_path, manifest_repo_root, native_importer, int(import_flags)
         )
+        # The rust resolver swallows source-side errors with a warning; surface
+        # the first one as a hard `ManifestImportFailed` so the legacy
+        # "active project, missing import file" contract holds.
+        if importer_errors:
+            raise ManifestImportFailed(importer_errors[0])
         # Workspace-context check: no project may claim the manifest
         # repository's own path. The rust core can't enforce this because
         # the manifest-repo path is a workspace-config concept, not a
@@ -902,6 +877,12 @@ class Manifest:
                 raise MalformedManifest(
                     f'{np.name} path "{repo_path_str}" is taken by the manifest repository'
                 )
+        # Bundle the parsed manifest with its workspace filters into a
+        # `LoadedManifest`. From here on `is_active()` consults
+        # `manifest.project-filter` + `manifest.group-filter` in one call,
+        # matching the rust CLI commands. Validation already happened
+        # above (via `ProjectFilter.from_config`); this just composes.
+        self._loaded = _west_native.LoadedManifest.from_components(self._native, cfg)
         self.abspath = os.fspath(manifest_path)
         self.posixpath = manifest_path.as_posix()
         self.relative_path = os.fspath(Path(repo_relpath) / manifest_file)
@@ -962,38 +943,26 @@ class Manifest:
         extra_filter: Iterable[str] | None = None,
     ) -> bool:
         '''Return True if *project* passes the manifest's group filter
-        (composed with *extra_filter* if any).'''
+        (composed with *extra_filter* if any) and isn't explicitly
+        disabled by `manifest.project-filter`.
+
+        The two-stage evaluation lives in the rust binding's
+        :py:class:`west._west_native.LoadedManifest`, so python and the
+        rust CLI commands agree on the answer.
+        '''
         if project is self._projects[MANIFEST_PROJECT_INDEX]:
             return True  # the synthetic manifest project is always active
-        # `manifest.project-filter` from workspace config trumps group-filter:
-        # an explicit match decides the outcome before group filtering runs.
-        pf = self._project_filter_decision(project.name)
-        if pf is not None:
-            return pf
-        # Look up the native project by name for the rust-side check.
+        # Look up the native project by name to hand to the binding.
         native_proj = self._native.project(project.name) if self._native else None
-        if native_proj is None:
-            # Caller passed a Project not from this manifest. Fall back
-            # to a python-side evaluation against the manifest's filter.
+        if native_proj is None or self._loaded is None:
+            # Either the caller passed a Project not from this manifest,
+            # or there's no workspace (from_data path) so no
+            # LoadedManifest exists. Fall back to a python-side
+            # group-filter-only evaluation — project-filter is a
+            # workspace-config concept and doesn't apply here.
             return self._python_is_active(project, extra_filter)
         extra = _west_native.parse_cli_group_filter(list(extra_filter)) if extra_filter else None
-        return self._native.is_active(native_proj, extra)
-
-    def _project_filter_decision(self, name: str) -> bool | None:
-        # Walk `manifest.project-filter` entries (last-match wins, mirroring
-        # legacy semantics). Returns `True`/`False` if any entry fullmatches
-        # `name`, or `None` if no entry matches — letting the caller fall
-        # through to the group-filter check.
-        import re
-
-        decision: bool | None = None
-        for entry in self._project_filter:
-            if not entry:
-                continue
-            sign, pattern = entry[0], entry[1:]
-            if re.fullmatch(pattern, name):
-                decision = sign == '+'
-        return decision
+        return self._loaded.is_active(native_proj, extra)
 
     def _python_is_active(
         self,

@@ -60,6 +60,17 @@ pub struct Configuration {
     resolved: ResolvedConfig,
 }
 
+impl Configuration {
+    /// Borrow the underlying `west_core::config::Configuration` so
+    /// neighbouring python-binding modules (e.g.
+    /// `LoadedManifest::from_components`) can pass it straight to
+    /// `west_core` helpers without duplicating the read API at the FFI
+    /// boundary.
+    pub(crate) fn core(&self) -> &west_core::config::Configuration {
+        &self.inner
+    }
+}
+
 #[pymethods]
 impl Configuration {
     /// Construct a Configuration for a workspace.

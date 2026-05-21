@@ -15,6 +15,10 @@ use pyo3::exceptions::{PyException, PyIOError, PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 
+use west_core::loaded::{
+    LoadError, LoadedManifest as CoreLoadedManifest, ProjectFilter as CoreProjectFilter,
+    ProjectFilterError,
+};
 use west_core::manifest::{
     self as core, GroupFilterEntry as CoreGroupFilterEntry, ImportPolicy, ImportSource,
     ImportSourceError, ManifestError, Submodule as CoreSubmodule, Submodules as CoreSubmodules,
@@ -616,6 +620,147 @@ impl ImportSource for PyImportSource {
     }
 }
 
+// ---- ProjectFilter --------------------------------------------------------
+
+/// Workspace-derived `manifest.project-filter` parsed into entries.
+/// Standalone so the python `_filesystem_importer` (built *before* the
+/// native parse) can short-circuit imports for inactive projects without
+/// holding a [`LoadedManifest`] yet.
+#[pyclass(name = "ProjectFilter", module = "west._west_native", frozen)]
+#[derive(Clone)]
+pub struct ProjectFilter {
+    inner: CoreProjectFilter,
+}
+
+#[pymethods]
+impl ProjectFilter {
+    /// Read and validate `manifest.project-filter` from `config`.
+    /// Returns an empty filter when the option is unset. Raises
+    /// `MalformedConfig` if any entry is syntactically invalid.
+    #[staticmethod]
+    fn from_config(config: PyRef<'_, super::config::Configuration>) -> PyResult<Self> {
+        CoreProjectFilter::from_config(config.core())
+            .map(|inner| Self { inner })
+            .map_err(project_filter_error_to_py)
+    }
+
+    /// Last-match-wins regex `fullmatch` against `name`:
+    ///   * `True`  — an explicit `+regex` matched (forced active).
+    ///   * `False` — an explicit `-regex` matched (forced inactive).
+    ///   * `None`  — no entry matched.
+    fn decide(&self, name: &str) -> Option<bool> {
+        self.inner.decide(name)
+    }
+
+    /// `True` when at least one filter entry is configured.
+    #[getter]
+    fn has_entries(&self) -> bool {
+        !self.inner.is_empty()
+    }
+}
+
+fn project_filter_error_to_py(err: ProjectFilterError) -> PyErr {
+    super::config::MalformedConfig::new_err(err.to_string())
+}
+
+// ---- LoadedManifest -------------------------------------------------------
+
+/// Workspace-aware view of a parsed [`Manifest`]. Bundles the manifest
+/// with its workspace-config-derived filters (`manifest.group-filter`,
+/// `manifest.project-filter`) so `is_active` consults both. The python
+/// `west.manifest.Manifest` wrapper holds one of these so the
+/// project-filter rule is applied consistently in python flows — the
+/// rust CLI commands route through the same `LoadedManifest::is_active`.
+#[pyclass(name = "LoadedManifest", module = "west._west_native", unsendable)]
+pub struct LoadedManifest {
+    inner: CoreLoadedManifest,
+}
+
+#[pymethods]
+impl LoadedManifest {
+    /// Build from an already-parsed [`Manifest`] plus a workspace
+    /// `Configuration`. Reads `manifest.group-filter` and
+    /// `manifest.project-filter` from `config` and validates each;
+    /// invalid project-filter values raise `MalformedConfig`. With
+    /// `config=None`, the resulting `LoadedManifest` has empty filters
+    /// (used by python's `from_data()` path, which has no workspace).
+    #[staticmethod]
+    #[pyo3(signature = (manifest, config=None))]
+    fn from_components(
+        manifest: PyRef<'_, Manifest>,
+        config: Option<PyRef<'_, super::config::Configuration>>,
+    ) -> PyResult<Self> {
+        let core_manifest = manifest.inner.clone();
+        let inner = match config {
+            Some(cfg) => CoreLoadedManifest::from_manifest_and_config(core_manifest, cfg.core())
+                .map_err(load_error_to_py)?,
+            None => CoreLoadedManifest::new(
+                core_manifest,
+                Vec::new(),
+                west_core::loaded::ProjectFilter::empty(),
+            ),
+        };
+        Ok(Self { inner })
+    }
+
+    /// `True` if `project` is active in this workspace. Mirrors v1's
+    /// `Manifest.is_active`: project-filter first (last-match wins,
+    /// regex fullmatch), then group-filter (workspace + manifest +
+    /// `extra_filter`).
+    #[pyo3(signature = (project, extra_filter=None))]
+    fn is_active(
+        &self,
+        project: &Project,
+        extra_filter: Option<Vec<PyRef<'_, GroupFilterEntry>>>,
+    ) -> PyResult<bool> {
+        let core_project = core::Project {
+            name: project.name.clone(),
+            url: project.url.clone(),
+            revision: project.revision.clone(),
+            path: PathBuf::from(&project.path),
+            description: project.description.clone(),
+            groups: project.groups.clone(),
+            clone_depth: project.clone_depth,
+            west_commands: project.west_commands.iter().map(PathBuf::from).collect(),
+            remote_name: project.remote_name.clone(),
+            submodules: project.submodules.clone(),
+            userdata: project.userdata.clone(),
+        };
+        let extras: Vec<CoreGroupFilterEntry> = extra_filter
+            .into_iter()
+            .flatten()
+            .map(|e| e.to_core())
+            .collect();
+        Ok(self.inner.is_active(&core_project, &extras))
+    }
+
+    /// Workspace project-filter decision for `name`:
+    ///   - `True`  → an explicit `+regex` matched (project is forced active).
+    ///   - `False` → an explicit `-regex` matched (project is forced inactive).
+    ///   - `None`  → no filter entry matched; activity is decided by groups.
+    /// Used by the workspace `ImportSource` to short-circuit imports for
+    /// inactive projects without touching the disk.
+    fn project_filter_decide(&self, name: &str) -> Option<bool> {
+        self.inner.project_filter.decide(name)
+    }
+
+    /// `True` if `manifest.project-filter` was set in workspace
+    /// configuration. Used by python's `manifest --resolve` / `--freeze`
+    /// guard to refuse running when the output couldn't faithfully
+    /// represent the active set.
+    #[getter]
+    fn has_project_filter(&self) -> bool {
+        !self.inner.project_filter.is_empty()
+    }
+}
+
+fn load_error_to_py(err: LoadError) -> PyErr {
+    // Both variants describe a malformed workspace-config value, so
+    // they collapse to the same exception type the config module
+    // already publishes — matching the legacy python error mapping.
+    super::config::MalformedConfig::new_err(err.to_string())
+}
+
 // ---- Error translation ----------------------------------------------------
 
 /// `ManifestError` → python exception. Parse / validation / content
@@ -649,6 +794,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ManifestRepo>()?;
     m.add_class::<Project>()?;
     m.add_class::<Manifest>()?;
+    m.add_class::<ProjectFilter>()?;
+    m.add_class::<LoadedManifest>()?;
     m.add_function(wrap_pyfunction!(parse_cli_group_filter, m)?)?;
     Ok(())
 }
