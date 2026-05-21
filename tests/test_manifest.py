@@ -15,15 +15,38 @@
 # We need to be able to instantiate Projects and parse manifest data
 # from strings or dicts, as well as from the file system.
 
+import logging
 import os
 import platform
 import subprocess
-from pathlib import Path
+from copy import deepcopy
+from pathlib import Path, PurePath
+from unittest.mock import patch
 
 import pytest
-from conftest import add_commit, add_tag, check_proj_consistency, create_repo, rev_parse
+import yaml
+from conftest import (
+    add_commit,
+    add_tag,
+    check_proj_consistency,
+    create_repo,
+    create_workspace,
+    rev_parse,
+)
 
-from west.manifest import MalformedManifest, Manifest, ManifestProject, Project, validate
+from west.configuration import ConfigFile, Configuration
+from west.manifest import (
+    MANIFEST_PROJECT_INDEX,
+    ImportFlag,
+    MalformedConfig,
+    MalformedManifest,
+    Manifest,
+    ManifestImportFailed,
+    ManifestProject,
+    Project,
+    manifest_path,
+    validate,
+)
 
 if platform.system() == 'Windows':
     TOPDIR = 'C:\\topdir'
@@ -33,6 +56,36 @@ else:
     TOPDIR_POSIX = TOPDIR
 
 THIS_DIRECTORY = os.path.dirname(__file__)
+
+
+@pytest.fixture
+def tmp_workspace(tmpdir):
+    # This fixture creates a skeletal west workspace in a temporary
+    # directory on the file system, and changes directory there.
+    #
+    # If you use this fixture, you can create
+    # './mp/west.yml', then run tests using its contents using
+    # Manifest.from_file(), etc. Or just use manifest_repo().
+
+    # Create the manifest repository directory and skeleton config.
+    topdir = tmpdir / 'topdir'
+    create_workspace(topdir)
+
+    # Switch to the top-level west workspace directory,
+    # and give it to the test case.
+    topdir.chdir()
+    return topdir
+
+
+@pytest.fixture
+def manifest_repo(tmp_workspace):
+    # This creates a temporary manifest repository, changes directory
+    # to it, and returns a pathlike for it.
+
+    manifest_repo = tmp_workspace / 'mp'
+    create_repo(manifest_repo)
+    manifest_repo.topdir = Path(tmp_workspace)
+    return manifest_repo
 
 
 def M(content, **kwargs):
@@ -737,3 +790,900 @@ def test_self_tag():
         self:
           path:''')
     assert 'must be nonempty if present' in str(e.value)
+
+
+#########################################
+# ImportFlag tests
+#
+# These cover the four documented flag values exposed in
+# `west.manifest.ImportFlag`. They live in the new tests/ tree; the
+# pre-rust counterparts in `tests-legacy/` exercise the same flows
+# against the legacy resolver and remain as a reference until the
+# migration finishes.
+
+
+def test_import_flag_ignore_skips_project_and_self_imports():
+    # IGNORE must drop every import silently — the resulting manifest
+    # contains only the directly-defined projects, and no importer is
+    # required.
+
+    m = M(
+        '''\
+    projects:
+    - name: foo
+      url: https://example.com
+      import: true
+    ''',
+        import_flags=ImportFlag.IGNORE,
+    )
+    assert [p.name for p in m.projects[1:]] == ['foo']
+
+    m = M(
+        '''\
+    projects:
+    - name: foo
+      url: https://example.com
+    self:
+      import: a-file
+    ''',
+        import_flags=ImportFlag.IGNORE,
+    )
+    assert [p.name for p in m.projects[1:]] == ['foo']
+
+
+def test_import_flag_default_rejects_unresolvable_imports():
+    # With DEFAULT (the default), an import in from_data() has no way to
+    # be resolved and the binding surfaces ManifestImportFailed.
+    with pytest.raises(ManifestImportFailed):
+        M(
+            '''\
+        projects:
+        - name: foo
+          url: https://example.com
+          import: true
+        '''
+        )
+
+
+def test_import_flag_force_projects_uses_importer():
+    # FORCE_PROJECTS with from_data() lets the caller resolve per-project
+    # imports through an in-memory callback. Any top-level / self imports
+    # in the imported body are silently skipped (no filesystem anchor).
+
+    upstream_body = '''\
+manifest:
+  projects:
+    - name: nested
+      url: https://example.com/nested
+'''
+
+    def importer(project, _file):
+        if project.name == 'upstream':
+            return upstream_body
+        return None
+
+    m = Manifest.from_data(
+        '''\
+manifest:
+  projects:
+    - name: upstream
+      url: https://example.com/upstream
+      import: true
+    - name: downstream
+      url: https://example.com/downstream
+''',
+        importer=importer,
+        import_flags=ImportFlag.FORCE_PROJECTS,
+    )
+    names = [p.name for p in m.projects[1:]]
+    assert names == ['upstream', 'downstream', 'nested']
+
+
+def test_import_flag_force_projects_requires_importer():
+    with pytest.raises(ValueError, match='FORCE_PROJECTS requires'):
+        M(
+            '''\
+        projects:
+        - name: foo
+          url: https://example.com
+        ''',
+            import_flags=ImportFlag.FORCE_PROJECTS,
+        )
+
+
+def test_import_flag_rejects_invalid_combinations():
+    # Only constraint between bits (mirrors legacy `_flags_ok`):
+    # FORCE_PROJECTS is incompatible with IGNORE / IGNORE_PROJECTS.
+    # IGNORE | IGNORE_PROJECTS is allowed (IGNORE subsumes IGNORE_PROJECTS).
+    rejected = (
+        ImportFlag.IGNORE | ImportFlag.FORCE_PROJECTS,
+        ImportFlag.FORCE_PROJECTS | ImportFlag.IGNORE_PROJECTS,
+        ImportFlag.IGNORE | ImportFlag.FORCE_PROJECTS | ImportFlag.IGNORE_PROJECTS,
+    )
+    for combo in rejected:
+        with pytest.raises(ValueError, match='invalid import_flags'):
+            M(
+                '''\
+            projects:
+            - name: foo
+              url: https://example.com
+            ''',
+                import_flags=combo,
+            )
+
+    # IGNORE | IGNORE_PROJECTS is redundant but legal. It should behave
+    # like IGNORE on its own — directly-defined projects, no imports.
+    m = M(
+        '''\
+    projects:
+    - name: foo
+      url: https://example.com
+      import: true
+    ''',
+        import_flags=ImportFlag.IGNORE | ImportFlag.IGNORE_PROJECTS,
+    )
+    assert [p.name for p in m.projects[1:]] == ['foo']
+
+
+def test_import_flag_ignore_projects_workspace(tmp_path):
+    # IGNORE_PROJECTS lets a workspace caller load the manifest even
+    # though a project declares `import:` and is unreachable. This is
+    # the real-world flow used by `west update` when only some
+    # projects have been cloned.
+
+    ws = tmp_path / 'ws'
+    create_workspace(ws)
+    manifest_repo = ws / 'mp'
+    add_commit(
+        manifest_repo,
+        'manifest',
+        files={
+            'west.yml': '''\
+manifest:
+  projects:
+    - name: zephyr
+      url: https://example.com/zephyr
+      import: true
+    - name: net-tools
+      url: https://example.com/net-tools
+''',
+        },
+    )
+
+    m = Manifest.from_topdir(topdir=ws, import_flags=ImportFlag.IGNORE_PROJECTS)
+    names = [p.name for p in m.projects[1:]]
+    assert names == ['zephyr', 'net-tools']
+
+
+#########################################
+# File system tests
+#
+# Parsing manifests from data is the base case that everything else
+# reduces to, but parsing may also be done from files on the file
+# system, or "as if" it were done from files on the file system.
+
+
+def test_from_topdir(tmp_workspace):
+    # If you load from topdir along with some source data, you will
+    # get absolute paths.
+    #
+    # This is true of both projects and the manifest itself.
+
+    topdir = Path(str(tmp_workspace))
+    repo_abspath = topdir / 'mp'
+    relpath = Path('mp') / 'west.yml'
+    abspath = topdir / relpath
+    mf = topdir / relpath
+
+    # Case 1: manifest has no "self: path:".
+    with open(mf, 'w', encoding='utf-8') as f:
+        f.write('''
+        manifest:
+          projects:
+          - name: my-cool-project
+            url: from-manifest-dir
+        ''')
+    m = MT(topdir=topdir)
+    # Path-related Manifest attribute tests.
+    assert m.abspath is not None
+    assert Path(m.abspath) == mf
+    assert m.posixpath == mf.as_posix()
+    assert m.relative_path is not None
+    assert Path(m.relative_path) == relpath
+    assert m.path_raw is None
+    assert m.repo_abspath is not None
+    assert Path(m.repo_abspath) == repo_abspath
+    assert m.repo_posixpath == repo_abspath.as_posix()
+    assert m.topdir is not None
+    assert Path(m.topdir) == topdir
+    # Legacy ManifestProject tests.
+    mproj = m.projects[MANIFEST_PROJECT_INDEX]
+    assert mproj.topdir is not None
+    assert Path(mproj.topdir) == topdir
+    assert mproj.path is not None
+    assert Path(mproj.path) == Path('mp')
+    # Project tests.
+    p1 = m.projects[1]
+    assert p1.topdir is not None
+    assert Path(p1.topdir) == Path(topdir)
+    assert p1.abspath is not None
+    assert Path(p1.abspath) == Path(topdir / 'my-cool-project')
+
+    # Case 2: manifest has a "self: path:", which disagrees with the
+    # actual file system path.
+    with open(mf, 'w', encoding='utf-8') as f:
+        f.write('''
+        manifest:
+          projects:
+          - name: my-cool-project
+            url: from-manifest-dir
+          self:
+            path: something/else
+        ''')
+    m = MT(topdir=topdir)
+    # Path-related Manifest attribute tests.
+    assert m.abspath is not None
+    assert Path(m.abspath) == abspath
+    assert m.posixpath == abspath.as_posix()
+    assert m.relative_path is not None
+    assert Path(m.relative_path) == relpath
+    assert m.path_raw == 'something/else'
+    assert m.repo_abspath is not None
+    assert Path(m.repo_abspath) == repo_abspath
+    assert m.repo_posixpath == repo_abspath.as_posix()
+    assert m.topdir is not None
+    assert Path(m.topdir) == topdir
+    # Legacy ManifestProject tests.
+    mproj = m.projects[MANIFEST_PROJECT_INDEX]
+    assert mproj.topdir is not None
+    assert Path(mproj.topdir).is_absolute()
+    assert Path(mproj.topdir) == topdir
+    assert mproj.path is not None
+    assert Path(mproj.path) == Path('mp')
+    assert mproj.abspath is not None
+    assert Path(mproj.abspath).is_absolute()
+    assert Path(mproj.abspath) == repo_abspath
+    # Project tests.
+    p1 = m.projects[1]
+    assert p1.topdir is not None
+    assert Path(p1.topdir) == Path(topdir)
+    assert p1.abspath is not None
+    assert Path(p1.abspath) == topdir / 'my-cool-project'
+
+    # Case 3: project has a path. This always takes effect.
+    with open(mf, 'w', encoding='utf-8') as f:
+        f.write('''
+        manifest:
+          projects:
+          - name: my-cool-project
+            url: from-manifest-dir
+            path: project-path
+          self:
+            path: something/else
+        ''')
+    m = MT(topdir=topdir)
+    p1 = m.projects[1]
+    assert p1.path == 'project-path'
+    assert p1.abspath is not None
+    assert Path(p1.abspath) == topdir / 'project-path'
+    assert p1.posixpath == (topdir / 'project-path').as_posix()
+
+
+def test_manifest_path_not_found(tmp_workspace):
+    # Make sure manifest_path() raises FileNotFoundError if the
+    # manifest file specified in .west/config doesn't exist.
+    # Here, we rely on tmp_workspace not actually creating the file.
+
+    with pytest.raises(FileNotFoundError) as e:
+        manifest_path()
+    assert e.value.filename == tmp_workspace / 'mp' / 'west.yml'
+
+
+def test_manifest_path_conflicts(tmp_workspace):
+    # Project path conflicts with the manifest path are errors. This
+    # is true when we have an explicit file system path, but it is not
+    # true when loading from data, where absolute paths are not known
+    # and the actual location of the manifest may be overridden from
+    # "self: path:", e.g. with "west init -l".
+
+    with open(tmp_workspace / 'mp' / 'west.yml', 'w', encoding='utf-8') as f:
+        f.write('''
+        manifest:
+           projects:
+           - name: p
+             path: mp
+             url: u
+        ''')
+
+    with pytest.raises(MalformedManifest) as e:
+        MT(topdir=tmp_workspace)
+    assert 'p path "mp" is taken by the manifest repository' in str(e.value)
+
+    m = M('''\
+        projects:
+        - name: n
+          url: u
+          path: p
+        self:
+          path: p
+        ''')
+    assert m.path_raw == 'p'
+    assert m.abspath is None
+    assert m.projects[1].path == 'p'
+    assert m.projects[1].abspath is None
+
+
+def test_manifest_repo_discovery(manifest_repo):
+    # The API should be able to find a manifest file based on the file
+    # system and west configuration. The resulting topdir and abspath
+    # attributes should work as specified.
+
+    topdir = manifest_repo.topdir
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: project-from-manifest-dir
+            url: from-manifest-dir
+        ''')
+
+    # manifest_path() should discover west_yml.
+    assert manifest_path() == manifest_repo / 'west.yml'
+
+    # Manifest.from_file() should as well.
+    # The project hierarchy should be rooted in the topdir.
+    manifest = Manifest.from_file()
+    assert manifest.topdir is not None
+    assert Path(manifest.topdir) == topdir
+    assert len(manifest.projects) == 2
+    p = manifest.projects[1]
+    assert p.name == 'project-from-manifest-dir'
+    assert p.url == 'from-manifest-dir'
+    assert p.topdir is not None
+    assert PurePath(p.topdir) == topdir
+
+    # Manifest.from_topdir() should work similarly.
+    manifest = MT()
+    assert manifest.topdir is not None
+    assert Path(manifest.topdir) == topdir
+
+
+def test_parse_multiple_manifest_files(manifest_repo):
+    # The API should be able to parse multiple manifest files inside a
+    # single topdir. The project hierarchies should always be rooted
+    # in that same topdir. The results of parsing the two separate
+    # files are independent of one another.
+
+    topdir = Path(manifest_repo.topdir)
+    manifest_repo = Path(manifest_repo)
+    west_yml = manifest_repo / 'west.yml'
+
+    with open(west_yml, 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: project-1
+            url: url-1
+          - name: project-2
+            url: url-2
+        ''')
+
+    another_repo = topdir / 'another-repo'
+    create_repo(another_repo)
+    another_yml = another_repo / 'another.yml'
+    with open(another_yml, 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: another-1
+            url: another-url-1
+          - name: another-2
+            url: another-url-2
+            path:  another/path
+        ''')
+
+    another_yml_with_path = another_repo / 'another-with-path.yml'
+    with open(another_yml_with_path, 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: foo
+            url: bar
+          self:
+            path: yaml-path
+        ''')
+
+    # manifest_path() should discover west_yml.
+    assert Path(manifest_path()) == west_yml
+
+    # Manifest.from_file() should discover west.yml, and
+    # the project hierarchy should be rooted at topdir.
+    manifest = Manifest.from_file()
+    assert manifest.topdir is not None
+    assert Path(manifest.topdir) == topdir
+    assert len(manifest.projects) == 3
+    assert manifest.projects[1].name == 'project-1'
+    assert manifest.projects[2].name == 'project-2'
+
+    # Manifest.from_file() should be also usable with another_yml.
+    # The project hierarchy in its return value should still be rooted
+    # in the topdir, but the resulting manifest will be initialized
+    # as if from "another_repo".
+    manifest = Manifest.from_file(source_file=another_yml)
+    assert len(manifest.projects) == 3
+    assert manifest.topdir is not None
+    assert Path(manifest.topdir) == topdir
+    assert manifest.abspath is not None
+    assert Path(manifest.abspath) == another_yml
+    assert manifest.repo_abspath is not None
+    assert Path(manifest.repo_abspath) == another_repo
+    mproj = manifest.projects[0]
+    assert mproj.path is not None
+    assert Path(mproj.path) == Path('another-repo')
+    assert mproj.abspath is not None
+    assert Path(mproj.abspath) == another_repo
+    assert mproj.posixpath == another_repo.as_posix()
+    p1 = manifest.projects[1]
+    assert p1.name == 'another-1'
+    assert p1.url == 'another-url-1'
+    assert p1.topdir is not None
+    assert Path(p1.topdir) == topdir
+    assert p1.abspath is not None
+    assert PurePath(p1.abspath) == topdir / 'another-1'
+    p2 = manifest.projects[2]
+    assert p2.name == 'another-2'
+    assert p2.url == 'another-url-2'
+    assert p2.topdir is not None
+    assert Path(p2.topdir) == topdir
+    assert p2.abspath is not None
+    assert Path(p2.abspath) == topdir / 'another' / 'path'
+
+    # If the manifest yaml file does specify its path, the path_raw
+    # attribute should reflect that, but we should still reflect what
+    # we actually loaded.
+    manifest = Manifest.from_file(source_file=another_yml_with_path)
+    assert manifest.path_raw == 'yaml-path'
+    assert manifest.abspath is not None
+    assert Path(manifest.abspath) == another_yml_with_path
+    mproj = manifest.projects[0]
+    assert mproj.abspath is not None
+    assert Path(mproj.abspath) == another_repo
+
+
+def test_bad_topdir_fails(tmp_workspace):
+    # Make sure we get expected failure using Manifest.from_topdir()
+    # with the topdir kwarg when no west.yml exists.
+
+    with pytest.raises(MalformedConfig):
+        MT(topdir=tmp_workspace)
+
+
+def test_from_bad_topdir(tmpdir):
+    # If we give a bad temporary directory that isn't a workspace
+    # root, that should also fail.
+
+    with pytest.raises(MalformedConfig) as e:
+        MT(topdir=tmpdir)
+    assert 'local configuration file not found' in str(e.value)
+
+
+#########################################
+# Miscellaneous tests
+
+
+def test_get_projects(tmp_workspace):
+    # Coverage for get_projects.
+
+    content = '''\
+    manifest:
+      projects:
+      - name: foo
+        url: https://foo.com
+    '''
+
+    # Attempting to get an unknown project is an error.
+    manifest = Manifest.from_data(yaml.safe_load(content))
+    with pytest.raises(ValueError) as e:
+        manifest.get_projects(['unknown'])
+    # The ValueError args are (unknown, uncloned).
+    assert e.value.args[0] == ['unknown']
+    assert e.value.args[1] == []
+
+    # For the remainder of the tests, make a manifest file.
+    with open(tmp_workspace / 'mp' / 'west.yml', 'w') as f:
+        f.write(content)
+
+    # Asking for an uncloned project should fail if only_cloned=False.
+    # The ValueError args are (unknown, uncloned).
+    manifest = MT(topdir=tmp_workspace)
+    with pytest.raises(ValueError) as e:
+        manifest.get_projects(['foo'], only_cloned=True)
+    unknown, uncloned = e.value.args
+    assert unknown == []
+    assert len(uncloned) == 1
+    assert uncloned[0].name == 'foo'
+
+    # Asking for an uncloned project should succeed if
+    # only_cloned=False (the default).
+    projects = manifest.get_projects(['foo'])
+    assert len(projects) == 1
+    assert projects[0].name == 'foo'
+
+    # We can get the manifest project, for now.
+    projects = manifest.get_projects(['manifest'])
+    assert len(projects) == 1
+    assert projects[0].name == 'manifest'
+    assert projects[0].abspath == tmp_workspace / 'mp'
+
+    # No project_ids means "all projects".
+    projects = manifest.get_projects([])
+    assert len(projects) == 2
+    assert projects[0].name == 'manifest'
+    assert projects[0].is_cloned()
+    assert projects[1].name == 'foo'
+    with pytest.raises(ValueError) as e:
+        projects = manifest.get_projects([], only_cloned=True)
+    unknown, uncloned = e.value.args
+    assert len(uncloned) == 1
+    assert uncloned[0].name == 'foo'
+
+
+def test_as_dict_and_yaml(manifest_repo):
+    # coverage for as_dict, as_frozen_dict, as_yaml, as_frozen_yaml.
+
+    # keep content_str, content_dict and expected_yaml in sync.
+
+    content_str = '''\
+    manifest:
+      projects:
+      - name: p1
+        url: https://example.com/p1
+      - name: p2
+        url: https://example.com/p2
+        revision: deadbeef
+        path: project-two
+        clone-depth: 1
+        west-commands: commands.yml
+      group-filter:
+        - -Ddisabled
+        - +Cenabled
+        - -Bdisabled
+        - +Aenabled
+    '''
+    content_dict = {
+        'manifest': {
+            'projects': [
+                {'name': 'p1', 'url': 'https://example.com/p1', 'revision': 'master'},
+                {
+                    'name': 'p2',
+                    'url': 'https://example.com/p2',
+                    'revision': 'deadbeef',
+                    'path': 'project-two',
+                    'clone-depth': 1,
+                    'west-commands': 'commands.yml',
+                },
+            ],
+            'self': {'path': os.path.basename(manifest_repo)},
+            'group-filter': [
+                '-Bdisabled',
+                '-Ddisabled',
+            ],
+        }
+    }
+
+    expected_yaml = '''\
+manifest:
+  group-filter:
+  - -Bdisabled
+  - -Ddisabled
+  projects:
+  - name: p1
+    revision: master
+    url: https://example.com/p1
+  - clone-depth: 1
+    name: p2
+    path: project-two
+    revision: deadbeef
+    url: https://example.com/p2
+    west-commands: commands.yml
+  self:
+    path: mp
+'''
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write(content_str)
+
+    fake_sha = 'the-sha'
+    frozen_expected = deepcopy(content_dict)
+    for p in frozen_expected['manifest']['projects']:
+        p['revision'] = fake_sha
+
+    # Manifest.from_file() and Manifest.from_file(topdir=<topdir>) shall
+    # produce result when given topdir is identical to what util.west_topdir()
+    # produces.
+    manifest = MF()
+
+    manifest_topdir = MT(topdir=os.path.dirname(manifest_repo))
+
+    # We can always call as_dict() and as_yaml(), regardless of what's
+    # cloned.
+
+    as_dict = manifest.as_dict()
+
+    as_dict_topdir = manifest_topdir.as_dict()
+    assert as_dict == as_dict_topdir
+
+    yaml_roundtrip = yaml.safe_load(manifest.as_yaml())
+    assert as_dict == content_dict
+    assert yaml_roundtrip == content_dict
+
+    # Deterministic output
+    assert manifest.as_yaml().replace(" ", "") == expected_yaml.replace(" ", "")
+    # More demanding: compare whitespace too
+    assert expected_yaml == manifest.as_yaml()
+
+    # With no cloned projects, however, we should not be able to freeze.
+
+    with pytest.raises(RuntimeError) as e:
+        manifest.as_frozen_dict()
+    assert 'is uncloned' in str(e.value)
+    with pytest.raises(RuntimeError) as e:
+        manifest.as_frozen_dict()
+    assert 'is uncloned' in str(e.value)
+
+    # Test as_frozen_dict() again, with the relevant git methods
+    # patched out, for checking expected results.
+
+    def sha_patch_1(*args, **kwargs):
+        # Replacement for sha() that succeeds with a fake value.
+        return fake_sha
+
+    def sha_patch_2(*args, **kwargs):
+        # Replacement that intentionally fails, but without running
+        # git.
+        raise subprocess.CalledProcessError(1, 'mocked-out')
+
+    with patch('west.manifest.Project.is_cloned', side_effect=lambda: True):
+        manifest = MF()
+        with patch('west.manifest.Project.sha', side_effect=sha_patch_1):
+            frozen = manifest.as_frozen_dict()
+        assert frozen == frozen_expected
+
+        with patch('west.manifest.Project.sha', side_effect=sha_patch_2):
+            with pytest.raises(RuntimeError) as e:
+                manifest.as_frozen_dict()
+            assert 'cannot be resolved to a SHA' in str(e.value)
+            with pytest.raises(RuntimeError) as e:
+                manifest.as_frozen_yaml()
+            assert 'cannot be resolved to a SHA' in str(e.value)
+
+
+def test_as_dict_groups():
+    # Make sure groups and group-filter round-trip properly.
+
+    actual = Manifest.from_data('''\
+    manifest:
+      group-filter: [+foo,-bar]
+      projects:
+        - name: p1
+          url: u
+        - name: p2
+          url: u
+          groups:
+            - g
+    ''').as_dict()['manifest']
+
+    assert actual['group-filter'] == ['-bar']
+    assert 'groups' not in actual['projects'][0]
+    assert actual['projects'][1]['groups'] == ['g']
+
+
+def test_project_filter_validation(config_tmpdir):
+    # Make sure we error out in the expected way when invalid
+    # manifest.project-filter options occur anywhere.
+
+    topdir = config_tmpdir / 'test-topdir'
+    manifest_repo = topdir / 'mp'
+    config = Configuration(topdir=topdir)
+    config.set('manifest.path', 'mp')
+    create_repo(manifest_repo)
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('manifest: {}')
+
+    def clean_up_config_files():
+        for configfile in [ConfigFile.SYSTEM, ConfigFile.GLOBAL, ConfigFile.LOCAL]:
+            try:
+                config.delete('manifest.project-filter', configfile=configfile)
+            except KeyError:
+                pass
+
+    def check_error(project_filter, expected_err_contains):
+        for configfile in [ConfigFile.SYSTEM, ConfigFile.GLOBAL, ConfigFile.LOCAL]:
+            clean_up_config_files()
+            config.set('manifest.project-filter', project_filter, configfile=configfile)
+
+            with pytest.raises(MalformedConfig) as e:
+                MT(topdir=topdir)
+
+            err = str(e.value)
+            assert (f'invalid "manifest.project-filter" option value "{project_filter}":') in err
+            assert expected_err_contains in err
+
+    check_error('foo', 'element "foo" does not start with "+" or "-"')
+    check_error('foo,+bar', 'element "foo" does not start with "+" or "-"')
+    check_error('foo , +bar', 'element "foo" does not start with "+" or "-"')
+    check_error('+', 'a bare "+" or "-" contains no regular expression')
+    check_error('-', 'a bare "+" or "-" contains no regular expression')
+    check_error('++', 'invalid regular expression "+":')
+
+
+def test_project_filter_matching(config_tmpdir):
+    # Test manifest.project-filter matching rules by making
+    # sure that projects can be made active or inactive. Also
+    # test that west ignores empty elements.
+
+    topdir = config_tmpdir / 'test-topdir'
+    manifest_repo = topdir / 'mp'
+    config = Configuration(topdir=topdir)
+    config.set('manifest.path', 'mp')
+    create_repo(manifest_repo)
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''
+        manifest:
+          projects:
+            - name: foo
+            - name: foobar
+            - name: bar
+
+          defaults:
+            remote: test
+          remotes:
+            - name: test
+              url-base: ignored
+        ''')
+
+    # West currently does not dynamically adjust its conception
+    # of what the configuration files said after __init__ time, so
+    # we recreate the manifest object every time.
+
+    config.set('manifest.project-filter', '-foo')
+    manifest = Manifest.from_topdir(topdir=topdir, config=config)
+    foo, foobar, bar = manifest.get_projects(['foo', 'foobar', 'bar'])
+    assert not manifest.is_active(foo)
+    assert manifest.is_active(foobar)
+    assert manifest.is_active(bar)
+
+    config.set('manifest.project-filter', '-foo,-bar')
+    manifest = Manifest.from_topdir(topdir=topdir, config=config)
+    foo, foobar, bar = manifest.get_projects(['foo', 'foobar', 'bar'])
+    assert not manifest.is_active(foo)
+    assert manifest.is_active(foobar)
+    assert not manifest.is_active(bar)
+
+    config.set('manifest.project-filter', '-foobar,-fo')
+    manifest = Manifest.from_topdir(topdir=topdir, config=config)
+    foo, foobar, bar = manifest.get_projects(['foo', 'foobar', 'bar'])
+    assert manifest.is_active(foo)
+    assert not manifest.is_active(foobar)
+    assert manifest.is_active(bar)
+
+    # This is equivalent to above: west should ignore the empty element.
+    config.set('manifest.project-filter', '-foobar,,-fo')
+    manifest = Manifest.from_topdir(topdir=topdir, config=config)
+    foo, foobar, bar = manifest.get_projects(['foo', 'foobar', 'bar'])
+    assert manifest.is_active(foo)
+    assert not manifest.is_active(foobar)
+    assert manifest.is_active(bar)
+
+
+def test_project_filter_precedence(config_tmpdir):
+    # Test manifest.project-filter matching rules by making
+    # sure that projects can be made active or inactive.
+
+    topdir = config_tmpdir / 'test-topdir'
+    manifest_repo = topdir / 'mp'
+    config = Configuration(topdir=topdir)
+    config.set('manifest.path', 'mp')
+    create_repo(manifest_repo)
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''
+        manifest:
+          projects:
+            - name: foo
+            - name: bar
+            - name: baz
+
+          defaults:
+            remote: test
+          remotes:
+            - name: test
+              url-base: ignored
+        ''')
+
+    # West currently does not dynamically adjust its conception
+    # of what the configuration files said after __init__ time, so
+    # we recreate the manifest object every time.
+
+    # Global has higher precedence than system.
+    config.set('manifest.project-filter', '-foo,-bar,-baz', configfile=ConfigFile.SYSTEM)
+    config.set('manifest.project-filter', '-foo', configfile=ConfigFile.GLOBAL)
+    manifest = Manifest.from_topdir(topdir=topdir, config=config)
+    foo, bar, baz = manifest.get_projects(['foo', 'bar', 'baz'])
+    assert not manifest.is_active(foo)
+    assert manifest.is_active(bar)
+    assert manifest.is_active(baz)
+
+    # Local has higher precedence than either.
+    config.set('manifest.project-filter', '-bar,-f.*', configfile=ConfigFile.LOCAL)
+    manifest = Manifest.from_topdir(topdir=topdir, config=config)
+    foo, bar, baz = manifest.get_projects(['foo', 'bar', 'baz'])
+    assert not manifest.is_active(foo)
+    assert not manifest.is_active(bar)
+    assert manifest.is_active(baz)
+
+
+def test_project_filter_inactive_prevents_import(config_tmpdir):
+    # West should not try to import from inactive projects.
+    # West should import from active projects.
+
+    topdir = config_tmpdir / 'test-topdir'
+    manifest_repo = topdir / 'mp'
+    config = Configuration(topdir=topdir)
+    config.set('manifest.path', 'mp')
+    config.set('manifest.project-filter', '-foo')
+    create_repo(manifest_repo)
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''
+        manifest:
+          projects:
+            - name: foo
+              url: ignored
+              import: true
+        ''')
+
+    # With foo inactive, we can load the project but its import
+    # is ignored.
+    manifest = Manifest.from_topdir(topdir=topdir, config=config)
+    assert not manifest.is_active(manifest.get_projects(['foo'])[0])
+
+    # Making foo active will try to do the import and thus fail
+    # to resolve the manifest.
+    config.set('manifest.project-filter', '+foo')
+    with pytest.raises(ManifestImportFailed):
+        Manifest.from_topdir(topdir=topdir, config=config)
+
+
+def test_project_filter_warnings_and_errors(config_tmpdir, caplog):
+    topdir = config_tmpdir / 'test-topdir'
+    manifest_repo = topdir / 'mp'
+    config = Configuration(topdir=topdir)
+    config.set('manifest.path', 'mp')
+    create_repo(manifest_repo)
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''
+        manifest:
+          projects:
+            - name: foo,bar
+              url: ignored
+        ''')
+
+    Manifest.from_topdir(topdir=topdir, config=config)
+    warned = False
+    for source, level, message in caplog.record_tuples:
+        if source != 'west.manifest':
+            continue
+        if level != logging.WARNING:
+            continue
+        if not message.startswith('project "foo,bar"'):
+            continue
+        if 'contains comma (",") or whitespace' in message:
+            warned = True
+    assert warned, caplog.record_tuples
+
+    config.set('manifest.project-filter', '+arbitrary')
+    with pytest.raises(MalformedConfig) as e:
+        Manifest.from_topdir(topdir=topdir, config=config)
+    err = str(e.value)
+    assert 'project "foo,bar"' in err
+    assert 'contains comma (",") or whitespace' in err

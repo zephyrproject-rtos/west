@@ -144,6 +144,34 @@ impl Configuration {
         Ok(default)
     }
 
+    /// List-of-strings accessor. The TOML config format stores
+    /// `manifest.project-filter` (and friends) as either a CSV-style
+    /// string for back-compat or a native TOML array; this method
+    /// always returns `list[str]` regardless of which form is on disk.
+    /// Comma-separated strings are split on `,` and whitespace-stripped.
+    #[pyo3(signature = (option, configfile=ConfigFile::ALL))]
+    fn get_list_str(
+        &self,
+        option: &str,
+        configfile: ConfigFile,
+    ) -> PyResult<Option<Vec<String>>> {
+        if configfile == ConfigFile::ALL {
+            return match self.inner.get_list_str(option) {
+                Ok(v) => Ok(v),
+                Err(e) => Err(config_error_to_py(e)),
+            };
+        }
+        let paths = self.paths_for(configfile);
+        for layer in paths.iter().rev() {
+            match self.inner.get_list_str_in(option, layer) {
+                Ok(Some(v)) => return Ok(Some(v)),
+                Ok(None) => continue,
+                Err(e) => return Err(config_error_to_py(e)),
+            }
+        }
+        Ok(None)
+    }
+
     #[pyo3(signature = (option, default=false, configfile=ConfigFile::ALL))]
     fn getboolean(&self, option: &str, default: bool, configfile: ConfigFile) -> PyResult<bool> {
         if configfile == ConfigFile::ALL {

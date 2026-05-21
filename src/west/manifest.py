@@ -166,6 +166,59 @@ def manifest_path() -> str:
     return os.fspath(full)
 
 
+def _read_project_filter(cfg: Configuration) -> tuple[list[str], str] | None:
+    # Read the `manifest.project-filter` config option in either of its
+    # accepted on-disk shapes — a native TOML array of strings, or a legacy
+    # CSV string — and return `(entries, raw_for_messages)`, or `None` when
+    # the option isn't set. CSV form preserves the original string for use
+    # in error messages (whitespace and all); TOML-array form joins the
+    # array with `,` for display.
+    try:
+        entries = cfg.get_list_str('manifest.project-filter')
+    except RuntimeError:
+        # Stored as a string; fall back to CSV form.
+        raw = cfg.get('manifest.project-filter')
+        if raw is None:
+            return None
+        return [e.strip() for e in raw.split(',') if e.strip()], raw
+    if entries is None:
+        return None
+    return entries, ','.join(entries)
+
+
+def _validate_project_filter(cfg: Configuration) -> None:
+    # Validate `manifest.project-filter` against the legacy contract:
+    # each entry must start with `+` or `-` and carry a non-empty,
+    # syntactically valid regular expression. Raises `MalformedConfig`
+    # with the legacy message shape `invalid "manifest.project-filter"
+    # option value "<raw>": <reason>` on any failure.
+    import re
+
+    read = _read_project_filter(cfg)
+    if read is None:
+        return
+    entries, raw = read
+    for element in entries:
+        if not element.startswith(('+', '-')):
+            raise MalformedConfig(
+                f'invalid "manifest.project-filter" option value "{raw}": '
+                f'element "{element}" does not start with "+" or "-"'
+            )
+        pattern = element[1:]
+        if not pattern:
+            raise MalformedConfig(
+                f'invalid "manifest.project-filter" option value "{raw}": '
+                f'a bare "+" or "-" contains no regular expression'
+            )
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            raise MalformedConfig(
+                f'invalid "manifest.project-filter" option value "{raw}": '
+                f'invalid regular expression "{pattern}": {e}'
+            ) from e
+
+
 def is_group(raw_group: Any) -> bool:
     '''Return True if *raw_group* is a syntactically valid group name.'''
     if not isinstance(raw_group, str) or not raw_group:
@@ -755,6 +808,10 @@ class Manifest:
         self.has_imports: bool = False
         self.userdata: Any = None
         self.group_filter: GroupFilterType = []
+        # `manifest.project-filter` entries (`+regex` / `-regex`). Only
+        # `_init_from_topdir` reads them from the workspace config; the
+        # `from_data` path leaves this empty.
+        self._project_filter: list[str] = []
 
         if source_data is not None:
             self._init_from_data(source_data, importer, import_flags)
@@ -808,15 +865,23 @@ class Manifest:
             repo_relpath = override['manifest.path']
             manifest_file = override['manifest.file']
         else:
+            # Detect "no workspace local config" via the resolver's actual
+            # path set rather than hard-coding `topdir/.west/config.toml`,
+            # so the check honors `WEST_CONFIG_LOCAL` overrides.
+            if not cfg.get_existing_paths(ConfigFile.LOCAL):
+                raise MalformedConfig('local configuration file not found')
             mp = cfg.get('manifest.path', configfile=ConfigFile.LOCAL)
             if mp is None:
                 raise MalformedConfig('no local manifest.path option')
             repo_relpath = mp
             manifest_file = cfg.get('manifest.file', _WEST_YML) or _WEST_YML
+        _validate_project_filter(cfg)
+        read = _read_project_filter(cfg)
+        self._project_filter = read[0] if read is not None else []
         manifest_repo_root = topdir / repo_relpath
         manifest_path = manifest_repo_root / manifest_file
         if not manifest_path.is_file():
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(manifest_path))
+            raise MalformedConfig(f'manifest file not found: {manifest_path}')
         # Legacy: an explicit `importer=` argument on a workspace flow replaces
         # the filesystem reader. The rust resolver still drives the calls.
         native_importer = (
@@ -827,6 +892,16 @@ class Manifest:
         self._native = _west_native.Manifest.from_path_with_imports(
             manifest_path, manifest_repo_root, native_importer, int(import_flags)
         )
+        # Workspace-context check: no project may claim the manifest
+        # repository's own path. The rust core can't enforce this because
+        # the manifest-repo path is a workspace-config concept, not a
+        # data-layer one.
+        repo_path_str = os.fspath(repo_relpath)
+        for np in self._native.projects:
+            if np.path == repo_path_str:
+                raise MalformedManifest(
+                    f'{np.name} path "{repo_path_str}" is taken by the manifest repository'
+                )
         self.abspath = os.fspath(manifest_path)
         self.posixpath = manifest_path.as_posix()
         self.relative_path = os.fspath(Path(repo_relpath) / manifest_file)
@@ -890,6 +965,11 @@ class Manifest:
         (composed with *extra_filter* if any).'''
         if project is self._projects[MANIFEST_PROJECT_INDEX]:
             return True  # the synthetic manifest project is always active
+        # `manifest.project-filter` from workspace config trumps group-filter:
+        # an explicit match decides the outcome before group filtering runs.
+        pf = self._project_filter_decision(project.name)
+        if pf is not None:
+            return pf
         # Look up the native project by name for the rust-side check.
         native_proj = self._native.project(project.name) if self._native else None
         if native_proj is None:
@@ -898,6 +978,22 @@ class Manifest:
             return self._python_is_active(project, extra_filter)
         extra = _west_native.parse_cli_group_filter(list(extra_filter)) if extra_filter else None
         return self._native.is_active(native_proj, extra)
+
+    def _project_filter_decision(self, name: str) -> bool | None:
+        # Walk `manifest.project-filter` entries (last-match wins, mirroring
+        # legacy semantics). Returns `True`/`False` if any entry fullmatches
+        # `name`, or `None` if no entry matches — letting the caller fall
+        # through to the group-filter check.
+        import re
+
+        decision: bool | None = None
+        for entry in self._project_filter:
+            if not entry:
+                continue
+            sign, pattern = entry[0], entry[1:]
+            if re.fullmatch(pattern, name):
+                decision = sign == '+'
+        return decision
 
     def _python_is_active(
         self,
@@ -935,42 +1031,53 @@ class Manifest:
     ) -> list[Project]:
         '''Look up projects by name (or, with *allow_paths*, by path).
 
+        An empty *project_ids* iterable selects every project in the
+        manifest (legacy contract).
+
         Raises `ValueError` for unknown selectors, and a chained
         `ValueError` carrying `(unknown, uncloned)` lists for
         compatibility with the legacy contract.
         '''
-        by_name = {p.name: p for p in self._projects}
-        by_path: dict[str, Project] = {}
-        if allow_paths:
-            for p in self._projects:
-                if p.path:
-                    by_path[os.path.normpath(p.path)] = p
-        out: list[Project] = []
-        unknown: list[str] = []
-        uncloned: list[Project] = []
-        for raw in project_ids:
-            sel = os.fspath(raw)
-            if sel in by_name:
-                p = by_name[sel]
-            elif allow_paths and os.path.normpath(sel) in by_path:
-                p = by_path[os.path.normpath(sel)]
-            else:
-                unknown.append(sel)
-                continue
-            if only_cloned and not p.is_cloned():
-                uncloned.append(p)
-            out.append(p)
-        if unknown or uncloned:
-            raise ValueError(unknown, uncloned)
-        return out
+        ids = [os.fspath(raw) for raw in project_ids]
+        if not ids:
+            candidates = list(self._projects)
+        else:
+            by_name = {p.name: p for p in self._projects}
+            by_path: dict[str, Project] = {}
+            if allow_paths:
+                for p in self._projects:
+                    if p.path:
+                        by_path[os.path.normpath(p.path)] = p
+            candidates = []
+            unknown: list[str] = []
+            for sel in ids:
+                if sel in by_name:
+                    candidates.append(by_name[sel])
+                elif allow_paths and os.path.normpath(sel) in by_path:
+                    candidates.append(by_path[os.path.normpath(sel)])
+                else:
+                    unknown.append(sel)
+            if unknown:
+                raise ValueError(unknown, [])
+
+        if only_cloned:
+            uncloned = [p for p in candidates if not p.is_cloned()]
+            if uncloned:
+                raise ValueError([], uncloned)
+
+        return candidates
 
     # ---- Serialization -------------------------------------------------
 
     def as_dict(self, active_only: bool = False) -> dict[str, Any]:
         '''Dict representation in manifest-YAML shape.'''
         manifest_block: dict[str, Any] = {}
-        if self.group_filter:
-            manifest_block['group-filter'] = list(self.group_filter)
+        # Serialize only the effective (disabling) entries, sorted by
+        # group name for deterministic output. `+enabled` tokens are the
+        # default state and round-trip-redundant.
+        effective_filter = sorted(t for t in self.group_filter if t.startswith('-'))
+        if effective_filter:
+            manifest_block['group-filter'] = effective_filter
         # `self:` block.
         mp = self._projects[MANIFEST_PROJECT_INDEX]
         self_block = mp.as_dict() if isinstance(mp, ManifestProject) else {}
@@ -1003,12 +1110,21 @@ class Manifest:
                 continue
             entry = p.as_dict()
             if not p.is_cloned():
-                raise RuntimeError(f'cannot freeze: project {p.name} is not cloned')
-            entry['revision'] = p.sha(QUAL_MANIFEST_REV_BRANCH)
+                raise RuntimeError(f'cannot freeze: project {p.name} is uncloned')
+            try:
+                entry['revision'] = p.sha(QUAL_MANIFEST_REV_BRANCH)
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(
+                    f'project {p.name} revision {p.revision!r} cannot be resolved to a SHA'
+                ) from e
             frozen_projects.append(entry)
         manifest_block: dict[str, Any] = {}
-        if self.group_filter:
-            manifest_block['group-filter'] = list(self.group_filter)
+        # Serialize only the effective (disabling) entries, sorted by
+        # group name for deterministic output. `+enabled` tokens are the
+        # default state and round-trip-redundant.
+        effective_filter = sorted(t for t in self.group_filter if t.startswith('-'))
+        if effective_filter:
+            manifest_block['group-filter'] = effective_filter
         mp = self._projects[MANIFEST_PROJECT_INDEX]
         self_block = mp.as_dict() if isinstance(mp, ManifestProject) else {}
         if self_block:

@@ -298,14 +298,14 @@ def check_output(*args, **kwargs):
 
 def create_workspace(workspace_dir, and_git=True):
     '''Build a bare-bones west workspace under `workspace_dir`:
-    `.west/config` with `manifest.path = mp`, an `mp/` directory,
+    `.west/config.toml` with `manifest.path = "mp"`, an `mp/` directory,
     and (if `and_git`) an initialized git repo inside `mp/`.'''
     if not os.path.isdir(workspace_dir):
         workspace_dir.mkdir()
     dot_west = workspace_dir / '.west'
     dot_west.mkdir()
-    with open(dot_west / 'config', 'w') as f:
-        f.write('[manifest]\npath = mp')
+    with open(dot_west / 'config.toml', 'w') as f:
+        f.write('[manifest]\npath = "mp"\n')
     mp = workspace_dir / 'mp'
     mp.mkdir()
     if and_git:
