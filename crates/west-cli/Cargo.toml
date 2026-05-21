@@ -21,7 +21,7 @@ default = []
 # dependencies of west-cli because the `west manifest --resolve` /
 # `--freeze` subcommand needs them. The CLI binary therefore always
 # ships with the three serde frontends — they're small.
-pyo3 = ["dep:pyo3"]
+pyo3 = ["dep:pyo3", "dep:pyo3-log"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -39,6 +39,11 @@ west-core = { path = "../west-core" }
 # Only pulled in when the `pyo3` feature is enabled (i.e., when maturin
 # is building the python wheel).
 pyo3 = { version = "0.28", features = ["extension-module", "abi3-py310"], optional = true }
+# Bridges rust `log::*` records into python's `logging` module —
+# `log::warn!(target: "west.manifest", ...)` from west-core ends up on
+# `logging.getLogger("west.manifest")` after `pyo3_log::Logger::install()`
+# is called once at module init.
+pyo3-log = { version = "0.13", optional = true }
 # Structured-data serializers used by both `west manifest --resolve` /
 # `--freeze` (binary) and `_west_native.parse_*` / `dump_*` (python
 # binding). `serde_json` and `toml_edit` are also pulled in transitively
