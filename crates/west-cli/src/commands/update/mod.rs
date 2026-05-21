@@ -39,7 +39,7 @@ use console::Style;
 use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
-use west_core::manifest::{GroupFilterEntry, Manifest, Project, Submodules};
+use west_core::manifest::{GroupFilterEntry, ImportPolicy, Manifest, Project, Submodules};
 use west_core::vcs::{
     self, CheckoutTarget, CommitSummary, FetchSpec, Output, SubmoduleScope, Vcs,
 };
@@ -705,7 +705,7 @@ fn load_manifest(
     if let Some(p) = import_progress {
         source = source.with_progress(p);
     }
-    Manifest::from_path_with_imports(&full, &manifest_repo_root, &source)
+    Manifest::from_path_with_imports(&full, &manifest_repo_root, &source, ImportPolicy::RESOLVE_ALL)
         .map_err(|e| format!("manifest {}: {e}", full.display()))
 }
 

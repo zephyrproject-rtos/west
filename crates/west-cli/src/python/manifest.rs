@@ -11,14 +11,56 @@
 use std::path::PathBuf;
 
 use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyIOError, PyKeyError};
+use pyo3::exceptions::{PyException, PyIOError, PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 
 use west_core::manifest::{
-    self as core, GroupFilterEntry as CoreGroupFilterEntry, ImportSource, ImportSourceError,
-    ManifestError, Submodule as CoreSubmodule, Submodules as CoreSubmodules,
+    self as core, GroupFilterEntry as CoreGroupFilterEntry, ImportPolicy, ImportSource,
+    ImportSourceError, ManifestError, Submodule as CoreSubmodule, Submodules as CoreSubmodules,
 };
+
+// Mirrors python `west.manifest.ImportFlag` IntFlag bits. Translated to
+// `ImportPolicy` at the FFI boundary so python remains the single source of
+// truth for the bitmask name.
+const FLAG_IGNORE: u32 = 1;
+const FLAG_FORCE_PROJECTS: u32 = 2;
+const FLAG_IGNORE_PROJECTS: u32 = 4;
+const FLAG_ALL: u32 = FLAG_IGNORE | FLAG_FORCE_PROJECTS | FLAG_IGNORE_PROJECTS;
+
+/// Translate a python `ImportFlag` bitmask into the rust [`ImportPolicy`].
+///
+/// Mirrors the legacy `_flags_ok` semantics: `FORCE_PROJECTS` is incompatible
+/// with `IGNORE` / `IGNORE_PROJECTS`, but `IGNORE | IGNORE_PROJECTS` is allowed
+/// (redundant but consistent — `IGNORE` subsumes `IGNORE_PROJECTS`). Unknown
+/// bits reject loudly. Per-entrypoint constraints (e.g. a routing decision
+/// that depends on whether a callback is available) live at the call site
+/// rather than here.
+fn flags_to_policy(bits: u32) -> PyResult<ImportPolicy> {
+    if bits & !FLAG_ALL != 0 {
+        return Err(PyValueError::new_err(format!(
+            "invalid import_flags {bits:#x}: unknown bits set"
+        )));
+    }
+    let has_fp = bits & FLAG_FORCE_PROJECTS != 0;
+    let has_skip = bits & (FLAG_IGNORE | FLAG_IGNORE_PROJECTS) != 0;
+    if has_fp && has_skip {
+        return Err(PyValueError::new_err(format!(
+            "invalid import_flags {bits:#x}: FORCE_PROJECTS cannot combine with \
+             IGNORE/IGNORE_PROJECTS"
+        )));
+    }
+    Ok(if has_fp {
+        ImportPolicy::PROJECTS_ONLY
+    } else if bits & FLAG_IGNORE != 0 {
+        // IGNORE subsumes IGNORE_PROJECTS.
+        ImportPolicy::IGNORE_ALL
+    } else if bits & FLAG_IGNORE_PROJECTS != 0 {
+        ImportPolicy::SKIP_PROJECTS
+    } else {
+        ImportPolicy::RESOLVE_ALL
+    })
+}
 
 use super::data::{py_to_value, value_to_py};
 
@@ -306,23 +348,37 @@ impl Manifest {
     /// `Manifest.from_data(str)` — the python wrapper picks YAML vs
     /// TOML vs JSON based on file extension or caller intent and
     /// delegates here.
+    ///
+    /// `import_flags` is the python `ImportFlag` bitmask. `DEFAULT` and
+    /// `IGNORE` work as expected. Flags that imply a callback
+    /// (`FORCE_PROJECTS`) or have nothing to act on here (`IGNORE_PROJECTS`)
+    /// reach the resolver and either silently no-op or surface
+    /// `ManifestImportFailed` if the manifest declares an import — callers
+    /// that want guaranteed semantics should use `from_yaml_str_with_imports`
+    /// for the FORCE_PROJECTS case.
     #[staticmethod]
-    fn from_yaml_str(s: &str) -> PyResult<Self> {
-        core::Manifest::from_yaml_str(s)
+    #[pyo3(signature = (s, import_flags=0))]
+    fn from_yaml_str(s: &str, import_flags: u32) -> PyResult<Self> {
+        let policy = flags_to_policy(import_flags)?;
+        core::Manifest::from_yaml_str_with_policy(s, policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
     }
 
     #[staticmethod]
-    fn from_toml_str(s: &str) -> PyResult<Self> {
-        core::Manifest::from_toml_str(s)
+    #[pyo3(signature = (s, import_flags=0))]
+    fn from_toml_str(s: &str, import_flags: u32) -> PyResult<Self> {
+        let policy = flags_to_policy(import_flags)?;
+        core::Manifest::from_toml_str_with_policy(s, policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
     }
 
     #[staticmethod]
-    fn from_json_str(s: &str) -> PyResult<Self> {
-        core::Manifest::from_json_str(s)
+    #[pyo3(signature = (s, import_flags=0))]
+    fn from_json_str(s: &str, import_flags: u32) -> PyResult<Self> {
+        let policy = flags_to_policy(import_flags)?;
+        core::Manifest::from_json_str_with_policy(s, policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
     }
@@ -337,20 +393,24 @@ impl Manifest {
     /// same `py_to_value` the `dump_*` bindings use) →
     /// `Manifest::from_value`. No JSON text round-trip.
     #[staticmethod]
-    fn from_dict(value: &Bound<'_, PyAny>) -> PyResult<Self> {
+    #[pyo3(signature = (value, import_flags=0))]
+    fn from_dict(value: &Bound<'_, PyAny>, import_flags: u32) -> PyResult<Self> {
+        let policy = flags_to_policy(import_flags)?;
         let v = py_to_value(value)?;
-        core::Manifest::from_value(v)
+        core::Manifest::from_value_with_policy(v, policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
     }
 
     /// Parse the manifest file at `path`. Format dispatch is by
     /// extension (yaml/yml/toml/json). Imports in the manifest raise
-    /// `ManifestImportFailed`; use `from_path_with_imports` to resolve
-    /// them.
+    /// `ManifestImportFailed` unless `import_flags=IGNORE` is passed;
+    /// use `from_path_with_imports` to actually resolve them.
     #[staticmethod]
-    fn from_path(path: PathBuf) -> PyResult<Self> {
-        core::Manifest::from_path(&path)
+    #[pyo3(signature = (path, import_flags=0))]
+    fn from_path(path: PathBuf, import_flags: u32) -> PyResult<Self> {
+        let policy = flags_to_policy(import_flags)?;
+        core::Manifest::from_path_with_policy(&path, policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
     }
@@ -368,16 +428,45 @@ impl Manifest {
     ///     resolver continues with whatever has been collected so far —
     ///     same semantics as west's read-only flows).
     ///
+    /// `import_flags` accepts the full set: `DEFAULT` (resolve all),
+    /// `IGNORE` (skip everything; callback never fires), `FORCE_PROJECTS`
+    /// (skip filesystem imports, resolve per-project through the callback),
+    /// and `IGNORE_PROJECTS` (resolve filesystem imports, skip per-project
+    /// — used by `west update` flows when the imported projects aren't
+    /// yet cloned).
+    ///
     /// Errors raised inside the callback are surfaced as
     /// `ManifestImportFailed`.
     #[staticmethod]
+    #[pyo3(signature = (path, manifest_repo_root, callback, import_flags=0))]
     fn from_path_with_imports(
         path: PathBuf,
         manifest_repo_root: PathBuf,
         callback: Py<PyAny>,
+        import_flags: u32,
     ) -> PyResult<Self> {
+        let policy = flags_to_policy(import_flags)?;
         let source = PyImportSource { callback };
-        core::Manifest::from_path_with_imports(&path, &manifest_repo_root, &source)
+        core::Manifest::from_path_with_imports(&path, &manifest_repo_root, &source, policy)
+            .map(|inner| Manifest { inner })
+            .map_err(manifest_error_to_py)
+    }
+
+    /// Parse a YAML manifest string and resolve per-project imports via
+    /// `callback`. Used by `Manifest.from_data(..., importer=cb,
+    /// import_flags=FORCE_PROJECTS)` — no workspace anchor, so only
+    /// `FORCE_PROJECTS` is meaningful (filesystem imports under any other
+    /// policy will fail with an IO error against the empty root).
+    #[staticmethod]
+    #[pyo3(signature = (s, callback, import_flags=FLAG_FORCE_PROJECTS))]
+    fn from_yaml_str_with_imports(
+        s: &str,
+        callback: Py<PyAny>,
+        import_flags: u32,
+    ) -> PyResult<Self> {
+        let policy = flags_to_policy(import_flags)?;
+        let source = PyImportSource { callback };
+        core::Manifest::from_yaml_str_with_imports(s, &source, policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
     }

@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use west_core::config::Configuration;
-use west_core::manifest::{ImportSource, ImportSourceError, Manifest, Project};
+use west_core::manifest::{ImportPolicy, ImportSource, ImportSourceError, Manifest, Project};
 use west_core::vcs::Vcs;
 
 const DEFAULT_MANIFEST_FILE: &str = "west.yml";
@@ -72,7 +72,7 @@ pub(crate) fn load_manifest(
         .unwrap_or_else(|| PathBuf::from(DEFAULT_MANIFEST_FILE));
     let manifest_repo_root = workspace.join(&manifest_path);
     let full = manifest_repo_root.join(&manifest_file);
-    Manifest::from_path_with_imports(&full, &manifest_repo_root, source)
+    Manifest::from_path_with_imports(&full, &manifest_repo_root, source, ImportPolicy::RESOLVE_ALL)
         .map_err(|e| WorkspaceError::Manifest(format!("manifest {}: {e}", full.display())))
 }
 

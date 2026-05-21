@@ -98,11 +98,19 @@ SubmodulesType = list[Submodule] | bool
 class ImportFlag(enum.IntFlag):
     '''Bit flags for *import_flags* arguments to manifest factories.
 
-    Preserved for API compatibility. The rust resolver currently
-    behaves as if `DEFAULT` is always set; the other flags are
-    accepted but ignored. Callers that depended on the previous
-    behaviour (e.g. `IGNORE` to skip imports entirely) should expect
-    the resolver to silently include them now.
+    The values are mutually exclusive — combinations raise
+    ``ValueError``.
+
+    - ``DEFAULT``: resolve all imports (top-level, self, per-project).
+    - ``IGNORE``: skip every import silently. The resulting manifest
+      contains only the directly-defined projects.
+    - ``FORCE_PROJECTS``: resolve per-project imports through a
+      caller-supplied ``importer`` callback, but skip filesystem-anchored
+      imports (top-level and ``self.import:``). Only meaningful with
+      :py:meth:`Manifest.from_data` plus ``importer=``.
+    - ``IGNORE_PROJECTS``: resolve filesystem imports normally but skip
+      per-project imports. Used by tools that need the manifest before
+      the projects it references have been cloned.
     '''
 
     DEFAULT = 0
@@ -585,6 +593,34 @@ def _filesystem_importer(topdir: Path) -> Callable[[str, str, str], str | None]:
     return _read
 
 
+def _adapt_legacy_importer(
+    importer: ImporterType,
+) -> Callable[[str, str, str], str | None]:
+    '''Adapt a legacy 2-arg ``importer(project, file)`` callback to the 3-arg
+    ``(name, path, file)`` callback the native binding calls.
+
+    The legacy callback receives a :py:class:`Project` instance; we synthesize
+    a minimal stub here because the resolver hasn't built the real Project list
+    yet when it asks for an import. The stub carries just ``name`` and ``path``,
+    which is what every in-tree caller actually reads.
+
+    Legacy return values may be ``str``, ``list[str]``, or ``None``. The native
+    binding expects ``str | None``. We join lists with a newline separator —
+    legacy behavior used these as concatenated manifest fragments.
+    '''
+
+    def _adapt(name: str, project_path: str, relative_file: str) -> str | None:
+        stub = Project(name, url='', revision='', path=project_path)
+        result = importer(stub, relative_file)
+        if result is None:
+            return None
+        if isinstance(result, list):
+            return '\n'.join(result)
+        return result
+
+    return _adapt
+
+
 class Manifest:
     '''Parsed contents of a west manifest file.'''
 
@@ -678,11 +714,6 @@ class Manifest:
         import_flags: ImportFlag = ImportFlag.DEFAULT,
         _override: dict[str, str] | None = None,
     ):
-        # The legacy `importer` callback isn't used by the rust
-        # resolver, but accept it for API compatibility.
-        del importer
-        del import_flags
-
         # `source_data` is the "literal manifest, ignore the
         # workspace" path; `topdir` / `config` are the
         # "discover via workspace" path. Mixing them is
@@ -692,6 +723,23 @@ class Manifest:
             raise ValueError('both topdir and source_data were given')
         if source_data is not None and config is not None:
             raise ValueError('both source_data and config were given')
+
+        # Mirror legacy `_flags_ok`: the only constraint between bits is
+        # that FORCE_PROJECTS is incompatible with IGNORE / IGNORE_PROJECTS.
+        # `IGNORE | IGNORE_PROJECTS` is allowed (redundant but consistent —
+        # IGNORE subsumes IGNORE_PROJECTS). Unknown bits are rejected.
+        known = ImportFlag.IGNORE | ImportFlag.FORCE_PROJECTS | ImportFlag.IGNORE_PROJECTS
+        if import_flags & ~known:
+            raise ValueError(f'invalid import_flags: {import_flags!r} (unknown bits)')
+        if (import_flags & ImportFlag.FORCE_PROJECTS) and (
+            import_flags & (ImportFlag.IGNORE | ImportFlag.IGNORE_PROJECTS)
+        ):
+            raise ValueError(
+                f'invalid import_flags: {import_flags!r} '
+                f'(FORCE_PROJECTS cannot combine with IGNORE/IGNORE_PROJECTS)'
+            )
+        if (import_flags & ImportFlag.FORCE_PROJECTS) and importer is None:
+            raise ValueError('ImportFlag.FORCE_PROJECTS requires an importer= callback')
 
         self.topdir: str | None = os.fspath(topdir) if topdir else None
         self.abspath: str | None = None
@@ -709,23 +757,42 @@ class Manifest:
         self.group_filter: GroupFilterType = []
 
         if source_data is not None:
-            self._init_from_data(source_data)
+            self._init_from_data(source_data, importer, import_flags)
             return
         if self.topdir is None:
             raise ValueError(
                 'Manifest() requires either source_data or topdir; '
                 'use Manifest.from_topdir() / from_file() / from_data() instead'
             )
-        self._init_from_topdir(Path(self.topdir), config, _override)
+        self._init_from_topdir(Path(self.topdir), config, _override, importer, import_flags)
 
     # ---- Initialization paths ------------------------------------------
 
-    def _init_from_data(self, source_data: str | dict) -> None:
-        if isinstance(source_data, dict):
-            yaml_str = _west_native.dump_yaml(source_data)
+    def _init_from_data(
+        self,
+        source_data: str | dict,
+        importer: ImporterType | None,
+        import_flags: ImportFlag,
+    ) -> None:
+        if import_flags == ImportFlag.FORCE_PROJECTS:
+            # importer non-None is enforced in __init__. FORCE_PROJECTS only
+            # has a YAML-backed binding today (`from_yaml_str_with_imports`),
+            # so a dict source is round-tripped through `dump_yaml` for this
+            # niche case rather than carrying a parallel `from_dict_with_imports`.
+            assert importer is not None
+            if isinstance(source_data, dict):
+                yaml_str = _west_native.dump_yaml(source_data)
+            else:
+                yaml_str = source_data
+            self._native = _west_native.Manifest.from_yaml_str_with_imports(
+                yaml_str, _adapt_legacy_importer(importer), int(import_flags)
+            )
+        elif isinstance(source_data, dict):
+            # `from_dict` hands the python value straight to rust via PyO3 →
+            # `serde_json::Value`, skipping the `dump_yaml` + re-parse pair.
+            self._native = _west_native.Manifest.from_dict(source_data, int(import_flags))
         else:
-            yaml_str = source_data
-        self._native = _west_native.Manifest.from_yaml_str(yaml_str)
+            self._native = _west_native.Manifest.from_yaml_str(source_data, int(import_flags))
         self._finalize_from_native(self._native, repo_relpath=None, manifest_file=None)
 
     def _init_from_topdir(
@@ -733,6 +800,8 @@ class Manifest:
         topdir: Path,
         config: Configuration | None,
         override: dict[str, str] | None,
+        importer: ImporterType | None,
+        import_flags: ImportFlag,
     ) -> None:
         cfg = config if config is not None else Configuration(topdir=topdir)
         if override is not None:
@@ -748,9 +817,15 @@ class Manifest:
         manifest_path = manifest_repo_root / manifest_file
         if not manifest_path.is_file():
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(manifest_path))
-        importer = _filesystem_importer(topdir)
+        # Legacy: an explicit `importer=` argument on a workspace flow replaces
+        # the filesystem reader. The rust resolver still drives the calls.
+        native_importer = (
+            _adapt_legacy_importer(importer)
+            if importer is not None
+            else _filesystem_importer(topdir)
+        )
         self._native = _west_native.Manifest.from_path_with_imports(
-            manifest_path, manifest_repo_root, importer
+            manifest_path, manifest_repo_root, native_importer, int(import_flags)
         )
         self.abspath = os.fspath(manifest_path)
         self.posixpath = manifest_path.as_posix()
