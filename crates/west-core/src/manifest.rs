@@ -852,28 +852,51 @@ impl<'a> Resolver<'a> {
         // Phase 2: self / top-level imports (filesystem). Process self
         // first so its projects are merged with first-wins precedence
         // already established by phase 1.
+        // Phase 2: self / top-level imports (filesystem). Flatten the
+        // schema before consulting the policy so `import: false` — which
+        // collapses to zero `ImportMap`s — short-circuits without ever
+        // tripping `SitePolicy::Error`. The legacy contract treats
+        // `import: false` (and an empty list, etc.) as an explicit no-op
+        // that must parse cleanly even without an `ImportSource`.
         if let Some(self_section) = &m.self_
             && let Some(import) = &self_section.import
-            && self.dispatch_resolving_policy(
-                self.policy.self_repo,
-                "self",
-                "west: warning: manifest `self.import:` is unsupported and will be ignored",
-            )?
         {
-            for imap in flatten_imports(import) {
-                self.absorb_filesystem_import(&imap, &filter, &path_prefix, ImportSite::SelfRepo)?;
+            let imaps = flatten_imports(import);
+            if !imaps.is_empty()
+                && self.dispatch_resolving_policy(
+                    self.policy.self_repo,
+                    "self",
+                    "west: warning: manifest `self.import:` is unsupported and will be ignored",
+                )?
+            {
+                for imap in imaps {
+                    self.absorb_filesystem_import(
+                        &imap,
+                        &filter,
+                        &path_prefix,
+                        ImportSite::SelfRepo,
+                    )?;
+                }
             }
         }
-        if let Some(import) = &m.import
-            && self.dispatch_resolving_policy(
-                self.policy.top_level,
-                "top-level",
-                "west: warning: manifest top-level `import:` is unsupported and \
-                 will be ignored; projects pulled in by the import will not be updated",
-            )?
-        {
-            for imap in flatten_imports(import) {
-                self.absorb_filesystem_import(&imap, &filter, &path_prefix, ImportSite::TopLevel)?;
+        if let Some(import) = &m.import {
+            let imaps = flatten_imports(import);
+            if !imaps.is_empty()
+                && self.dispatch_resolving_policy(
+                    self.policy.top_level,
+                    "top-level",
+                    "west: warning: manifest top-level `import:` is unsupported and \
+                     will be ignored; projects pulled in by the import will not be updated",
+                )?
+            {
+                for imap in imaps {
+                    self.absorb_filesystem_import(
+                        &imap,
+                        &filter,
+                        &path_prefix,
+                        ImportSite::TopLevel,
+                    )?;
+                }
             }
         }
 
@@ -883,6 +906,10 @@ impl<'a> Resolver<'a> {
         // import to chase).
         for ps in &m.projects {
             let Some(import) = &ps.import else { continue };
+            let imaps = flatten_imports(import);
+            if imaps.is_empty() {
+                continue; // `import: false` or an empty list — no-op.
+            }
             if !self.dispatch_resolving_policy(
                 self.policy.per_project,
                 &format!("project {:?}", ps.name),
@@ -899,7 +926,7 @@ impl<'a> Resolver<'a> {
             let Some(project) = project_clone else {
                 continue;
             };
-            for imap in flatten_imports(import) {
+            for imap in imaps {
                 self.absorb_project_import(&project, &imap, &filter, &path_prefix)?;
             }
         }

@@ -163,42 +163,6 @@ def test_version_check_success(ver):
     assert manifest.projects[-1].name == 'foo'
 
 
-#########################################
-# Manifest import tests
-
-
-def make_importer(import_map):
-    # Helper function for making a simple importer for test cases.
-    #
-    # The argument is a map from (project_name, path, revision) tuples
-    # to the manifest contents the importer should return.
-    #
-    # This, makes it easier to set up tests cases where import
-    # resolution can be done entirely with data in this file. That's
-    # faster (both when writing tests and running them) than setting
-    # up a west workspace on the file system.
-
-    def importer(project, file):
-        return import_map[(project.name, file)]
-
-    return importer
-
-
-def test_import_false_ok():
-    # When it would have no effect, it's OK to parse manifest data
-    # with imports in it, even without an importer. The project data
-    # should be parsed as expected.
-
-    manifest = Manifest.from_data('''\
-    manifest:
-      projects:
-        - name: foo
-          url: https://foo.com
-          import: false
-    ''')
-    assert manifest.projects[-1].name == 'foo'
-
-
 # A stand-in for zephyr/west.yml to use when testing manifest imports.
 # This feature isn't tied to Zephyr in any way, but we write the tests
 # this way to make them easier to read and relate to Zephyr use cases.
