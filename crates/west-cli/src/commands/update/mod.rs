@@ -705,8 +705,13 @@ fn load_manifest(
     if let Some(p) = import_progress {
         source = source.with_progress(p);
     }
-    Manifest::from_path_with_imports(&full, &manifest_repo_root, &source, ImportPolicy::RESOLVE_ALL)
-        .map_err(|e| format!("manifest {}: {e}", full.display()))
+    Manifest::from_path_with(
+        &full,
+        Some(&manifest_repo_root),
+        Some(&source),
+        ImportPolicy::RESOLVE_ALL,
+    )
+    .map_err(|e| format!("manifest {}: {e}", full.display()))
 }
 
 fn default_jobs() -> usize {

@@ -72,8 +72,13 @@ pub(crate) fn load_manifest(
         .unwrap_or_else(|| PathBuf::from(DEFAULT_MANIFEST_FILE));
     let manifest_repo_root = workspace.join(&manifest_path);
     let full = manifest_repo_root.join(&manifest_file);
-    Manifest::from_path_with_imports(&full, &manifest_repo_root, source, ImportPolicy::RESOLVE_ALL)
-        .map_err(|e| WorkspaceError::Manifest(format!("manifest {}: {e}", full.display())))
+    Manifest::from_path_with(
+        &full,
+        Some(&manifest_repo_root),
+        Some(source),
+        ImportPolicy::RESOLVE_ALL,
+    )
+    .map_err(|e| WorkspaceError::Manifest(format!("manifest {}: {e}", full.display())))
 }
 
 /// Read-only `ImportSource` for commands that don't materialize

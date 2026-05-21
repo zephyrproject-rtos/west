@@ -165,6 +165,23 @@ pub trait ImportSource {
     }
 }
 
+/// An `ImportSource` that always reports "this import is unavailable".
+/// Used internally as the no-source default by entry points that don't
+/// take a caller-supplied source — the resolver still runs, but per-project
+/// imports under [`SitePolicy::Resolve`] become no-ops (they call the source,
+/// the source returns `Ok(None)`, the resolver moves on).
+struct NoopImportSource;
+
+impl ImportSource for NoopImportSource {
+    fn project_manifest(
+        &self,
+        _project: &Project,
+        _relative_file: &str,
+    ) -> Result<Option<String>, ImportSourceError> {
+        Ok(None)
+    }
+}
+
 /// Opaque error type returned by [`ImportSource`] implementations. The
 /// resolver only ever displays it (warning + skip on `Err`), so the
 /// inner error is type-erased: any [`std::error::Error`] can be wrapped
@@ -246,7 +263,7 @@ pub enum ManifestError {
     AbsoluteProjectPath { project: String, path: String },
     /// Retired: emitted by the strict policy on legacy callers, but kept
     /// in the enum so external `match` arms don't break. New code should
-    /// use [`Manifest::from_path_with_imports`] for resolution or
+    /// use [`Manifest::from_path_with`] with a source for resolution or
     /// [`Manifest::from_path_lenient`] to skip imports.
     #[error("manifest imports are not supported (found in {context})")]
     ImportNotSupported { context: String },
@@ -759,6 +776,19 @@ impl<'a> Resolver<'a> {
         }
 
         let m = file.manifest;
+
+        // Per-file project-name uniqueness. Duplicates *within* a single
+        // manifest file are an error — there is no first-wins semantic
+        // for "the same file twice". Across files (root + imports) the
+        // global `seen_names` set in phase 1 below drops dupes
+        // first-wins, which is the intended import behavior.
+        let mut this_file_names: HashSet<&str> = HashSet::new();
+        for ps in &m.projects {
+            if !this_file_names.insert(ps.name.as_str()) {
+                return Err(ManifestError::DuplicateProjectName(ps.name.clone()));
+            }
+        }
+
         let remotes: HashMap<String, &RemoteSchema> =
             m.remotes.iter().map(|r| (r.name.clone(), r)).collect();
         let defaults = m.defaults.as_ref();
@@ -1087,16 +1117,22 @@ fn parse_body_by_extension(path: &Path, body: &str) -> Result<ManifestFile, Mani
 // =====================================================================
 
 impl Manifest {
+    // ---- Simple convenience entries (STRICT policy, no source) ----------
+    //
+    // These are equivalent to calling `from_*_with(..., None, ImportPolicy::STRICT)`
+    // and exist so the common "just parse this thing, no imports" call stays
+    // a one-liner.
+
     pub fn from_yaml_str(s: &str) -> Result<Self, ManifestError> {
-        Self::from_yaml_str_with_policy(s, ImportPolicy::STRICT)
+        Self::from_yaml_str_with(s, None, ImportPolicy::STRICT)
     }
 
     pub fn from_toml_str(s: &str) -> Result<Self, ManifestError> {
-        Self::from_toml_str_with_policy(s, ImportPolicy::STRICT)
+        Self::from_toml_str_with(s, None, ImportPolicy::STRICT)
     }
 
     pub fn from_json_str(s: &str) -> Result<Self, ManifestError> {
-        Self::from_json_str_with_policy(s, ImportPolicy::STRICT)
+        Self::from_json_str_with(s, None, ImportPolicy::STRICT)
     }
 
     /// Construct from an already-parsed [`serde_json::Value`].
@@ -1107,57 +1143,12 @@ impl Manifest {
     /// passes a `dict` straight in as a `Value` via PyO3's
     /// `from_pyobject` path).
     pub fn from_value(value: serde_json::Value) -> Result<Self, ManifestError> {
-        Self::from_value_with_policy(value, ImportPolicy::STRICT)
+        Self::from_value_with(value, None, ImportPolicy::STRICT)
     }
 
     /// Sniff `.yaml` / `.yml` / `.toml` / `.json` from the path's extension.
     pub fn from_path(path: &Path) -> Result<Self, ManifestError> {
-        Self::from_path_with(path, ImportPolicy::STRICT)
-    }
-
-    /// Like [`Manifest::from_yaml_str`] but with a caller-chosen policy for
-    /// `import:` handling. With no resolver attached, the meaningful values
-    /// are [`ImportPolicy::STRICT`] (the default), [`ImportPolicy::WARN_AND_STRIP`],
-    /// and [`ImportPolicy::IGNORE_ALL`]. Policies that name `SitePolicy::Resolve`
-    /// are routed through the warning-and-strip behavior.
-    pub fn from_yaml_str_with_policy(
-        s: &str,
-        policy: ImportPolicy,
-    ) -> Result<Self, ManifestError> {
-        let file: ManifestFile = serde_saphyr::from_str(s).map_err(ManifestError::Yaml)?;
-        validate_and_resolve(file, policy)
-    }
-
-    pub fn from_toml_str_with_policy(
-        s: &str,
-        policy: ImportPolicy,
-    ) -> Result<Self, ManifestError> {
-        let file: ManifestFile = toml_edit::de::from_str(s).map_err(ManifestError::Toml)?;
-        validate_and_resolve(file, policy)
-    }
-
-    pub fn from_json_str_with_policy(
-        s: &str,
-        policy: ImportPolicy,
-    ) -> Result<Self, ManifestError> {
-        let file: ManifestFile = serde_json::from_str(s).map_err(ManifestError::Json)?;
-        validate_and_resolve(file, policy)
-    }
-
-    pub fn from_value_with_policy(
-        value: serde_json::Value,
-        policy: ImportPolicy,
-    ) -> Result<Self, ManifestError> {
-        let file: ManifestFile = serde_json::from_value(value).map_err(ManifestError::Json)?;
-        validate_and_resolve(file, policy)
-    }
-
-    /// Like [`Manifest::from_path`] but with an explicit `import:` policy.
-    pub fn from_path_with_policy(
-        path: &Path,
-        policy: ImportPolicy,
-    ) -> Result<Self, ManifestError> {
-        Self::from_path_with(path, policy)
+        Self::from_path_with(path, None, None, ImportPolicy::STRICT)
     }
 
     /// Like [`Manifest::from_path`] but treats `import:` directives as a
@@ -1167,26 +1158,68 @@ impl Manifest {
     /// can do something useful with the locally-defined projects even
     /// while full import resolution remains unimplemented.
     pub fn from_path_lenient(path: &Path) -> Result<Self, ManifestError> {
-        Self::from_path_with(path, ImportPolicy::WARN_AND_STRIP)
+        Self::from_path_with(path, None, None, ImportPolicy::WARN_AND_STRIP)
     }
 
-    /// Parse a manifest file and resolve imports into a single flat project
-    /// list with first-wins precedence.
+    // ---- Full-control entries (per format) ------------------------------
+    //
+    // Each `_with` takes an optional [`ImportSource`] (the per-project
+    // import callback) and a per-site [`ImportPolicy`]. `source` is only
+    // consulted for sites whose policy is `SitePolicy::Resolve` — when no
+    // source is provided, a private `NoopImportSource` returns `Ok(None)`
+    // for every callback invocation. The four documented policy presets
+    // (`STRICT`, `WARN_AND_STRIP`, `IGNORE_ALL`, `SKIP_PROJECTS`,
+    // `PROJECTS_ONLY`, `RESOLVE_ALL`) cover the python `ImportFlag` values
+    // plus the validation defaults.
+
+    pub fn from_yaml_str_with(
+        s: &str,
+        source: Option<&dyn ImportSource>,
+        policy: ImportPolicy,
+    ) -> Result<Self, ManifestError> {
+        let file: ManifestFile = serde_saphyr::from_str(s).map_err(ManifestError::Yaml)?;
+        resolve_file(file, Path::new(""), source, policy, None)
+    }
+
+    pub fn from_toml_str_with(
+        s: &str,
+        source: Option<&dyn ImportSource>,
+        policy: ImportPolicy,
+    ) -> Result<Self, ManifestError> {
+        let file: ManifestFile = toml_edit::de::from_str(s).map_err(ManifestError::Toml)?;
+        resolve_file(file, Path::new(""), source, policy, None)
+    }
+
+    pub fn from_json_str_with(
+        s: &str,
+        source: Option<&dyn ImportSource>,
+        policy: ImportPolicy,
+    ) -> Result<Self, ManifestError> {
+        let file: ManifestFile = serde_json::from_str(s).map_err(ManifestError::Json)?;
+        resolve_file(file, Path::new(""), source, policy, None)
+    }
+
+    pub fn from_value_with(
+        value: serde_json::Value,
+        source: Option<&dyn ImportSource>,
+        policy: ImportPolicy,
+    ) -> Result<Self, ManifestError> {
+        let file: ManifestFile = serde_json::from_value(value).map_err(ManifestError::Json)?;
+        resolve_file(file, Path::new(""), source, policy, None)
+    }
+
+    /// Parse a manifest file at `path` and run the resolver against it.
     ///
-    /// `manifest_repo_root` is the directory the manifest lives in,
-    /// used to resolve relative paths in self/top-level imports.
-    /// `source` provides per-project manifest bodies on demand and is
-    /// expected to ensure the project is at its manifest revision before
-    /// returning the file body. See [`ImportSource`] for the contract.
-    ///
-    /// `policy` controls which import sites are actually resolved. Pass
-    /// [`ImportPolicy::RESOLVE_ALL`] for the standard behavior; the other
-    /// constants on [`ImportPolicy`] map onto the python `ImportFlag` values
-    /// (`IGNORE_ALL`, `SKIP_PROJECTS`, `PROJECTS_ONLY`).
-    pub fn from_path_with_imports(
+    /// - `manifest_repo_root`: directory used to anchor relative paths in
+    ///   `self.import:` / top-level `import:`. Pass `None` to use the file's
+    ///   own parent directory (fine when imports are policy-skipped).
+    /// - `source`: per-project import callback. Pass `None` to skip per-project
+    ///   imports (or have them returned as "unavailable").
+    /// - `policy`: per-site `import:` policy. See [`ImportPolicy`].
+    pub fn from_path_with(
         path: &Path,
-        manifest_repo_root: &Path,
-        source: &dyn ImportSource,
+        manifest_repo_root: Option<&Path>,
+        source: Option<&dyn ImportSource>,
         policy: ImportPolicy,
     ) -> Result<Self, ManifestError> {
         let body = fs::read_to_string(path).map_err(|e| ManifestError::Io {
@@ -1194,55 +1227,14 @@ impl Manifest {
             source: e,
         })?;
         let file = parse_body_by_extension(path, &body)?;
-        file.validate()
-            .map_err(|r| ManifestError::Validation(r.to_string()))?;
-        let mut resolver = Resolver::new(manifest_repo_root, source, policy);
-        // Mark the root file as visited so a self-import that names the
-        // root file produces a clean ImportLoop diagnostic.
-        if let Ok(canon) = path.canonicalize() {
-            resolver.visited_files.insert(canon);
-        }
-        resolver.absorb_root(file)?;
-        resolver.into_manifest()
-    }
-
-    /// Parse a YAML manifest body and resolve per-project imports through
-    /// `source`. Used by the python `from_data(..., importer=cb,
-    /// import_flags=FORCE_PROJECTS)` path, which has no workspace anchor —
-    /// the resolver runs with an empty `current_repo_root`, so the supplied
-    /// `policy` must skip top-level and self imports (use
-    /// [`ImportPolicy::PROJECTS_ONLY`]).
-    pub fn from_yaml_str_with_imports(
-        s: &str,
-        source: &dyn ImportSource,
-        policy: ImportPolicy,
-    ) -> Result<Self, ManifestError> {
-        let file: ManifestFile = serde_saphyr::from_str(s).map_err(ManifestError::Yaml)?;
-        file.validate()
-            .map_err(|r| ManifestError::Validation(r.to_string()))?;
-        let mut resolver = Resolver::new(Path::new(""), source, policy);
-        resolver.absorb_root(file)?;
-        resolver.into_manifest()
-    }
-
-    fn from_path_with(path: &Path, policy: ImportPolicy) -> Result<Self, ManifestError> {
-        let body = fs::read_to_string(path).map_err(|e| ManifestError::Io {
-            path: path.to_owned(),
-            source: e,
-        })?;
-        let file: ManifestFile = match path.extension().and_then(OsStr::to_str) {
-            Some("yaml") | Some("yml") => {
-                serde_saphyr::from_str(&body).map_err(ManifestError::Yaml)?
-            }
-            Some("toml") => toml_edit::de::from_str(&body).map_err(ManifestError::Toml)?,
-            Some("json") => serde_json::from_str(&body).map_err(ManifestError::Json)?,
-            other => {
-                return Err(ManifestError::UnsupportedFormat(
-                    other.unwrap_or("").to_owned(),
-                ));
-            }
+        let fallback_root: PathBuf;
+        let repo_root: &Path = if let Some(r) = manifest_repo_root {
+            r
+        } else {
+            fallback_root = path.parent().map(Path::to_path_buf).unwrap_or_default();
+            &fallback_root
         };
-        validate_and_resolve(file, policy)
+        resolve_file(file, repo_root, source, policy, Some(path))
     }
 
     /// Read just `manifest.self.path` from a manifest file, tolerating
@@ -1573,125 +1565,34 @@ impl ImportPolicy {
     };
 }
 
-fn validate_and_resolve(
+/// Single execution path used by every `Manifest::from_*` entry. Validates
+/// the parsed schema, sets up a [`Resolver`] with the chosen `policy`, and
+/// drives it via [`Resolver::absorb_root`]. When `source` is `None` a
+/// private no-op source is used; the resolver still runs but
+/// `SitePolicy::Resolve` for per-project imports becomes a silent no-op
+/// (the source reports every project as unavailable). `root_canonical_from`
+/// is the on-disk path of the root manifest if there is one — used to
+/// seed the loop-detection set so a self-import naming the root file
+/// produces a clean `ImportLoop` diagnostic.
+fn resolve_file(
     file: ManifestFile,
+    repo_root: &Path,
+    source: Option<&dyn ImportSource>,
     policy: ImportPolicy,
+    root_canonical_from: Option<&Path>,
 ) -> Result<Manifest, ManifestError> {
     file.validate()
         .map_err(|r| ManifestError::Validation(r.to_string()))?;
-    resolve(file, policy)
-}
-
-/// Apply a [`SitePolicy`] on the non-resolving validation path
-/// ([`validate_and_resolve`] / [`resolve`]). `SitePolicy::Skip` drops the
-/// import silently, `WarnAndStrip` prints `warn_message` to stderr,
-/// `Error` and `Resolve` both return [`ManifestError::ImportNotSupported`]
-/// (the latter because `Resolve` requires a resolver, which this path lacks
-/// by construction — callers reach here only via the no-callback entry
-/// points).
-fn apply_non_resolving_policy(
-    policy: SitePolicy,
-    context: &str,
-    warn_message: &str,
-) -> Result<(), ManifestError> {
-    match policy {
-        SitePolicy::Skip => Ok(()),
-        SitePolicy::WarnAndStrip => {
-            eprintln!("{warn_message}");
-            Ok(())
-        }
-        SitePolicy::Resolve | SitePolicy::Error => Err(ManifestError::ImportNotSupported {
-            context: context.to_owned(),
-        }),
-    }
-}
-
-fn resolve(file: ManifestFile, policy: ImportPolicy) -> Result<Manifest, ManifestError> {
-    let m = file.manifest;
-
-    if m.import.is_some() {
-        apply_non_resolving_policy(
-            policy.top_level,
-            "top-level",
-            "west: warning: manifest top-level `import:` is unsupported and \
-             will be ignored; projects pulled in by the import will not be updated",
-        )?;
-    }
-
-    if let Some(self_) = &m.self_
-        && self_.import.is_some()
+    let noop = NoopImportSource;
+    let src: &dyn ImportSource = source.unwrap_or(&noop);
+    let mut resolver = Resolver::new(repo_root, src, policy);
+    if let Some(path) = root_canonical_from
+        && let Ok(canon) = path.canonicalize()
     {
-        apply_non_resolving_policy(
-            policy.self_repo,
-            "self",
-            "west: warning: manifest `self.import:` is unsupported and will be ignored",
-        )?;
+        resolver.visited_files.insert(canon);
     }
-
-    let remotes: HashMap<String, &RemoteSchema> =
-        m.remotes.iter().map(|r| (r.name.clone(), r)).collect();
-    let defaults = m.defaults.as_ref();
-
-    let mut projects: Vec<Project> = Vec::with_capacity(m.projects.len());
-    let mut seen_names: HashSet<String> = HashSet::new();
-    let mut seen_paths: HashSet<String> = HashSet::new();
-
-    for ps in m.projects {
-        if ps.name == "manifest" {
-            return Err(ManifestError::ProjectNamedManifest);
-        }
-        if !seen_names.insert(ps.name.clone()) {
-            return Err(ManifestError::DuplicateProjectName(ps.name.clone()));
-        }
-        if ps.import.is_some() {
-            apply_non_resolving_policy(
-                policy.per_project,
-                &format!("project {:?}", ps.name),
-                &format!(
-                    "west: warning: project {:?}: `import:` is unsupported and will be \
-                     ignored; projects from {:?}'s manifest will not be updated",
-                    ps.name, ps.name
-                ),
-            )?;
-        }
-        for g in &ps.groups {
-            if !is_valid_group(g) {
-                return Err(ManifestError::InvalidGroup {
-                    project: ps.name.clone(),
-                    group: g.clone(),
-                });
-            }
-        }
-
-        let project = resolve_project(ps, &remotes, defaults)?;
-
-        // Path uniqueness + safety.
-        let path_str = project.path.to_string_lossy().into_owned();
-        if !seen_paths.insert(path_str.clone()) {
-            return Err(ManifestError::DuplicateProjectPath(path_str));
-        }
-        if Path::new(&path_str).is_absolute()
-            || path_str.starts_with('/')
-            || path_str.starts_with('\\')
-        {
-            return Err(ManifestError::AbsoluteProjectPath {
-                project: project.name.clone(),
-                path: path_str,
-            });
-        }
-
-        projects.push(project);
-    }
-
-    let group_filter = parse_group_filter(&m.group_filter, "manifest")?;
-    let self_ = build_self(m.self_)?;
-
-    Ok(Manifest {
-        version: m.version,
-        self_,
-        projects,
-        group_filter,
-    })
+    resolver.absorb_root(file)?;
+    resolver.into_manifest()
 }
 
 fn resolve_project(
@@ -2848,7 +2749,7 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with_imports(&root, dir.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["p", "q"]);
     }
@@ -2871,7 +2772,7 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let err = Manifest::from_path_with_imports(&root, dir.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap_err();
+        let err = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -2922,7 +2823,7 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with_imports(&root, dir.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["p", "q", "r"]);
     }
@@ -2957,7 +2858,7 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with_imports(&root, dir.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["p", "keepme"]);
     }
@@ -2994,7 +2895,7 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with_imports(&root, dir.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["p", "b"]);
     }
@@ -3027,7 +2928,7 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with_imports(&root, dir.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let q = m.project("q").unwrap();
         assert_eq!(q.path, PathBuf::from("vendor/q"));
     }
@@ -3058,7 +2959,7 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with_imports(&root, dir.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         assert_eq!(m.projects.len(), 1);
         // Parent wins.
         assert_eq!(m.projects[0].url, "https://parent");
@@ -3089,7 +2990,7 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let err = Manifest::from_path_with_imports(&root, dir.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap_err();
+        let err = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -3125,7 +3026,7 @@ manifest:
       url: https://example.com/cmsis
 "#,
         );
-        let m = Manifest::from_path_with_imports(&root, dir.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["zephyr", "cmsis"]);
         assert_eq!(source.calls.borrow().len(), 1);
@@ -3186,7 +3087,7 @@ manifest:
             )
             .with_root("zephyr", project_root_dir.path().to_path_buf());
 
-        let m = Manifest::from_path_with_imports(&outer_root, outer.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(&outer_root, Some(outer.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["zephyr", "cmsis"]);
     }
@@ -3235,7 +3136,7 @@ manifest:
 "#,
         );
 
-        let m = Manifest::from_path_with_imports(&outer_root, outer.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(&outer_root, Some(outer.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["zephyr", "cmsis"]);
     }
@@ -3266,7 +3167,7 @@ manifest:
       url: https://example.com/hal_nordic
 "#,
         );
-        let m = Manifest::from_path_with_imports(&root, dir.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["zephyr", "cmsis"]);
     }
@@ -3286,7 +3187,7 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new(); // no entry for "zephyr"
-        let m = Manifest::from_path_with_imports(&root, dir.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["zephyr"]);
     }
@@ -3335,7 +3236,7 @@ manifest:
         std::fs::write(sub.join("README"), "ignore me").unwrap();
 
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with_imports(&root, dir.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["from-a", "from-b"]);
     }
@@ -3387,7 +3288,7 @@ url = "https://b"
         std::fs::write(sub.join("README.txt"), "ignore me").unwrap();
 
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with_imports(&root, dir.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let mut names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         names.sort();
         assert_eq!(names, vec!["from-json", "from-toml", "from-yaml"]);
@@ -3431,7 +3332,7 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with_imports(&root, dir.path(), &source, ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let p = m.project("deep").unwrap();
         assert_eq!(p.path, PathBuf::from("outer/inner/deep"));
     }
@@ -3458,12 +3359,7 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with_imports(
-            &root,
-            dir.path(),
-            &source,
-            ImportPolicy::SKIP_PROJECTS,
-        )
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::SKIP_PROJECTS)
         .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["p", "q"]);
@@ -3498,7 +3394,7 @@ manifest:
             ..ImportPolicy::RESOLVE_ALL
         };
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with_imports(&root, dir.path(), &source, policy).unwrap();
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), policy).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["p"]);
     }
@@ -3522,7 +3418,7 @@ manifest:
             ..ImportPolicy::RESOLVE_ALL
         };
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with_imports(&root, dir.path(), &source, policy).unwrap();
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), policy).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["p"]);
     }
@@ -3550,12 +3446,7 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with_imports(
-            &root,
-            dir.path(),
-            &source,
-            ImportPolicy::IGNORE_ALL,
-        )
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::IGNORE_ALL)
         .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["p", "q"]);
@@ -3589,12 +3480,7 @@ manifest:
       url: https://from-p
 "#;
         let source = StaticImportSource::new().with("p", imported);
-        let m = Manifest::from_path_with_imports(
-            &root,
-            dir.path(),
-            &source,
-            ImportPolicy::PROJECTS_ONLY,
-        )
+        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::PROJECTS_ONLY)
         .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["p", "from-p"]);
@@ -3619,17 +3505,14 @@ manifest:
         // This pin fires if/when we restore the legacy quirk, prompting an
         // update both here and in the python `ImportFlag` docstring (which
         // currently inherits the legacy wording about `bar/foo`).
-        let m = Manifest::from_yaml_str_with_policy(
-            r#"
+        let m = Manifest::from_yaml_str_with(r#"
 manifest:
   projects:
     - name: foo
       url: https://example.com/foo
       import:
         path-prefix: bar
-"#,
-            ImportPolicy::IGNORE_ALL,
-        )
+"#, None, ImportPolicy::IGNORE_ALL)
         .unwrap();
         assert_eq!(m.projects[0].path, PathBuf::from("foo"));
         // Legacy would assert PathBuf::from("bar/foo").
@@ -3655,7 +3538,7 @@ manifest:
       url: upstream.com/nested
 "#;
         let source = StaticImportSource::new().with("upstream", imported);
-        let m = Manifest::from_yaml_str_with_imports(body, &source, ImportPolicy::PROJECTS_ONLY)
+        let m = Manifest::from_yaml_str_with(body, Some(&source), ImportPolicy::PROJECTS_ONLY)
             .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["upstream", "downstream", "nested"]);

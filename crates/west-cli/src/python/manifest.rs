@@ -33,10 +33,15 @@ const FLAG_ALL: u32 = FLAG_IGNORE | FLAG_FORCE_PROJECTS | FLAG_IGNORE_PROJECTS;
 /// Mirrors the legacy `_flags_ok` semantics: `FORCE_PROJECTS` is incompatible
 /// with `IGNORE` / `IGNORE_PROJECTS`, but `IGNORE | IGNORE_PROJECTS` is allowed
 /// (redundant but consistent — `IGNORE` subsumes `IGNORE_PROJECTS`). Unknown
-/// bits reject loudly. Per-entrypoint constraints (e.g. a routing decision
-/// that depends on whether a callback is available) live at the call site
-/// rather than here.
-fn flags_to_policy(bits: u32) -> PyResult<ImportPolicy> {
+/// bits reject loudly.
+///
+/// `has_source` shapes the meaning of the `DEFAULT` flag (bits == 0): with a
+/// caller-supplied import callback we resolve everything; without one, we
+/// fall back to `STRICT` so an `import:` directive surfaces as
+/// `ManifestImportFailed` instead of an IO error from the resolver's attempt
+/// to walk the empty filesystem anchor. The skip flags map identically in
+/// either context.
+fn flags_to_policy(bits: u32, has_source: bool) -> PyResult<ImportPolicy> {
     if bits & !FLAG_ALL != 0 {
         return Err(PyValueError::new_err(format!(
             "invalid import_flags {bits:#x}: unknown bits set"
@@ -57,8 +62,10 @@ fn flags_to_policy(bits: u32) -> PyResult<ImportPolicy> {
         ImportPolicy::IGNORE_ALL
     } else if bits & FLAG_IGNORE_PROJECTS != 0 {
         ImportPolicy::SKIP_PROJECTS
-    } else {
+    } else if has_source {
         ImportPolicy::RESOLVE_ALL
+    } else {
+        ImportPolicy::STRICT
     })
 }
 
@@ -359,8 +366,8 @@ impl Manifest {
     #[staticmethod]
     #[pyo3(signature = (s, import_flags=0))]
     fn from_yaml_str(s: &str, import_flags: u32) -> PyResult<Self> {
-        let policy = flags_to_policy(import_flags)?;
-        core::Manifest::from_yaml_str_with_policy(s, policy)
+        let policy = flags_to_policy(import_flags, false)?;
+        core::Manifest::from_yaml_str_with(s, None, policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
     }
@@ -368,8 +375,8 @@ impl Manifest {
     #[staticmethod]
     #[pyo3(signature = (s, import_flags=0))]
     fn from_toml_str(s: &str, import_flags: u32) -> PyResult<Self> {
-        let policy = flags_to_policy(import_flags)?;
-        core::Manifest::from_toml_str_with_policy(s, policy)
+        let policy = flags_to_policy(import_flags, false)?;
+        core::Manifest::from_toml_str_with(s, None, policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
     }
@@ -377,8 +384,8 @@ impl Manifest {
     #[staticmethod]
     #[pyo3(signature = (s, import_flags=0))]
     fn from_json_str(s: &str, import_flags: u32) -> PyResult<Self> {
-        let policy = flags_to_policy(import_flags)?;
-        core::Manifest::from_json_str_with_policy(s, policy)
+        let policy = flags_to_policy(import_flags, false)?;
+        core::Manifest::from_json_str_with(s, None, policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
     }
@@ -395,9 +402,9 @@ impl Manifest {
     #[staticmethod]
     #[pyo3(signature = (value, import_flags=0))]
     fn from_dict(value: &Bound<'_, PyAny>, import_flags: u32) -> PyResult<Self> {
-        let policy = flags_to_policy(import_flags)?;
+        let policy = flags_to_policy(import_flags, false)?;
         let v = py_to_value(value)?;
-        core::Manifest::from_value_with_policy(v, policy)
+        core::Manifest::from_value_with(v, None, policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
     }
@@ -409,8 +416,8 @@ impl Manifest {
     #[staticmethod]
     #[pyo3(signature = (path, import_flags=0))]
     fn from_path(path: PathBuf, import_flags: u32) -> PyResult<Self> {
-        let policy = flags_to_policy(import_flags)?;
-        core::Manifest::from_path_with_policy(&path, policy)
+        let policy = flags_to_policy(import_flags, false)?;
+        core::Manifest::from_path_with(&path, None, None, policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
     }
@@ -445,9 +452,9 @@ impl Manifest {
         callback: Py<PyAny>,
         import_flags: u32,
     ) -> PyResult<Self> {
-        let policy = flags_to_policy(import_flags)?;
+        let policy = flags_to_policy(import_flags, true)?;
         let source = PyImportSource { callback };
-        core::Manifest::from_path_with_imports(&path, &manifest_repo_root, &source, policy)
+        core::Manifest::from_path_with(&path, Some(&manifest_repo_root), Some(&source), policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
     }
@@ -464,9 +471,9 @@ impl Manifest {
         callback: Py<PyAny>,
         import_flags: u32,
     ) -> PyResult<Self> {
-        let policy = flags_to_policy(import_flags)?;
+        let policy = flags_to_policy(import_flags, true)?;
         let source = PyImportSource { callback };
-        core::Manifest::from_yaml_str_with_imports(s, &source, policy)
+        core::Manifest::from_yaml_str_with(s, Some(&source), policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
     }
