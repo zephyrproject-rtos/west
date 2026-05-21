@@ -137,10 +137,10 @@ impl fmt::Display for ImportSite {
 /// Returning `Ok(None)` means "the file isn't there"; the import is
 /// silently skipped — one missing imported file shouldn't break the
 /// rest of resolution. Returning `Err` means "the source operation
-/// itself failed"; the resolver `eprintln!`s a warning and continues
-/// with the rest of the projects, surfacing the failure once at the
-/// end via [`ManifestError::ImportSourceFailed`] only if the resolver
-/// aborts.
+/// itself failed"; the resolver emits a `log::warn!(target:
+/// "west.manifest", …)` and continues with the rest of the projects,
+/// surfacing the failure once at the end via
+/// [`ManifestError::ImportSourceFailed`] only if the resolver aborts.
 pub trait ImportSource {
     fn project_manifest(
         &self,
@@ -866,7 +866,7 @@ impl<'a> Resolver<'a> {
                 && self.dispatch_resolving_policy(
                     self.policy.self_repo,
                     "self",
-                    "west: warning: manifest `self.import:` is unsupported and will be ignored",
+                    "manifest `self.import:` is unsupported and will be ignored",
                 )?
             {
                 for imap in imaps {
@@ -885,8 +885,8 @@ impl<'a> Resolver<'a> {
                 && self.dispatch_resolving_policy(
                     self.policy.top_level,
                     "top-level",
-                    "west: warning: manifest top-level `import:` is unsupported and \
-                     will be ignored; projects pulled in by the import will not be updated",
+                    "manifest top-level `import:` is unsupported and will be ignored; \
+                     projects pulled in by the import will not be updated",
                 )?
             {
                 for imap in imaps {
@@ -914,8 +914,8 @@ impl<'a> Resolver<'a> {
                 self.policy.per_project,
                 &format!("project {:?}", ps.name),
                 &format!(
-                    "west: warning: project {:?}: `import:` is unsupported and will be \
-                     ignored; projects from {:?}'s manifest will not be updated",
+                    "project {:?}: `import:` is unsupported and will be ignored; \
+                     projects from {:?}'s manifest will not be updated",
                     ps.name, ps.name
                 ),
             )? {
@@ -937,7 +937,10 @@ impl<'a> Resolver<'a> {
     /// Dispatch a [`SitePolicy`] on the resolving path. Returns `Ok(true)`
     /// when the resolver should proceed with the import, `Ok(false)` when
     /// the site is skipped (silently or after a warning), or an error for
-    /// `SitePolicy::Error`.
+    /// `SitePolicy::Error`. The warning lands on `log::warn!(target:
+    /// "west.manifest", …)`; pyo3-log routes it to python's
+    /// `logging.getLogger("west.manifest")` and the CLI binary's
+    /// env_logger emits it with the standard prefix.
     fn dispatch_resolving_policy(
         &self,
         policy: SitePolicy,
@@ -948,7 +951,7 @@ impl<'a> Resolver<'a> {
             SitePolicy::Resolve => Ok(true),
             SitePolicy::Skip => Ok(false),
             SitePolicy::WarnAndStrip => {
-                eprintln!("{warn_message}");
+                log::warn!(target: "west.manifest", "{warn_message}");
                 Ok(false)
             }
             SitePolicy::Error => Err(ManifestError::ImportNotSupported {
@@ -1073,9 +1076,10 @@ impl<'a> Resolver<'a> {
                 return Ok(());
             }
             Err(e) => {
-                eprintln!(
-                    "west: warning: project {:?} import failed: {e}; skipping",
-                    project.name
+                log::warn!(
+                    target: "west.manifest",
+                    "project {:?} import failed: {e}; skipping",
+                    project.name,
                 );
                 self.visited_projects.remove(&project.name);
                 return Ok(());
