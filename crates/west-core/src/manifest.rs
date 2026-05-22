@@ -979,6 +979,7 @@ impl<'a> Resolver<'a> {
         if let Some(self_section) = &m.self_
             && let Some(import) = &self_section.import
         {
+            reject_bool_import(import, "self")?;
             let imaps = flatten_imports(import);
             if !imaps.is_empty()
                 && self.dispatch_resolving_policy(
@@ -999,6 +1000,7 @@ impl<'a> Resolver<'a> {
             }
         }
         if let Some(import) = &m.import {
+            reject_bool_import(import, "top-level")?;
             let imaps = flatten_imports(import);
             if !imaps.is_empty()
                 && self.dispatch_resolving_policy(
@@ -1409,6 +1411,25 @@ fn name_already_claimed(
     } else {
         None
     }
+}
+
+/// Reject `import: true` / `import: false` at filesystem-anchored
+/// import sites (`self.import:` and the top-level `manifest.import:`).
+/// Booleans are only meaningful for per-project imports, where
+/// `import: true` is sugar for "look at this project's
+/// `west.yml`" — there's no analog for self / top-level, which are
+/// already anchored to a known file. v1 surfaced this as a parse-time
+/// error mentioning the value's type; mirroring that here keeps the
+/// diagnostic specific instead of bouncing through the resolver's
+/// generic "imports unsupported" path.
+fn reject_bool_import(import: &ImportSchema, site: &'static str) -> Result<(), ManifestError> {
+    if matches!(import, ImportSchema::Bool(_)) {
+        return Err(ManifestError::Validation(format!(
+            "manifest.{site}.import: invalid import type of boolean \
+             (expected a file path, a list of paths, or a map)"
+        )));
+    }
+    Ok(())
 }
 
 fn parse_body_by_extension(path: &Path, body: &str) -> Result<ManifestFile, ManifestError> {
@@ -3071,9 +3092,11 @@ manifest:
     }
 
     #[test]
-    fn import_self_bool_true_means_west_yml() {
-        // self.import: true should look for `west.yml` next to the root,
-        // which IS the root; that should produce ImportLoop.
+    fn import_self_bool_is_rejected_at_parse_time() {
+        // v1: `self.import: true|false` is invalid — booleans are only
+        // meaningful for per-project imports. Reject before the
+        // resolver gets involved so the diagnostic names the value's
+        // type instead of "imports unsupported".
         let dir = tempfile::TempDir::new().unwrap();
         let root = write_yaml(
             dir.path(),
@@ -3089,16 +3112,15 @@ manifest:
         );
         let source = StaticImportSource::new();
         let err = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap_err();
-        assert!(
-            matches!(
-                err,
-                ManifestError::ImportLoop {
-                    kind: ImportSite::SelfRepo,
-                    ..
-                }
-            ),
-            "got: {err:?}"
-        );
+        match err {
+            ManifestError::Validation(msg) => {
+                assert!(
+                    msg.contains("boolean") && msg.contains("self"),
+                    "expected boolean/self in validation error, got: {msg}"
+                );
+            }
+            other => panic!("expected Validation error, got: {other:?}"),
+        }
     }
 
     #[test]
