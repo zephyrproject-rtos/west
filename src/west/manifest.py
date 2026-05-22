@@ -176,12 +176,17 @@ def manifest_path() -> str:
 
 
 def is_group(raw_group: Any) -> bool:
-    '''Return True if *raw_group* is a syntactically valid group name.'''
-    if not isinstance(raw_group, str) or not raw_group:
+    '''Return True if *raw_group* is a syntactically valid group name.
+
+    Delegates to `_west_native.is_group`, the same predicate the rust
+    resolver applies — one source of truth for the rule (a non-empty
+    string that does not start with `+`/`-` and contains no whitespace,
+    comma, or colon). Non-string inputs short-circuit to False at this
+    boundary so callers can pass arbitrary YAML-parsed values.
+    '''
+    if not isinstance(raw_group, str):
         return False
-    if raw_group[0].isdigit() or raw_group in ('-', '+'):
-        return False
-    return all(c.isalnum() or c in ('_', '-') for c in raw_group)
+    return _west_native.is_group(raw_group)
 
 
 # Per-format `(parser, schema-parser)` tuple table. The

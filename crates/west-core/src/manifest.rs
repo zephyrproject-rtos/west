@@ -281,7 +281,7 @@ pub enum ManifestError {
     #[error("project {project:?}: cannot specify both `url` and `repo-path`")]
     UrlAndRepoPath { project: String },
     #[error(
-        "project {project:?}: invalid group name {group:?} \
+        "project {project:?}: invalid group {group:?} \
          (must not be empty, contain whitespace/comma/colon, or start with `+`/`-`)"
     )]
     InvalidGroup { project: String, group: String },
@@ -2226,7 +2226,7 @@ fn parse_group_filter(
 /// does not begin with `+` or `-`. Whitespace and commas would break common
 /// group-list serializations; colons clash with potential future namespacing;
 /// the leading `+`/`-` are reserved for `group-filter` enable/disable syntax.
-fn is_valid_group(g: &str) -> bool {
+pub fn is_valid_group(g: &str) -> bool {
     if g.is_empty() {
         return false;
     }

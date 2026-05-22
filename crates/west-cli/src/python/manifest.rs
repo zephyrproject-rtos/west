@@ -607,6 +607,15 @@ impl Manifest {
 
 // ---- Module-level functions ----------------------------------------------
 
+/// Single source of truth for the project-group name rule, shared
+/// with the resolver. Python's `is_group` wraps this so the two stay
+/// aligned (the python wrapper still handles non-str inputs by
+/// returning False at the boundary).
+#[pyfunction]
+fn is_group(s: &str) -> bool {
+    core::is_valid_group(s)
+}
+
 /// Parse `+group` / `-group` tokens (typically CLI-sourced) into
 /// structured entries. Empty input yields an empty list.
 #[pyfunction]
@@ -869,6 +878,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Manifest>()?;
     m.add_class::<ProjectFilter>()?;
     m.add_class::<LoadedManifest>()?;
+    m.add_function(wrap_pyfunction!(is_group, m)?)?;
     m.add_function(wrap_pyfunction!(parse_cli_group_filter, m)?)?;
     Ok(())
 }
