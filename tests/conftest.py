@@ -220,6 +220,45 @@ def config_tmpdir(tmpdir):
         yield tmpdir
 
 
+@pytest.fixture
+def west_init_tmpdir(tmpdir):
+    '''Per-test fixture producing a *minimal* initialized workspace.
+
+    Drops a workspace under `tmpdir`: a `.west/` marker, a git-
+    initialized `mp/` directory, and a minimal `mp/west.yml`.
+    `manifest.path = "mp"` lands in whichever local-config file the
+    binary will read — `$WEST_CONFIG_LOCAL` if set (so composition
+    with `config_tmpdir` works), otherwise `.west/config.toml`.
+
+    chdir into the workspace root. The legacy fixture by the same
+    name spun up four "remote" repositories and ran `west init`
+    against them; the heavyweight shape is only needed by
+    `test_project*.py` and is deferred until those files migrate.
+
+    Tests that exercise CLI flows operating purely on workspace
+    config (alias resolution, `west config`, `west topdir`,
+    `west list` against an empty project set, …) use this.
+    '''
+    # `.west/` marker + git-initialized `mp/`. Skip the config file
+    # `create_workspace` would drop into `.west/`, because the binary
+    # will look at `$WEST_CONFIG_LOCAL` (set by the surrounding
+    # `config_tmpdir` fixture in some tests) instead.
+    (tmpdir / '.west').mkdir()
+    (tmpdir / 'mp').mkdir()
+    create_repo(tmpdir / 'mp')
+    add_commit(
+        tmpdir / 'mp',
+        'add west.yml',
+        files={'west.yml': 'manifest:\n  projects: []\n'},
+    )
+    local_config = os.environ.get('WEST_CONFIG_LOCAL') or str(tmpdir / '.west' / 'config.toml')
+    Path(local_config).parent.mkdir(parents=True, exist_ok=True)
+    with open(local_config, 'w') as f:
+        f.write('[manifest]\npath = "mp"\n')
+    with chdir(tmpdir):
+        yield tmpdir
+
+
 # =========================================================================
 # `west` CLI helpers
 # =========================================================================
