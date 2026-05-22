@@ -1247,6 +1247,15 @@ impl<'a> Resolver<'a> {
             .validate()
             .map_err(|r| ManifestError::Validation(r.to_string()))?;
 
+        // Self / top-level imports are filesystem-anchored to the
+        // manifest repo, so any `west-commands:` they declare in their
+        // own `self:` block contributes to the manifest repo's own
+        // extension-command list (per-project imports use the
+        // analogous step inside `absorb_imported_submanifest`).
+        if matches!(site, ImportSite::SelfRepo | ImportSite::TopLevel) {
+            self.inherit_imported_self_west_commands(&parsed);
+        }
+
         self.depth += 1;
         let res = self.absorb(parsed, filter.clone(), prefix.to_path_buf(), parent_skip);
         self.depth -= 1;
@@ -1388,6 +1397,26 @@ impl<'a> Resolver<'a> {
             p.west_commands
                 .extend(wc.to_vec().into_iter().map(PathBuf::from));
         }
+    }
+
+    /// The self/top-level analog of `inherit_imported_west_commands`:
+    /// fold an imported sub-manifest's `self.west-commands:` into the
+    /// resolver's accumulated self block. Same v1 contract — a self
+    /// import contributes extension scripts to the manifest repo
+    /// itself.
+    fn inherit_imported_self_west_commands(&mut self, imported: &ManifestFile) {
+        let Some(self_section) = &imported.manifest.self_ else {
+            return;
+        };
+        let Some(wc) = &self_section.west_commands else {
+            return;
+        };
+        let Some(target) = self.self_.as_mut() else {
+            return;
+        };
+        target
+            .west_commands
+            .extend(wc.to_vec().into_iter().map(PathBuf::from));
     }
 
     fn into_manifest(self) -> Result<Manifest, ManifestError> {
