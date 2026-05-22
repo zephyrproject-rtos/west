@@ -293,6 +293,8 @@ pub enum ManifestError {
     },
     #[error("project {project:?} has absolute path {path:?}; must be relative to the workspace")]
     AbsoluteProjectPath { project: String, path: String },
+    #[error("project {project:?} has path {path:?} that escapes the workspace topdir")]
+    EscapingProjectPath { project: String, path: String },
     /// Retired: emitted by the strict policy on legacy callers, but kept
     /// in the enum so external `match` arms don't break. New code should
     /// use [`Manifest::from_path_with`] with a source for resolution or
@@ -1086,6 +1088,12 @@ impl<'a> Resolver<'a> {
                     path: path_str,
                 });
             }
+            if relative_path_escapes_root(&project.path) {
+                return Err(ManifestError::EscapingProjectPath {
+                    project: project.name.clone(),
+                    path: path_str,
+                });
+            }
 
             if !filter.allows(&project) {
                 continue;
@@ -1483,6 +1491,34 @@ fn name_already_claimed(
 /// error mentioning the value's type; mirroring that here keeps the
 /// diagnostic specific instead of bouncing through the resolver's
 /// generic "imports unsupported" path.
+/// Walk components and report whether a relative `path` (possibly
+/// containing `..`) climbs above its starting point. A leading `..`
+/// or any `..` that backs out past the start counts; `.` segments
+/// are ignored; absolute components (root / drive prefix) are
+/// reported as escapes too so callers can treat this as a single
+/// "stays within root" predicate. The caller picks the user-facing
+/// "root" — for project paths in the resolver that's the workspace
+/// topdir, but the math is purely path-arithmetic and has no
+/// workspace baked in.
+fn relative_path_escapes_root(path: &Path) -> bool {
+    let mut depth: i32 = 0;
+    for comp in path.components() {
+        use std::path::Component::*;
+        match comp {
+            Prefix(_) | RootDir => return true,
+            CurDir => {}
+            ParentDir => {
+                depth -= 1;
+                if depth < 0 {
+                    return true;
+                }
+            }
+            Normal(_) => depth += 1,
+        }
+    }
+    false
+}
+
 fn reject_bool_import(import: &ImportSchema, site: &'static str) -> Result<(), ManifestError> {
     if matches!(import, ImportSchema::Bool(_)) {
         return Err(ManifestError::Validation(format!(
