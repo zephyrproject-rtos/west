@@ -21,7 +21,7 @@
 //! format-agnostic: the same `validate()` + `resolve()` flow runs whatever
 //! parser produced the schema.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
@@ -953,20 +953,6 @@ impl<'a> Resolver<'a> {
             m.remotes.iter().map(|r| (r.name.clone(), r)).collect();
         let defaults = m.defaults.as_ref();
 
-        // Collect imported group-filter strings; appended to the resolver's
-        // accumulated list at the end so all-imports group-filter merging
-        // happens deterministically. An explicit empty list (`group-filter:
-        // []`) is rejected at every level — v1's contract via
-        // `_validated_group_filter`.
-        if let Some(gf) = &m.group_filter {
-            if gf.is_empty() {
-                return Err(ManifestError::EmptyGroupFilter);
-            }
-            for s in gf {
-                self.group_filter_strs.push(s.clone());
-            }
-        }
-
         // v1 ordering / precedence rules for `self.import:` and the
         // top-level `manifest.import:`:
         //   - Output order: imported projects appear *before* the
@@ -1041,6 +1027,22 @@ impl<'a> Resolver<'a> {
         // the tail (v1 "imports come before locals" applied to self-
         // block extension scripts).
         self.append_own_self_west_commands(&m);
+
+        // Phase A.5 (cont.): same idea for group-filter — append
+        // this file's own entries now that any self/top-level
+        // imports have already appended theirs, with Phase C project
+        // imports still to come. `into_manifest` walks the resulting
+        // vec in reverse to simplify, so this push order produces
+        // v1's apply sequence: project imports first (lowest
+        // precedence), then own, then self/top-level imports last
+        // (highest precedence wins). Reject explicit `[]` here too,
+        // matching v1's `_validated_group_filter`.
+        if let Some(gf) = &m.group_filter {
+            if gf.is_empty() {
+                return Err(ManifestError::EmptyGroupFilter);
+            }
+            self.group_filter_strs.extend(gf.iter().cloned());
+        }
 
         // Phase B: this file's directly-defined projects. Skip any
         // name reserved by an outer scope (v1 precedence: outermost
@@ -1470,7 +1472,28 @@ impl<'a> Resolver<'a> {
     }
 
     fn into_manifest(self) -> Result<Manifest, ManifestError> {
-        let group_filter = parse_group_filter(&self.group_filter_strs, "manifest")?;
+        // Validate every accumulated entry, then simplify by walking
+        // the accumulator in reverse (lowest-precedence-first per
+        // v1's apply order — see the Phase A.5 push site) and
+        // updating a disabled-groups set: `-X` adds, `+X` removes.
+        // The final `Manifest.group_filter` exposes only the disabled
+        // groups in sorted order — v1's v0.10 contract.
+        let entries = parse_group_filter(&self.group_filter_strs, "manifest")?;
+        let mut disabled: BTreeSet<String> = BTreeSet::new();
+        for e in entries.iter().rev() {
+            if e.disabled {
+                disabled.insert(e.group.clone());
+            } else {
+                disabled.remove(&e.group);
+            }
+        }
+        let group_filter: Vec<GroupFilterEntry> = disabled
+            .into_iter()
+            .map(|group| GroupFilterEntry {
+                group,
+                disabled: true,
+            })
+            .collect();
         Ok(Manifest {
             version: self.version,
             self_: self.self_.unwrap_or_default(),
@@ -2390,11 +2413,11 @@ manifest:
             vec![PathBuf::from("scripts/west-commands.yml")]
         );
         assert_eq!(m.projects.len(), 6);
-        assert_eq!(m.group_filter.len(), 2);
+        // v0.10 simplification: `+core` collapses (groups are enabled
+        // by default), only `-optional` survives.
+        assert_eq!(m.group_filter.len(), 1);
         assert_eq!(m.group_filter[0].group, "optional");
         assert!(m.group_filter[0].disabled);
-        assert_eq!(m.group_filter[1].group, "core");
-        assert!(!m.group_filter[1].disabled);
     }
 
     #[test]
