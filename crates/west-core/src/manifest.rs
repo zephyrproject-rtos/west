@@ -285,6 +285,8 @@ pub enum ManifestError {
          (must not be empty, contain whitespace/comma/colon, or start with `+`/`-`)"
     )]
     InvalidGroup { project: String, group: String },
+    #[error("project {project:?}: \"groups\" cannot be combined with \"import\"")]
+    GroupsWithImport { project: String },
     #[error("{origin} group filter: invalid item {item:?}: {reason}")]
     InvalidGroupFilter {
         origin: String,
@@ -1047,6 +1049,18 @@ impl<'a> Resolver<'a> {
                         group: g.clone(),
                     });
                 }
+            }
+            // v1: a project may not declare both `groups:` and a
+            // truthy `import:`. `import: false` is falsy and stays
+            // benign, matching the legacy `if imp and groups:` check.
+            let has_active_import = ps
+                .import
+                .as_ref()
+                .is_some_and(|i| !matches!(i, ImportSchema::Bool(false)));
+            if has_active_import && !ps.groups.is_empty() {
+                return Err(ManifestError::GroupsWithImport {
+                    project: ps.name.clone(),
+                });
             }
             let project = resolve_project(ps.clone(), &remotes, defaults)?;
             // A project that carries `import: { path-prefix: X }` has
