@@ -463,11 +463,13 @@ enum SubmodulesSchema {
 /// `import:` directive on the manifest, `self`, or any project. Four
 /// permitted shapes; see [`ImportMap`] for dict-form fields.
 ///
-/// Variant order matters for serde-untagged: more specific shapes first,
-/// `Map` last — otherwise serde-saphyr's leniency for YAML sequences
-/// vs mappings can mis-deserialize a sequence as a map.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
+/// Deserialization is hand-rolled (rather than `#[serde(untagged)]`)
+/// to keep the per-variant error from being collapsed into "data did
+/// not match any variant" — once we know the value is an object, we
+/// delegate to `ImportMap`'s derived `Deserialize` so serde's
+/// `deny_unknown_fields` message (which lists the valid keys) makes
+/// it through to the user.
+#[derive(Debug, Clone)]
 enum ImportSchema {
     /// `import: true` (= west.yml). `import: false` is a no-op.
     Bool(bool),
@@ -477,6 +479,46 @@ enum ImportSchema {
     List(Vec<ImportSchema>),
     /// `import: { file: ..., name-allowlist: [...] , ... }`.
     Map(ImportMap),
+}
+
+impl<'de> Deserialize<'de> for ImportSchema {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        // Route through `serde_json::Value` so we can branch on the
+        // shape and call the right per-variant deserializer with its
+        // own error message. One extra allocation per `import:` —
+        // fine, imports parse once at load.
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value {
+            serde_json::Value::Bool(b) => Ok(ImportSchema::Bool(b)),
+            serde_json::Value::String(s) => Ok(ImportSchema::Str(s)),
+            serde_json::Value::Array(_) => {
+                serde_json::from_value(value).map(ImportSchema::List).map_err(D::Error::custom)
+            }
+            serde_json::Value::Object(_) => {
+                // ImportMap's derived `deny_unknown_fields` reports
+                // unknown keys with the list of valid ones; each field
+                // type produces serde's natural "invalid type" error
+                // when wrong-shaped.
+                serde_json::from_value(value).map(ImportSchema::Map).map_err(D::Error::custom)
+            }
+            other => Err(D::Error::custom(format!(
+                "invalid `import:` value: expected bool, string, list, or map; got {}",
+                json_type_name(&other),
+            ))),
+        }
+    }
+}
+
+fn json_type_name(v: &serde_json::Value) -> &'static str {
+    match v {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "bool",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "list",
+        serde_json::Value::Object(_) => "map",
+    }
 }
 
 /// Dict form of [`ImportSchema`]. All list fields also accept a single
@@ -508,11 +550,85 @@ struct SubmoduleSchema {
     name: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone)]
 enum OneOrMany<T> {
     One(T),
     Many(Vec<T>),
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for OneOrMany<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use std::fmt;
+        use std::marker::PhantomData;
+
+        use serde::de::{IntoDeserializer, MapAccess, SeqAccess, Visitor};
+
+        // Custom Visitor (rather than `#[serde(untagged)]`) so the
+        // outer deserializer's field-path context propagates through
+        // a wrong-shape error: serde's untagged collapses every
+        // per-variant failure into "data did not match any variant"
+        // and discards the surrounding context, leaving callers
+        // staring at an unattributed message.
+        struct OneOrManyVisitor<T>(PhantomData<T>);
+
+        impl<'de, T: Deserialize<'de>> Visitor<'de> for OneOrManyVisitor<T> {
+            type Value = OneOrMany<T>;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a value or a list of values")
+            }
+
+            // Scalars / single-value forms — forward to T's own
+            // deserializer via the `IntoDeserializer` helpers so any
+            // type T (String, struct, …) round-trips correctly.
+            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Self::Value, E> {
+                T::deserialize(v.into_deserializer()).map(OneOrMany::One)
+            }
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                T::deserialize(v.into_deserializer()).map(OneOrMany::One)
+            }
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
+                T::deserialize(v.into_deserializer()).map(OneOrMany::One)
+            }
+            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
+                T::deserialize(v.into_deserializer()).map(OneOrMany::One)
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                T::deserialize(v.into_deserializer()).map(OneOrMany::One)
+            }
+            fn visit_string<E: serde::de::Error>(self, v: String) -> Result<Self::Value, E> {
+                T::deserialize(v.into_deserializer()).map(OneOrMany::One)
+            }
+
+            fn visit_seq<S>(self, seq: S) -> Result<Self::Value, S::Error>
+            where
+                S: SeqAccess<'de>,
+            {
+                let items = Vec::<T>::deserialize(serde::de::value::SeqAccessDeserializer::new(seq))?;
+                Ok(OneOrMany::Many(items))
+            }
+
+            fn visit_map<M>(self, map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                // T might itself be a map-shaped type (e.g. the
+                // submodule schema). Try deserializing the map as T
+                // first so legitimate map-shaped Ts still work; only
+                // re-emit a OneOrMany-flavoured error if T rejects.
+                T::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+                    .map(OneOrMany::One)
+                    .map_err(|_| {
+                        serde::de::Error::invalid_type(
+                            serde::de::Unexpected::Map,
+                            &"a value or a list of values",
+                        )
+                    })
+            }
+        }
+
+        deserializer.deserialize_any(OneOrManyVisitor(PhantomData))
+    }
 }
 
 // =====================================================================
