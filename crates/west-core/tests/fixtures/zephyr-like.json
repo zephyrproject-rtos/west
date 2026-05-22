@@ -33,7 +33,7 @@
         "url": "https://git.example.com/vendor-thing.git",
         "revision": "v2.0.0",
         "path": "vendor/thing",
-        "west-commands": ["west-commands.yml", "extra-commands.yml"],
+        "west-commands": "west-commands.yml",
         "submodules": true
       },
       {

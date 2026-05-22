@@ -268,6 +268,8 @@ pub enum ManifestError {
     Validation(String),
     #[error("project {project:?}: remote {remote:?} is not defined")]
     UnknownRemote { project: String, remote: String },
+    #[error("defaults.remote {remote:?} is not defined in remotes")]
+    UnknownDefaultRemote { remote: String },
     #[error("duplicate project name: {0:?}")]
     DuplicateProjectName(String),
     #[error("duplicate project path: {0:?}")]
@@ -299,6 +301,9 @@ pub enum ManifestError {
     AbsoluteProjectPath { project: String, path: String },
     #[error("project {project:?} has path {path:?} that escapes the workspace topdir")]
     EscapingProjectPath { project: String, path: String },
+    #[error("project {project:?} has reserved path {path:?} (the .west directory \
+             and its subdirectories are reserved for workspace metadata)")]
+    ReservedProjectPath { project: String, path: String },
     /// Retired: emitted by the strict policy on legacy callers, but kept
     /// in the enum so external `match` arms don't break. New code should
     /// use [`Manifest::from_path_with`] with a source for resolution or
@@ -437,9 +442,13 @@ struct ProjectSchema {
     #[garde(skip)]
     #[serde(rename = "clone-depth", default)]
     clone_depth: Option<u32>,
+    /// Per-project `west-commands` is a scalar string only (unlike
+    /// the `self.west-commands` field, which also accepts a list).
+    /// Legacy v1 rejects the list form here even with a single entry —
+    /// see `tests/manifests/invalid_west_commands_2.yml`.
     #[garde(skip)]
     #[serde(rename = "west-commands", default)]
-    west_commands: Option<OneOrMany<String>>,
+    west_commands: Option<String>,
     #[garde(skip)]
     #[serde(rename = "remote-name", default)]
     remote_name: Option<String>,
@@ -953,6 +962,19 @@ impl<'a> Resolver<'a> {
             m.remotes.iter().map(|r| (r.name.clone(), r)).collect();
         let defaults = m.defaults.as_ref();
 
+        // If `defaults.remote:` names a remote, that remote must exist in
+        // the same file's `remotes:` list — even when no project actually
+        // resolves through it. Catches typos that would otherwise lurk
+        // until someone added a project relying on the default.
+        if let Some(d) = defaults
+            && let Some(name) = &d.remote
+            && !remotes.contains_key(name)
+        {
+            return Err(ManifestError::UnknownDefaultRemote {
+                remote: name.clone(),
+            });
+        }
+
         // v1 ordering / precedence rules for `self.import:` and the
         // top-level `manifest.import:`:
         //   - Output order: imported projects appear *before* the
@@ -1115,6 +1137,12 @@ impl<'a> Resolver<'a> {
             }
             if relative_path_escapes_root(&project.path) {
                 return Err(ManifestError::EscapingProjectPath {
+                    project: project.name.clone(),
+                    path: path_str,
+                });
+            }
+            if path_collides_with_west_dir(&project.path) {
+                return Err(ManifestError::ReservedProjectPath {
                     project: project.name.clone(),
                     path: path_str,
                 });
@@ -1563,6 +1591,34 @@ fn relative_path_escapes_root(path: &Path) -> bool {
         }
     }
     false
+}
+
+/// Returns true when `path`, after `..`/`.` collapsing, lands at the
+/// workspace's reserved `.west` directory or any descendant of it.
+/// The check normalizes through the same balanced-depth walk
+/// [`relative_path_escapes_root`] uses; any path that would resolve to
+/// `<topdir>/.west` (or below) at the OS level is rejected, regardless
+/// of how the original string was written.
+fn path_collides_with_west_dir(path: &Path) -> bool {
+    let mut stack: Vec<&OsStr> = Vec::new();
+    for comp in path.components() {
+        use std::path::Component::*;
+        match comp {
+            CurDir => {}
+            ParentDir => {
+                if stack.pop().is_none() {
+                    // Caller already rejects escaping paths; nothing
+                    // to evaluate against here.
+                    return false;
+                }
+            }
+            Normal(seg) => stack.push(seg),
+            // Prefix/RootDir are caught by the absolute-path check
+            // before this helper runs.
+            Prefix(_) | RootDir => return false,
+        }
+    }
+    matches!(stack.first(), Some(seg) if *seg == OsStr::new(crate::WEST_DIR))
 }
 
 fn reject_bool_import(import: &ImportSchema, site: &'static str) -> Result<(), ManifestError> {
@@ -2124,13 +2180,7 @@ fn resolve_project(
         .or(url_remote_name)
         .unwrap_or_else(|| "origin".to_owned());
 
-    let west_commands = ps
-        .west_commands
-        .map(OneOrMany::into_vec)
-        .unwrap_or_default()
-        .into_iter()
-        .map(PathBuf::from)
-        .collect();
+    let west_commands: Vec<PathBuf> = ps.west_commands.map(PathBuf::from).into_iter().collect();
 
     let submodules = match ps.submodules {
         None => Submodules::None,
@@ -2963,7 +3013,11 @@ manifest:
     }
 
     #[test]
-    fn west_commands_string_or_list() {
+    fn west_commands_per_project_is_string_only() {
+        // Per-project `west-commands:` accepts a scalar string only. The
+        // list form is reserved for the `self.west-commands` field; legacy
+        // v1 rejects the list form here (even with a single entry) — see
+        // `tests/manifests/invalid_west_commands_2.yml`.
         let m1 = yaml(
             r#"
 manifest:
@@ -2979,7 +3033,7 @@ manifest:
             vec![PathBuf::from("single.yml")]
         );
 
-        let m2 = yaml(
+        let err = yaml(
             r#"
 manifest:
   projects:
@@ -2988,11 +3042,8 @@ manifest:
       west-commands: [a.yml, b.yml]
 "#,
         )
-        .unwrap();
-        assert_eq!(
-            m2.projects[0].west_commands,
-            vec![PathBuf::from("a.yml"), PathBuf::from("b.yml")]
-        );
+        .unwrap_err();
+        assert!(matches!(err, ManifestError::Yaml(_)), "got {err:?}");
     }
 
     #[test]
