@@ -223,3 +223,71 @@ fn update_per_project_import_missing_file_silently_skipped() {
         .success();
     assert!(ws.join("p/README").exists());
 }
+
+#[test]
+#[serial]
+fn list_reads_per_project_imports_from_manifest_rev_not_worktree() {
+    // Mirrors the python `tests/test_manifest.py::test_import_project_list`:
+    // P's west.yml (importing Q) exists at the commit `manifest-rev` points
+    // at, but is *absent* from the current working tree. `west list` must
+    // still surface Q — proves the import resolver reads from git at
+    // `manifest-rev`, not the working tree, which is the v1
+    // `_manifest_content_at` contract.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+
+    let q = make_bare_with_files(sb.root(), "q", &[("README", "q\n")]);
+    let p_yml = format!(
+        "manifest:\n  projects:\n    - name: q\n      url: {url}\n      revision: main\n",
+        url = q.display(),
+    );
+    let p = make_bare_with_files(sb.root(), "p", &[("README", "p\n"), ("west.yml", &p_yml)]);
+    let manifest_yml = format!(
+        "manifest:\n  self:\n    path: my-manifest\n  projects:\n    - name: p\n      url: {url}\n      revision: main\n      import: true\n",
+        url = p.display(),
+    );
+    let manifest_bare = make_bare_with_files(sb.root(), "manifest", &[("west.yml", &manifest_yml)]);
+
+    let ws = init_workspace(&sb, &manifest_bare);
+    sb.west()
+        .args(["-C", ws.to_str().unwrap(), "update", "-j", "1"])
+        .assert()
+        .success();
+
+    // After `west update`, P is at the commit `manifest-rev` points at and
+    // P/west.yml exists on disk. Stash the worktree copy aside so anything
+    // that still reads from disk returns "missing" — only `manifest-rev`
+    // can answer truthfully.
+    let p_yml_path = ws.join("p/west.yml");
+    assert!(p_yml_path.exists(), "precondition: west update should land P/west.yml");
+    std::fs::remove_file(&p_yml_path).unwrap();
+    // Verify `manifest-rev` still has it. The pre-fix resolver would now
+    // silently lose Q because it reads from the missing worktree path.
+    let from_git = git_capture(
+        &["show", "refs/heads/manifest-rev:west.yml"],
+        &ws.join("p"),
+    );
+    assert!(
+        from_git.contains("name: q"),
+        "precondition: west.yml at manifest-rev still references Q; got {from_git:?}"
+    );
+
+    let assert = sb
+        .west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "list",
+            "-f",
+            "{name}",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    assert!(
+        stdout.lines().any(|l| l.trim() == "q"),
+        "expected Q in `west list` output even after p/west.yml was deleted from worktree; got: {stdout:?}",
+    );
+}

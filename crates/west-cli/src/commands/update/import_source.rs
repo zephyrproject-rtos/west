@@ -20,13 +20,14 @@
 //!   used a `NullSink` ("intentionally quiet") which silently hung
 //!   minutes-long clones on Zephyr-sized workspaces — fixed.
 
-use std::io;
 use std::path::Path;
 
 use indicatif::{MultiProgress, ProgressBar};
 
 use west_core::manifest::{ImportSource, ImportSourceError, Project};
-use west_core::vcs::{CheckoutTarget, CloneSpec, CommitSummary, FetchSpec, Output, Vcs, VcsError};
+use west_core::vcs::{
+    CheckoutTarget, CloneSpec, CommitSummary, FetchSpec, MANIFEST_REV_REF, Output, Vcs, VcsError,
+};
 
 use super::Settings;
 use super::cache;
@@ -114,15 +115,24 @@ impl ImportSource for WorkspaceImportSource<'_> {
             }
         }
 
-        // Read the imported file.
-        let path = repo.join(relative_file);
-        match std::fs::read_to_string(&path) {
-            Ok(body) => Ok(Some(body)),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(ImportSourceError::msg(format!(
-                "read {}: {e}",
-                path.display()
-            ))),
+        // Read the imported file from git at `manifest-rev`, not the
+        // working tree. `materialize` above just ran
+        // `set_manifest_rev(repo, sha)`, so the ref points at the
+        // commit we just landed — matches v1's `_manifest_content_at`
+        // semantic and stays correct even if a downstream caller
+        // checks out a different branch between resolver invocations.
+        let bytes = self
+            .vcs
+            .read_at_ref(&repo, MANIFEST_REV_REF, Path::new(relative_file))
+            .map_err(ImportSourceError::new)?;
+        match bytes {
+            Some(b) => Ok(Some(String::from_utf8(b).map_err(|e| {
+                ImportSourceError::msg(format!(
+                    "{}: non-utf8 manifest at {}:{}: {e}",
+                    project.name, MANIFEST_REV_REF, relative_file,
+                ))
+            })?)),
+            None => Ok(None),
         }
     }
 }

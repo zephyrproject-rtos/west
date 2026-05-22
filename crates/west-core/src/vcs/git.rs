@@ -22,7 +22,7 @@ const NAME: &str = "git";
 /// `refs/heads/<name>` rather than `refs/west/<name>` so it stays visible
 /// to `git branch` and other ordinary tooling — this is the established
 /// location users expect from prior west releases.
-const MANIFEST_REV_REF: &str = "refs/heads/manifest-rev";
+use crate::vcs::MANIFEST_REV_REF;
 
 #[derive(Debug)]
 pub struct GitClient {
@@ -375,6 +375,53 @@ impl Vcs for GitClient {
             });
         }
         Ok(trimmed.to_owned())
+    }
+
+    fn read_at_ref(
+        &self,
+        repo: &Path,
+        rev: &str,
+        relative_path: &Path,
+    ) -> Result<Option<Vec<u8>>, VcsError> {
+        let repo_str = repo.to_string_lossy().into_owned();
+        let spec = format!("{rev}:{}", relative_path.to_string_lossy());
+        // `cat-file -p <rev>:<path>` writes the raw object contents to
+        // stdout. Equivalent to v1's `git show <ref>:<path>` for the
+        // blob case and explicit about "bytes please" — no smudge,
+        // pager, or diff machinery in the way.
+        let res = self.run(&["-C", &repo_str, "cat-file", "-p", &spec])?;
+        if res.output.status.success() {
+            return Ok(Some(res.output.stdout));
+        }
+        // Distinguish "ref/path absent" (soft) from real failures.
+        // git uses exit-128 for both, so we match on the stderr
+        // signature instead. The set of patterns mirrors what we see
+        // from the binary across versions on missing-revision and
+        // missing-path errors.
+        let stderr = String::from_utf8_lossy(&res.output.stderr);
+        // `git cat-file -p`'s stderr for missing objects varies by git
+        // version and whether the ref or the path is the missing half.
+        // The case-insensitive substring set below covers all the
+        // wordings observed across recent git releases.
+        let lower = stderr.to_ascii_lowercase();
+        if lower.contains("not a valid object name")
+            || lower.contains("invalid object name")
+            || lower.contains("does not exist")
+            || lower.contains("unknown revision")
+            || lower.contains("ambiguous argument")
+        {
+            return Ok(None);
+        }
+        check_success(&res)?;
+        // `check_success` returned Ok on a non-zero status with an
+        // unrecognized stderr — treat as a real failure rather than
+        // a silent miss.
+        Err(VcsError::CommandFailed {
+            client: NAME,
+            argv: res.argv,
+            exit_code: res.output.status.code(),
+            stderr: stderr.into_owned(),
+        })
     }
 
     fn is_ancestor(&self, repo: &Path, ancestor: &str, descendant: &str) -> Result<bool, VcsError> {

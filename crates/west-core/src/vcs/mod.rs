@@ -162,6 +162,13 @@ impl<W: Write + Send> ProgressSink for LineSink<W> {
 /// (the tool renders its own progress); `Stream(sink)` pipes stderr
 /// through a parser into structured [`ProgressEvent`]s. Lookups (`sha`,
 /// `is_repo`, …) don't produce progress and don't take an `Output`.
+/// Fully-qualified name of the ref west uses to record the
+/// commit it most recently materialized in a project. The import
+/// resolver reads imports from this ref via [`Vcs::read_at_ref`].
+/// Implementations of [`Vcs::set_manifest_rev`] / [`Vcs::manifest_rev`]
+/// point this ref at the appropriate commit.
+pub const MANIFEST_REV_REF: &str = "refs/heads/manifest-rev";
+
 pub trait Vcs: fmt::Debug + Send + Sync {
     /// Client identifier (`"git"`, `"jj"`, …). Stable; surfaces in errors.
     fn name(&self) -> &'static str;
@@ -177,6 +184,31 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     /// Resolve `rev` to a commit SHA in `repo`. `"HEAD"` resolves the current
     /// commit.
     fn sha(&self, repo: &Path, rev: &str) -> Result<String, VcsError>;
+
+    /// Read the contents of `relative_path` at `rev` in `repo`. Returns
+    /// `Ok(None)` when the path doesn't exist at that revision *or*
+    /// when the revision itself doesn't resolve (e.g. `manifest-rev`
+    /// has never been set on a fresh clone). Genuine tool failures
+    /// (`git` binary missing, repo isn't a working copy, malformed
+    /// output) surface as `Err`.
+    ///
+    /// The path is interpreted relative to the repo root. The west
+    /// import resolver passes `refs/heads/manifest-rev` as `rev` —
+    /// mirrors v1's `_manifest_content_at`, which loaded import data
+    /// from git rather than the working tree so a user-initiated
+    /// `git checkout` of an unrelated branch doesn't contaminate
+    /// manifest resolution.
+    ///
+    /// The return type is bytes, not a string, so callers can decide
+    /// whether to treat the payload as text. Manifest YAML is UTF-8
+    /// per spec; callers that need string semantics do
+    /// `String::from_utf8(...)` at the boundary.
+    fn read_at_ref(
+        &self,
+        repo: &Path,
+        rev: &str,
+        relative_path: &Path,
+    ) -> Result<Option<Vec<u8>>, VcsError>;
 
     /// Is `ancestor` reachable as an ancestor of `descendant`?
     fn is_ancestor(&self, repo: &Path, ancestor: &str, descendant: &str) -> Result<bool, VcsError>;

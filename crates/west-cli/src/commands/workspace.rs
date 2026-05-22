@@ -27,7 +27,7 @@ use std::sync::Mutex;
 use west_core::config::Configuration;
 use west_core::loaded::{LoadedManifest, ProjectFilter, ProjectFilterError};
 use west_core::manifest::{ImportPolicy, ImportSource, ImportSourceError, Manifest, Project};
-use west_core::vcs::Vcs;
+use west_core::vcs::{MANIFEST_REV_REF, Vcs};
 
 const DEFAULT_MANIFEST_FILE: &str = "west.yml";
 
@@ -165,14 +165,30 @@ impl ImportSource for ReadOnlyImportSource<'_> {
                 .push(project.name.clone());
             return Ok(None);
         }
-        let path = repo.join(relative_file);
-        match std::fs::read_to_string(&path) {
-            Ok(body) => Ok(Some(body)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(ImportSourceError::msg(format!(
-                "read {}: {e}",
-                path.display()
-            ))),
+        // Read from git at `manifest-rev`, not the working tree. v1's
+        // `_manifest_content_at` semantic: imports reflect the
+        // revision west materialized, independent of whatever the
+        // user has checked out since.
+        let bytes = self
+            .vcs
+            .read_at_ref(&repo, MANIFEST_REV_REF, std::path::Path::new(relative_file))
+            .map_err(ImportSourceError::new)?;
+        match bytes {
+            Some(b) => Ok(Some(String::from_utf8(b).map_err(|e| {
+                ImportSourceError::msg(format!(
+                    "{}: non-utf8 manifest at {}:{}: {e}",
+                    project.name, MANIFEST_REV_REF, relative_file,
+                ))
+            })?)),
+            None => {
+                // Path or ref absent at `manifest-rev`. Lines up with
+                // v1's soft-fail branch in `_manifest_content_at`.
+                self.skipped
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .push(project.name.clone());
+                Ok(None)
+            }
         }
     }
 }

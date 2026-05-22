@@ -1109,3 +1109,93 @@ fn from_config_default_fetch_force_is_true() {
     assert!(dbg.contains("submodules_recurse: true"), "got: {dbg}");
     assert!(dbg.contains("submodules_sync: true"), "got: {dbg}");
 }
+
+// =====================================================================
+// `read_at_ref`: content-addressed file reads at a revision.
+//
+// The west import resolver relies on this to load per-project manifest
+// imports from `refs/heads/manifest-rev` rather than the working tree
+// — so a user `git checkout`-ing an unrelated branch after `west update`
+// doesn't break manifest resolution. v1 used `git show <ref>:<path>`
+// directly; these tests pin the equivalent semantics on the trait.
+// =====================================================================
+
+#[test]
+fn read_at_ref_reads_from_git_not_worktree() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+
+    // Stage a file on `manifest-rev` branch and remove it from the
+    // working tree. v1's pin test (`test_import_project_list`) does
+    // the same shape: commit-on-branch, switch back to master,
+    // assert the resolver still finds the file.
+    git(&["checkout", "-q", "-b", "manifest-rev"], &dest);
+    std::fs::write(dest.join("m1.yml"), b"manifest: {}\n").unwrap();
+    git(&["add", "m1.yml"], &dest);
+    git(&["commit", "-q", "-m", "add m1.yml"], &dest);
+    git(&["checkout", "-q", "main"], &dest);
+    assert!(
+        !dest.join("m1.yml").exists(),
+        "precondition: m1.yml must be absent from the working tree"
+    );
+
+    let v = GitClient::new(GitOptions::default());
+    let got = v
+        .read_at_ref(&dest, "refs/heads/manifest-rev", Path::new("m1.yml"))
+        .unwrap();
+    assert_eq!(got.as_deref(), Some(b"manifest: {}\n".as_slice()));
+}
+
+#[test]
+fn read_at_ref_returns_none_when_path_missing_at_ref() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+
+    let v = GitClient::new(GitOptions::default());
+    let got = v.read_at_ref(&dest, "HEAD", Path::new("does-not-exist.yml")).unwrap();
+    assert!(got.is_none());
+}
+
+#[test]
+fn read_at_ref_returns_none_when_ref_missing() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+
+    // `manifest-rev` is the conventional ref west sets after `update`.
+    // On a fresh clone it doesn't exist — must be Ok(None), not Err.
+    let v = GitClient::new(GitOptions::default());
+    let got = v
+        .read_at_ref(&dest, "refs/heads/manifest-rev", Path::new("anything"))
+        .unwrap();
+    assert!(got.is_none());
+}
+
+#[test]
+fn read_at_ref_errors_when_repo_path_is_not_a_repo() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let v = GitClient::new(GitOptions::default());
+    let res = v.read_at_ref(tmp.path(), "HEAD", Path::new("anything"));
+    assert!(
+        matches!(res, Err(_)),
+        "non-repo dir must propagate as Err, not silent Ok(None); got {res:?}"
+    );
+}
