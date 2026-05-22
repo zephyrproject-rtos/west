@@ -377,6 +377,72 @@ impl Vcs for GitClient {
         Ok(trimmed.to_owned())
     }
 
+    fn ls_tree_at_ref(
+        &self,
+        repo: &Path,
+        rev: &str,
+        relative_path: &Path,
+    ) -> Result<Option<Vec<String>>, VcsError> {
+        let repo_str = repo.to_string_lossy().into_owned();
+        let spec = format!("{rev}:{}", relative_path.to_string_lossy());
+        // Two-step: first `cat-file -t` to disambiguate tree vs blob
+        // vs missing (git stderrs vary by version, but the type-probe
+        // is unambiguous); then `ls-tree --name-only` if it's a tree.
+        let probe = self.run(&["-C", &repo_str, "cat-file", "-t", &spec])?;
+        if !probe.output.status.success() {
+            // Missing ref or path — soft-fail. Use the same stderr
+            // pattern set as `read_at_ref`; real failures bubble up.
+            let stderr = String::from_utf8_lossy(&probe.output.stderr);
+            let lower = stderr.to_ascii_lowercase();
+            if lower.contains("not a valid object name")
+                || lower.contains("invalid object name")
+                || lower.contains("does not exist")
+                || lower.contains("unknown revision")
+                || lower.contains("ambiguous argument")
+            {
+                return Ok(None);
+            }
+            return Err(VcsError::CommandFailed {
+                client: NAME,
+                argv: probe.argv,
+                exit_code: probe.output.status.code(),
+                stderr: stderr.into_owned(),
+            });
+        }
+        let kind = std::str::from_utf8(&probe.output.stdout)
+            .map(str::trim)
+            .map_err(|e| VcsError::BadOutput {
+                client: NAME,
+                argv: probe.argv.clone(),
+                detail: format!("cat-file -t non-UTF-8 stdout: {e}"),
+            })?;
+        if kind != "tree" {
+            // Blob (or anything else): the caller treats this as
+            // "not a directory" and falls back to `read_at_ref`.
+            return Ok(None);
+        }
+        // `ls-tree --name-only <rev>:<path>` writes one name per line.
+        // Use the same `<rev>:<path>` spec as the probe; `name-only`
+        // strips the mode/type/sha columns. NUL-terminated mode (`-z`)
+        // would be safer for filenames with newlines but git's natural
+        // line-mode is sufficient for manifest YAML names.
+        let res = self.run(&["-C", &repo_str, "ls-tree", "--name-only", &spec])?;
+        check_success(&res)?;
+        let stdout = std::str::from_utf8(&res.output.stdout).map_err(|e| VcsError::BadOutput {
+            client: NAME,
+            argv: res.argv.clone(),
+            detail: format!("ls-tree non-UTF-8 stdout: {e}"),
+        })?;
+        Ok(Some(
+            stdout
+                .lines()
+                .map(str::trim_end)
+                .filter(|l| !l.is_empty())
+                .map(str::to_owned)
+                .collect(),
+        ))
+    }
+
     fn read_at_ref(
         &self,
         repo: &Path,

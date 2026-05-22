@@ -1185,6 +1185,85 @@ fn read_at_ref_returns_none_when_ref_missing() {
     assert!(got.is_none());
 }
 
+// =====================================================================
+// `ls_tree_at_ref`: directory listing for per-project directory imports.
+// =====================================================================
+
+#[test]
+fn ls_tree_at_ref_lists_sorted_filenames() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    git(&["checkout", "-q", "-b", "manifest-rev"], &dest);
+    std::fs::create_dir_all(dest.join("d")).unwrap();
+    std::fs::write(dest.join("d/m1.yml"), b"m1\n").unwrap();
+    std::fs::write(dest.join("d/m2.yml"), b"m2\n").unwrap();
+    std::fs::write(dest.join("d/ignore.txt"), b"ignore\n").unwrap();
+    git(&["add", "d"], &dest);
+    git(&["commit", "-q", "-m", "dir"], &dest);
+
+    let v = GitClient::new(GitOptions::default());
+    let got = v
+        .ls_tree_at_ref(&dest, "refs/heads/manifest-rev", Path::new("d"))
+        .unwrap()
+        .expect("d/ is a tree at manifest-rev");
+    // `git ls-tree --name-only` produces lexically sorted output.
+    assert_eq!(got, vec!["ignore.txt", "m1.yml", "m2.yml"]);
+}
+
+#[test]
+fn ls_tree_at_ref_returns_none_for_blob() {
+    // A path that's a file (blob) at the ref must report Ok(None), so
+    // the importer falls back to read_at_ref instead of treating it
+    // as a directory.
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    let v = GitClient::new(GitOptions::default());
+    // `README` was committed by `bare_source_with_one_commit`.
+    let got = v.ls_tree_at_ref(&dest, "HEAD", Path::new("README")).unwrap();
+    assert!(got.is_none());
+}
+
+#[test]
+fn ls_tree_at_ref_returns_none_when_ref_missing() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    let v = GitClient::new(GitOptions::default());
+    let got = v
+        .ls_tree_at_ref(&dest, "refs/heads/manifest-rev", Path::new("anything"))
+        .unwrap();
+    assert!(got.is_none());
+}
+
+#[test]
+fn ls_tree_at_ref_errors_when_repo_path_is_not_a_repo() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let v = GitClient::new(GitOptions::default());
+    let res = v.ls_tree_at_ref(tmp.path(), "HEAD", Path::new("anything"));
+    assert!(
+        matches!(res, Err(_)),
+        "non-repo dir must propagate as Err; got {res:?}"
+    );
+}
+
 #[test]
 fn read_at_ref_errors_when_repo_path_is_not_a_repo() {
     if !git_available() {

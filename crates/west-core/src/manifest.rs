@@ -141,12 +141,29 @@ impl fmt::Display for ImportSite {
 /// "west.manifest", …)` and continues with the rest of the projects,
 /// surfacing the failure once at the end via
 /// [`ManifestError::ImportSourceFailed`] only if the resolver aborts.
+/// What an [`ImportSource`] returns for a per-project import.
+///
+/// `Single` is a one-file body (the common case, when the project's
+/// `import:` names a single file). `Multiple` is a sorted list of YAML
+/// file bodies, used by the directory form (`import: <dir>` where
+/// `<dir>` lives in the project at `manifest-rev`). The resolver
+/// absorbs each entry as a separate sub-manifest in order — matching
+/// v1's `_manifest_content_at`, which returned `str | list[str]`.
+///
+/// `Multiple` entries are parsed as YAML. Mixed-extension directories
+/// fall out of scope; v1 didn't support them either.
+#[derive(Debug, Clone)]
+pub enum ImportContent {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
 pub trait ImportSource {
     fn project_manifest(
         &self,
         project: &Project,
         relative_file: &str,
-    ) -> Result<Option<String>, ImportSourceError>;
+    ) -> Result<Option<ImportContent>, ImportSourceError>;
 
     /// Where this project's working tree lives on disk, used by the
     /// resolver to anchor *filesystem*-style imports (`self.import:
@@ -177,7 +194,7 @@ impl ImportSource for NoopImportSource {
         &self,
         _project: &Project,
         _relative_file: &str,
-    ) -> Result<Option<String>, ImportSourceError> {
+    ) -> Result<Option<ImportContent>, ImportSourceError> {
         Ok(None)
     }
 }
@@ -1069,8 +1086,8 @@ impl<'a> Resolver<'a> {
             .file
             .clone()
             .unwrap_or_else(|| MANIFEST_DEFAULT_FILE.to_owned());
-        let body = match self.source.project_manifest(project, &file) {
-            Ok(Some(b)) => b,
+        let content = match self.source.project_manifest(project, &file) {
+            Ok(Some(c)) => c,
             Ok(None) => {
                 self.visited_projects.remove(&project.name);
                 return Ok(());
@@ -1085,14 +1102,6 @@ impl<'a> Resolver<'a> {
                 return Ok(());
             }
         };
-
-        // Parse with the imported file's extension if explicit, else YAML
-        // (default for `west.yml`).
-        let pseudo_path = PathBuf::from(&file);
-        let parsed = parse_body_by_extension(&pseudo_path, &body)?;
-        parsed
-            .validate()
-            .map_err(|r| ManifestError::Validation(r.to_string()))?;
 
         let composed = ImportFilter::compose(parent_filter, &ImportFilter::from_map(imap));
         let prefix = match imap.path_prefix.as_deref() {
@@ -1112,12 +1121,60 @@ impl<'a> Resolver<'a> {
             self.current_repo_root = root;
         }
 
-        self.depth += 1;
-        let res = self.absorb(parsed, composed, prefix);
-        self.depth -= 1;
+        let res = match content {
+            ImportContent::Single(body) => {
+                // Parse with the imported file's extension if explicit,
+                // else YAML (default for `west.yml`).
+                let pseudo_path = PathBuf::from(&file);
+                self.absorb_one_imported_body(
+                    &pseudo_path,
+                    &body,
+                    composed.clone(),
+                    prefix.clone(),
+                )
+            }
+            ImportContent::Multiple(bodies) => {
+                // Directory form: each entry is a YAML sub-manifest. v1's
+                // contract is that the source returns them in the order
+                // the resolver should absorb them — typically lexical by
+                // filename, set by the source impl.
+                let mut out: Result<(), ManifestError> = Ok(());
+                for body in bodies {
+                    if let Err(e) = self.absorb_one_imported_body(
+                        Path::new("west.yml"),
+                        &body,
+                        composed.clone(),
+                        prefix.clone(),
+                    ) {
+                        out = Err(e);
+                        break;
+                    }
+                }
+                out
+            }
+        };
 
         self.current_repo_root = saved_repo_root;
         self.visited_projects.remove(&project.name);
+        res
+    }
+
+    /// Shared parse-validate-absorb path used by both the single-file
+    /// and directory branches of [`Self::absorb_project_import`].
+    fn absorb_one_imported_body(
+        &mut self,
+        pseudo_path: &Path,
+        body: &str,
+        filter: ImportFilter,
+        prefix: PathBuf,
+    ) -> Result<(), ManifestError> {
+        let parsed = parse_body_by_extension(pseudo_path, body)?;
+        parsed
+            .validate()
+            .map_err(|r| ManifestError::Validation(r.to_string()))?;
+        self.depth += 1;
+        let res = self.absorb(parsed, filter, prefix);
+        self.depth -= 1;
         res
     }
 
@@ -2735,11 +2792,15 @@ manifest:
             &self,
             project: &Project,
             file: &str,
-        ) -> Result<Option<String>, ImportSourceError> {
+        ) -> Result<Option<ImportContent>, ImportSourceError> {
             self.calls
                 .borrow_mut()
                 .push((project.name.clone(), file.to_owned()));
-            Ok(self.manifests.get(&project.name).cloned())
+            Ok(self
+                .manifests
+                .get(&project.name)
+                .cloned()
+                .map(ImportContent::Single))
         }
 
         fn project_root(&self, project: &Project) -> Option<PathBuf> {

@@ -20,8 +20,9 @@ use west_core::loaded::{
     ProjectFilterError,
 };
 use west_core::manifest::{
-    self as core, GroupFilterEntry as CoreGroupFilterEntry, ImportPolicy, ImportSource,
-    ImportSourceError, ManifestError, Submodule as CoreSubmodule, Submodules as CoreSubmodules,
+    self as core, GroupFilterEntry as CoreGroupFilterEntry, ImportContent, ImportPolicy,
+    ImportSource, ImportSourceError, ManifestError, Submodule as CoreSubmodule,
+    Submodules as CoreSubmodules,
 };
 
 // Mirrors python `west.manifest.ImportFlag` IntFlag bits. Translated to
@@ -586,11 +587,15 @@ fn parse_cli_group_filter(items: Vec<String>) -> PyResult<Vec<GroupFilterEntry>>
 /// Adapts a python callable to `west_core::manifest::ImportSource`.
 /// Each `project_manifest` invocation acquires the GIL, calls the
 /// python callable with `(project_name, project_path, relative_file)`,
-/// and translates the return value: `None` → resolver continues
-/// without this import; `str` → fed to the resolver as the import's
-/// content; any other type, or an exception, → `ImportSourceError`
-/// (which the rust resolver surfaces as
-/// `ManifestError::ImportSourceFailed` → `ManifestImportFailed`).
+/// and translates the return value:
+///   * `None`       → resolver continues without this import.
+///   * `str`        → [`ImportContent::Single`] (one sub-manifest body).
+///   * `list[str]`  → [`ImportContent::Multiple`] (directory-form import:
+///                     each entry is parsed as a separate YAML body, in
+///                     the order the python side returned them).
+///   * anything else, or an exception → `ImportSourceError` (the rust
+///     resolver surfaces this as `ManifestError::ImportSourceFailed` →
+///     `ManifestImportFailed`).
 struct PyImportSource {
     callback: Py<PyAny>,
 }
@@ -600,7 +605,7 @@ impl ImportSource for PyImportSource {
         &self,
         project: &core::Project,
         relative_file: &str,
-    ) -> Result<Option<String>, ImportSourceError> {
+    ) -> Result<Option<ImportContent>, ImportSourceError> {
         Python::attach(|py| {
             let project_path = project.path.to_string_lossy();
             let result = self
@@ -609,12 +614,20 @@ impl ImportSource for PyImportSource {
                 .call1((project.name.as_str(), &*project_path, relative_file))
                 .map_err(|e| ImportSourceError::msg(format!("{}: {e}", project.name)))?;
             if result.is_none() {
-                Ok(None)
-            } else {
-                let s: String = result
-                    .extract()
-                    .map_err(|e| ImportSourceError::msg(format!("{}: {e}", project.name)))?;
-                Ok(Some(s))
+                return Ok(None);
+            }
+            // Try `list[str]` first — a string also satisfies the
+            // "iterable of str" extraction, so the str path must win
+            // when the value is genuinely a string.
+            if let Ok(s) = result.extract::<String>() {
+                return Ok(Some(ImportContent::Single(s)));
+            }
+            match result.extract::<Vec<String>>() {
+                Ok(list) => Ok(Some(ImportContent::Multiple(list))),
+                Err(e) => Err(ImportSourceError::msg(format!(
+                    "{}: importer must return str | list[str] | None, got: {e}",
+                    project.name,
+                ))),
             }
         })
     }

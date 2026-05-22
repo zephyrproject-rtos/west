@@ -45,7 +45,32 @@ fn read_at_ref<'py>(
     }
 }
 
+/// List the entries of the directory at `rev:relative_path` in
+/// `repo`. Returns the entry names (no parent prefix) on success,
+/// `None` when the path isn't a directory at that revision, or raises
+/// `OSError` for genuine git failures.
+///
+/// Mirrors `west_core::vcs::Vcs::ls_tree_at_ref`. The python
+/// `_filesystem_importer` uses this to detect per-project directory
+/// imports against `manifest-rev`.
+#[pyfunction]
+#[pyo3(signature = (repo, rev, relative_path))]
+fn ls_tree_at_ref(
+    repo: PathBuf,
+    rev: &str,
+    relative_path: PathBuf,
+) -> PyResult<Option<Vec<String>>> {
+    if rev.is_empty() {
+        return Err(PyValueError::new_err("rev must be non-empty"));
+    }
+    let client = GitClient::new(GitOptions::default());
+    client
+        .ls_tree_at_ref(&repo, rev, &relative_path)
+        .map_err(|e| PyOSError::new_err(e.to_string()))
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_at_ref, m)?)?;
+    m.add_function(wrap_pyfunction!(ls_tree_at_ref, m)?)?;
     Ok(())
 }

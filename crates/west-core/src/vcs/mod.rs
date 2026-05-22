@@ -185,6 +185,23 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     /// commit.
     fn sha(&self, repo: &Path, rev: &str) -> Result<String, VcsError>;
 
+    /// List the entries of the *directory* at `rev:relative_path` in
+    /// `repo`. Returns `Ok(None)` when the path isn't a tree (it's a
+    /// blob, or absent), or when the revision itself doesn't resolve.
+    /// Genuine tool failures surface as `Err`.
+    ///
+    /// Entries are returned as filenames relative to `relative_path`,
+    /// without the parent path prefix. Order matches git's natural
+    /// `ls-tree` order (lexical by name). Used by the import resolver
+    /// to expand per-project directory imports (`import: <dir>`) — see
+    /// v1's `_manifest_content_at` for the contract.
+    fn ls_tree_at_ref(
+        &self,
+        repo: &Path,
+        rev: &str,
+        relative_path: &Path,
+    ) -> Result<Option<Vec<String>>, VcsError>;
+
     /// Read the contents of `relative_path` at `rev` in `repo`. Returns
     /// `Ok(None)` when the path doesn't exist at that revision *or*
     /// when the revision itself doesn't resolve (e.g. `manifest-rev`

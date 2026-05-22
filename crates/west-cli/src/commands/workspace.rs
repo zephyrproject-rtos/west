@@ -26,7 +26,9 @@ use std::sync::Mutex;
 
 use west_core::config::Configuration;
 use west_core::loaded::{LoadedManifest, ProjectFilter, ProjectFilterError};
-use west_core::manifest::{ImportPolicy, ImportSource, ImportSourceError, Manifest, Project};
+use west_core::manifest::{
+    ImportContent, ImportPolicy, ImportSource, ImportSourceError, Manifest, Project,
+};
 use west_core::vcs::{MANIFEST_REV_REF, Vcs};
 
 const DEFAULT_MANIFEST_FILE: &str = "west.yml";
@@ -156,7 +158,7 @@ impl ImportSource for ReadOnlyImportSource<'_> {
         &self,
         project: &Project,
         relative_file: &str,
-    ) -> Result<Option<String>, ImportSourceError> {
+    ) -> Result<Option<ImportContent>, ImportSourceError> {
         let repo = self.workspace.join(&project.path);
         if !repo.exists() || !self.vcs.is_repo(&repo).unwrap_or(false) {
             self.skipped
@@ -165,29 +167,83 @@ impl ImportSource for ReadOnlyImportSource<'_> {
                 .push(project.name.clone());
             return Ok(None);
         }
-        // Read from git at `manifest-rev`, not the working tree. v1's
-        // `_manifest_content_at` semantic: imports reflect the
-        // revision west materialized, independent of whatever the
-        // user has checked out since.
-        let bytes = self
-            .vcs
-            .read_at_ref(&repo, MANIFEST_REV_REF, std::path::Path::new(relative_file))
-            .map_err(ImportSourceError::new)?;
-        match bytes {
-            Some(b) => Ok(Some(String::from_utf8(b).map_err(|e| {
-                ImportSourceError::msg(format!(
-                    "{}: non-utf8 manifest at {}:{}: {e}",
-                    project.name, MANIFEST_REV_REF, relative_file,
-                ))
-            })?)),
+        match read_project_import(self.vcs, &repo, relative_file, &project.name)? {
+            Some(content) => Ok(Some(content)),
             None => {
-                // Path or ref absent at `manifest-rev`. Lines up with
-                // v1's soft-fail branch in `_manifest_content_at`.
                 self.skipped
                     .lock()
                     .unwrap_or_else(|p| p.into_inner())
                     .push(project.name.clone());
                 Ok(None)
+            }
+        }
+    }
+}
+
+/// Shared read-from-git helper used by [`ReadOnlyImportSource`] and
+/// [`crate::commands::update::import_source::WorkspaceImportSource`].
+///
+/// Tries the directory-import path first via [`Vcs::ls_tree_at_ref`]:
+/// for a tree, the YAML/TOML/JSON entries are sorted, read via
+/// [`Vcs::read_at_ref`], and returned as
+/// [`ImportContent::Multiple`]. Other extensions (`.txt`, …) are
+/// silently filtered out — matches v1 and `absorb_filesystem_import`'s
+/// own directory rule.
+///
+/// On a blob path, falls back to [`Vcs::read_at_ref`] and returns
+/// [`ImportContent::Single`]. Missing ref / missing path collapses
+/// to `Ok(None)` so the import is soft-skipped.
+pub(crate) fn read_project_import(
+    vcs: &dyn Vcs,
+    repo: &Path,
+    relative_file: &str,
+    project_name: &str,
+) -> Result<Option<ImportContent>, ImportSourceError> {
+    let path = std::path::Path::new(relative_file);
+    match vcs
+        .ls_tree_at_ref(repo, MANIFEST_REV_REF, path)
+        .map_err(ImportSourceError::new)?
+    {
+        Some(mut entries) => {
+            entries.retain(|name| {
+                matches!(
+                    std::path::Path::new(name)
+                        .extension()
+                        .and_then(|s| s.to_str()),
+                    Some("yml") | Some("yaml") | Some("toml") | Some("json")
+                )
+            });
+            entries.sort();
+            let mut bodies: Vec<String> = Vec::with_capacity(entries.len());
+            for name in entries {
+                let nested = path.join(&name);
+                let bytes = vcs
+                    .read_at_ref(repo, MANIFEST_REV_REF, &nested)
+                    .map_err(ImportSourceError::new)?;
+                let Some(bytes) = bytes else { continue };
+                let body = String::from_utf8(bytes).map_err(|e| {
+                    ImportSourceError::msg(format!(
+                        "{project_name}: non-utf8 manifest at {MANIFEST_REV_REF}:{}: {e}",
+                        nested.display(),
+                    ))
+                })?;
+                bodies.push(body);
+            }
+            Ok(Some(ImportContent::Multiple(bodies)))
+        }
+        None => {
+            let bytes = vcs
+                .read_at_ref(repo, MANIFEST_REV_REF, path)
+                .map_err(ImportSourceError::new)?;
+            match bytes {
+                Some(b) => Ok(Some(ImportContent::Single(String::from_utf8(b).map_err(
+                    |e| {
+                        ImportSourceError::msg(format!(
+                            "{project_name}: non-utf8 manifest at {MANIFEST_REV_REF}:{relative_file}: {e}",
+                        ))
+                    },
+                )?))),
+                None => Ok(None),
             }
         }
     }

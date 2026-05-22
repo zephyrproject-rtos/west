@@ -291,3 +291,59 @@ fn list_reads_per_project_imports_from_manifest_rev_not_worktree() {
         "expected Q in `west list` output even after p/west.yml was deleted from worktree; got: {stdout:?}",
     );
 }
+
+#[test]
+#[serial]
+fn update_resolves_per_project_directory_import() {
+    // Mirrors python `tests/test_manifest.py::test_import_project_directory`:
+    // P's import names a directory (`d`) rather than a single file. The
+    // directory contains two YAML sub-manifests at `manifest-rev` plus a
+    // non-YAML file that must be filtered out. The resolver should pull
+    // in projects from BOTH YAML files and ignore the non-YAML entry.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+
+    let q = make_bare_with_files(sb.root(), "q", &[("README", "q\n")]);
+    let r = make_bare_with_files(sb.root(), "r", &[("README", "r\n")]);
+
+    // P's `d/` directory holds the sub-manifests. `ignore.txt` proves
+    // the resolver filters by extension instead of swallowing everything.
+    let m1 = format!(
+        "manifest:\n  projects:\n    - name: q\n      url: {url}\n      revision: main\n",
+        url = q.display(),
+    );
+    let m2 = format!(
+        "manifest:\n  projects:\n    - name: r\n      url: {url}\n      revision: main\n",
+        url = r.display(),
+    );
+    let p = make_bare_with_files(
+        sb.root(),
+        "p",
+        &[
+            ("README", "p\n"),
+            ("d/m1.yml", m1.as_str()),
+            ("d/m2.yml", m2.as_str()),
+            ("d/ignore.txt", "not a manifest\n"),
+        ],
+    );
+
+    let manifest_yml = format!(
+        "manifest:\n  self:\n    path: my-manifest\n  projects:\n    - name: p\n      url: {url}\n      revision: main\n      import: d\n",
+        url = p.display(),
+    );
+    let manifest_bare = make_bare_with_files(sb.root(), "manifest", &[("west.yml", &manifest_yml)]);
+
+    let ws = init_workspace(&sb, &manifest_bare);
+    sb.west()
+        .args(["-C", ws.to_str().unwrap(), "update", "-j", "1"])
+        .assert()
+        .success();
+
+    // Both Q and R should be cloned (pulled in by P's directory
+    // import); the non-YAML entry must not have caused parse errors.
+    assert!(ws.join("p/d/m1.yml").exists(), "P/d/m1.yml must be present");
+    assert!(ws.join("q/README").exists(), "Q (from d/m1.yml) must be cloned");
+    assert!(ws.join("r/README").exists(), "R (from d/m2.yml) must be cloned");
+}

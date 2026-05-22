@@ -575,30 +575,35 @@ def _default_importer(project: Project, file: str) -> NoReturn:
 
 def _filesystem_importer(
     topdir: Path, project_filter: _west_native.ProjectFilter
-) -> tuple[Callable[[str, str, str], str | None], list[str]]:
+) -> tuple[Callable[[str, str, str], str | list[str] | None], list[str]]:
     '''Build a read-only ImportSource callback for `Manifest.from_path_with_imports`.
 
     Reads import files **from git** at the project's
     `refs/heads/manifest-rev`, not from the working tree, via the rust
-    binding's :py:func:`west._west_native.read_at_ref`. The legacy
-    contract (see v1's `_manifest_content_at`) is that imports are
-    evaluated against the revision west most recently updated to —
-    independent of whatever the user may have checked out since.
-    Sharing the rust `read_at_ref` keeps python and the rust CLI
-    commands using identical git invocation and soft-fail semantics.
-    Projects that the workspace config has marked inactive via
-    `manifest.project-filter` short-circuit to `None`.
+    binding's :py:func:`west._west_native.read_at_ref`. Directory-form
+    per-project imports (``import: <dir>/``) are detected via
+    :py:func:`west._west_native.ls_tree_at_ref` and returned as a sorted
+    ``list[str]`` of YAML/TOML/JSON sub-manifest bodies — the binding's
+    ``PyImportSource`` maps that to ``ImportContent::Multiple``, which
+    the rust resolver absorbs entry by entry. Mirrors v1's
+    ``_manifest_content_at`` return shape (``str | list[str]``).
 
-    Returns `(callback, errors)`. `errors` is a list the callback appends
-    to whenever an *active* project's import file is missing or
-    unreadable; the rust resolver swallows source-side `Err` returns
-    with a warning by design, so the caller is expected to inspect
-    `errors` after the resolver returns and raise `ManifestImportFailed`
-    if any were recorded.
+    Projects that the workspace config has marked inactive via
+    ``manifest.project-filter`` short-circuit to ``None``.
+
+    Returns ``(callback, errors)``. ``errors`` is a list the callback
+    appends to whenever an *active* project's import file is missing
+    or unreadable; the rust resolver swallows source-side ``Err``
+    returns with a warning by design, so the caller is expected to
+    inspect ``errors`` after the resolver returns and raise
+    ``ManifestImportFailed`` if any were recorded.
     '''
     errors: list[str] = []
+    _IMPORTABLE_EXTS = ('.yml', '.yaml', '.toml', '.json')
 
-    def _read(name: str, project_path: str, relative_file: str) -> str | None:
+    def _read(
+        name: str, project_path: str, relative_file: str
+    ) -> str | list[str] | None:
         if project_filter.decide(name) is False:
             return None
         repo = topdir / project_path
@@ -609,28 +614,64 @@ def _filesystem_importer(
             # expected to clone before we can resolve.
             errors.append(f'{name}:{relative_file}: project is not cloned')
             return None
+        # Try the directory form first. A blob path / missing path /
+        # missing ref all surface as `None` from `ls_tree_at_ref`,
+        # which lets us fall through to the single-file read.
         try:
-            payload = _west_native.read_at_ref(
+            entries = _west_native.ls_tree_at_ref(
                 os.fspath(repo), QUAL_MANIFEST_REV_BRANCH, relative_file
             )
         except OSError as e:
             errors.append(f'{name}:{relative_file}: {e}')
             return None
-        if payload is None:
-            errors.append(f'{name}:{relative_file}: not found at {MANIFEST_REV_BRANCH}')
-            return None
-        try:
-            return payload.decode('utf-8')
-        except UnicodeDecodeError as e:
-            errors.append(f'{name}:{relative_file}: not valid utf-8 at {MANIFEST_REV_BRANCH}: {e}')
-            return None
+        if entries is not None:
+            bodies: list[str] = []
+            for entry_name in sorted(entries):
+                if not entry_name.endswith(_IMPORTABLE_EXTS):
+                    continue
+                nested = (
+                    f'{relative_file.rstrip("/")}/{entry_name}'
+                    if relative_file
+                    else entry_name
+                )
+                body = _read_blob(repo, nested, name, errors)
+                if body is not None:
+                    bodies.append(body)
+            return bodies
+        # Not a directory — try the single-file read.
+        return _read_blob(repo, relative_file, name, errors)
 
     return _read, errors
 
 
+def _read_blob(
+    repo: Path, relative_file: str, project_name: str, errors: list[str]
+) -> str | None:
+    # Single-file read at `manifest-rev`. Soft-fails on missing path
+    # or ref by appending to `errors`. Returns the decoded body on
+    # success.
+    try:
+        payload = _west_native.read_at_ref(
+            os.fspath(repo), QUAL_MANIFEST_REV_BRANCH, relative_file
+        )
+    except OSError as e:
+        errors.append(f'{project_name}:{relative_file}: {e}')
+        return None
+    if payload is None:
+        errors.append(f'{project_name}:{relative_file}: not found at {MANIFEST_REV_BRANCH}')
+        return None
+    try:
+        return payload.decode('utf-8')
+    except UnicodeDecodeError as e:
+        errors.append(
+            f'{project_name}:{relative_file}: not valid utf-8 at {MANIFEST_REV_BRANCH}: {e}'
+        )
+        return None
+
+
 def _adapt_legacy_importer(
     importer: ImporterType,
-) -> Callable[[str, str, str], str | None]:
+) -> Callable[[str, str, str], str | list[str] | None]:
     '''Adapt a legacy 2-arg ``importer(project, file)`` callback to the 3-arg
     ``(name, path, file)`` callback the native binding calls.
 
@@ -639,19 +680,17 @@ def _adapt_legacy_importer(
     yet when it asks for an import. The stub carries just ``name`` and ``path``,
     which is what every in-tree caller actually reads.
 
-    Legacy return values may be ``str``, ``list[str]``, or ``None``. The native
-    binding expects ``str | None``. We join lists with a newline separator —
-    legacy behavior used these as concatenated manifest fragments.
+    Return values flow through verbatim: ``str`` becomes a single-file
+    import (`ImportContent::Single`), ``list[str]`` becomes a directory
+    form (`ImportContent::Multiple`), ``None`` skips. Matches v1's
+    ``ImportedContentType``.
     '''
 
-    def _adapt(name: str, project_path: str, relative_file: str) -> str | None:
+    def _adapt(
+        name: str, project_path: str, relative_file: str
+    ) -> str | list[str] | None:
         stub = Project(name, url='', revision='', path=project_path)
-        result = importer(stub, relative_file)
-        if result is None:
-            return None
-        if isinstance(result, list):
-            return '\n'.join(result)
-        return result
+        return importer(stub, relative_file)
 
     return _adapt
 
