@@ -76,6 +76,7 @@ SCHEMA_VERSION = '1.2'
 # The value of a west-commands as passed around during manifest
 # resolution. It can become a list due to resolving imports, even
 # though it's just a str in each individual file right now.
+# TODO: WestCommands should be promoted to a Python class, see issue #959
 WestCommandsType = str | list[str]
 
 # Type for the importer callback passed to the manifest constructor.
@@ -907,6 +908,9 @@ class Project:
         self.groups: GroupsType = groups or []
         self.userdata: Any = userdata
 
+        # Internal helpers
+        self._west_commands_manifest_dirs: dict[str, str] = dict()
+
     @property
     def path(self) -> str:
         return self._path
@@ -1266,6 +1270,7 @@ class ManifestProject(Project):
 
         # Extension commands.
         self.west_commands = _west_commands_list(west_commands)
+        self._west_commands_manifest_dirs: dict[str, str] = dict()
 
     @property
     def abspath(self) -> str | None:
@@ -2723,6 +2728,12 @@ class Manifest:
         west_commands_to_merge = [
             (mfst_dir / cmd).as_posix() for cmd in submanifest._ctx.manifest_west_commands
         ]
+
+        # Keep track of which imported manifest directory each adjusted
+        # west-commands entry came from, so command Python files can be
+        # resolved relative to that manifest root later in commands.py.
+        for adjusted_cmd in west_commands_to_merge:
+            project._west_commands_manifest_dirs.setdefault(adjusted_cmd, str(mfst_dir))
 
         project.west_commands = _west_commands_merge(project.west_commands, west_commands_to_merge)
 

@@ -266,6 +266,83 @@ def test_extension_command_multiple_commands_same_file(west_update_tmpdir):
     assert 'second command' in ext_output
 
 
+def test_call_imported_project_submanifest_commands_from_project_subdirectory(repos_tmpdir):
+    # If net-tools imports mf_subdir/west.yml and that manifest declares
+    # self: west-commands: scripts/west-commands.yml, then file paths in that
+    # west-commands YAML are resolved relative to the imported manifest root.
+    # The same paths must work whether a project is imported or initialized directly;
+    # importing must never break anything.
+    manifest_path = repos_tmpdir / 'repos' / 'zephyr'
+    net_tools_path = repos_tmpdir / 'repos' / 'net-tools'
+
+    MF_SUB_WEST_YML = textwrap.dedent(
+        '''\
+        manifest:
+          self:
+            west-commands: scripts/west-commands-from-subdir.yml
+        '''
+    )
+    MF_SUB_COMMANDS_YML = textwrap.dedent(
+        '''\
+        west-commands:
+          - file: test/west-commands/subdir_command.py
+            commands:
+              - name: imported-command-from-subdir
+                class: ImportedCommandFromProjectSubdir
+                help: imported extension help
+        '''
+    )
+    MF_SUB_WEST_PY = textwrap.dedent(
+        '''\
+        from west.commands import WestCommand
+
+        class ImportedCommandFromProjectSubdir(WestCommand):
+            def __init__(self):
+                super().__init__(
+                    'imported-command-from-subdir',
+                    'imported command from subdir help',
+                    'imported command from subdir description',
+                )
+
+            def do_add_parser(self, parser_adder):
+                return parser_adder.add_parser(self.name)
+
+            def do_run(self, args, unknown):
+                print('imported command from subdir works')
+        '''
+    )
+
+    add_commit(
+        net_tools_path,
+        'add imported submanifest extension command',
+        files={
+            'mf_subdir/west.yml': MF_SUB_WEST_YML,
+            'mf_subdir/scripts/west-commands-from-subdir.yml': MF_SUB_COMMANDS_YML,
+            'mf_subdir/test/west-commands/subdir_command.py': MF_SUB_WEST_PY,
+        },
+    )
+
+    with yaml_editor(manifest_path / 'west.yml') as mf:
+        net_tools_project = [p for p in mf['manifest']['projects'] if p['name'] == 'net-tools'][0]
+        net_tools_project['import'] = 'mf_subdir/west.yml'
+    subprocess.check_call([
+        GIT,
+        '-C',
+        str(manifest_path),
+        'commit',
+        '-m',
+        'import mf_subdir/west.yml',
+        'west.yml',
+    ])
+
+    workspace = repos_tmpdir / 'workspace'
+    cmd(['init', '-m', str(manifest_path), str(workspace)])
+    cmd('update', cwd=workspace)
+
+    ext_output = cmd('imported-command-from-subdir', cwd=workspace)
+    assert 'imported command from subdir works' in ext_output
+
+
 def test_extension_special_chars(west_update_tmpdir):
     # Detect any unexpected changes in the way we've been handling backslashes and other
     # special characters. Changes in how we handle such edge cases may or may not be desired
