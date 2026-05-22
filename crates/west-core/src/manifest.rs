@@ -1047,10 +1047,32 @@ impl<'a> Resolver<'a> {
                 }
             }
             let project = resolve_project(ps.clone(), &remotes, defaults)?;
-            let prefixed_path = if path_prefix.as_os_str().is_empty() {
+            // A project that carries `import: { path-prefix: X }` has
+            // its own path prefixed with `X` too, so it sits alongside
+            // the projects pulled in from its imported body (which
+            // pick up the same prefix when `absorb_project_import`
+            // composes it onto `path_prefix`). For list-form imports
+            // we use the first map's prefix — multiple prefixes on
+            // one project's `import:` is ill-defined.
+            let own_prefix = ps
+                .import
+                .as_ref()
+                .and_then(|s| flatten_imports(s).into_iter().find_map(|m| m.path_prefix))
+                .map(PathBuf::from)
+                .unwrap_or_default();
+            let effective_prefix = match (
+                path_prefix.as_os_str().is_empty(),
+                own_prefix.as_os_str().is_empty(),
+            ) {
+                (true, true) => PathBuf::new(),
+                (false, true) => path_prefix.clone(),
+                (true, false) => own_prefix,
+                (false, false) => path_prefix.join(&own_prefix),
+            };
+            let prefixed_path = if effective_prefix.as_os_str().is_empty() {
                 project.path.clone()
             } else {
-                path_prefix.join(&project.path)
+                effective_prefix.join(&project.path)
             };
             let mut project = project;
             project.path = prefixed_path;
@@ -3867,21 +3889,12 @@ manifest:
     }
 
     #[test]
-    fn project_import_path_prefix_does_not_apply_to_self() {
-        // Pins current behavior. Divergence from legacy west:
-        //
-        // A project that carries `import: { path-prefix: bar }` historically
-        // had its OWN path prefixed with `bar` — `foo` landed at `bar/foo` so
-        // it sat alongside the projects pulled in from foo's manifest body
-        // (which use the prefix when they're absorbed in `absorb_project_import`).
-        //
-        // The current resolver applies `path_prefix` only when recursing into
-        // the imported body — phase 1 adds the directly-defined project at its
-        // declared path without consulting `ps.import.path_prefix`.
-        //
-        // This pin fires if/when we restore the legacy quirk, prompting an
-        // update both here and in the python `ImportFlag` docstring (which
-        // currently inherits the legacy wording about `bar/foo`).
+    fn project_import_path_prefix_applies_to_importing_project() {
+        // A project that carries `import: { path-prefix: bar }` has
+        // its own path prefixed with `bar` too, so it ends up at
+        // `bar/foo` alongside the projects pulled in from foo's
+        // imported body (which `absorb_project_import` composes onto
+        // the same prefix when recursing).
         let m = Manifest::from_yaml_str_with(r#"
 manifest:
   projects:
@@ -3891,8 +3904,7 @@ manifest:
         path-prefix: bar
 "#, None, ImportPolicy::IGNORE_ALL)
         .unwrap();
-        assert_eq!(m.projects[0].path, PathBuf::from("foo"));
-        // Legacy would assert PathBuf::from("bar/foo").
+        assert_eq!(m.projects[0].path, PathBuf::from("bar/foo"));
     }
 
     #[test]
