@@ -94,6 +94,15 @@ GroupFilterType = list[str]
 GroupsType = list[str]
 SubmodulesType = list[Submodule] | bool
 
+# Return type of the 3-arg `(name, project_path, relative_file)` callback
+# the rust binding's `PyImportSource` calls. Mirrors what the binding
+# accepts: a single body, a directory of YAML bodies (legacy v1 shape),
+# a directory of `(filename, body)` pairs (per-entry parser dispatch),
+# or `None` to skip. Module-private — the public surface stays
+# `ImporterType` (the 2-arg legacy callback).
+_NativeImporterReturn = str | list[str] | list[tuple[str, str]] | None
+_NativeImporter = Callable[[str, str, str], _NativeImporterReturn]
+
 
 class ImportFlag(enum.IntFlag):
     '''Bit flags for *import_flags* arguments to manifest factories.
@@ -575,7 +584,7 @@ def _default_importer(project: Project, file: str) -> NoReturn:
 
 def _filesystem_importer(
     topdir: Path, project_filter: _west_native.ProjectFilter
-) -> tuple[Callable[[str, str, str], str | list[str] | None], list[str]]:
+) -> tuple[_NativeImporter, list[str]]:
     '''Build a read-only ImportSource callback for `Manifest.from_path_with_imports`.
 
     Reads import files **from git** at the project's
@@ -583,10 +592,11 @@ def _filesystem_importer(
     binding's :py:func:`west._west_native.read_at_ref`. Directory-form
     per-project imports (``import: <dir>/``) are detected via
     :py:func:`west._west_native.ls_tree_at_ref` and returned as a sorted
-    ``list[str]`` of YAML/TOML/JSON sub-manifest bodies — the binding's
-    ``PyImportSource`` maps that to ``ImportContent::Multiple``, which
-    the rust resolver absorbs entry by entry. Mirrors v1's
-    ``_manifest_content_at`` return shape (``str | list[str]``).
+    list of ``(filename, body)`` tuples — the binding's
+    ``PyImportSource`` maps that to ``ImportContent::Multiple`` with
+    filenames intact, so the resolver picks the right parser per entry
+    (YAML/TOML/JSON sub-manifests can mix in a single directory). Single-file
+    imports return the body as a plain ``str``.
 
     Projects that the workspace config has marked inactive via
     ``manifest.project-filter`` short-circuit to ``None``.
@@ -601,9 +611,7 @@ def _filesystem_importer(
     errors: list[str] = []
     _IMPORTABLE_EXTS = ('.yml', '.yaml', '.toml', '.json')
 
-    def _read(
-        name: str, project_path: str, relative_file: str
-    ) -> str | list[str] | None:
+    def _read(name: str, project_path: str, relative_file: str) -> _NativeImporterReturn:
         if project_filter.decide(name) is False:
             return None
         repo = topdir / project_path
@@ -625,35 +633,29 @@ def _filesystem_importer(
             errors.append(f'{name}:{relative_file}: {e}')
             return None
         if entries is not None:
-            bodies: list[str] = []
+            named_bodies: list[tuple[str, str]] = []
             for entry_name in sorted(entries):
                 if not entry_name.endswith(_IMPORTABLE_EXTS):
                     continue
                 nested = (
-                    f'{relative_file.rstrip("/")}/{entry_name}'
-                    if relative_file
-                    else entry_name
+                    f'{relative_file.rstrip("/")}/{entry_name}' if relative_file else entry_name
                 )
                 body = _read_blob(repo, nested, name, errors)
                 if body is not None:
-                    bodies.append(body)
-            return bodies
+                    named_bodies.append((entry_name, body))
+            return named_bodies
         # Not a directory — try the single-file read.
         return _read_blob(repo, relative_file, name, errors)
 
     return _read, errors
 
 
-def _read_blob(
-    repo: Path, relative_file: str, project_name: str, errors: list[str]
-) -> str | None:
+def _read_blob(repo: Path, relative_file: str, project_name: str, errors: list[str]) -> str | None:
     # Single-file read at `manifest-rev`. Soft-fails on missing path
     # or ref by appending to `errors`. Returns the decoded body on
     # success.
     try:
-        payload = _west_native.read_at_ref(
-            os.fspath(repo), QUAL_MANIFEST_REV_BRANCH, relative_file
-        )
+        payload = _west_native.read_at_ref(os.fspath(repo), QUAL_MANIFEST_REV_BRANCH, relative_file)
     except OSError as e:
         errors.append(f'{project_name}:{relative_file}: {e}')
         return None
@@ -669,9 +671,7 @@ def _read_blob(
         return None
 
 
-def _adapt_legacy_importer(
-    importer: ImporterType,
-) -> Callable[[str, str, str], str | list[str] | None]:
+def _adapt_legacy_importer(importer: ImporterType) -> _NativeImporter:
     '''Adapt a legacy 2-arg ``importer(project, file)`` callback to the 3-arg
     ``(name, path, file)`` callback the native binding calls.
 
@@ -686,9 +686,7 @@ def _adapt_legacy_importer(
     ``ImportedContentType``.
     '''
 
-    def _adapt(
-        name: str, project_path: str, relative_file: str
-    ) -> str | list[str] | None:
+    def _adapt(name: str, project_path: str, relative_file: str) -> _NativeImporterReturn:
         stub = Project(name, url='', revision='', path=project_path)
         return importer(stub, relative_file)
 

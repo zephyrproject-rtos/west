@@ -27,7 +27,7 @@ use std::sync::Mutex;
 use west_core::config::Configuration;
 use west_core::loaded::{LoadedManifest, ProjectFilter, ProjectFilterError};
 use west_core::manifest::{
-    ImportContent, ImportPolicy, ImportSource, ImportSourceError, Manifest, Project,
+    ImportContent, ImportPolicy, ImportSource, ImportSourceError, Manifest, NamedBody, Project,
 };
 use west_core::vcs::{MANIFEST_REV_REF, Vcs};
 
@@ -214,7 +214,7 @@ pub(crate) fn read_project_import(
                 )
             });
             entries.sort();
-            let mut bodies: Vec<String> = Vec::with_capacity(entries.len());
+            let mut bodies: Vec<NamedBody> = Vec::with_capacity(entries.len());
             for name in entries {
                 let nested = path.join(&name);
                 let bytes = vcs
@@ -227,7 +227,9 @@ pub(crate) fn read_project_import(
                         nested.display(),
                     ))
                 })?;
-                bodies.push(body);
+                // The filename (without the directory prefix) carries
+                // the extension the resolver uses to pick its parser.
+                bodies.push(NamedBody { name, body });
             }
             Ok(Some(ImportContent::Multiple(bodies)))
         }

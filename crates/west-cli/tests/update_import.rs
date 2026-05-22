@@ -295,11 +295,11 @@ fn list_reads_per_project_imports_from_manifest_rev_not_worktree() {
 #[test]
 #[serial]
 fn update_resolves_per_project_directory_import() {
-    // Mirrors python `tests/test_manifest.py::test_import_project_directory`:
-    // P's import names a directory (`d`) rather than a single file. The
-    // directory contains two YAML sub-manifests at `manifest-rev` plus a
-    // non-YAML file that must be filtered out. The resolver should pull
-    // in projects from BOTH YAML files and ignore the non-YAML entry.
+    // Mirrors python `tests/test_manifest.py::test_import_project_directory`,
+    // plus goes one further by mixing YAML and TOML sub-manifests in
+    // the same directory — the resolver must dispatch parsers per
+    // entry rather than treating every entry as YAML. v1 was YAML-only;
+    // this exercises the rust port's broader format support.
     if !git_available() {
         return;
     }
@@ -308,14 +308,17 @@ fn update_resolves_per_project_directory_import() {
     let q = make_bare_with_files(sb.root(), "q", &[("README", "q\n")]);
     let r = make_bare_with_files(sb.root(), "r", &[("README", "r\n")]);
 
-    // P's `d/` directory holds the sub-manifests. `ignore.txt` proves
-    // the resolver filters by extension instead of swallowing everything.
-    let m1 = format!(
+    // P's `d/` directory mixes a YAML and a TOML sub-manifest plus a
+    // non-importable file. The resolver dispatches by extension per
+    // entry — so the TOML file must parse with the TOML parser, not
+    // be silently mis-parsed as YAML — and `ignore.txt` must be
+    // filtered out by extension before any parsing happens.
+    let m1_yml = format!(
         "manifest:\n  projects:\n    - name: q\n      url: {url}\n      revision: main\n",
         url = q.display(),
     );
-    let m2 = format!(
-        "manifest:\n  projects:\n    - name: r\n      url: {url}\n      revision: main\n",
+    let m2_toml = format!(
+        "[[manifest.projects]]\nname = \"r\"\nurl = \"{url}\"\nrevision = \"main\"\n",
         url = r.display(),
     );
     let p = make_bare_with_files(
@@ -323,8 +326,8 @@ fn update_resolves_per_project_directory_import() {
         "p",
         &[
             ("README", "p\n"),
-            ("d/m1.yml", m1.as_str()),
-            ("d/m2.yml", m2.as_str()),
+            ("d/m1.yml", m1_yml.as_str()),
+            ("d/m2.toml", m2_toml.as_str()),
             ("d/ignore.txt", "not a manifest\n"),
         ],
     );

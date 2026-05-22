@@ -144,18 +144,33 @@ impl fmt::Display for ImportSite {
 /// What an [`ImportSource`] returns for a per-project import.
 ///
 /// `Single` is a one-file body (the common case, when the project's
-/// `import:` names a single file). `Multiple` is a sorted list of YAML
-/// file bodies, used by the directory form (`import: <dir>` where
-/// `<dir>` lives in the project at `manifest-rev`). The resolver
-/// absorbs each entry as a separate sub-manifest in order — matching
-/// v1's `_manifest_content_at`, which returned `str | list[str]`.
+/// `import:` names a single file). `Multiple` is a sorted list of
+/// `(filename, body)` pairs, used by the directory form
+/// (`import: <dir>` where `<dir>` lives in the project at
+/// `manifest-rev`). The resolver absorbs each entry as a separate
+/// sub-manifest in the given order; the filename selects the parser
+/// per entry, so YAML, TOML, and JSON sub-manifests can coexist in a
+/// single import directory.
 ///
-/// `Multiple` entries are parsed as YAML. Mixed-extension directories
-/// fall out of scope; v1 didn't support them either.
+/// Matches v1's `_manifest_content_at` return shape (`str | list[str]`),
+/// extended with filenames because the rust port supports multiple
+/// manifest formats — v1 was YAML-only and so could fold filenames
+/// out of the API.
 #[derive(Debug, Clone)]
 pub enum ImportContent {
     Single(String),
-    Multiple(Vec<String>),
+    Multiple(Vec<NamedBody>),
+}
+
+/// One entry in [`ImportContent::Multiple`] — a sub-manifest body
+/// paired with the filename it was read from. The filename's extension
+/// (`.yml`/`.yaml`/`.toml`/`.json`) selects the parser; an empty name
+/// or missing extension defaults to YAML (matches the
+/// `west.yml`-as-default convention).
+#[derive(Debug, Clone)]
+pub struct NamedBody {
+    pub name: String,
+    pub body: String,
 }
 
 pub trait ImportSource {
@@ -1133,16 +1148,17 @@ impl<'a> Resolver<'a> {
                     prefix.clone(),
                 )
             }
-            ImportContent::Multiple(bodies) => {
-                // Directory form: each entry is a YAML sub-manifest. v1's
-                // contract is that the source returns them in the order
-                // the resolver should absorb them — typically lexical by
-                // filename, set by the source impl.
+            ImportContent::Multiple(entries) => {
+                // Directory form: absorb each (filename, body) pair in
+                // the order the source returned them. The filename's
+                // extension picks the parser, so a directory can mix
+                // YAML/TOML/JSON sub-manifests freely.
                 let mut out: Result<(), ManifestError> = Ok(());
-                for body in bodies {
+                for entry in entries {
+                    let pseudo_path = PathBuf::from(&entry.name);
                     if let Err(e) = self.absorb_one_imported_body(
-                        Path::new("west.yml"),
-                        &body,
+                        &pseudo_path,
+                        &entry.body,
                         composed.clone(),
                         prefix.clone(),
                     ) {

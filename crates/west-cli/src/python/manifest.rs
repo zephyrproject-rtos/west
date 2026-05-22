@@ -21,7 +21,7 @@ use west_core::loaded::{
 };
 use west_core::manifest::{
     self as core, GroupFilterEntry as CoreGroupFilterEntry, ImportContent, ImportPolicy,
-    ImportSource, ImportSourceError, ManifestError, Submodule as CoreSubmodule,
+    ImportSource, ImportSourceError, ManifestError, NamedBody, Submodule as CoreSubmodule,
     Submodules as CoreSubmodules,
 };
 
@@ -588,13 +588,17 @@ fn parse_cli_group_filter(items: Vec<String>) -> PyResult<Vec<GroupFilterEntry>>
 /// Each `project_manifest` invocation acquires the GIL, calls the
 /// python callable with `(project_name, project_path, relative_file)`,
 /// and translates the return value:
-///   * `None`       → resolver continues without this import.
-///   * `str`        → [`ImportContent::Single`] (one sub-manifest body).
-///   * `list[str]`  → [`ImportContent::Multiple`] (directory-form import:
-///                     each entry is parsed as a separate YAML body, in
-///                     the order the python side returned them).
-///   * anything else, or an exception → `ImportSourceError` (the rust
-///     resolver surfaces this as `ManifestError::ImportSourceFailed` →
+///   * `None` → resolver continues without this import.
+///   * `str`  → [`ImportContent::Single`] (one sub-manifest body).
+///   * `list[str]` → [`ImportContent::Multiple`] with synthetic empty
+///     filenames; each entry is parsed as YAML (matches v1's legacy
+///     `_manifest_content_at`, which was YAML-only).
+///   * `list[tuple[str, str]]` → [`ImportContent::Multiple`] with
+///     explicit `(filename, body)` pairs; the filename's extension
+///     selects the parser per entry so YAML/TOML/JSON can mix in a
+///     single import directory.
+///   * anything else, or an exception → `ImportSourceError` (surfaces
+///     as `ManifestError::ImportSourceFailed` →
 ///     `ManifestImportFailed`).
 struct PyImportSource {
     callback: Py<PyAny>,
@@ -616,16 +620,37 @@ impl ImportSource for PyImportSource {
             if result.is_none() {
                 return Ok(None);
             }
-            // Try `list[str]` first — a string also satisfies the
+            // `str` first: a Python string also satisfies the
             // "iterable of str" extraction, so the str path must win
             // when the value is genuinely a string.
             if let Ok(s) = result.extract::<String>() {
                 return Ok(Some(ImportContent::Single(s)));
             }
+            // `list[tuple[str, str]]` next: explicit (filename, body)
+            // pairs. The named form is preferred — picks the right
+            // parser per entry for mixed-extension directories.
+            if let Ok(pairs) = result.extract::<Vec<(String, String)>>() {
+                let entries = pairs
+                    .into_iter()
+                    .map(|(name, body)| NamedBody { name, body })
+                    .collect();
+                return Ok(Some(ImportContent::Multiple(entries)));
+            }
+            // `list[str]`: legacy YAML-only form (matches v1's
+            // `ImportedContentType = str | list[str] | None`). Each
+            // entry gets an empty filename — the resolver's
+            // `parse_body_by_extension` falls back to YAML.
             match result.extract::<Vec<String>>() {
-                Ok(list) => Ok(Some(ImportContent::Multiple(list))),
+                Ok(list) => Ok(Some(ImportContent::Multiple(
+                    list.into_iter()
+                        .map(|body| NamedBody {
+                            name: String::new(),
+                            body,
+                        })
+                        .collect(),
+                ))),
                 Err(e) => Err(ImportSourceError::msg(format!(
-                    "{}: importer must return str | list[str] | None, got: {e}",
+                    "{}: importer must return str | list[str] | list[(str, str)] | None, got: {e}",
                     project.name,
                 ))),
             }
