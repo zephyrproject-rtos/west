@@ -10,6 +10,7 @@ mod config;
 mod data;
 mod manifest;
 mod topdir;
+mod vcs;
 
 #[pymodule]
 fn _west_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -24,5 +25,6 @@ fn _west_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     config::register(m)?;
     manifest::register(m)?;
     data::register(m)?;
+    vcs::register(m)?;
     Ok(())
 }

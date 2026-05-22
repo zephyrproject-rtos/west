@@ -578,33 +578,51 @@ def _filesystem_importer(
 ) -> tuple[Callable[[str, str, str], str | None], list[str]]:
     '''Build a read-only ImportSource callback for `Manifest.from_path_with_imports`.
 
-    Reads import files directly off the workspace's project directories.
+    Reads import files **from git** at the project's
+    `refs/heads/manifest-rev`, not from the working tree, via the rust
+    binding's :py:func:`west._west_native.read_at_ref`. The legacy
+    contract (see v1's `_manifest_content_at`) is that imports are
+    evaluated against the revision west most recently updated to —
+    independent of whatever the user may have checked out since.
+    Sharing the rust `read_at_ref` keeps python and the rust CLI
+    commands using identical git invocation and soft-fail semantics.
     Projects that the workspace config has marked inactive via
-    `manifest.project-filter` short-circuit to `None` — the
-    project-filter decision comes from the rust binding's
-    :py:class:`west._west_native.ProjectFilter`, so the regex semantics
-    match :py:class:`west._west_native.LoadedManifest.is_active` exactly.
+    `manifest.project-filter` short-circuit to `None`.
 
     Returns `(callback, errors)`. `errors` is a list the callback appends
     to whenever an *active* project's import file is missing or
-    unreadable; the rust resolver swallows source-side `Err` returns with
-    a warning by design, so the caller is expected to inspect `errors`
-    after the resolver returns and raise `ManifestImportFailed` if any
-    were recorded.
+    unreadable; the rust resolver swallows source-side `Err` returns
+    with a warning by design, so the caller is expected to inspect
+    `errors` after the resolver returns and raise `ManifestImportFailed`
+    if any were recorded.
     '''
     errors: list[str] = []
 
     def _read(name: str, project_path: str, relative_file: str) -> str | None:
         if project_filter.decide(name) is False:
             return None
-        full = topdir / project_path / relative_file
-        try:
-            return full.read_text(encoding='utf-8')
-        except FileNotFoundError:
-            errors.append(f'{name}:{relative_file}: file not found')
+        repo = topdir / project_path
+        if not (repo / '.git').exists():
+            # Project isn't cloned yet — match v1's "use the importer"
+            # branch by reporting unavailability without erroring. The
+            # caller's `manifest --update` flow (or equivalent) is
+            # expected to clone before we can resolve.
+            errors.append(f'{name}:{relative_file}: project is not cloned')
             return None
+        try:
+            payload = _west_native.read_at_ref(
+                os.fspath(repo), QUAL_MANIFEST_REV_BRANCH, relative_file
+            )
         except OSError as e:
             errors.append(f'{name}:{relative_file}: {e}')
+            return None
+        if payload is None:
+            errors.append(f'{name}:{relative_file}: not found at {MANIFEST_REV_BRANCH}')
+            return None
+        try:
+            return payload.decode('utf-8')
+        except UnicodeDecodeError as e:
+            errors.append(f'{name}:{relative_file}: not valid utf-8 at {MANIFEST_REV_BRANCH}: {e}')
             return None
 
     return _read, errors
