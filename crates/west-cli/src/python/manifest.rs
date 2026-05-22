@@ -33,20 +33,36 @@ const FLAG_FORCE_PROJECTS: u32 = 2;
 const FLAG_IGNORE_PROJECTS: u32 = 4;
 const FLAG_ALL: u32 = FLAG_IGNORE | FLAG_FORCE_PROJECTS | FLAG_IGNORE_PROJECTS;
 
+/// Where in the binding the flag→policy mapping is being applied.
+/// Distinguishes the three call sites because `FORCE_PROJECTS`'s mapping
+/// is context-dependent — v1's semantic is "use my callback for
+/// per-project imports", which means different things depending on
+/// whether the caller also has a filesystem anchor (workspace) or
+/// only an in-memory body (`from_data`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlagSite {
+    /// No caller-supplied source (`from_yaml_str`, `from_path`, etc.).
+    /// `DEFAULT` falls back to `STRICT`; `FORCE_PROJECTS` has no
+    /// callback to dispatch to so the entry rejects it upstream.
+    NoSource,
+    /// Workspace flow with source AND filesystem (`from_path_with_imports`).
+    /// `FORCE_PROJECTS` = "route per-project through my callback" while
+    /// self / top-level imports keep reading from `manifest-rev`.
+    WorkspaceWithSource,
+    /// In-memory flow with source but no filesystem
+    /// (`from_yaml_str_with_imports`). `FORCE_PROJECTS` is the only
+    /// meaningful flag — filesystem-anchored sites must skip because
+    /// there's no anchor.
+    InMemoryWithSource,
+}
+
 /// Translate a python `ImportFlag` bitmask into the rust [`ImportPolicy`].
 ///
 /// Mirrors the legacy `_flags_ok` semantics: `FORCE_PROJECTS` is incompatible
 /// with `IGNORE` / `IGNORE_PROJECTS`, but `IGNORE | IGNORE_PROJECTS` is allowed
 /// (redundant but consistent — `IGNORE` subsumes `IGNORE_PROJECTS`). Unknown
 /// bits reject loudly.
-///
-/// `has_source` shapes the meaning of the `DEFAULT` flag (bits == 0): with a
-/// caller-supplied import callback we resolve everything; without one, we
-/// fall back to `STRICT` so an `import:` directive surfaces as
-/// `ManifestImportFailed` instead of an IO error from the resolver's attempt
-/// to walk the empty filesystem anchor. The skip flags map identically in
-/// either context.
-fn flags_to_policy(bits: u32, has_source: bool) -> PyResult<ImportPolicy> {
+fn flags_to_policy(bits: u32, site: FlagSite) -> PyResult<ImportPolicy> {
     if bits & !FLAG_ALL != 0 {
         return Err(PyValueError::new_err(format!(
             "invalid import_flags {bits:#x}: unknown bits set"
@@ -61,16 +77,35 @@ fn flags_to_policy(bits: u32, has_source: bool) -> PyResult<ImportPolicy> {
         )));
     }
     Ok(if has_fp {
-        ImportPolicy::PROJECTS_ONLY
+        match site {
+            // No filesystem to anchor self / top-level — skip them
+            // and route per-project through the callback.
+            FlagSite::InMemoryWithSource => ImportPolicy::PROJECTS_ONLY,
+            // Workspace with both source and disk: v1's
+            // `FORCE_PROJECTS` only changed *per-project* routing
+            // (built-in git → user callback). The Rust port routes
+            // per-project through the callback regardless, so this
+            // is equivalent to `RESOLVE_ALL`.
+            FlagSite::WorkspaceWithSource => ImportPolicy::RESOLVE_ALL,
+            // `FORCE_PROJECTS` without a callback is meaningless;
+            // the no-source entry points reject it upstream.
+            FlagSite::NoSource => ImportPolicy::PROJECTS_ONLY,
+        }
     } else if bits & FLAG_IGNORE != 0 {
         // IGNORE subsumes IGNORE_PROJECTS.
         ImportPolicy::IGNORE_ALL
     } else if bits & FLAG_IGNORE_PROJECTS != 0 {
         ImportPolicy::SKIP_PROJECTS
-    } else if has_source {
-        ImportPolicy::RESOLVE_ALL
     } else {
-        ImportPolicy::STRICT
+        match site {
+            FlagSite::WorkspaceWithSource | FlagSite::InMemoryWithSource => {
+                ImportPolicy::RESOLVE_ALL
+            }
+            // DEFAULT without a callback: surface `import:` as
+            // `ManifestImportFailed` (matches v1) rather than the
+            // IO error that an empty-anchor RESOLVE_ALL would yield.
+            FlagSite::NoSource => ImportPolicy::STRICT,
+        }
     })
 }
 
@@ -371,7 +406,7 @@ impl Manifest {
     #[staticmethod]
     #[pyo3(signature = (s, import_flags=0))]
     fn from_yaml_str(s: &str, import_flags: u32) -> PyResult<Self> {
-        let policy = flags_to_policy(import_flags, false)?;
+        let policy = flags_to_policy(import_flags, FlagSite::NoSource)?;
         core::Manifest::from_yaml_str_with(s, None, policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
@@ -380,7 +415,7 @@ impl Manifest {
     #[staticmethod]
     #[pyo3(signature = (s, import_flags=0))]
     fn from_toml_str(s: &str, import_flags: u32) -> PyResult<Self> {
-        let policy = flags_to_policy(import_flags, false)?;
+        let policy = flags_to_policy(import_flags, FlagSite::NoSource)?;
         core::Manifest::from_toml_str_with(s, None, policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
@@ -389,7 +424,7 @@ impl Manifest {
     #[staticmethod]
     #[pyo3(signature = (s, import_flags=0))]
     fn from_json_str(s: &str, import_flags: u32) -> PyResult<Self> {
-        let policy = flags_to_policy(import_flags, false)?;
+        let policy = flags_to_policy(import_flags, FlagSite::NoSource)?;
         core::Manifest::from_json_str_with(s, None, policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
@@ -407,7 +442,7 @@ impl Manifest {
     #[staticmethod]
     #[pyo3(signature = (value, import_flags=0))]
     fn from_dict(value: &Bound<'_, PyAny>, import_flags: u32) -> PyResult<Self> {
-        let policy = flags_to_policy(import_flags, false)?;
+        let policy = flags_to_policy(import_flags, FlagSite::NoSource)?;
         let v = py_to_value(value)?;
         core::Manifest::from_value_with(v, None, policy)
             .map(|inner| Manifest { inner })
@@ -421,7 +456,7 @@ impl Manifest {
     #[staticmethod]
     #[pyo3(signature = (path, import_flags=0))]
     fn from_path(path: PathBuf, import_flags: u32) -> PyResult<Self> {
-        let policy = flags_to_policy(import_flags, false)?;
+        let policy = flags_to_policy(import_flags, FlagSite::NoSource)?;
         core::Manifest::from_path_with(&path, None, None, policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
@@ -457,7 +492,7 @@ impl Manifest {
         callback: Py<PyAny>,
         import_flags: u32,
     ) -> PyResult<Self> {
-        let policy = flags_to_policy(import_flags, true)?;
+        let policy = flags_to_policy(import_flags, FlagSite::WorkspaceWithSource)?;
         let source = PyImportSource { callback };
         core::Manifest::from_path_with(&path, Some(&manifest_repo_root), Some(&source), policy)
             .map(|inner| Manifest { inner })
@@ -476,7 +511,7 @@ impl Manifest {
         callback: Py<PyAny>,
         import_flags: u32,
     ) -> PyResult<Self> {
-        let policy = flags_to_policy(import_flags, true)?;
+        let policy = flags_to_policy(import_flags, FlagSite::InMemoryWithSource)?;
         let source = PyImportSource { callback };
         core::Manifest::from_yaml_str_with(s, Some(&source), policy)
             .map(|inner| Manifest { inner })

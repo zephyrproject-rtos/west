@@ -908,7 +908,12 @@ impl<'a> Resolver<'a> {
         self.version = file.manifest.version.clone();
         let self_section = file.manifest.self_.clone();
         self.self_ = Some(build_self(self_section)?);
-        self.absorb(file, ImportFilter::default(), PathBuf::new())
+        self.absorb(
+            file,
+            ImportFilter::default(),
+            PathBuf::new(),
+            &HashSet::new(),
+        )
     }
 
     fn absorb(
@@ -916,6 +921,7 @@ impl<'a> Resolver<'a> {
         file: ManifestFile,
         filter: ImportFilter,
         path_prefix: PathBuf,
+        parent_skip: &HashSet<String>,
     ) -> Result<(), ManifestError> {
         if self.depth > MAX_IMPORT_DEPTH {
             return Err(ManifestError::ImportTooDeep {
@@ -928,7 +934,7 @@ impl<'a> Resolver<'a> {
         // Per-file project-name uniqueness. Duplicates *within* a single
         // manifest file are an error — there is no first-wins semantic
         // for "the same file twice". Across files (root + imports) the
-        // global `seen_names` set in phase 1 below drops dupes
+        // global `seen_names` set in phase B below drops dupes
         // first-wins, which is the intended import behavior.
         let mut this_file_names: HashSet<&str> = HashSet::new();
         for ps in &m.projects {
@@ -948,7 +954,77 @@ impl<'a> Resolver<'a> {
             self.group_filter_strs.push(s.clone());
         }
 
-        // Phase 1: this file's directly-defined projects (first-wins).
+        // v1 ordering / precedence rules for `self.import:` and the
+        // top-level `manifest.import:`:
+        //   - Output order: imported projects appear *before* the
+        //     locally-defined ones in the final list (v1's docs frame
+        //     local definitions as additions on top of imports).
+        //   - Precedence on name conflict: the *importing* file's
+        //     locally-defined project wins; the import's same-named
+        //     project is silently dropped.
+        //
+        // To get both: process imports first (phase A), then push
+        // locals (phase B), and thread a `skip` set down to the
+        // recursive imports so the inner phase B knows which names the
+        // outer file will claim.
+        let my_locals: HashSet<String> =
+            m.projects.iter().map(|p| p.name.clone()).collect();
+        let mut child_skip: HashSet<String> = parent_skip.clone();
+        child_skip.extend(my_locals.iter().cloned());
+
+        // Phase A: self / top-level imports (filesystem). Recursive
+        // absorbs see `child_skip` so any name this file (or one of
+        // its ancestors) will define locally is skipped on the import
+        // side.
+        if let Some(self_section) = &m.self_
+            && let Some(import) = &self_section.import
+        {
+            let imaps = flatten_imports(import);
+            if !imaps.is_empty()
+                && self.dispatch_resolving_policy(
+                    self.policy.self_repo,
+                    "self",
+                    "manifest `self.import:` is unsupported and will be ignored",
+                )?
+            {
+                for imap in imaps {
+                    self.absorb_filesystem_import(
+                        &imap,
+                        &filter,
+                        &path_prefix,
+                        ImportSite::SelfRepo,
+                        &child_skip,
+                    )?;
+                }
+            }
+        }
+        if let Some(import) = &m.import {
+            let imaps = flatten_imports(import);
+            if !imaps.is_empty()
+                && self.dispatch_resolving_policy(
+                    self.policy.top_level,
+                    "top-level",
+                    "manifest top-level `import:` is unsupported and will be ignored; \
+                     projects pulled in by the import will not be updated",
+                )?
+            {
+                for imap in imaps {
+                    self.absorb_filesystem_import(
+                        &imap,
+                        &filter,
+                        &path_prefix,
+                        ImportSite::TopLevel,
+                        &child_skip,
+                    )?;
+                }
+            }
+        }
+
+        // Phase B: this file's directly-defined projects. Skip any
+        // name reserved by an outer scope (v1 precedence: outermost
+        // wins). The seen_names check below also catches the case
+        // where phase A pushed a same-named import that wasn't
+        // covered by `parent_skip` for some reason — defensive.
         for ps in &m.projects {
             if ps.name == "manifest" {
                 return Err(ManifestError::ProjectNamedManifest);
@@ -983,10 +1059,11 @@ impl<'a> Resolver<'a> {
             if !filter.allows(&project) {
                 continue;
             }
-            if self.seen_names.contains(&project.name) {
+            if let Some(reason) = name_already_claimed(&project.name, &self.seen_names, parent_skip)
+            {
                 log::debug!(
-                    "manifest import: dropping duplicate project {:?} (first-wins)",
-                    project.name
+                    "manifest import: dropping duplicate project {:?} ({reason})",
+                    project.name,
                 );
                 continue;
             }
@@ -995,57 +1072,6 @@ impl<'a> Resolver<'a> {
             }
             self.seen_names.insert(project.name.clone());
             self.projects.push(project);
-        }
-
-        // Phase 2: self / top-level imports (filesystem). Process self
-        // first so its projects are merged with first-wins precedence
-        // already established by phase 1.
-        // Phase 2: self / top-level imports (filesystem). Flatten the
-        // schema before consulting the policy so `import: false` — which
-        // collapses to zero `ImportMap`s — short-circuits without ever
-        // tripping `SitePolicy::Error`. The legacy contract treats
-        // `import: false` (and an empty list, etc.) as an explicit no-op
-        // that must parse cleanly even without an `ImportSource`.
-        if let Some(self_section) = &m.self_
-            && let Some(import) = &self_section.import
-        {
-            let imaps = flatten_imports(import);
-            if !imaps.is_empty()
-                && self.dispatch_resolving_policy(
-                    self.policy.self_repo,
-                    "self",
-                    "manifest `self.import:` is unsupported and will be ignored",
-                )?
-            {
-                for imap in imaps {
-                    self.absorb_filesystem_import(
-                        &imap,
-                        &filter,
-                        &path_prefix,
-                        ImportSite::SelfRepo,
-                    )?;
-                }
-            }
-        }
-        if let Some(import) = &m.import {
-            let imaps = flatten_imports(import);
-            if !imaps.is_empty()
-                && self.dispatch_resolving_policy(
-                    self.policy.top_level,
-                    "top-level",
-                    "manifest top-level `import:` is unsupported and will be ignored; \
-                     projects pulled in by the import will not be updated",
-                )?
-            {
-                for imap in imaps {
-                    self.absorb_filesystem_import(
-                        &imap,
-                        &filter,
-                        &path_prefix,
-                        ImportSite::TopLevel,
-                    )?;
-                }
-            }
         }
 
         // Phase 3: per-project imports. We iterate the same projects again
@@ -1114,6 +1140,7 @@ impl<'a> Resolver<'a> {
         parent_filter: &ImportFilter,
         parent_prefix: &Path,
         site: ImportSite,
+        parent_skip: &HashSet<String>,
     ) -> Result<(), ManifestError> {
         let file_name = imap
             .file
@@ -1158,12 +1185,24 @@ impl<'a> Resolver<'a> {
                 .collect();
             entries.sort();
             for path in entries {
-                self.absorb_one_file(&path, &composed_filter, &composed_prefix, site)?;
+                self.absorb_one_file(
+                    &path,
+                    &composed_filter,
+                    &composed_prefix,
+                    site,
+                    parent_skip,
+                )?;
             }
             return Ok(());
         }
 
-        self.absorb_one_file(&abs_path, &composed_filter, &composed_prefix, site)
+        self.absorb_one_file(
+            &abs_path,
+            &composed_filter,
+            &composed_prefix,
+            site,
+            parent_skip,
+        )
     }
 
     fn absorb_one_file(
@@ -1172,6 +1211,7 @@ impl<'a> Resolver<'a> {
         filter: &ImportFilter,
         prefix: &Path,
         site: ImportSite,
+        parent_skip: &HashSet<String>,
     ) -> Result<(), ManifestError> {
         let canonical = abs_path
             .canonicalize()
@@ -1193,7 +1233,7 @@ impl<'a> Resolver<'a> {
             .map_err(|r| ManifestError::Validation(r.to_string()))?;
 
         self.depth += 1;
-        let res = self.absorb(parsed, filter.clone(), prefix.to_path_buf());
+        let res = self.absorb(parsed, filter.clone(), prefix.to_path_buf(), parent_skip);
         self.depth -= 1;
         self.visited_files.remove(&canonical);
         res
@@ -1301,7 +1341,16 @@ impl<'a> Resolver<'a> {
             .map_err(|r| ManifestError::Validation(r.to_string()))?;
         self.inherit_imported_west_commands(importing_project, &parsed);
         self.depth += 1;
-        let res = self.absorb(parsed, filter.clone(), prefix.to_path_buf());
+        // Per-project imports fire in Phase 3, after the outer Phase
+        // B already pushed locals — so `seen_names` covers the
+        // precedence dedup. The outer-scope skip set used by
+        // filesystem-anchored imports doesn't apply here.
+        let res = self.absorb(
+            parsed,
+            filter.clone(),
+            prefix.to_path_buf(),
+            &HashSet::new(),
+        );
         self.depth -= 1;
         res
     }
@@ -1334,6 +1383,31 @@ impl<'a> Resolver<'a> {
             projects: self.projects,
             group_filter,
         })
+    }
+}
+
+/// Returns a debug-log reason when `name` is already claimed by some
+/// other scope so the caller should drop the candidate project:
+///
+/// - `"outer-scope first-wins"` — an outer (caller) absorb's locals
+///   set has reserved the name; the outer hasn't pushed yet but will,
+///   and v1's precedence rule is that the outermost-defining manifest
+///   wins on a name conflict.
+/// - `"first-wins"` — some earlier phase or recursion has already
+///   pushed this name to `seen_names`; later attempts are dropped.
+///
+/// Returns `None` when the name is free to push.
+fn name_already_claimed(
+    name: &str,
+    seen_names: &HashSet<String>,
+    parent_skip: &HashSet<String>,
+) -> Option<&'static str> {
+    if parent_skip.contains(name) {
+        Some("outer-scope first-wins")
+    } else if seen_names.contains(name) {
+        Some("first-wins")
+    } else {
+        None
     }
 }
 
@@ -2991,7 +3065,9 @@ manifest:
         let source = StaticImportSource::new();
         let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, vec!["p", "q"]);
+        // Imported projects come before locally-defined ones in the
+        // output list — v1's `self.import:` ordering contract.
+        assert_eq!(names, vec!["q", "p"]);
     }
 
     #[test]
@@ -3065,7 +3141,9 @@ manifest:
         let source = StaticImportSource::new();
         let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, vec!["p", "q", "r"]);
+        // Imports come first in the output list (q from a.yml, r
+        // from b.yml), then the locally-defined `p`.
+        assert_eq!(names, vec!["q", "r", "p"]);
     }
 
     #[test]
@@ -3100,7 +3178,7 @@ manifest:
         let source = StaticImportSource::new();
         let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, vec!["p", "keepme"]);
+        assert_eq!(names, vec!["keepme", "p"]);
     }
 
     #[test]
@@ -3137,7 +3215,7 @@ manifest:
         let source = StaticImportSource::new();
         let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, vec!["p", "b"]);
+        assert_eq!(names, vec!["b", "p"]);
     }
 
     #[test]
