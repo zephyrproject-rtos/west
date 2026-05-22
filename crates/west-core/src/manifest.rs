@@ -1136,62 +1136,78 @@ impl<'a> Resolver<'a> {
             self.current_repo_root = root;
         }
 
-        let res = match content {
-            ImportContent::Single(body) => {
-                // Parse with the imported file's extension if explicit,
-                // else YAML (default for `west.yml`).
-                let pseudo_path = PathBuf::from(&file);
-                self.absorb_one_imported_body(
-                    &pseudo_path,
-                    &body,
-                    composed.clone(),
-                    prefix.clone(),
-                )
-            }
-            ImportContent::Multiple(entries) => {
-                // Directory form: absorb each (filename, body) pair in
-                // the order the source returned them. The filename's
-                // extension picks the parser, so a directory can mix
-                // YAML/TOML/JSON sub-manifests freely.
-                let mut out: Result<(), ManifestError> = Ok(());
-                for entry in entries {
-                    let pseudo_path = PathBuf::from(&entry.name);
-                    if let Err(e) = self.absorb_one_imported_body(
-                        &pseudo_path,
-                        &entry.body,
-                        composed.clone(),
-                        prefix.clone(),
-                    ) {
-                        out = Err(e);
-                        break;
-                    }
-                }
-                out
-            }
+        // Fold Single into a 1-element batch so both branches go through
+        // the same loop. `Single` carries the original `import:` path
+        // as the parser-dispatch hint; `Multiple` already has per-entry
+        // filenames from the directory expansion.
+        let entries: Vec<NamedBody> = match content {
+            ImportContent::Single(body) => vec![NamedBody {
+                name: file.clone(),
+                body,
+            }],
+            ImportContent::Multiple(entries) => entries,
         };
+
+        let mut res: Result<(), ManifestError> = Ok(());
+        for entry in entries {
+            if let Err(e) = self.absorb_imported_submanifest(
+                &entry.name,
+                &entry.body,
+                &project.name,
+                &composed,
+                &prefix,
+            ) {
+                res = Err(e);
+                break;
+            }
+        }
 
         self.current_repo_root = saved_repo_root;
         self.visited_projects.remove(&project.name);
         res
     }
 
-    /// Shared parse-validate-absorb path used by both the single-file
-    /// and directory branches of [`Self::absorb_project_import`].
-    fn absorb_one_imported_body(
+    /// Parse, inherit, then absorb one sub-manifest pulled in by
+    /// `importing_project`'s per-project `import:` directive. `name`
+    /// is the filename used both for parser dispatch (extension
+    /// selects YAML/TOML/JSON) and for diagnostics.
+    fn absorb_imported_submanifest(
         &mut self,
-        pseudo_path: &Path,
+        name: &str,
         body: &str,
-        filter: ImportFilter,
-        prefix: PathBuf,
+        importing_project: &str,
+        filter: &ImportFilter,
+        prefix: &Path,
     ) -> Result<(), ManifestError> {
-        let parsed = parse_body_by_extension(pseudo_path, body)?;
+        let parsed = parse_body_by_extension(Path::new(name), body)?;
         parsed
             .validate()
             .map_err(|r| ManifestError::Validation(r.to_string()))?;
+        self.inherit_imported_west_commands(importing_project, &parsed);
         self.depth += 1;
-        let res = self.absorb(parsed, filter, prefix);
+        let res = self.absorb(parsed, filter.clone(), prefix.to_path_buf());
         self.depth -= 1;
         res
+    }
+
+    /// Append any `self.west-commands:` declared in an imported
+    /// sub-manifest onto the importing project's own `west_commands`.
+    /// v1 contract: a project that imports a sub-manifest inherits
+    /// the sub-manifest's extension scripts even if it has none of
+    /// its own. Multiple imports compose in absorption order; no-ops
+    /// silently when the imported file has no `self:` block or the
+    /// project was filter-dropped before the resolver got here.
+    fn inherit_imported_west_commands(&mut self, into: &str, imported: &ManifestFile) {
+        let Some(self_section) = &imported.manifest.self_ else {
+            return;
+        };
+        let Some(wc) = &self_section.west_commands else {
+            return;
+        };
+        if let Some(p) = self.projects.iter_mut().find(|p| p.name == into) {
+            p.west_commands
+                .extend(wc.to_vec().into_iter().map(PathBuf::from));
+        }
     }
 
     fn into_manifest(self) -> Result<Manifest, ManifestError> {
