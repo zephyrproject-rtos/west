@@ -6,6 +6,7 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+import pytest
 import yaml
 from conftest import GIT, WINDOWS, add_commit, cmd, cmd_raises, yaml_editor
 
@@ -341,6 +342,85 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory(re
 
     ext_output = cmd('imported-command-from-subdir', cwd=workspace)
     assert 'imported command from subdir works' in ext_output
+
+
+@pytest.mark.skipif(
+    not WINDOWS, reason="non-posix path separators don't work reliably on non-Windows"
+)
+def test_call_imported_project_submanifest_commands_from_project_subdirectory_windows_paths(
+    repos_tmpdir,
+):
+    # Same as the forward-slash test above, but use Windows-style
+    # separators in the manifest file paths.
+    manifest_path = repos_tmpdir / 'repos' / 'zephyr'
+    net_tools_path = repos_tmpdir / 'repos' / 'net-tools'
+
+    MF_SUB_WEST_YML = textwrap.dedent(
+        '''\
+        manifest:
+          self:
+            west-commands: scripts\\west-commands-from-subdir-windows.yml
+        '''
+    )
+    MF_SUB_COMMANDS_YML = textwrap.dedent(
+        '''\
+        west-commands:
+          - file: test\\west-commands\\subdir_command_windows.py
+            commands:
+              - name: imported-command-from-subdir-windows
+                class: ImportedCommandFromProjectSubdirWindows
+                help: imported command from subdir with windows paths help
+        '''
+    )
+    MF_SUB_WEST_PY = textwrap.dedent(
+        '''\
+        from west.commands import WestCommand
+
+        class ImportedCommandFromProjectSubdirWindows(WestCommand):
+            def __init__(self):
+                super().__init__(
+                    'imported-command-from-subdir-windows',
+                    'imported command from subdir with windows paths help',
+                    'imported command from subdir with windows paths description',
+                )
+
+            def do_add_parser(self, parser_adder):
+                return parser_adder.add_parser(self.name)
+
+            def do_run(self, args, unknown):
+                print('imported command from subdir with windows paths works')
+        '''
+    )
+
+    add_commit(
+        net_tools_path,
+        'add imported submanifest extension command with windows paths',
+        files={
+            r'mf_subdir/west.yml': MF_SUB_WEST_YML,
+            r'mf_subdir/scripts/west-commands-from-subdir-windows.yml': MF_SUB_COMMANDS_YML,
+            r'mf_subdir/test/west-commands/subdir_command_windows.py': MF_SUB_WEST_PY,
+        },
+    )
+
+    with yaml_editor(manifest_path / 'west.yml') as mf:
+        net_tools_project = [p for p in mf['manifest']['projects'] if p['name'] == 'net-tools'][0]
+        net_tools_project['import'] = r'mf_subdir/west.yml'
+    subprocess.check_call([
+        GIT,
+        '-C',
+        str(manifest_path),
+        'commit',
+        '-m',
+        'import mf_subdir\\west.yml',
+        'west.yml',
+    ])
+
+    workspace = repos_tmpdir / 'workspace'
+    cmd(['init', '-m', str(manifest_path), str(workspace)])
+    cmd('update', cwd=workspace)
+
+    ext_output = cmd('imported-command-from-subdir-windows', cwd=workspace)
+    assert 'imported command from subdir with windows paths works' in ext_output
 
 
 def test_extension_special_chars(west_update_tmpdir):
