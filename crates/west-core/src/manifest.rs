@@ -1155,6 +1155,19 @@ impl<'a> Resolver<'a> {
         // `ImportSource::project_root`).
         let abs_path = self.current_repo_root.join(&file_name);
 
+        // A missing path here means the manifest author named a
+        // file/directory that isn't on disk; surface it as a
+        // validation error (which maps to `MalformedManifest` on the
+        // python side) rather than a raw IO error from the read
+        // attempt downstream. Keeps the diagnostic specific without
+        // poking at io::ErrorKind in `absorb_one_file`.
+        if !abs_path.exists() {
+            return Err(ManifestError::Validation(format!(
+                "manifest.{site}.import: file not found: {}",
+                abs_path.display(),
+            )));
+        }
+
         // Compose filter and prefix once at this level so a directory
         // form's per-file recursions all see the same constraints.
         let composed_filter = ImportFilter::compose(parent_filter, &ImportFilter::from_map(imap));
