@@ -287,12 +287,14 @@ pub enum ManifestError {
     InvalidGroup { project: String, group: String },
     #[error("project {project:?}: \"groups\" cannot be combined with \"import\"")]
     GroupsWithImport { project: String },
-    #[error("{origin} group filter: invalid item {item:?}: {reason}")]
+    #[error("{origin} group filter contains invalid item {item:?}; {reason}")]
     InvalidGroupFilter {
         origin: String,
         item: String,
         reason: String,
     },
+    #[error("\"manifest: group-filter: []\" may not be empty")]
+    EmptyGroupFilter,
     #[error("project {project:?} has absolute path {path:?}; must be relative to the workspace")]
     AbsoluteProjectPath { project: String, path: String },
     #[error("project {project:?} has path {path:?} that escapes the workspace topdir")]
@@ -356,7 +358,7 @@ struct ManifestSection {
     self_: Option<SelfSchema>,
     #[garde(skip)]
     #[serde(rename = "group-filter", default)]
-    group_filter: Vec<String>,
+    group_filter: Option<Vec<String>>,
     #[garde(dive)]
     #[serde(default)]
     projects: Vec<ProjectSchema>,
@@ -953,9 +955,16 @@ impl<'a> Resolver<'a> {
 
         // Collect imported group-filter strings; appended to the resolver's
         // accumulated list at the end so all-imports group-filter merging
-        // happens deterministically.
-        for s in &m.group_filter {
-            self.group_filter_strs.push(s.clone());
+        // happens deterministically. An explicit empty list (`group-filter:
+        // []`) is rejected at every level — v1's contract via
+        // `_validated_group_filter`.
+        if let Some(gf) = &m.group_filter {
+            if gf.is_empty() {
+                return Err(ManifestError::EmptyGroupFilter);
+            }
+            for s in gf {
+                self.group_filter_strs.push(s.clone());
+            }
         }
 
         // v1 ordering / precedence rules for `self.import:` and the
