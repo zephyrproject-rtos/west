@@ -1022,6 +1022,13 @@ impl<'a> Resolver<'a> {
             }
         }
 
+        // Phase A.5: this file's own `self.west-commands:` lands now,
+        // after its imports' contributions, so the final list is
+        // ordered deepest-first with the root manifest's commands at
+        // the tail (v1 "imports come before locals" applied to self-
+        // block extension scripts).
+        self.append_own_self_west_commands(&m);
+
         // Phase B: this file's directly-defined projects. Skip any
         // name reserved by an outer scope (v1 precedence: outermost
         // wins). The seen_names check below also catches the case
@@ -1247,15 +1254,6 @@ impl<'a> Resolver<'a> {
             .validate()
             .map_err(|r| ManifestError::Validation(r.to_string()))?;
 
-        // Self / top-level imports are filesystem-anchored to the
-        // manifest repo, so any `west-commands:` they declare in their
-        // own `self:` block contributes to the manifest repo's own
-        // extension-command list (per-project imports use the
-        // analogous step inside `absorb_imported_submanifest`).
-        if matches!(site, ImportSite::SelfRepo | ImportSite::TopLevel) {
-            self.inherit_imported_self_west_commands(&parsed);
-        }
-
         self.depth += 1;
         let res = self.absorb(parsed, filter.clone(), prefix.to_path_buf(), parent_skip);
         self.depth -= 1;
@@ -1399,13 +1397,12 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    /// The self/top-level analog of `inherit_imported_west_commands`:
-    /// fold an imported sub-manifest's `self.west-commands:` into the
-    /// resolver's accumulated self block. Same v1 contract — a self
-    /// import contributes extension scripts to the manifest repo
-    /// itself.
-    fn inherit_imported_self_west_commands(&mut self, imported: &ManifestFile) {
-        let Some(self_section) = &imported.manifest.self_ else {
+    /// Append the current file's own `self.west-commands:` onto the
+    /// resolver's accumulated self block. Called from `absorb` after
+    /// Phase A imports return, so deeper sub-manifests' commands land
+    /// before the importing file's own (v1 ordering).
+    fn append_own_self_west_commands(&mut self, m: &ManifestSection) {
+        let Some(self_section) = &m.self_ else {
             return;
         };
         let Some(wc) = &self_section.west_commands else {
@@ -2094,13 +2091,11 @@ fn build_self(s: Option<SelfSchema>) -> Result<ManifestRepo, ManifestError> {
     Ok(ManifestRepo {
         path: PathBuf::from(resolved_path.unwrap_or_else(|| "manifest".to_owned())),
         path_raw,
-        west_commands: s
-            .west_commands
-            .map(OneOrMany::into_vec)
-            .unwrap_or_default()
-            .into_iter()
-            .map(PathBuf::from)
-            .collect(),
+        // `west_commands` is appended by `Resolver::absorb` after each
+        // file's Phase A imports complete, so that imported sub-manifest
+        // commands land before the importing file's own (v1 "import
+        // order: deepest first, importer last").
+        west_commands: Vec::new(),
         userdata: s.userdata,
     })
 }
