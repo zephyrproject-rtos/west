@@ -10,6 +10,11 @@ license.workspace = true
 dirs = "5"
 garde = { version = "0.20", features = ["derive", "regex"] }
 log = "0.4"
+# Pure-string `.`/`..` collapsing for paths from manifest YAML. We
+# never want `std::fs::canonicalize` here — manifest paths must
+# resolve as written, regardless of what's on disk in any given
+# workspace.
+path-clean = "1"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde-saphyr = "0.0.26"

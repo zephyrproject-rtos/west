@@ -28,6 +28,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use garde::Validate;
+use path_clean::PathClean;
 use serde::{Deserialize, Deserializer};
 
 // =====================================================================
@@ -1124,7 +1125,13 @@ impl<'a> Resolver<'a> {
                 effective_prefix.join(&project.path)
             };
             let mut project = project;
-            project.path = prefixed_path;
+            // Canonicalize the stored path so `{path}` rendering, the
+            // selector-by-path lookup, and any downstream consumer all
+            // see a single normal form. Collapses `subdir///foo`,
+            // `subdir/./foo`, and `subdir/inner/../foo` to their
+            // obvious equivalents; backslashes inside a segment
+            // (legal filename chars on POSIX) are preserved.
+            project.path = prefixed_path.clean();
             let path_str = project.path.to_string_lossy().into_owned();
             if Path::new(&path_str).is_absolute()
                 || path_str.starts_with('/')
@@ -1565,60 +1572,33 @@ fn name_already_claimed(
 /// error mentioning the value's type; mirroring that here keeps the
 /// diagnostic specific instead of bouncing through the resolver's
 /// generic "imports unsupported" path.
-/// Walk components and report whether a relative `path` (possibly
-/// containing `..`) climbs above its starting point. A leading `..`
-/// or any `..` that backs out past the start counts; `.` segments
-/// are ignored; absolute components (root / drive prefix) are
-/// reported as escapes too so callers can treat this as a single
-/// "stays within root" predicate. The caller picks the user-facing
-/// "root" — for project paths in the resolver that's the workspace
-/// topdir, but the math is purely path-arithmetic and has no
-/// workspace baked in.
+/// Whether a relative `path` (possibly containing `..`) climbs above
+/// its starting point. `.` is ignored; `..` past the start counts.
+/// Absolute paths report as escapes too — callers can treat this as a
+/// single "stays within root" predicate. The "root" is implicit: the
+/// math is pure path-arithmetic with no workspace baked in.
+///
+/// Routes through [`path_clean::clean`], which collapses `.`/`..`
+/// segments without touching the filesystem. A cleaned path that
+/// starts with `..` means the original tried to back out past the
+/// anchor; an absolute path stays absolute after cleaning.
 fn relative_path_escapes_root(path: &Path) -> bool {
-    let mut depth: i32 = 0;
-    for comp in path.components() {
-        use std::path::Component::*;
-        match comp {
-            Prefix(_) | RootDir => return true,
-            CurDir => {}
-            ParentDir => {
-                depth -= 1;
-                if depth < 0 {
-                    return true;
-                }
-            }
-            Normal(_) => depth += 1,
-        }
+    if path.is_absolute() {
+        return true;
     }
-    false
+    path.clean().starts_with("..")
 }
 
 /// Returns true when `path`, after `..`/`.` collapsing, lands at the
 /// workspace's reserved `.west` directory or any descendant of it.
-/// The check normalizes through the same balanced-depth walk
-/// [`relative_path_escapes_root`] uses; any path that would resolve to
-/// `<topdir>/.west` (or below) at the OS level is rejected, regardless
-/// of how the original string was written.
+/// Manifest YAML can spell the same destination in many ways
+/// (`.west`, `.west/sub`, `foo/../.west`); collapsing first lets us
+/// reject them all uniformly.
 fn path_collides_with_west_dir(path: &Path) -> bool {
-    let mut stack: Vec<&OsStr> = Vec::new();
-    for comp in path.components() {
-        use std::path::Component::*;
-        match comp {
-            CurDir => {}
-            ParentDir => {
-                if stack.pop().is_none() {
-                    // Caller already rejects escaping paths; nothing
-                    // to evaluate against here.
-                    return false;
-                }
-            }
-            Normal(seg) => stack.push(seg),
-            // Prefix/RootDir are caught by the absolute-path check
-            // before this helper runs.
-            Prefix(_) | RootDir => return false,
-        }
-    }
-    matches!(stack.first(), Some(seg) if *seg == OsStr::new(crate::WEST_DIR))
+    path.clean()
+        .components()
+        .next()
+        .is_some_and(|c| c.as_os_str() == OsStr::new(crate::WEST_DIR))
 }
 
 fn reject_bool_import(import: &ImportSchema, site: &'static str) -> Result<(), ManifestError> {
