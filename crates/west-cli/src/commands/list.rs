@@ -257,11 +257,17 @@ impl ProjectContext<'_> {
                 .join(&self.project.path)
                 .to_string_lossy()
                 .into_owned()),
-            "posixpath" => Ok(self
-                .workspace
-                .join(&self.project.path)
-                .to_string_lossy()
-                .replace('\\', "/")),
+            "posixpath" => Ok({
+                // Mirror python's `PurePath.as_posix()`: rewrite the
+                // native separator only on Windows. On POSIX, `\` is
+                // a legal filename character and must not be touched.
+                let s = self
+                    .workspace
+                    .join(&self.project.path)
+                    .to_string_lossy()
+                    .into_owned();
+                if cfg!(windows) { s.replace('\\', "/") } else { s }
+            }),
             "revision" => Ok(or_na(&self.project.revision)),
             "remote" => Ok(self.project.remote_name.clone()),
             "clone_depth" => Ok(self
