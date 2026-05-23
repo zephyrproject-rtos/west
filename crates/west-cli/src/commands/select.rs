@@ -9,6 +9,8 @@
 //! [`super::workspace::normalize_project_selector`] on each one first to
 //! translate `.` / `..` / absolute paths into the matching form.
 
+use std::path::PathBuf;
+
 use west_core::loaded::LoadedManifest;
 use west_core::manifest::{GroupFilterEntry, Manifest, ManifestError, Project, Submodules};
 
@@ -45,15 +47,20 @@ where
 /// Build the synthetic project record for the manifest repo itself.
 /// Mirrors python's `ManifestProject` (index 0 in `Manifest.projects`):
 /// name `"manifest"` (a reserved name no real project can use),
-/// revision `"HEAD"`, no url. Path is the manifest repo's `self.path`.
-/// Used by `list`, `forall`, and other project-iterating commands that
-/// need to emit / operate on the manifest repo as if it were a project.
-pub(crate) fn synthetic_manifest_project(manifest: &Manifest) -> Project {
+/// revision `"HEAD"`, no url.
+///
+/// `path` is provided explicitly because the canonical "where does the
+/// manifest repo live" answer is the workspace's `manifest.path`
+/// config value — NOT the YAML `self.path` (which is advisory and may
+/// not match the on-disk layout if the user moved the repo). Callers
+/// that want the YAML value pass `manifest.self_.path.clone()`; that's
+/// what `west list --manifest-path-from-yaml` does.
+pub(crate) fn synthetic_manifest_project(manifest: &Manifest, path: PathBuf) -> Project {
     Project {
         name: "manifest".into(),
         url: String::new(),
         revision: "HEAD".into(),
-        path: manifest.self_.path.clone(),
+        path,
         description: None,
         groups: Vec::new(),
         clone_depth: None,

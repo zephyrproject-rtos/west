@@ -142,7 +142,8 @@ fn run_inner(args: ForallArgs, loaded: &mut LoadedConfig) -> Result<bool, Forall
     let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
     let manifest = &loaded_manifest.manifest;
 
-    let synthetic = select::synthetic_manifest_project(manifest);
+    let synthetic_path = super::workspace::manifest_path_from_config(&loaded.config)?;
+    let synthetic = select::synthetic_manifest_project(manifest, synthetic_path);
 
     // Step 1: candidate set (positional resolution + activity gate).
     let mut candidates: Vec<&Project> = if args.projects.is_empty() {
@@ -164,7 +165,7 @@ fn run_inner(args: ForallArgs, loaded: &mut LoadedConfig) -> Result<bool, Forall
         // Positional path. Pull "manifest" / `<self.path>` matches out
         // for the synthetic; fall through to `select_projects` for
         // the real ones.
-        let manifest_path_str = manifest.self_.path.to_string_lossy().into_owned();
+        let manifest_path_str = synthetic.path.to_string_lossy().into_owned();
         let normalized: Vec<String> = args
             .projects
             .iter()

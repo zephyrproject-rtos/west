@@ -158,7 +158,8 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
     let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
     let manifest = &loaded_manifest.manifest;
 
-    let synthetic = select::synthetic_manifest_project(manifest);
+    let synthetic_path = super::workspace::manifest_path_from_config(&loaded.config)?;
+    let synthetic = select::synthetic_manifest_project(manifest, synthetic_path);
 
     // Candidate set: same shape as forall, with one exception —
     // when `--manifest` is set, the synthetic manifest project is
@@ -179,7 +180,7 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
         );
         acc
     } else {
-        let manifest_path_str = manifest.self_.path.to_string_lossy().into_owned();
+        let manifest_path_str = synthetic.path.to_string_lossy().into_owned();
         let normalized: Vec<String> = args
             .projects
             .iter()

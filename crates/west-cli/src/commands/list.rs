@@ -46,6 +46,19 @@ pub struct ListArgs {
     /// Format string. Default: `{name:12} {path:28} {revision:40} {url}`.
     #[arg(short = 'f', long)]
     pub format: Option<String>,
+
+    /// For the synthetic `manifest` project only: render `{path}` /
+    /// `{abspath}` / `{posixpath}` using the manifest file's
+    /// `self.path` value instead of the workspace's `manifest.path`
+    /// config. The two normally agree; they diverge when the user
+    /// re-points the workspace at a moved manifest repo.
+    ///
+    /// The hidden `--manifest-path-from-yaml` alias keeps v1
+    /// invocations working — the field exists in TOML and JSON
+    /// manifests too, so the format-agnostic name is the canonical
+    /// one going forward.
+    #[arg(long, alias = "manifest-path-from-yaml")]
+    pub manifest_path_from_file: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -116,7 +129,15 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
     // these at index 0; we inline it here in `west list` so the data
     // layer stays free of synthetic records (commands that shouldn't
     // operate on it, like `west update`, don't need to filter).
-    let synthetic = select::synthetic_manifest_project(manifest);
+    // Default: render the synthetic's `{path}` against the
+    // workspace's `manifest.path` config. `--manifest-path-from-file`
+    // overrides to the manifest's advisory `self.path`.
+    let synthetic_path = if args.manifest_path_from_file {
+        manifest.self_.path.clone()
+    } else {
+        super::workspace::manifest_path_from_config(&loaded.config)?
+    };
+    let synthetic = select::synthetic_manifest_project(manifest, synthetic_path);
 
     let projects: Vec<&Project> = if args.projects.is_empty() {
         let mut acc: Vec<&Project> = Vec::new();
@@ -138,9 +159,9 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
     } else {
         // Normalize positionals first so absolute paths and `./..`
         // forms collapse to the same shape as the partition's
-        // comparators (`"manifest"` / `self.path`) and as
+        // comparators (`"manifest"` / synthetic's path) and as
         // `Manifest::resolve_projects` matches against.
-        let manifest_path_str = manifest.self_.path.to_string_lossy().into_owned();
+        let synthetic_path_str = synthetic.path.to_string_lossy().into_owned();
         let normalized: Vec<String> = args
             .projects
             .iter()
@@ -148,7 +169,7 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
             .collect();
         let (synthetic_hits, leftover): (Vec<_>, Vec<_>) = normalized
             .iter()
-            .partition(|s| s.as_str() == "manifest" || s.as_str() == manifest_path_str);
+            .partition(|s| s.as_str() == "manifest" || s.as_str() == synthetic_path_str);
 
         let mut acc: Vec<&Project> = Vec::new();
         if !synthetic_hits.is_empty() {

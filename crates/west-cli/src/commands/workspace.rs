@@ -128,6 +128,24 @@ pub(crate) fn load_manifest(
     ))
 }
 
+/// Read the workspace's `manifest.path` config option — the
+/// authoritative answer to "where is the manifest repo in the
+/// workspace?". This is *not* the same as `Manifest::self_.path`
+/// (the YAML's `self.path` field, which is advisory). Callers that
+/// need the synthetic manifest-project's `path` for output rendering
+/// should use this value by default.
+pub(crate) fn manifest_path_from_config(
+    config: &Configuration,
+) -> Result<PathBuf, WorkspaceError> {
+    config
+        .get_str("manifest.path")
+        .map_err(|e| WorkspaceError::Config(e.to_string()))?
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            WorkspaceError::Config("manifest.path is not set in workspace config".into())
+        })
+}
+
 /// Lower-level entry that returns the raw `Manifest` without any
 /// workspace-config-derived filters. Used by `update`, which assembles
 /// its own [`LoadedManifest`] around an in-flight `WorkspaceImportSource`.
@@ -136,13 +154,7 @@ pub(crate) fn load_bare_manifest(
     config: &Configuration,
     source: &dyn ImportSource,
 ) -> Result<Manifest, WorkspaceError> {
-    let manifest_path: PathBuf = config
-        .get_str("manifest.path")
-        .map_err(|e| WorkspaceError::Config(e.to_string()))?
-        .map(PathBuf::from)
-        .ok_or_else(|| {
-            WorkspaceError::Config("manifest.path is not set in workspace config".into())
-        })?;
+    let manifest_path = manifest_path_from_config(config)?;
     let manifest_file: PathBuf = config
         .get_str("manifest.file")
         .map_err(|e| WorkspaceError::Config(e.to_string()))?
