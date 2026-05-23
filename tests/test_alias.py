@@ -9,10 +9,15 @@ from conftest import cmd, cmd_raises
 
 
 @pytest.fixture(autouse=True)
-def autouse_tmpdir(config_tmpdir, west_init_tmpdir):
-    # Since this module tests west's configuration file features,
-    # adding autouse=True to the config_tmpdir and west_init_tmpdir fixtures
-    # saves typing and is less error-prone than using it below in every test case.
+def autouse_tmpdir(west_init_tmpdir):
+    # `west_init_tmpdir` is the heavyweight workspace fixture (clones
+    # from `repos_tmpdir`, runs `west init`). The workspace's own
+    # `.west/config.toml` is where rust `west init` writes
+    # `manifest.path`; composing with `config_tmpdir` would redirect
+    # `WEST_CONFIG_LOCAL` to a file outside that workspace, so the
+    # binary would lose track of `manifest.path`. The shared
+    # `setup_teardown_test_environment` autouse already sandboxes
+    # `WEST_CONFIG_SYSTEM` / `WEST_CONFIG_GLOBAL`.
     pass
 
 

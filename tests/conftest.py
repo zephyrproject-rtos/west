@@ -220,43 +220,167 @@ def config_tmpdir(tmpdir):
         yield tmpdir
 
 
-@pytest.fixture
-def west_init_tmpdir(tmpdir):
-    '''Per-test fixture producing a *minimal* initialized workspace.
+# Manifest template materialised by `repos_tmpdir`. `THE_URL_BASE` is
+# substituted with `file://<tmpdir>/repos`. Mirrors the legacy
+# `tests-legacy/conftest.py` shape so migrating tests don't need to
+# re-derive what's at which path.
+_MANIFEST_TEMPLATE = '''\
+manifest:
+  defaults:
+    remote: test-local
 
-    Drops a workspace under `tmpdir`: a `.west/` marker, a git-
-    initialized `mp/` directory, and a minimal `mp/west.yml`.
-    `manifest.path = "mp"` lands in whichever local-config file the
-    binary will read — `$WEST_CONFIG_LOCAL` if set (so composition
-    with `config_tmpdir` works), otherwise `.west/config.toml`.
+  remotes:
+  - name: test-local
+    url-base: THE_URL_BASE
 
-    chdir into the workspace root. The legacy fixture by the same
-    name spun up four "remote" repositories and ran `west init`
-    against them; the heavyweight shape is only needed by
-    `test_project*.py` and is deferred until those files migrate.
+  projects:
+  - name: Kconfiglib
+    description: |
+      Kconfiglib is an implementation of
+      the Kconfig language written in Python.
+    revision: zephyr
+    path: subdir/Kconfiglib
+    groups:
+    - Kconfiglib-group
+    submodules: true
+  - name: tagged_repo
+    revision: v1.0
+  - name: net-tools
+    description: Networking tools.
+    clone-depth: 1
+    west-commands: scripts/west-commands.yml
 
-    Tests that exercise CLI flows operating purely on workspace
-    config (alias resolution, `west config`, `west topdir`,
-    `west list` against an empty project set, …) use this.
+  self:
+    path: zephyr
+'''
+
+
+@pytest.fixture(scope='session')
+def _session_repos(tmp_path_factory):
+    '''Session-scoped helper. Don't use directly; tests want
+    `repos_tmpdir` / `west_init_tmpdir` / `west_update_tmpdir`.
+
+    Builds the four "remote" git repositories once per session
+    (`Kconfiglib`, `tagged_repo`, `net-tools`, `zephyr`) so per-test
+    fixtures can clone from them cheaply. Returns the path to the
+    directory that holds them.
     '''
-    # `.west/` marker + git-initialized `mp/`. Skip the config file
-    # `create_workspace` would drop into `.west/`, because the binary
-    # will look at `$WEST_CONFIG_LOCAL` (set by the surrounding
-    # `config_tmpdir` fixture in some tests) instead.
-    (tmpdir / '.west').mkdir()
-    (tmpdir / 'mp').mkdir()
-    create_repo(tmpdir / 'mp')
+    import textwrap
+
+    session_repos = str(tmp_path_factory.mktemp('session_repos'))
+    print('initializing session repositories in', session_repos)
+    shutil.rmtree(session_repos, ignore_errors=True)
+
+    rp = {}
+    for repo in 'Kconfiglib', 'tagged_repo', 'net-tools', 'zephyr':
+        path = os.path.join(session_repos, repo)
+        rp[repo] = path
+        create_repo(path)
+
     add_commit(
-        tmpdir / 'mp',
-        'add west.yml',
-        files={'west.yml': 'manifest:\n  projects: []\n'},
+        rp['zephyr'],
+        'base zephyr commit',
+        files={
+            'CODEOWNERS': '',
+            'include/header.h': '#pragma once\n',
+            'subsys/bluetooth/code.c': 'void foo(void) {}\n',
+        },
     )
-    local_config = os.environ.get('WEST_CONFIG_LOCAL') or str(tmpdir / '.west' / 'config.toml')
-    Path(local_config).parent.mkdir(parents=True, exist_ok=True)
-    with open(local_config, 'w') as f:
-        f.write('[manifest]\npath = "mp"\n')
-    with chdir(tmpdir):
-        yield tmpdir
+
+    create_branch(rp['Kconfiglib'], 'zephyr', checkout=True)
+    add_commit(
+        rp['Kconfiglib'],
+        'test kconfiglib commit',
+        files={'kconfiglib.py': 'print("hello world kconfiglib")\n'},
+    )
+
+    add_commit(rp['tagged_repo'], 'tagged_repo commit', files={'test.txt': 'hello world'})
+    add_tag(rp['tagged_repo'], 'v1.0')
+
+    add_commit(
+        rp['net-tools'],
+        'test net-tools commit',
+        files={
+            'qemu-script.sh': 'echo hello world net-tools\n',
+            'scripts/west-commands.yml': textwrap.dedent('''\
+                west-commands:
+                - file: scripts/test.py
+                  commands:
+                  - name: test-extension
+                    class: TestExtension
+                    help: test-extension-help
+                '''),
+            'scripts/test.py': textwrap.dedent('''\
+                from west.commands import WestCommand
+                class TestExtension(WestCommand):
+                    def __init__(self):
+                        super().__init__('test-extension',
+                                         description='description of test extension')
+                    def do_add_parser(self, parser_adder):
+                        parser = parser_adder.add_parser(self.name)
+                        return parser
+                    def do_run(self, args, ignored):
+                        print('Testing test command 1')
+                '''),
+        },
+    )
+
+    print('finished initializing session repositories')
+    return session_repos
+
+
+@pytest.fixture
+def repos_tmpdir(tmpdir, _session_repos):
+    '''Per-test "remote" repos cloned from `_session_repos`.
+
+    Layout after this fixture runs:
+
+      <tmpdir>/repos/
+      ├── Kconfiglib (branch: zephyr)
+      ├── tagged_repo (branch: master, tag: v1.0)
+      ├── net-tools (branch: master)
+      └── zephyr (branch: master) — manifest repo with `west.yml`
+
+    The `west.yml` is `_MANIFEST_TEMPLATE` with `THE_URL_BASE`
+    replaced by `file://<tmpdir>/repos`. Returns `tmpdir` (NOT
+    `tmpdir/repos`) so workspace-building fixtures can compose.
+    '''
+    kconfiglib, tagged_repo, net_tools, zephyr = (
+        os.path.join(_session_repos, x)
+        for x in ['Kconfiglib', 'tagged_repo', 'net-tools', 'zephyr']
+    )
+    repos = tmpdir.mkdir('repos')
+    repos.chdir()
+    for r in [kconfiglib, tagged_repo, net_tools, zephyr]:
+        subprocess.check_call([GIT, 'clone', r])
+
+    manifest = _MANIFEST_TEMPLATE.replace('THE_URL_BASE', str(tmpdir.join('repos')))
+    add_commit(str(repos.join('zephyr')), 'add manifest', files={'west.yml': manifest})
+    return tmpdir
+
+
+@pytest.fixture
+def west_init_tmpdir(repos_tmpdir):
+    '''Per-test workspace initialized via `west init` against the
+    `repos_tmpdir` fixture's local "remote" manifest repo.
+
+    Workspace lives at `<repos_tmpdir>/workspace`; chdirs into it
+    and yields the path. The workspace's projects are NOT cloned —
+    use `west_update_tmpdir` if you need them on disk.
+    '''
+    west_tmpdir = repos_tmpdir / 'workspace'
+    manifest = repos_tmpdir / 'repos' / 'zephyr'
+    cmd(['init', '--url', f'file://{manifest}', str(west_tmpdir)])
+    with chdir(west_tmpdir):
+        yield west_tmpdir
+
+
+@pytest.fixture
+def west_update_tmpdir(west_init_tmpdir):
+    '''Like `west_init_tmpdir`, plus a `west update` to clone all
+    projects defined in the manifest.'''
+    cmd('update', cwd=west_init_tmpdir)
+    return west_init_tmpdir
 
 
 # =========================================================================

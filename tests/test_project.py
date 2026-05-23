@@ -20,7 +20,6 @@ from conftest import (
     check_proj_consistency,
     cmd,
     cmd_raises,
-    cmd_subprocess,
     create_branch,
     create_repo,
     create_workspace,
@@ -69,21 +68,127 @@ UpdateResults = collections.namedtuple(
 # https://github.blog/2022-10-18-git-security-vulnerabilities-announced/#cve-2022-39253
 SUBMODULE_ADD = [GIT, '-c', 'protocol.file.allow=always', 'submodule', 'add']
 
-# Helper string for the same purpose when running west update.
-PROTOCOL_FILE_ALLOW = '--submodule-init-config protocol.file.allow=always'
+# Helper for the same purpose when running west update. v1 had a
+# dedicated `--submodule-init-config` CLI flag on `west update`; the
+# rust port surfaces the same knob via the generic top-level
+# `--config` mechanism backed by `tool.git.submodules.init-config`,
+# which keeps the security-tweak narrowly scoped to the submodule
+# init step without cluttering `west update --help`. Expressed as a
+# list of argv tokens so the inner TOML quoting survives intact
+# without shlex stripping it.
+PROTOCOL_FILE_ALLOW = [
+    "--config",
+    'tool.git.submodules.init-config=["protocol.file.allow=always"]',
+]
 
 #
 # Test cases
 #
 
 
+def _match_multiline_regex(expected, actual):
+    for eline_re, aline in zip(expected, actual, strict=True):
+        assert re.match(eline_re, aline) is not None, (aline, eline_re)
+
+
 def _list_f(format):
     return ['list', '-f', format]
 
 
-def _match_multiline_regex(expected, actual):
-    for eline_re, aline in zip(expected, actual, strict=True):
-        assert re.match(eline_re, aline) is not None, (aline, eline_re)
+def clone(repo, dst):
+    # Creates a new branch.
+    repo = str(repo)
+
+    subprocess.check_call([GIT, 'clone', repo, dst])
+
+
+def checkout_branch(repo, branch, create=False):
+    # Creates a new branch.
+    repo = str(repo)
+
+    # Edit any files as specified by the user and add them to the index.
+    if create:
+        subprocess.check_call([GIT, 'checkout', '-b', branch], cwd=repo)
+    else:
+        subprocess.check_call([GIT, 'checkout', branch], cwd=repo)
+
+
+def head_subject(path):
+    # Returns the subject of the HEAD commit in the repository at 'path'
+
+    return subprocess.check_output([GIT, 'log', '-n1', '--format=%s'], cwd=path).decode().rstrip()
+
+
+def default_updater(remotes):
+    add_commit(remotes.net_tools, 'another net-tools commit')
+    add_commit(remotes.kconfiglib, 'another kconfiglib commit')
+    add_commit(remotes.tagged_repo, 'another tagged_repo commit')
+    cmd('update')
+
+
+def update_helper(west_tmpdir, updater=default_updater):
+    # Helper command for causing a change in two remote repositories,
+    # then running a project command on the west workspace.
+    #
+    # Adds a commit to both of the kconfiglib and net-tools projects
+    # remotes, then call updater(update_remotes),
+    # which defaults to a function that adds commits in each
+    # repository's remote and runs 'west update'.
+    #
+    # Captures the remote and local repository paths, as well as
+    # manifest-rev and HEAD before and after, returning the results in
+    # an UpdateResults tuple.
+
+    nt_remote = str(west_tmpdir.join('..', 'repos', 'net-tools'))
+    nt_local = str(west_tmpdir.join('net-tools'))
+    kl_remote = str(west_tmpdir.join('..', 'repos', 'Kconfiglib'))
+    kl_local = str(west_tmpdir.join('subdir', 'Kconfiglib'))
+    tr_remote = str(west_tmpdir.join('..', 'repos', 'tagged_repo'))
+    tr_local = str(west_tmpdir.join('tagged_repo'))
+
+    def output_or_none(*args, **kwargs):
+        try:
+            ret = check_output(*args, **kwargs)
+        except (FileNotFoundError, NotADirectoryError, SystemExit):
+            ret = None
+        return ret
+
+    nt_mr_0 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=nt_local)
+    kl_mr_0 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=kl_local)
+    tr_mr_0 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=tr_local)
+    nt_head_0 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=nt_local)
+    kl_head_0 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=kl_local)
+    tr_head_0 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=tr_local)
+
+    updater(UpdateRemotes(nt_remote, kl_remote, tr_remote))
+
+    nt_mr_1 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=nt_local)
+    kl_mr_1 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=kl_local)
+    tr_mr_1 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=tr_local)
+    nt_head_1 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=nt_local)
+    kl_head_1 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=kl_local)
+    tr_head_1 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=tr_local)
+
+    return UpdateResults(
+        nt_remote,
+        nt_local,
+        kl_remote,
+        kl_local,
+        tr_remote,
+        tr_local,
+        nt_mr_0,
+        nt_mr_1,
+        kl_mr_0,
+        kl_mr_1,
+        tr_mr_0,
+        tr_mr_1,
+        nt_head_0,
+        nt_head_1,
+        kl_head_0,
+        kl_head_1,
+        tr_head_0,
+        tr_head_1,
+    )
 
 
 def test_workspace(west_update_tmpdir):
@@ -148,11 +253,11 @@ def test_list(west_update_tmpdir):
 
 def test_list_manifest(west_update_tmpdir):
     # The manifest's "self: path:" should only be used to print
-    # path-type format strings with --manifest-path-from-yaml.
+    # path-type format strings with --manifest-path-from-file.
 
     os.mkdir('manifest_moved')
     shutil.copy('zephyr/west.yml', 'manifest_moved/west.yml')
-    cmd('config manifest.path manifest_moved')
+    cmd('config set manifest.path manifest_moved')
 
     path = cmd('list -f {path} manifest').strip()
     abspath = cmd('list -f {abspath} manifest').strip()
@@ -161,9 +266,9 @@ def test_list_manifest(west_update_tmpdir):
     assert abspath == str(west_update_tmpdir / 'manifest_moved')
     assert posixpath == Path(west_update_tmpdir).as_posix() + '/manifest_moved'
 
-    path = cmd('list --manifest-path-from-yaml -f {path} manifest').strip()
-    abspath = cmd('list --manifest-path-from-yaml -f {abspath} manifest').strip()
-    posixpath = cmd('list --manifest-path-from-yaml -f {posixpath} manifest').strip()
+    path = cmd('list --manifest-path-from-file -f {path} manifest').strip()
+    abspath = cmd('list --manifest-path-from-file -f {abspath} manifest').strip()
+    posixpath = cmd('list --manifest-path-from-file -f {posixpath} manifest').strip()
     assert path == 'zephyr'
     assert abspath == str(west_update_tmpdir / 'zephyr')
     assert posixpath == Path(west_update_tmpdir).as_posix() + '/zephyr'
@@ -269,7 +374,7 @@ def test_list_groups(west_init_tmpdir):
     _, err_msg = cmd_raises('list -i foo bar', SystemExit)
     assert '-i cannot be combined with an explicit project list' in err_msg
 
-    cmd('config manifest.group-filter +foo-group-1')
+    cmd('config set manifest.group-filter +foo-group-1')
     check(
         _list_f('{name} .{groups}. {path} {active}'),
         [
@@ -297,7 +402,7 @@ def test_manifest_untracked(west_update_tmpdir):
     assert projs == ['manifest', 'Kconfiglib', 'tagged_repo', 'net-tools']
 
     # Disable Kconfiglib
-    cmd('config manifest.group-filter -- -Kconfiglib-group')
+    cmd('config set manifest.group-filter -- -Kconfiglib-group')
 
     # Ensure that Kconfiglib is inactive
     projs = cmd('list -f {name}').splitlines()
@@ -413,7 +518,7 @@ def test_manifest_untracked_with_symlinks(west_update_tmpdir):
         assert out_lines == expected
 
     # Disable Kconfiglib to have an inactive project
-    cmd('config manifest.group-filter -- -Kconfiglib-group')
+    cmd('config set manifest.group-filter -- -Kconfiglib-group')
 
     # Ensure that Kconfiglib is inactive
     projs = cmd('list -f {name}').splitlines()
@@ -485,7 +590,7 @@ def test_manifest_freeze(west_update_tmpdir):
 
 def test_manifest_freeze_active(west_update_tmpdir):
     # We should be able to freeze manifests with inactive projects.
-    cmd('config manifest.group-filter -- -Kconfiglib-group')
+    cmd('config set manifest.group-filter -- -Kconfiglib-group')
 
     actual = cmd('manifest --freeze --active-only').splitlines()
     # Same as test_manifest_freeze but without inactive projects
@@ -541,7 +646,7 @@ def test_manifest_resolve(west_update_tmpdir):
 
 def test_manifest_resolve_active(west_update_tmpdir):
     # We should be able to resolve manifests with inactive projects.
-    cmd('config manifest.group-filter -- -Kconfiglib-group')
+    cmd('config set manifest.group-filter -- -Kconfiglib-group')
 
     actual = cmd('manifest --resolve --active-only').splitlines()
     # Same as test_manifest_resolve but without inactive projects
@@ -563,7 +668,7 @@ def test_manifest_resolve_active(west_update_tmpdir):
     _match_multiline_regex(expected_res, actual)
 
 
-def test_compare(config_tmpdir, west_init_tmpdir):
+def test_compare(west_init_tmpdir):
     # 'west compare' with no projects cloned should still work,
     # and not print anything.
     assert cmd('compare') == ''
@@ -599,13 +704,13 @@ def test_compare(config_tmpdir, west_init_tmpdir):
     # We shouldn't get any output for inactive projects by default, so
     # temporarily deactivate the Kconfiglib project and make sure that
     # works.
-    cmd('config manifest.group-filter -- -Kconfiglib-group')
+    cmd('config set manifest.group-filter -- -Kconfiglib-group')
     assert cmd('compare') == ''
     # unless we ask for it with --all, or the project by name
     assert cmd('compare Kconfiglib').startswith('=== Kconfiglib (subdir/Kconfiglib)')
     assert cmd('compare --all').startswith('=== Kconfiglib (subdir/Kconfiglib)')
     # Activate the project again.
-    cmd('config -d manifest.group-filter')
+    cmd('config unset manifest.group-filter')
 
     # Verify --exit-code works as advertised, and clean up again.
     with pytest.raises(SystemExit):
@@ -622,13 +727,13 @@ def test_compare(config_tmpdir, west_init_tmpdir):
     # unless we disable that explicitly...
     assert cmd('compare --ignore-branches') == ''
     # or the compare.ignore-branches configuration option is true...
-    cmd('config compare.ignore-branches true')
+    cmd('config set compare.ignore-branches true')
     assert cmd('compare') == ''
     # unless we override that option on the command line.
     assert 'mybranch' in cmd('compare --no-ignore-branches')
 
 
-def test_compare_format_manifest(config_tmpdir, west_init_tmpdir):
+def test_compare_format_manifest(west_init_tmpdir):
     # ManifestProject special-casing: empty output, single-line
     # machine-readable output without any banner, and the path/sha/url
     # keys that are distinct from regular projects -- same conventions
@@ -669,7 +774,7 @@ def test_compare_format_manifest(config_tmpdir, west_init_tmpdir):
     assert cmd('compare --format {name}') == ''
 
 
-def test_compare_format_projects(config_tmpdir, west_init_tmpdir):
+def test_compare_format_projects(west_init_tmpdir):
     # Regular (non-manifest) projects: every format key, multi-project
     # ordering, and interactions with --all / named projects / the
     # manifest.group-filter configuration option.
@@ -716,16 +821,16 @@ def test_compare_format_projects(config_tmpdir, west_init_tmpdir):
     # An inactive project is skipped by default but appears with --all
     # or when named explicitly (same active-project semantics as plain
     # 'west compare').
-    cmd('config manifest.group-filter -- -Kconfiglib-group')
+    cmd('config set manifest.group-filter -- -Kconfiglib-group')
     assert cmd('compare -f {name}') == ''
     assert cmd('compare --all -f {name}').strip() == 'Kconfiglib'
     assert cmd('compare -f {name} Kconfiglib').strip() == 'Kconfiglib'
-    cmd('config -d manifest.group-filter')
+    cmd('config unset manifest.group-filter')
 
     os.unlink(bar)
 
 
-def test_compare_format_errors(config_tmpdir, west_init_tmpdir):
+def test_compare_format_errors(west_init_tmpdir):
     # Malformed format strings must fail cleanly via self.die() ->
     # SystemExit, not with an uncaught KeyError/IndexError traceback.
     # Dirty the manifest repo so the format path is actually reached.
@@ -751,13 +856,13 @@ def test_diff(west_init_tmpdir):
 
     cmd('diff')
     cmd('diff --manifest')
-    cmd('diff --stat')
+    cmd('diff -- --stat')
 
     # Neither should it fail after fetching one or both projects
 
     cmd('update net-tools')
     cmd('diff')
-    cmd('diff --stat')
+    cmd('diff -- --stat')
     cmd('diff --manifest')
 
     cmd('update Kconfiglib')
@@ -769,13 +874,13 @@ def test_status(west_init_tmpdir):
     # Status with no projects cloned shouldn't fail
 
     cmd('status')
-    cmd('status --short --branch')
+    cmd('status -- --short --branch')
 
     # Neither should it fail after fetching one or both projects
 
     cmd('update net-tools')
     cmd('status')
-    cmd('status --short --branch')
+    cmd('status -- --short --branch')
 
     cmd('update Kconfiglib')
 
@@ -786,7 +891,7 @@ def test_forall(west_init_tmpdir):
 
     # 'forall' with no projects cloned shouldn't fail
 
-    assert cmd_subprocess(['forall', '-c', 'echo foo']).splitlines() == [
+    assert cmd(['forall', '--raw', '-c', 'echo foo']).splitlines() == [
         '=== running "echo foo" in manifest (zephyr):',
         'foo',
     ]
@@ -794,7 +899,7 @@ def test_forall(west_init_tmpdir):
     # Neither should it fail after cloning one or both projects
 
     cmd('update net-tools')
-    assert cmd_subprocess(['forall', '-c', 'echo foo']).splitlines() == [
+    assert cmd(['forall', '--raw', '-c', 'echo foo']).splitlines() == [
         '=== running "echo foo" in manifest (zephyr):',
         'foo',
         '=== running "echo foo" in net-tools (net-tools):',
@@ -805,7 +910,7 @@ def test_forall(west_init_tmpdir):
 
     env_var = "%WEST_PROJECT_NAME%" if WINDOWS else "$WEST_PROJECT_NAME"
 
-    assert cmd_subprocess(['forall', '-c', f'echo {env_var}']).splitlines() == [
+    assert cmd(['forall', '--raw', '-c', f'echo {env_var}']).splitlines() == [
         f'=== running "echo {env_var}" in manifest (zephyr):',
         'manifest',
         f'=== running "echo {env_var}" in net-tools (net-tools):',
@@ -813,7 +918,7 @@ def test_forall(west_init_tmpdir):
     ]
 
     cmd('update Kconfiglib')
-    assert cmd_subprocess(['forall', '-c', 'echo foo']).splitlines() == [
+    assert cmd(['forall', '--raw', '-c', 'echo foo']).splitlines() == [
         '=== running "echo foo" in manifest (zephyr):',
         'foo',
         '=== running "echo foo" in Kconfiglib (subdir/Kconfiglib):',
@@ -822,8 +927,8 @@ def test_forall(west_init_tmpdir):
         'foo',
     ]
 
-    assert cmd_subprocess(
-        'forall --group Kconfiglib-group -c'.split() + ['echo foo']
+    assert cmd(
+        'forall --raw --group Kconfiglib-group -c'.split() + ['echo foo']
     ).splitlines() == [
         '=== running "echo foo" in Kconfiglib (subdir/Kconfiglib):',
         'foo',
@@ -852,7 +957,7 @@ def test_forall_env_vars(west_init_tmpdir, test_case):
     # Windows vs. Linux
     env_var = f'%{env_var}%' if WINDOWS else f'${env_var}'
 
-    stdout = cmd_subprocess(['forall', '-c', f'echo {env_var}'])
+    stdout = cmd(['forall', '--raw', '-c', f'echo {env_var}'])
     assert stdout.splitlines() == [
         f'=== running "echo {env_var}" in manifest (zephyr):',
         f'{expected_zephyr}',
@@ -1054,7 +1159,7 @@ def test_update_head_0(west_init_tmpdir):
         '''
     )
 
-    cmd(["config", "manifest.path", my_manifest_dir])
+    cmd(["config", "set", "manifest.path", my_manifest_dir])
 
     # Update the upstream repositories, getting an UpdateResults tuple
     # back.
@@ -1115,16 +1220,20 @@ def test_update_some_with_imports(repos_tmpdir):
         },
     )
 
-    # Updating unknown projects should fail as always.
-
-    with pytest.raises(SystemExit):
-        cmd('update unknown-project', cwd=ws)
+    # Updating unknown projects should fail with the manifest-repo-only
+    # diagnostic — same error path covers "behind a per-project import"
+    # since neither case can be resolved without cloning extra repos.
+    _, err_msg = cmd_raises('update unknown-project', SystemExit, cwd=ws)
+    assert 'unknown-project' in err_msg
+    assert 'project name not found in the manifest repo' in err_msg
 
     # Updating a list of projects when some are resolved via project
-    # imports must fail.
-
-    with pytest.raises(SystemExit):
-        cmd('update Kconfiglib net-tools', cwd=ws)
+    # imports must fail with the same diagnostic — Kconfiglib lives
+    # behind zephyr's `import: true` and isn't named in the manifest
+    # repo's west.yml or its self/top-level imports.
+    _, err_msg = cmd_raises('update Kconfiglib net-tools', SystemExit, cwd=ws)
+    assert 'Kconfiglib' in err_msg
+    assert 'project name not found in the manifest repo' in err_msg
 
     # Updates of projects defined in the manifest repository or all
     # projects must succeed, and behave the same as if no imports
@@ -1146,6 +1255,20 @@ def test_update_some_with_imports(repos_tmpdir):
     cmd('update', cwd=ws)
     manifest = Manifest.from_topdir(topdir=ws)
     assert manifest.get_projects(['Kconfiglib'])[0].is_cloned()
+
+
+def test_update_synthetic_manifest_rejected(west_init_tmpdir):
+    # `west update manifest` and `west update <self.path>` both name
+    # the synthetic manifest project, which isn't an update target —
+    # v1 contract is "use `west init` to change the manifest". The
+    # rust port surfaces a dedicated error so users aren't routed
+    # through the "needs per-project import" branch (which would
+    # suggest cloning a parent that doesn't exist).
+    for selector in ('manifest', 'zephyr'):  # zephyr == this fixture's self.path
+        _, err_msg = cmd_raises(['update', selector], SystemExit)
+        assert selector in err_msg
+        assert 'manifest project itself is not a west update target' in err_msg
+        assert 'west init' in err_msg
 
 
 def test_update_submodules_list(repos_tmpdir):
@@ -1223,7 +1346,7 @@ def test_update_submodules_list(repos_tmpdir):
     assert not net_tools_project.is_cloned()
 
     # Update only zephyr project.
-    cmd(f'update {PROTOCOL_FILE_ALLOW} zephyr', cwd=ws)
+    cmd([*PROTOCOL_FILE_ALLOW, "update", "zephyr"], cwd=ws)
 
     # Verify if only zephyr project was cloned.
     assert zephyr_project.is_cloned()
@@ -1240,7 +1363,7 @@ def test_update_submodules_list(repos_tmpdir):
     assert not (res.returncode or res.stdout.strip())
 
     # Update all projects
-    cmd(f'update {PROTOCOL_FILE_ALLOW}', cwd=ws)
+    cmd([*PROTOCOL_FILE_ALLOW, "update"], cwd=ws)
 
     # Verify if both projects were cloned
     assert zephyr_project.is_cloned()
@@ -1343,7 +1466,7 @@ def test_update_all_submodules(repos_tmpdir):
     assert not zephyr_project.is_cloned()
 
     # Update zephyr project.
-    cmd(f'update {PROTOCOL_FILE_ALLOW} zephyr', cwd=ws)
+    cmd([*PROTOCOL_FILE_ALLOW, "update", "zephyr"], cwd=ws)
 
     # Verify if zephyr project was cloned.
     assert zephyr_project.is_cloned()
@@ -1553,7 +1676,7 @@ def test_update_submodules_strategy(repos_tmpdir):
     assert not net_tools_project.is_cloned()
 
     # Update only zephyr project using checkout strategy (selected by default).
-    cmd(f'update {PROTOCOL_FILE_ALLOW} zephyr', cwd=ws)
+    cmd([*PROTOCOL_FILE_ALLOW, "update", "zephyr"], cwd=ws)
 
     # Verify if only zephyr project was cloned.
     assert zephyr_project.is_cloned()
@@ -1570,7 +1693,7 @@ def test_update_submodules_strategy(repos_tmpdir):
     assert not (res.returncode or res.stdout.strip())
 
     # Update only net-tools project using rebase strategy
-    cmd(f'update {PROTOCOL_FILE_ALLOW} net-tools -r', cwd=ws)
+    cmd([*PROTOCOL_FILE_ALLOW, "update", "net-tools", '-r'], cwd=ws)
 
     # Verify if both projects were cloned
     assert zephyr_project.is_cloned()
@@ -1885,11 +2008,11 @@ def test_update_narrow(tmpdir):
     cmd('update --narrow')
     assert project_tags() == []
 
-    cmd('config update.narrow true')
+    cmd('config set update.narrow true')
     cmd('update')
     assert project_tags() == []
 
-    cmd('config update.narrow false')
+    cmd('config set update.narrow false')
     cmd('update')
     assert project_tags() != []
 
@@ -1915,13 +2038,50 @@ def test_update_narrow_depth1(tmpdir):
     assert len(refs) == 1
 
 
+def test_init_local_with_clone_option_failure(repos_tmpdir):
+    # 'west init -l -o' is incompatible: -l doesn't clone.
+    west_tmpdir = repos_tmpdir / 'workspace'
+    with pytest.raises(SystemExit):
+        cmd(['init', '-l', '-o=--depth=1', str(west_tmpdir)])
+
+
+def test_init_manifest_url_alias(repos_tmpdir):
+    # v1's `-m` / `--manifest-url` is kept as an alias for `-u`/`--url`
+    # so existing `west init -m <url>` workflows don't break.
+    west_tmpdir = repos_tmpdir / 'workspace'
+    mnft_url = str(repos_tmpdir / 'repos' / 'zephyr')
+
+    cmd(['init', '-m', mnft_url, str(west_tmpdir)])
+    assert (west_tmpdir / 'zephyr' / '.git').check(dir=1)
+
+
+def test_init_with_clone_option_depth_one(repos_tmpdir):
+    # 'west init -o=--depth=1' clones the manifest repo shallow.
+    # --no-local forces a real (non-hardlinked) clone so --depth is
+    # honored even though the manifest URL is a local path.
+    west_tmpdir = repos_tmpdir / 'workspace'
+    mnft_url = str(repos_tmpdir / 'repos' / 'zephyr')
+
+    cmd(['init', '-o=--depth=1', '-o=--no-local', '-u', mnft_url, str(west_tmpdir)])
+    assert 1 == int(
+        subprocess.check_output(
+            [GIT, 'rev-list', '--count', '--max-count=5', 'HEAD'],
+            cwd=west_tmpdir / 'zephyr',
+        )
+        .decode()
+        .strip()
+    )
+
+
 def test_init_again(west_init_tmpdir):
     # Test that 'west init' on an initialized tmpdir errors out
-    # with a message that indicates it's already initialized.
+    # with a message that indicates it's already initialized,
+    # regardless of how init is invoked (bare, -m, -l). The rust port
+    # prefixes errors with "west:" rather than v1's "FATAL ERROR:".
+    expected_msg = f'already initialized in {west_init_tmpdir}'
 
-    expected_msg = f'FATAL ERROR: already initialized in {west_init_tmpdir}'
-
-    # A bare `init` defaults to cloning -m http://zephyrproject/zephyr
+    # A bare `init` reports the already-initialized guard before the
+    # missing-mode error.
     exc, stderr = cmd_raises('init', SystemExit, cwd=west_init_tmpdir)
     assert exc.value.code == 1
     assert expected_msg in stderr
@@ -1941,14 +2101,16 @@ def test_init_again(west_init_tmpdir):
         assert exc.value.code == 1
         assert expected_msg in stderr
 
+    # Initializing a subdir that is itself an existing workspace is
+    # caught after the target is resolved. (v1 additionally raised a
+    # RuntimeError with a stack trace under -vvv; that in-process
+    # `log.die` debug behavior has no analog in the subprocess CLI.)
     manifest = west_init_tmpdir / '..' / 'repos' / 'zephyr'
     exc, stderr = cmd_raises(
-        f'-vvv init -m {manifest} workspace', RuntimeError, cwd=west_init_tmpdir.dirname
+        f'init -m {manifest} workspace', SystemExit, cwd=west_init_tmpdir.dirname
     )
+    assert exc.value.code == 1
     assert expected_msg in stderr
-
-    expected_vvv_msg = "die with -vvv or more shows a stack trace. exit_code argument is ignored"
-    assert expected_vvv_msg in str(exc.value)
 
 
 def test_init_local_manifest_project(repos_tmpdir):
@@ -2025,10 +2187,14 @@ def test_init_local_with_manifest_filename(repos_tmpdir):
     cwd = os.getcwd()
     cmd(['init', '-l', zephyr_install_dir])
 
-    # init with a local manifest doesn't parse the file, so let's access it
+    # `init -l` doesn't parse the manifest (it succeeded above despite
+    # the syntax error). A command that *does* read it surfaces the
+    # error: v1 raised yaml.parser.ParserError in-process; the
+    # subprocess CLI exits non-zero with the parse error on stderr.
     workspace.chdir()
-    with pytest.raises(yaml.parser.ParserError):
-        cmd('list')
+    exc, stderr = cmd_raises('list', SystemExit)
+    assert exc.value.code != 0
+    assert 'parse' in stderr.lower()
 
     os.chdir(cwd)
     shutil.move(workspace / '.west', workspace / '.west-syntaxerror')
@@ -2050,31 +2216,6 @@ def test_init_local_with_empty_path(repos_tmpdir):
     cmd('init -l .')
     cmd('update')
     assert (repos_tmpdir / 'workspace' / 'subdir' / 'Kconfiglib').check(dir=1)
-
-
-def test_init_local_with_clone_option_failure(repos_tmpdir):
-    # Test that 'west init -l -o' errors out
-
-    west_tmpdir = repos_tmpdir / 'workspace'
-
-    with pytest.raises(SystemExit):
-        cmd(['init', '-l', '-o=--depth=1', west_tmpdir])
-
-
-def test_init_with_clone_option_depth_one(repos_tmpdir):
-    # Test that 'west init -o=--depth=1' only clones depth 1
-
-    west_tmpdir = repos_tmpdir / 'workspace'
-    mnft_url = str(repos_tmpdir / 'repos' / 'zephyr')
-
-    cmd(['init', '-o=--depth=1', '-o=--no-local', '-m', mnft_url, west_tmpdir])
-    assert 1 == int(
-        subprocess.check_output(
-            [GIT, 'rev-list', '--count', '--max-count=5', 'HEAD'], cwd=west_tmpdir / 'zephyr'
-        )
-        .decode()
-        .strip()
-    )
 
 
 def test_update_with_groups_enabled(west_init_tmpdir):
@@ -2123,7 +2264,7 @@ def test_update_with_groups_enabled(west_init_tmpdir):
     assert (west_init_tmpdir / 'tagged_repo').check(dir=1)
     assert (west_init_tmpdir / 'net-tools').check(dir=0)
 
-    cmd('config manifest.group-filter +enable-in-config-file')
+    cmd('config set manifest.group-filter +enable-in-config-file')
     cmd('update')
     assert (west_init_tmpdir / 'net-tools').check(dir=1)
 
@@ -2159,13 +2300,13 @@ def test_update_with_groups_disabled(west_init_tmpdir):
             path: zephyr
         ''')
 
-    cmd('config manifest.group-filter -- -disabled-in-config-file')
+    cmd('config set manifest.group-filter -disabled-in-config-file')
     cmd('update --group-filter=-disabled-on-cmd-line')
     assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=0)
     assert (west_init_tmpdir / 'tagged_repo').check(dir=0)
     assert (west_init_tmpdir / 'net-tools').check(dir=0)
 
-    cmd('config -d manifest.group-filter')
+    cmd('config unset manifest.group-filter')
     cmd('update --group-filter=-disabled-on-cmd-line')
     assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=0)
     assert (west_init_tmpdir / 'tagged_repo').check(dir=0)
@@ -2227,9 +2368,12 @@ def test_init_with_manifest_filename(repos_tmpdir):
         str(manifest), 'rename manifest', files={'west.yml': '[', 'project.yml': manifest_data}
     )
 
-    # syntax error
-    with pytest.raises(yaml.parser.ParserError):
-        cmd(['init', '-m', manifest, west_tmpdir])
+    # Syntax error: bootstrap reads the (default) west.yml and fails.
+    # v1 raised yaml.parser.ParserError in-process; the subprocess CLI
+    # exits non-zero with the parse error on stderr.
+    exc, stderr = cmd_raises(['init', '-m', str(manifest), str(west_tmpdir)], SystemExit)
+    assert exc.value.code != 0
+    assert 'parse' in stderr.lower()
     shutil.move(west_tmpdir, repos_tmpdir / 'workspace-syntaxerror')
 
     # success
@@ -2277,7 +2421,6 @@ def test_extension_command_multiproject(repos_tmpdir):
     rr = repos_tmpdir.join('repos')
     remote_kconfiglib = str(rr.join('Kconfiglib'))
     remote_zephyr = str(rr.join('zephyr'))
-    remote_west = str(rr.join('west'))
 
     # Update the manifest to specify extension commands in Kconfiglib.
     # This removes tagged_repo, but we're not using it, so that's fine.
@@ -2286,8 +2429,6 @@ def test_extension_command_multiproject(repos_tmpdir):
         'test added extension command',
         files={
             'west.yml': textwrap.dedent(f'''\
-                      west:
-                        url: file://{remote_west}
                       manifest:
                         defaults:
                           remote: test-local
@@ -2349,14 +2490,19 @@ def test_extension_command_multiproject(repos_tmpdir):
     west_tmpdir.chdir()
     cmd('update')
 
-    # The newline shenanigans are for Windows.
-    help_text = '\n'.join(cmd('-h').splitlines())
+    # The newline shenanigans are for Windows. The rust port surfaces
+    # extension commands via the `west help` subcommand (clap's plain
+    # `-h` stays static); v1 listed them under `-h`. The port's
+    # two-column listing pads the "  <name>" label to a fixed width and
+    # omits help-less commands' text (v1 emitted ":" + a "no help
+    # provided" placeholder).
+    help_text = '\n'.join(cmd('help').splitlines())
     expected = '\n'.join([
         'extension commands from project Kconfiglib (path: subdir/Kconfiglib):',  # noqa: E501
-        '  kconfigtest:          (no help provided; try "west kconfigtest -h")',  # noqa: E501
+        '  kconfigtest',
         '',
         'extension commands from project net-tools (path: net-tools):',
-        '  test-extension:       test-extension-help',
+        f'{"  test-extension":<22}test-extension-help',
     ])
     assert expected in help_text, help_text
 
@@ -2379,7 +2525,6 @@ def test_extension_command_duplicate(repos_tmpdir):
     rr = repos_tmpdir.join('repos')
     remote_kconfiglib = str(rr.join('Kconfiglib'))
     remote_zephyr = str(rr.join('zephyr'))
-    remote_west = str(rr.join('west'))
 
     # This removes tagged_repo, but we're not using it, so that's fine.
     add_commit(
@@ -2387,8 +2532,6 @@ def test_extension_command_duplicate(repos_tmpdir):
         'test added extension command',
         files={
             'west.yml': textwrap.dedent(f'''\
-                      west:
-                        url: file://{remote_west}
                       manifest:
                         defaults:
                           remote: test-local
@@ -2464,19 +2607,20 @@ def test_extension_command_duplicate(repos_tmpdir):
     west_tmpdir.chdir()
     cmd('update')
 
-    expected_warns = [
-        'WARNING: ignoring project Kconfiglib extension command "list"; this is a built in command',
-        'WARNING: ignoring project net-tools extension command "test-extension"; '
-        'command "test-extension" is already defined as extension command',
-    ]
+    # Collisions resolve as in v1 — a built-in beats a same-named
+    # extension, and the first-declared extension beats a later
+    # duplicate. The rust port resolves silently rather than printing
+    # v1's "ignoring project ... extension command" warnings on every
+    # invocation (those required running discovery for every command,
+    # including built-ins), so only the resolution is asserted here.
 
     # Expect output from the built-in command, not its Kconfiglib duplicate.
     actual = cmd('list zephyr -f {name}').splitlines()
-    assert actual == expected_warns + ['manifest']
+    assert actual == ['manifest']
 
     # Expect output from the Kconfiglib command, not its net-tools duplicate.
     actual = cmd('test-extension').splitlines()
-    assert actual == expected_warns + ['Testing kconfig test command']
+    assert actual == ['Testing kconfig test command']
 
     actual = cmd('test-extension -h')
     assert "MISSING description" in actual
@@ -2510,107 +2654,6 @@ def test_topdir_in_workspace(west_init_tmpdir):
     assert cmd('topdir', cwd=str(west_init_tmpdir / 'pytest-foo')).strip() == expected
 
 
-#
-# Helper functions used by the test cases and fixtures.
-#
-
-
-def clone(repo, dst):
-    # Creates a new branch.
-    repo = str(repo)
-
-    subprocess.check_call([GIT, 'clone', repo, dst])
-
-
-def checkout_branch(repo, branch, create=False):
-    # Creates a new branch.
-    repo = str(repo)
-
-    # Edit any files as specified by the user and add them to the index.
-    if create:
-        subprocess.check_call([GIT, 'checkout', '-b', branch], cwd=repo)
-    else:
-        subprocess.check_call([GIT, 'checkout', branch], cwd=repo)
-
-
-def head_subject(path):
-    # Returns the subject of the HEAD commit in the repository at 'path'
-
-    return subprocess.check_output([GIT, 'log', '-n1', '--format=%s'], cwd=path).decode().rstrip()
-
-
-def default_updater(remotes):
-    add_commit(remotes.net_tools, 'another net-tools commit')
-    add_commit(remotes.kconfiglib, 'another kconfiglib commit')
-    add_commit(remotes.tagged_repo, 'another tagged_repo commit')
-    cmd('update')
-
-
-def update_helper(west_tmpdir, updater=default_updater):
-    # Helper command for causing a change in two remote repositories,
-    # then running a project command on the west workspace.
-    #
-    # Adds a commit to both of the kconfiglib and net-tools projects
-    # remotes, then call updater(update_remotes),
-    # which defaults to a function that adds commits in each
-    # repository's remote and runs 'west update'.
-    #
-    # Captures the remote and local repository paths, as well as
-    # manifest-rev and HEAD before and after, returning the results in
-    # an UpdateResults tuple.
-
-    nt_remote = str(west_tmpdir.join('..', 'repos', 'net-tools'))
-    nt_local = str(west_tmpdir.join('net-tools'))
-    kl_remote = str(west_tmpdir.join('..', 'repos', 'Kconfiglib'))
-    kl_local = str(west_tmpdir.join('subdir', 'Kconfiglib'))
-    tr_remote = str(west_tmpdir.join('..', 'repos', 'tagged_repo'))
-    tr_local = str(west_tmpdir.join('tagged_repo'))
-
-    def output_or_none(*args, **kwargs):
-        try:
-            ret = check_output(*args, **kwargs)
-        except (FileNotFoundError, NotADirectoryError, SystemExit):
-            ret = None
-        return ret
-
-    nt_mr_0 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=nt_local)
-    kl_mr_0 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=kl_local)
-    tr_mr_0 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=tr_local)
-    nt_head_0 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=nt_local)
-    kl_head_0 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=kl_local)
-    tr_head_0 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=tr_local)
-
-    updater(UpdateRemotes(nt_remote, kl_remote, tr_remote))
-
-    nt_mr_1 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=nt_local)
-    kl_mr_1 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=kl_local)
-    tr_mr_1 = output_or_none([GIT, 'rev-parse', 'manifest-rev'], cwd=tr_local)
-    nt_head_1 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=nt_local)
-    kl_head_1 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=kl_local)
-    tr_head_1 = output_or_none([GIT, 'rev-parse', 'HEAD'], cwd=tr_local)
-
-    return UpdateResults(
-        nt_remote,
-        nt_local,
-        kl_remote,
-        kl_local,
-        tr_remote,
-        tr_local,
-        nt_mr_0,
-        nt_mr_1,
-        kl_mr_0,
-        kl_mr_1,
-        tr_mr_0,
-        tr_mr_1,
-        nt_head_0,
-        nt_head_1,
-        kl_head_0,
-        kl_head_1,
-        tr_head_0,
-        tr_head_1,
-    )
-
-
 def test_change_remote_conflict(west_update_tmpdir):
     # Test that `west update` will force fetch into local refs space when
     # remote has changed and cannot be fast forwarded.
@@ -2619,7 +2662,6 @@ def test_change_remote_conflict(west_update_tmpdir):
 
     rrepo = str(tmpdir.join('repos'))
     net_tools = str(tmpdir.join('repos', 'net-tools'))
-    rwest = str(tmpdir.join('repos', 'west'))
     alt_repo = str(tmpdir.join('alt_repo'))
     alt_net_tools = str(tmpdir.join('alt_repo', 'net-tools'))
     create_repo(alt_net_tools)
@@ -2632,8 +2674,6 @@ def test_change_remote_conflict(west_update_tmpdir):
     revision = rev_parse(net_tools, 'HEAD')
 
     west_yml_content = textwrap.dedent(f'''\
-                      west:
-                        url: file://{rwest}
                       manifest:
                         defaults:
                           remote: test-local
@@ -2657,8 +2697,6 @@ def test_change_remote_conflict(west_update_tmpdir):
     revision = rev_parse(alt_net_tools, 'HEAD')
 
     west_yml_content = textwrap.dedent(f'''\
-                      west:
-                        url: file://{rwest}
                       manifest:
                         defaults:
                           remote: test-local
