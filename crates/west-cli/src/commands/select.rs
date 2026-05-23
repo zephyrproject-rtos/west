@@ -3,11 +3,14 @@
 //! `Manifest::resolve_projects` with one CLI rule on top: positional
 //! project names bypass the active-group filter (matches Python's intent —
 //! a user who names a project explicitly wants it even if its group is off).
+//!
+//! Selectors are expected to be names or manifest-relative paths; callers
+//! that accept user-supplied positionals from argv should run
+//! [`super::workspace::normalize_project_selector`] on each one first to
+//! translate `.` / `..` / absolute paths into the matching form.
 
 use west_core::loaded::LoadedManifest;
-use west_core::manifest::{
-    GroupFilterEntry, Manifest, ManifestError, Project, Submodules,
-};
+use west_core::manifest::{GroupFilterEntry, Manifest, ManifestError, Project, Submodules};
 
 /// Resolve the set of projects to update.
 ///

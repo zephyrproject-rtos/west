@@ -223,9 +223,14 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
     };
     let loaded_manifest = LoadedManifest::new(manifest, config_group_filter, project_filter);
 
+    let normalized_selectors: Vec<String> = args
+        .projects
+        .iter()
+        .map(|s| super::workspace::normalize_project_selector(s, &workspace))
+        .collect();
     let projects = match super::select::select_projects(
         &loaded_manifest,
-        &args.projects,
+        &normalized_selectors,
         &cli_group_filter,
     ) {
         Ok(ps) => ps,

@@ -136,13 +136,17 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
         }));
         acc
     } else {
-        // Pull positional matches for the synthetic out before falling
-        // through to `select_projects` (which only knows about the
-        // resolved real projects). `west list manifest` matches by name;
-        // `west list <self.path>` matches by path — same as Python.
+        // Normalize positionals first so absolute paths and `./..`
+        // forms collapse to the same shape as the partition's
+        // comparators (`"manifest"` / `self.path`) and as
+        // `Manifest::resolve_projects` matches against.
         let manifest_path_str = manifest.self_.path.to_string_lossy().into_owned();
-        let (synthetic_hits, leftover): (Vec<_>, Vec<_>) = args
+        let normalized: Vec<String> = args
             .projects
+            .iter()
+            .map(|s| super::workspace::normalize_project_selector(s, &workspace))
+            .collect();
+        let (synthetic_hits, leftover): (Vec<_>, Vec<_>) = normalized
             .iter()
             .partition(|s| s.as_str() == "manifest" || s.as_str() == manifest_path_str);
 

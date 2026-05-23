@@ -52,6 +52,59 @@ pub(crate) fn resolve_workspace_dir() -> Result<PathBuf, WorkspaceError> {
     west_core::topdir::topdir(&cwd).map_err(|_| WorkspaceError::NotInWorkspace)
 }
 
+/// Map a user-facing project selector to the form
+/// [`west_core::manifest::Manifest::resolve_projects`] matches against
+/// (project name OR manifest-relative path).
+///
+/// Bare names — no separator, no `./` / `../` prefix, not absolute —
+/// pass through unchanged so the manifest's name-lookup branch wins.
+/// Anything that looks like a path is anchored at the current working
+/// directory and made workspace-relative by stripping the
+/// canonicalized workspace prefix. Selectors that don't end up under
+/// the workspace are returned as-is — `resolve_projects` will reject
+/// them with `UnknownProject`, preserving the legacy error.
+///
+/// Two strip attempts cover the two cases:
+///   1. Canonicalize both sides — handles macOS's `/var → /private/var`
+///      redirect and any other symlink games along the path.
+///   2. Plain textual strip against the canonicalized workspace — used
+///      when the project isn't on disk yet (pre-`west update`), so
+///      `canonicalize` on its absolute path would fail.
+pub(crate) fn normalize_project_selector(sel: &str, workspace: &Path) -> String {
+    let path = Path::new(sel);
+    let looks_pathy = path.is_absolute()
+        || sel.contains('/')
+        || sel.contains(std::path::MAIN_SEPARATOR)
+        || sel == "."
+        || sel == ".."
+        || sel.starts_with("./")
+        || sel.starts_with("../");
+    if !looks_pathy {
+        return sel.to_owned();
+    }
+    let cwd = match std::env::current_dir() {
+        Ok(c) => c,
+        Err(_) => return sel.to_owned(),
+    };
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    };
+    let ws_can = workspace
+        .canonicalize()
+        .unwrap_or_else(|_| workspace.to_path_buf());
+    if let Ok(can) = abs.canonicalize()
+        && let Ok(rel) = can.strip_prefix(&ws_can)
+    {
+        return rel.to_string_lossy().into_owned();
+    }
+    if let Ok(rel) = abs.strip_prefix(&ws_can) {
+        return rel.to_string_lossy().into_owned();
+    }
+    sel.to_owned()
+}
+
 /// Load the manifest at `<workspace>/<manifest.path>/<manifest.file>`
 /// using `source` for import resolution, **plus** the workspace's
 /// `manifest.group-filter` and `manifest.project-filter` so the
@@ -248,5 +301,85 @@ pub(crate) fn read_project_import(
                 None => Ok(None),
             }
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    /// Build a workspace tempdir with `subdir/project1` and `project2`
+    /// pre-created so `canonicalize` succeeds on those targets.
+    fn workspace_with_projects() -> tempfile::TempDir {
+        let tmp = tempdir().expect("tempdir");
+        fs::create_dir_all(tmp.path().join("subdir/project1")).unwrap();
+        fs::create_dir(tmp.path().join("project2")).unwrap();
+        tmp
+    }
+
+    #[test]
+    fn bare_name_passes_through() {
+        let ws = workspace_with_projects();
+        assert_eq!(
+            normalize_project_selector("project1", ws.path()),
+            "project1"
+        );
+        // Names starting with '.' are NOT path-like unless the prefix is './'.
+        assert_eq!(
+            normalize_project_selector(".hidden-project", ws.path()),
+            ".hidden-project"
+        );
+    }
+
+    #[test]
+    fn absolute_path_inside_workspace_becomes_relative() {
+        let ws = workspace_with_projects();
+        let abs = ws.path().join("subdir/project1");
+        assert_eq!(
+            normalize_project_selector(abs.to_str().unwrap(), ws.path()),
+            "subdir/project1"
+        );
+    }
+
+    #[test]
+    fn absolute_path_outside_workspace_is_unchanged() {
+        let ws = workspace_with_projects();
+        let outside = tempdir().unwrap();
+        let abs = outside.path().join("not-in-ws");
+        // Leaf doesn't exist, so canonicalize fails; textual strip
+        // also fails (different prefix). Returns the original.
+        let s = abs.to_str().unwrap();
+        assert_eq!(normalize_project_selector(s, ws.path()), s);
+    }
+
+    #[test]
+    fn relative_dot_anchors_at_cwd() {
+        let ws = workspace_with_projects();
+        let nested = ws.path().join("subdir/project1");
+        // Save+restore cwd; on test parallelism this would race, but
+        // the rust test runner serializes per-process by default
+        // and we have only one cwd-touching test in the file.
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&nested).unwrap();
+        let result = normalize_project_selector(".", ws.path());
+        std::env::set_current_dir(prev).unwrap();
+        assert_eq!(result, "subdir/project1");
+    }
+
+    #[test]
+    fn uncloned_project_path_still_normalizes() {
+        // canonicalize would fail on the leaf (no directory), so this
+        // exercises the textual-strip fallback.
+        let ws = workspace_with_projects();
+        let ws_can = ws.path().canonicalize().unwrap();
+        let leaf = ws_can.join("not-yet-cloned");
+        let s = leaf.to_str().unwrap();
+        assert_eq!(
+            normalize_project_selector(s, ws.path()),
+            "not-yet-cloned"
+        );
     }
 }

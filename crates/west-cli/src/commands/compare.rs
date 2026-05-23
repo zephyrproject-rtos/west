@@ -190,8 +190,12 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
         acc
     } else {
         let manifest_path_str = manifest.self_.path.to_string_lossy().into_owned();
-        let (synthetic_hits, leftover): (Vec<_>, Vec<_>) = args
+        let normalized: Vec<String> = args
             .projects
+            .iter()
+            .map(|s| super::workspace::normalize_project_selector(s, &workspace))
+            .collect();
+        let (synthetic_hits, leftover): (Vec<_>, Vec<_>) = normalized
             .iter()
             .partition(|s| s.as_str() == "manifest" || s.as_str() == manifest_path_str);
         let mut acc: Vec<&Project> = Vec::new();
