@@ -169,7 +169,7 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
             .collect();
         let (synthetic_hits, leftover): (Vec<_>, Vec<_>) = normalized
             .iter()
-            .partition(|s| s.as_str() == "manifest" || s.as_str() == synthetic_path_str);
+            .partition(|s| s.as_str() == select::SYNTHETIC_NAME || s.as_str() == synthetic_path_str);
 
         let mut acc: Vec<&Project> = Vec::new();
         if !synthetic_hits.is_empty() {
@@ -301,6 +301,12 @@ impl ProjectContext<'_> {
     }
 
     fn compute_sha(&self) -> Result<String, ListError> {
+        // The synthetic manifest project has no manifest-controlled
+        // revision — the manifest repo's HEAD moves under the user's
+        // own control, not west's. Match v1's "N/A" rendering.
+        if select::is_synthetic_manifest_project(self.project) {
+            return Ok("N/A".into());
+        }
         if !self.is_cloned() {
             return Err(ListError::UnclonedSha(self.project.name.clone()));
         }

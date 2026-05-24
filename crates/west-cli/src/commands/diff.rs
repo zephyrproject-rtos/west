@@ -188,7 +188,7 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
             .collect();
         let (synthetic_hits, leftover): (Vec<_>, Vec<_>) = normalized
             .iter()
-            .partition(|s| s.as_str() == "manifest" || s.as_str() == manifest_path_str);
+            .partition(|s| s.as_str() == select::SYNTHETIC_NAME || s.as_str() == manifest_path_str);
         let mut acc: Vec<&Project> = Vec::new();
         // See the empty-positionals branch: `--manifest` excludes
         // the synthetic project unconditionally.

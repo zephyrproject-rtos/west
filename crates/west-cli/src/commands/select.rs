@@ -44,9 +44,22 @@ where
     }
 }
 
+/// The reserved project name used by [`synthetic_manifest_project`].
+/// The schema rejects any manifest that names a real project this,
+/// so equality against it is a sound "is this the synthetic?" check.
+pub(crate) const SYNTHETIC_NAME: &str = "manifest";
+
+/// Whether `p` is the synthetic manifest-repo project (built by
+/// [`synthetic_manifest_project`]). Centralises the name-equality
+/// check so callers don't reinvent it via field-emptiness probes
+/// — the discriminator stays next to the constructor.
+pub(crate) fn is_synthetic_manifest_project(p: &Project) -> bool {
+    p.name == SYNTHETIC_NAME
+}
+
 /// Build the synthetic project record for the manifest repo itself.
 /// Mirrors python's `ManifestProject` (index 0 in `Manifest.projects`):
-/// name `"manifest"` (a reserved name no real project can use),
+/// name [`SYNTHETIC_NAME`] (a reserved name no real project can use),
 /// revision `"HEAD"`, no url.
 ///
 /// `path` is provided explicitly because the canonical "where does the
@@ -57,7 +70,7 @@ where
 /// what `west list --manifest-path-from-yaml` does.
 pub(crate) fn synthetic_manifest_project(manifest: &Manifest, path: PathBuf) -> Project {
     Project {
-        name: "manifest".into(),
+        name: SYNTHETIC_NAME.into(),
         url: String::new(),
         revision: "HEAD".into(),
         path,

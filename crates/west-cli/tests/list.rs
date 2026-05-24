@@ -436,12 +436,13 @@ fn list_sha_for_cloned_project() {
         .stdout
         .clone();
     let lines = stdout_lines(&out);
-    // Synthetic manifest's HEAD + p1's HEAD; both 40-char hex shas.
+    // Two output lines: the synthetic manifest project renders as
+    // "N/A" (it has no manifest-controlled revision), and p1's HEAD
+    // resolves to a 40-char hex SHA.
     assert_eq!(lines.len(), 2);
-    for line in &lines {
-        assert_eq!(line.len(), 40, "expected 40-char sha, got: {line:?}");
-        assert!(line.chars().all(|c| c.is_ascii_hexdigit()));
-    }
+    assert_eq!(lines[0], "N/A", "synthetic manifest sha should be N/A");
+    assert_eq!(lines[1].len(), 40, "expected 40-char sha, got: {:?}", lines[1]);
+    assert!(lines[1].chars().all(|c| c.is_ascii_hexdigit()));
 }
 
 #[test]

@@ -198,7 +198,7 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
             .collect();
         let (synthetic_hits, leftover): (Vec<_>, Vec<_>) = normalized
             .iter()
-            .partition(|s| s.as_str() == "manifest" || s.as_str() == manifest_path_str);
+            .partition(|s| s.as_str() == select::SYNTHETIC_NAME || s.as_str() == manifest_path_str);
         let mut acc: Vec<&Project> = Vec::new();
         if !synthetic_hits.is_empty() {
             acc.push(&synthetic);
