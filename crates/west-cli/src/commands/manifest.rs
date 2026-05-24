@@ -267,11 +267,16 @@ fn action_untracked(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), Man
     // that convention.
     let cwd = std::env::current_dir()
         .map_err(|e| ManifestCmdError::Config(format!("cannot get current directory: {e}")))?;
-    let mut paths: Vec<String> = untracked
+    // No re-sort after relativizing: the workspace-absolute order
+    // from above is the natural one. When cwd is a subdirectory of
+    // the workspace, `.` (the cwd entry itself) lands where the
+    // subdir's workspace-path would have sorted — typically at the
+    // end, matching v1. Re-sorting the cwd-relative strings would
+    // push `.` to the front (`.` < `..` lexically).
+    let paths: Vec<String> = untracked
         .iter()
         .map(|p| relative_to(p, &cwd).to_string_lossy().into_owned())
         .collect();
-    paths.sort();
 
     let body = format_untracked(&paths, args.format)?;
     write_output(args.out.as_deref(), &body)
