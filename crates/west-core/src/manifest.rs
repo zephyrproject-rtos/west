@@ -1896,12 +1896,14 @@ impl Manifest {
 
         let projects: Vec<Value> = self.projects.iter().map(project_to_value).collect();
 
+        // v1 emits keys in `group-filter`, `projects`, `self` order
+        // (projects first, self block last). Match it.
         let mut manifest_block = Map::new();
         if !group_filter.is_empty() {
             manifest_block.insert("group-filter".into(), Value::Array(group_filter));
         }
-        manifest_block.insert("self".into(), Value::Object(self_block));
         manifest_block.insert("projects".into(), Value::Array(projects));
+        manifest_block.insert("self".into(), Value::Object(self_block));
 
         json!({ "manifest": Value::Object(manifest_block) })
     }
