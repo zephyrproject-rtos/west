@@ -29,10 +29,12 @@ By default the manifest file is named ``west.yml``.
 You use ``west init`` to set up this directory, then ``west update`` to fetch
 and/or update the repositories named in the manifest.
 
-By default, west uses `upstream Zephyr's manifest file
-<https://github.com/zephyrproject-rtos/zephyr/blob/main/west.yml>`_, but west
-doesn't care if the manifest repository is zephyr or not. You can and are
-encouraged to make your own manifest repositories to meet your needs.
+West used to default to `upstream Zephyr's manifest file
+<https://github.com/zephyrproject-rtos/zephyr/blob/main/west.yml>`_.
+You are still able and will always be able to use this manifest but you
+are now required to pass it explicitly and, you are more encouraged than
+before to design your own manifest(s) instead and minimized security SBOMs
+based on your specific needs.
 
 For more details, see the `West (Zephyr's meta-tool)
 <https://docs.zephyrproject.org/latest/develop/west/index.html>`_ in the Zephyr
@@ -41,12 +43,12 @@ documentation.
 Example usage using the upstream manifest file::
 
   mkdir zephyrproject && cd zephyrproject
-  west init
+  west init -m https://github.com/zephyrproject-rtos/zephyr/
   west update
 
 What just happened:
 
-- ``west init`` clones the upstream *west manifest* repository, which in this
+- ``west init -m ...`` clones the upstream *west manifest* repository, which in this
   case is the zephyr repository. The manifest repository contains ``west.yml``,
   a YAML description of the Zephyr installation, including Git repositories and
   other metadata.

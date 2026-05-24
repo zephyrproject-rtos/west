@@ -274,11 +274,8 @@ Each component can have subdirectories, even the last one despite its name
 
 1. Using a Manifest Repository (default)
 ----------------------------------------
-West clones the given repository (provided via `-m / --manifest-url`).
+West clones the repository provided via `-m / --manifest-url`.
 Note, that the repository must contain a west manifest.
-
-If no `-m / --manifest-url` is provided, west uses the Zephyr URL by default:
-  {MANIFEST_URL_DEFAULT}.
 
 The topdir (where `.west` is created) is determined as follows:
 - argument `-t / --topdir` if provided
@@ -347,8 +344,9 @@ below.
         )
 
         # Remember to update the usage if you modify any arguments.
+        clone_or_local = parser.add_mutually_exclusive_group(required=True)
 
-        parser.add_argument(
+        clone_or_local.add_argument(
             '-m',
             '--manifest-url',
             metavar='URL',
@@ -373,7 +371,7 @@ below.
             help='''manifest repository branch or tag name
                     to check out first; cannot be combined with -l''',
         )
-        parser.add_argument(
+        clone_or_local.add_argument(
             '-l',
             '--local',
             action='store_true',
@@ -568,7 +566,7 @@ below.
 
         self.banner(f'Initializing in {topdir}')
 
-        manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
+        manifest_url = args.manifest_url
         if args.manifest_rev:
             # This works with tags, too.
             branch_opt = ['--branch', args.manifest_rev]
@@ -2819,9 +2817,6 @@ def projects_unknown(manifest, projects):
 
 # Top-level west directory, containing west itself and the manifest.
 WEST_DIR = util.WEST_DIR
-
-# Default manifest repository URL.
-MANIFEST_URL_DEFAULT = 'https://github.com/zephyrproject-rtos/zephyr'
 
 #
 # Other shared globals.

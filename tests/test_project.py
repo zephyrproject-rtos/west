@@ -1923,8 +1923,8 @@ def test_init_again(west_init_tmpdir):
 
     expected_msg = f'FATAL ERROR: already initialized in {west_init_tmpdir}'
 
-    # A bare `init` defaults to cloning -m http://zephyrproject/zephyr
-    exc, stderr = cmd_raises('init', SystemExit, cwd=west_init_tmpdir)
+    # The local disk state should be checked before the remote bogus_url
+    exc, stderr = cmd_raises(['init', '-m', 'bogus_url'], SystemExit, cwd=west_init_tmpdir)
     assert exc.value.code == 1
     assert expected_msg in stderr
 
