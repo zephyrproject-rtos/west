@@ -77,7 +77,7 @@ pub enum ListError {
     Format(String),
     #[error("project {0:?} is not cloned; cannot resolve {{sha}} (run `west update` first)")]
     UnclonedSha(String),
-    #[error("--inactive cannot be combined with project names")]
+    #[error("-i cannot be combined with an explicit project list")]
     InactiveWithPositional,
 }
 

@@ -350,7 +350,7 @@ fn list_inactive_with_positional_errors() {
         .failure();
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
     assert!(
-        stderr.contains("--inactive cannot be combined with project names"),
+        stderr.contains("-i cannot be combined with an explicit project list"),
         "got: {stderr}"
     );
 }
