@@ -1385,18 +1385,18 @@ manifest:
   group-filter:
   - -Bdisabled
   - -Ddisabled
-  projects:
-  - name: p1
-    revision: master
-    url: https://example.com/p1
-  - clone-depth: 1
-    name: p2
-    path: project-two
-    revision: deadbeef
-    url: https://example.com/p2
-    west-commands: commands.yml
   self:
     path: mp
+  projects:
+  - name: p1
+    url: https://example.com/p1
+    revision: master
+  - name: p2
+    url: https://example.com/p2
+    revision: deadbeef
+    path: project-two
+    clone-depth: 1
+    west-commands: commands.yml
 '''
 
     with open(manifest_repo / 'west.yml', 'w') as f:
