@@ -35,7 +35,7 @@
 //! `textwrap.indent(..., ' ' * 4)`.
 
 use std::io::{self, IsTerminal, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 
 use clap::{Args, ValueEnum};
@@ -130,6 +130,12 @@ enum CompareError {
     #[error("uncloned {plural}: {names}\n  Hint: run \"west update\" and retry.",
             plural = if names.contains(',') { "projects" } else { "project" })]
     UnclonedPositional { names: String },
+    /// Embeds [`super::project_format::FormatError`] transparently —
+    /// keeps each `FormatError` variant addressable by `match`
+    /// without duplicating them here, and preserves the user-facing
+    /// message verbatim (no extra "manifest:" prefix).
+    #[error(transparent)]
+    Format(#[from] super::project_format::FormatError),
 }
 
 impl From<super::workspace::WorkspaceError> for CompareError {
@@ -139,16 +145,6 @@ impl From<super::workspace::WorkspaceError> for CompareError {
             super::workspace::WorkspaceError::Config(s) => CompareError::Config(s),
             super::workspace::WorkspaceError::Manifest(s) => CompareError::Manifest(s),
         }
-    }
-}
-
-impl From<super::project_format::FormatError> for CompareError {
-    fn from(e: super::project_format::FormatError) -> Self {
-        // Compress all format-rendering errors into `Manifest` since
-        // CompareError has no dedicated format variants — they're
-        // structural failures of the user's `-f` template, not VCS
-        // or workspace issues.
-        CompareError::Manifest(e.to_string())
     }
 }
 
@@ -341,7 +337,7 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
     };
     let mut printed_any = false;
     let mut failures: Vec<(String, String)> = Vec::new();
-    for (project, o) in projects.iter().zip(outcomes.into_iter()) {
+    for o in outcomes {
         match o.result {
             Ok(None) => {} // Aligned project, no output.
             Ok(Some(body)) => {
@@ -351,7 +347,7 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
                     // just one line per dirty project rendered
                     // through the shared format engine.
                     let ctx = super::project_format::ProjectContext {
-                        project,
+                        project: o.project,
                         loaded: &loaded_manifest,
                         workspace: workspace.as_path(),
                         vcs: vcs.as_ref(),
@@ -365,15 +361,15 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
                             "{}",
                             banner_style.apply_to(format!(
                                 "=== {} ({}):",
-                                o.name,
-                                o.path.display(),
+                                o.project.name,
+                                o.project.path.display(),
                             )),
                         );
                     }
                     let _ = stdout.write_all(&body);
                 }
             }
-            Err(e) => failures.push((o.name, e.to_string())),
+            Err(e) => failures.push((o.project.name.clone(), e.to_string())),
         }
     }
     drop(stdout);
@@ -401,9 +397,8 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
     }
 }
 
-struct ProjectOutcome {
-    name: String,
-    path: PathBuf,
+struct ProjectOutcome<'a> {
+    project: &'a Project,
     /// `Ok(None)` = aligned (no output);
     /// `Ok(Some(body))` = output collected (without project
     /// banner — the drain loop adds that);
@@ -411,21 +406,17 @@ struct ProjectOutcome {
     result: Result<Option<Vec<u8>>, VcsError>,
 }
 
-fn compare_one(
-    project: &Project,
+fn compare_one<'a>(
+    project: &'a Project,
     workspace: &Path,
     vcs: &dyn Vcs,
     ignore_branches: bool,
     color: ColorMode,
     is_synthetic: bool,
-) -> ProjectOutcome {
+) -> ProjectOutcome<'a> {
     let abspath = workspace.join(&project.path);
     let result = compare_one_inner(&abspath, vcs, ignore_branches, color, is_synthetic);
-    ProjectOutcome {
-        name: project.name.clone(),
-        path: project.path.clone(),
-        result,
-    }
+    ProjectOutcome { project, result }
 }
 
 fn compare_one_inner(

@@ -21,7 +21,7 @@ use super::select;
 /// template. Commands that consume this convert to their own error
 /// enum via a `From` impl.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum FormatError {
+pub enum FormatError {
     #[error("unknown format key: {{{0}}}")]
     UnknownKey(String),
     #[error("format error: {0}")]
@@ -151,14 +151,24 @@ pub(crate) fn render(template: &str, ctx: &ProjectContext<'_>) -> Result<String,
 
 /// Best-effort: when `strfmt` surfaces a `KeyError` that our lookup
 /// produced, the message starts with the human-readable form of one
-/// of our `FormatError` variants. Keep the original text rather than
-/// re-typing — losing the typed structure here is OK because the
-/// caller just prints the message.
+/// of our `FormatError` variants. Re-typing here so callers that
+/// `match` on the variant (and not just the printed message) can
+/// still distinguish e.g. an uncloned-sha failure from an unknown
+/// format key.
 fn parse_back_format_error(msg: &str) -> FormatError {
     if let Some(rest) = msg.strip_prefix("unknown format key: {")
         && let Some(key) = rest.strip_suffix('}')
     {
         return FormatError::UnknownKey(key.to_owned());
+    }
+    // Match the `Display` shape of `FormatError::UnclonedSha`:
+    //   project "NAME" is not cloned; cannot resolve {sha} ...
+    // The name lives between the first pair of double-quotes.
+    if msg.starts_with("project ") && msg.contains("is not cloned") {
+        let parts: Vec<&str> = msg.splitn(3, '"').collect();
+        if parts.len() >= 3 {
+            return FormatError::UnclonedSha(parts[1].to_owned());
+        }
     }
     FormatError::Format(msg.to_owned())
 }

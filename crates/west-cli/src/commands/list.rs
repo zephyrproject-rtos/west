@@ -70,12 +70,12 @@ pub enum ListError {
     Manifest(String),
     #[error("{0}")]
     Vcs(String),
-    #[error("unknown format key: {{{0}}}")]
-    UnknownKey(String),
-    #[error("format error: {0}")]
-    Format(String),
-    #[error("project {0:?} is not cloned; cannot resolve {{sha}} (run `west update` first)")]
-    UnclonedSha(String),
+    /// Embeds [`FormatError`] transparently — every format-rendering
+    /// variant (unknown key, format string error, uncloned sha, vcs
+    /// failure while resolving `{sha}`) stays addressable by `match`
+    /// without per-variant duplication in this enum.
+    #[error(transparent)]
+    Format(#[from] FormatError),
     #[error("-i cannot be combined with an explicit project list")]
     InactiveWithPositional,
 }
@@ -86,17 +86,6 @@ impl From<super::workspace::WorkspaceError> for ListError {
             super::workspace::WorkspaceError::NotInWorkspace => ListError::NotInWorkspace,
             super::workspace::WorkspaceError::Config(s) => ListError::Config(s),
             super::workspace::WorkspaceError::Manifest(s) => ListError::Manifest(s),
-        }
-    }
-}
-
-impl From<FormatError> for ListError {
-    fn from(e: FormatError) -> Self {
-        match e {
-            FormatError::UnknownKey(k) => ListError::UnknownKey(k),
-            FormatError::Format(s) => ListError::Format(s),
-            FormatError::UnclonedSha(n) => ListError::UnclonedSha(n),
-            FormatError::Vcs(s) => ListError::Vcs(s),
         }
     }
 }
@@ -213,7 +202,10 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
             if e.kind() == io::ErrorKind::BrokenPipe {
                 return Ok(false);
             }
-            return Err(ListError::Format(e.to_string()));
+            // Writing to stdout failed for a reason other than the
+            // user-closing-pipe case. Funnel through FormatError so
+            // we don't grow a one-shot variant for this corner.
+            return Err(FormatError::Format(e.to_string()).into());
         }
     }
 
