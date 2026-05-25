@@ -19,12 +19,15 @@
 //!
 //! Two stdio modes:
 //!
-//! - **Serial** (`-j 1` or `output.raw=true`): banner via stderr
+//! - **Serial** (`-j 1` or `output.raw=true`): banner via stdout
 //!   then `Stdio::inherit` — output flows live to the user's
-//!   terminal.
+//!   terminal. Banner on stdout matches v1, the other banner-
+//!   emitting commands (`diff` / `status` / `compare`), and the
+//!   parallel path below. Users who want banner-less output
+//!   can pass `-q` (the autouse top-level quiet flag).
 //! - **Parallel** (`-j N>1`): `Stdio::piped` + per-project capture;
 //!   workers return their banner + captured streams, and the driver
-//!   drains them in completion order to stderr at the end. Keeps
+//!   drains them in completion order to stdout at the end. Keeps
 //!   parallel runs interleave-free without an indicatif UI (we
 //!   don't have phase/tick events from a generic shell command).
 
@@ -228,9 +231,9 @@ fn run_inner(args: ForallArgs, loaded: &mut LoadedConfig) -> Result<bool, Forall
     let jobs = if parallel { settings.jobs } else { 1 };
 
     if parallel {
-        run_parallel(&args, &workspace, &projects, jobs)
+        run_parallel(&args, &workspace, &projects, jobs, settings.quiet)
     } else {
-        run_serial(&args, &workspace, &projects)
+        run_serial(&args, &workspace, &projects, settings.quiet)
     }
 }
 
@@ -242,25 +245,28 @@ fn run_serial(
     args: &ForallArgs,
     workspace: &Path,
     projects: &[&Project],
+    quiet: bool,
 ) -> Result<bool, ForallError> {
     // Bright green + bold matches python v1's banner palette
     // (`colorama.Fore.LIGHTGREEN_EX`). console::Style's
-    // auto-detect (against stderr) strips the colour when
-    // stderr isn't a TTY.
-    let bold = Style::new().green().bright().bold().for_stderr();
+    // auto-detect (against stdout) strips the colour when
+    // stdout isn't a TTY.
+    let bold = Style::new().green().bright().bold().for_stdout();
     let mut failed: Vec<String> = Vec::new();
     for project in projects {
         let abspath = workspace.join(&project.path);
         let cwd = args.cwd.as_deref().unwrap_or(&abspath);
-        eprintln!(
-            "{}",
-            bold.apply_to(format!(
-                "=== running \"{}\" in {} ({}):",
-                args.command,
-                project.name,
-                project.path.display(),
-            ))
-        );
+        if !quiet {
+            println!(
+                "{}",
+                bold.apply_to(format!(
+                    "=== running \"{}\" in {} ({}):",
+                    args.command,
+                    project.name,
+                    project.path.display(),
+                ))
+            );
+        }
         let mut cmd = build_command(args, project, &abspath, cwd);
         // Inherit stdio so output flows live.
         let status = cmd.status().map_err(ForallError::Spawn)?;
@@ -276,6 +282,7 @@ fn run_parallel(
     workspace: &Path,
     projects: &[&Project],
     jobs: usize,
+    quiet: bool,
 ) -> Result<bool, ForallError> {
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(jobs)
@@ -332,14 +339,16 @@ fn run_parallel(
     let outcomes = outcomes.into_inner().unwrap_or_else(|p| p.into_inner());
     // Bright green + bold matches python v1's banner palette
     // (`colorama.Fore.LIGHTGREEN_EX`). console::Style's
-    // auto-detect (against stderr) strips the colour when
-    // stderr isn't a TTY.
-    let bold = Style::new().green().bright().bold().for_stderr();
-    let stderr = io::stderr();
-    let mut lock = stderr.lock();
+    // auto-detect (against stdout) strips the colour when
+    // stdout isn't a TTY.
+    let bold = Style::new().green().bright().bold().for_stdout();
+    let stdout = io::stdout();
+    let mut lock = stdout.lock();
     let mut failed: Vec<String> = Vec::new();
     for outcome in outcomes {
-        let _ = writeln!(lock, "{}", bold.apply_to(&outcome.banner));
+        if !quiet {
+            let _ = writeln!(lock, "{}", bold.apply_to(&outcome.banner));
+        }
         let _ = lock.write_all(&outcome.stdout);
         let _ = lock.write_all(&outcome.stderr);
         match outcome.status {
@@ -429,6 +438,7 @@ fn build_env(project: &Project, abspath: &Path) -> [(&'static str, String); 6] {
 struct Settings {
     jobs: usize,
     raw: bool,
+    quiet: bool,
 }
 
 impl Settings {
@@ -447,10 +457,14 @@ impl Settings {
             .get_bool("output.raw")
             .map_err(|e| e.to_string())?
             .unwrap_or(false);
+        let quiet = config
+            .get_bool("output.quiet")
+            .map_err(|e| e.to_string())?
+            .unwrap_or(false);
         // `_` to silence the read on serial-only platforms; we use the
         // computed value indirectly via `jobs` and `raw`.
         let _is_tty = io::stderr().is_terminal();
-        Ok(Self { jobs, raw })
+        Ok(Self { jobs, raw, quiet })
     }
 }
 

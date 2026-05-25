@@ -515,8 +515,10 @@ fn forall_synthetic_manifest_included() {
 #[serial]
 fn forall_parallel_buffers_output_per_project() {
     // -j 2 with two projects each writing 50 numbered lines: the
-    // captured stderr must show each project's lines in a contiguous
-    // block (banner + all lines, no interleaving).
+    // captured stdout must show each project's lines in a contiguous
+    // block (banner + all lines, no interleaving). forall drains
+    // banner + body to stdout (matching `diff` / `status` / `compare`
+    // and v1); stderr is for west's own diagnostics.
     if !git_available() {
         return;
     }
@@ -546,7 +548,7 @@ fn forall_parallel_buffers_output_per_project() {
         .assert()
         .success()
         .get_output()
-        .stderr
+        .stdout
         .clone();
     let lines = stdout_lines(&out);
     // Find the indices where p1's numbered lines appear; they must be
