@@ -34,6 +34,10 @@ rayon = "1"
 shlex = "1"
 strfmt = "0.2"
 thiserror.workspace = true
+# Used by `west grep` to locate `rg` / `ripgrep` / `grep` on PATH
+# when neither `--tool-path` nor the `grep.{tool}-path` config key is
+# set. Tiny dependency (no transitive deps on linux/macOS).
+which = "8"
 west-core = { path = "../west-core" }
 
 # Only pulled in when the `pyo3` feature is enabled (i.e., when maturin

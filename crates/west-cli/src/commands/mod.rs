@@ -11,6 +11,7 @@ pub mod diff;
 pub mod exec;
 pub mod extension;
 pub mod forall;
+pub mod grep;
 pub mod help;
 pub mod init;
 pub mod list;
@@ -37,6 +38,8 @@ pub enum Command {
     Exec(exec::ExecArgs),
     /// Run a shell command in each project.
     Forall(forall::ForallArgs),
+    /// Run a grep-like tool in each project (git-grep / ripgrep / grep).
+    Grep(grep::GrepArgs),
     /// Show help for a command — built-in, alias, or extension.
     Help(help::HelpArgs),
     /// Initialize a west workspace.
@@ -64,6 +67,7 @@ pub fn dispatch(cmd: Command, mut loaded: LoadedConfig) -> ExitCode {
         Command::Diff(a) => diff::run(a, &mut loaded),
         Command::Exec(a) => exec::run(a),
         Command::Forall(a) => forall::run(a, &mut loaded),
+        Command::Grep(a) => grep::run(a, &mut loaded),
         Command::Help(a) => help::run(a, &loaded),
         Command::Init(a) => init::run(a, &mut loaded),
         Command::List(a) => list::run(a, &mut loaded),

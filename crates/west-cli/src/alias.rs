@@ -126,6 +126,7 @@ fn subcommand_token(cmd: &Command) -> String {
         Command::Diff(_) => "diff".to_owned(),
         Command::Exec(_) => "exec".to_owned(),
         Command::Forall(_) => "forall".to_owned(),
+        Command::Grep(_) => "grep".to_owned(),
         Command::Help(_) => "help".to_owned(),
         Command::Init(_) => "init".to_owned(),
         Command::List(_) => "list".to_owned(),
