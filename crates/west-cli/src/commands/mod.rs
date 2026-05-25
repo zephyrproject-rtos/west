@@ -15,6 +15,7 @@ pub mod help;
 pub mod init;
 pub mod list;
 pub mod manifest;
+pub mod project_format;
 pub mod select;
 pub mod status;
 pub mod topdir;

@@ -100,6 +100,14 @@ pub struct CompareArgs {
     /// `min(num_cpus, 8)`.
     #[arg(short = 'j', long, value_name = "N")]
     pub jobs: Option<usize>,
+
+    /// Format string. When set, replaces the human-readable
+    /// per-project block (`=== name ...`) with one line per dirty
+    /// project rendered through this template. Same keys as
+    /// `west list -f` (`{name}`, `{path}`, `{sha}`, `{groups}`, …).
+    /// Designed for machine-readable output.
+    #[arg(short = 'f', long, value_name = "FMT")]
+    pub format: Option<String>,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -131,6 +139,16 @@ impl From<super::workspace::WorkspaceError> for CompareError {
             super::workspace::WorkspaceError::Config(s) => CompareError::Config(s),
             super::workspace::WorkspaceError::Manifest(s) => CompareError::Manifest(s),
         }
+    }
+}
+
+impl From<super::project_format::FormatError> for CompareError {
+    fn from(e: super::project_format::FormatError) -> Self {
+        // Compress all format-rendering errors into `Manifest` since
+        // CompareError has no dedicated format variants — they're
+        // structural failures of the user's `-f` template, not VCS
+        // or workspace issues.
+        CompareError::Manifest(e.to_string())
     }
 }
 
@@ -323,23 +341,37 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
     };
     let mut printed_any = false;
     let mut failures: Vec<(String, String)> = Vec::new();
-    for o in outcomes {
+    for (project, o) in projects.iter().zip(outcomes.into_iter()) {
         match o.result {
             Ok(None) => {} // Aligned project, no output.
             Ok(Some(body)) => {
                 printed_any = true;
-                if !settings.quiet {
-                    let _ = writeln!(
-                        stdout,
-                        "{}",
-                        banner_style.apply_to(format!(
-                            "=== {} ({}):",
-                            o.name,
-                            o.path.display(),
-                        )),
-                    );
+                if let Some(template) = args.format.as_deref() {
+                    // Machine-readable mode: no banner, no body —
+                    // just one line per dirty project rendered
+                    // through the shared format engine.
+                    let ctx = super::project_format::ProjectContext {
+                        project,
+                        loaded: &loaded_manifest,
+                        workspace: workspace.as_path(),
+                        vcs: vcs.as_ref(),
+                    };
+                    let line = super::project_format::render(template, &ctx)?;
+                    let _ = writeln!(stdout, "{line}");
+                } else {
+                    if !settings.quiet {
+                        let _ = writeln!(
+                            stdout,
+                            "{}",
+                            banner_style.apply_to(format!(
+                                "=== {} ({}):",
+                                o.name,
+                                o.path.display(),
+                            )),
+                        );
+                    }
+                    let _ = stdout.write_all(&body);
                 }
-                let _ = stdout.write_all(&body);
             }
             Err(e) => failures.push((o.name, e.to_string())),
         }

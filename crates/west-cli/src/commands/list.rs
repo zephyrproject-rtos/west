@@ -13,16 +13,15 @@
 //! for them — relevant for workspaces with hundreds of projects.
 
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Args;
 
-use west_core::loaded::LoadedManifest;
 use west_core::manifest::Project;
-use west_core::vcs::{self, Vcs};
+use west_core::vcs;
 
 use super::config::LoadedConfig;
+use super::project_format::{self, FormatError, ProjectContext};
 use super::select;
 
 const DEFAULT_FORMAT: &str = "{name:12} {path:28} {revision:40} {url}";
@@ -87,6 +86,17 @@ impl From<super::workspace::WorkspaceError> for ListError {
             super::workspace::WorkspaceError::NotInWorkspace => ListError::NotInWorkspace,
             super::workspace::WorkspaceError::Config(s) => ListError::Config(s),
             super::workspace::WorkspaceError::Manifest(s) => ListError::Manifest(s),
+        }
+    }
+}
+
+impl From<FormatError> for ListError {
+    fn from(e: FormatError) -> Self {
+        match e {
+            FormatError::UnknownKey(k) => ListError::UnknownKey(k),
+            FormatError::Format(s) => ListError::Format(s),
+            FormatError::UnclonedSha(n) => ListError::UnclonedSha(n),
+            FormatError::Vcs(s) => ListError::Vcs(s),
         }
     }
 }
@@ -196,7 +206,7 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
             workspace: workspace.as_path(),
             vcs: vcs.as_ref(),
         };
-        let line = render(template, &ctx)?;
+        let line = project_format::render(template, &ctx)?;
         // A broken pipe (head, |less q) is the natural way for users to
         // truncate output; treat as success and return.
         if let Err(e) = writeln!(lock, "{line}") {
@@ -226,146 +236,7 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
     Ok(false)
 }
 
-// =====================================================================
-// Per-project lookup
-// =====================================================================
-
-struct ProjectContext<'a> {
-    project: &'a Project,
-    loaded: &'a LoadedManifest,
-    workspace: &'a Path,
-    vcs: &'a dyn Vcs,
-}
-
-impl ProjectContext<'_> {
-    fn lookup(&self, key: &str) -> Result<String, ListError> {
-        match key {
-            "name" => Ok(self.project.name.clone()),
-            "description" => Ok(self
-                .project
-                .description
-                .clone()
-                .unwrap_or_else(|| "None".into())),
-            // Empty url/revision → "N/A". Real projects are validated to
-            // have a non-empty url and a revision, so this fallback only
-            // fires for the synthetic manifest project (matches Python's
-            // `project.url or 'N/A'` rendering in `_format_project`).
-            "url" => Ok(or_na(&self.project.url)),
-            "path" => Ok(self.project.path.to_string_lossy().into_owned()),
-            "abspath" => Ok(self
-                .workspace
-                .join(&self.project.path)
-                .to_string_lossy()
-                .into_owned()),
-            "posixpath" => Ok({
-                // Mirror python's `PurePath.as_posix()`: rewrite the
-                // native separator only on Windows. On POSIX, `\` is
-                // a legal filename character and must not be touched.
-                let s = self
-                    .workspace
-                    .join(&self.project.path)
-                    .to_string_lossy()
-                    .into_owned();
-                if cfg!(windows) { s.replace('\\', "/") } else { s }
-            }),
-            "revision" => Ok(or_na(&self.project.revision)),
-            "remote" => Ok(self.project.remote_name.clone()),
-            "clone_depth" => Ok(self
-                .project
-                .clone_depth
-                .map(|n| n.to_string())
-                .unwrap_or_else(|| "None".into())),
-            "groups" => Ok(self.project.groups.join(",")),
-            "active" => Ok(if self.loaded.is_active(self.project, &[]) {
-                "active".into()
-            } else {
-                "inactive".into()
-            }),
-            "cloned" => Ok(if self.is_cloned() {
-                "cloned".into()
-            } else {
-                "not-cloned".into()
-            }),
-            "sha" => self.compute_sha(),
-            other => Err(ListError::UnknownKey(other.to_owned())),
-        }
-    }
-
-    fn repo_path(&self) -> PathBuf {
-        self.workspace.join(&self.project.path)
-    }
-
-    fn is_cloned(&self) -> bool {
-        let repo = self.repo_path();
-        repo.exists() && self.vcs.is_repo(&repo).unwrap_or(false)
-    }
-
-    fn compute_sha(&self) -> Result<String, ListError> {
-        // The synthetic manifest project has no manifest-controlled
-        // revision — the manifest repo's HEAD moves under the user's
-        // own control, not west's. Match v1's "N/A" rendering.
-        if select::is_synthetic_manifest_project(self.project) {
-            return Ok("N/A".into());
-        }
-        if !self.is_cloned() {
-            return Err(ListError::UnclonedSha(self.project.name.clone()));
-        }
-        self.vcs
-            .sha(&self.repo_path(), "HEAD")
-            .map_err(|e| ListError::Vcs(e.to_string()))
-    }
-}
-
-fn or_na(s: &str) -> String {
-    if s.is_empty() {
-        "N/A".into()
-    } else {
-        s.to_owned()
-    }
-}
-
-// =====================================================================
-// Rendering via `strfmt`
-// =====================================================================
-
-fn render(template: &str, ctx: &ProjectContext<'_>) -> Result<String, ListError> {
-    strfmt::strfmt_map(template, |mut fmt: strfmt::Formatter<'_, '_>| {
-        // Errors flow back through `FmtError::KeyError(String)`; we
-        // recover the typed `ListError` after `strfmt_map` returns.
-        match ctx.lookup(fmt.key) {
-            Ok(value) => fmt.str(&value),
-            Err(e) => Err(strfmt::FmtError::KeyError(e.to_string())),
-        }
-    })
-    .map_err(|e| match e {
-        strfmt::FmtError::KeyError(msg) => parse_back_listerror(&msg),
-        strfmt::FmtError::TypeError(msg) | strfmt::FmtError::Invalid(msg) => ListError::Format(msg),
-    })
-}
-
-/// Best-effort: when `strfmt` surfaces a `KeyError` that our lookup
-/// produced, the message starts with the human-readable form of one of
-/// our `ListError` variants. Keep the original text rather than re-typing
-/// — losing the typed structure here is OK because run_inner is the only
-/// caller and it just prints the message.
-fn parse_back_listerror(msg: &str) -> ListError {
-    if msg.starts_with("unknown format key:") {
-        // Pull the `{key}` substring back out so the diagnostic stays
-        // concise.
-        if let Some(start) = msg.find('{')
-            && let Some(end) = msg[start + 1..].find('}')
-        {
-            return ListError::UnknownKey(msg[start + 1..start + 1 + end].to_owned());
-        }
-    }
-    if msg.starts_with("project ") && msg.contains("is not cloned") {
-        // Synthesise a fresh `UnclonedSha` so callers can recognise it
-        // by variant. The name is between the first pair of `"`s.
-        let parts: Vec<&str> = msg.split('"').collect();
-        if parts.len() >= 2 {
-            return ListError::UnclonedSha(parts[1].to_owned());
-        }
-    }
-    ListError::Format(msg.to_owned())
-}
+// Per-project lookup + format rendering live in
+// `commands/project_format.rs`; `list` consumes them and converts
+// `FormatError` to `ListError` via the From impl above.
 
