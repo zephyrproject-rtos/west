@@ -13,7 +13,7 @@ use crate::config::Configuration;
 
 use super::{
     CheckoutTarget, CloneSpec, ColorMode, CommitSummary, DiffOutcome, DiffSpec, FetchSpec, Output,
-    ProgressSink, StatusMode, StatusOutcome, StatusSpec, SubmoduleScope, Vcs, VcsError,
+    ProgressSink, RevType, StatusMode, StatusOutcome, StatusSpec, SubmoduleScope, Vcs, VcsError,
 };
 
 const NAME: &str = "git";
@@ -377,6 +377,69 @@ impl Vcs for GitClient {
         Ok(trimmed.to_owned())
     }
 
+    fn rev_type(&self, repo: &Path, rev: &str) -> Result<RevType, VcsError> {
+        // Two-step, mirrors v1's `_rev_type`:
+        //   1. `git cat-file -t <rev>` — annotated tags come back as
+        //      `tag`; lightweight tags, branches, and SHAs all come
+        //      back as `commit`. Blob/tree are valid git objects but
+        //      not commit-ish — not what fetch callers want.
+        //   2. For `commit`, `git rev-parse --verify --symbolic-full-name`
+        //      tells us whether the user named a branch (`refs/heads/…`),
+        //      a lightweight tag (`refs/tags/…`), or a raw SHA (empty
+        //      output — there's no symbolic name for it).
+        // Non-zero exits at step 1 (unresolvable rev) or step 2
+        // (ambiguous: same name as both a tag and a branch, etc.) map
+        // to `Other`, which the fetch callers treat as "don't skip".
+        let repo_str = repo.to_string_lossy().into_owned();
+        let res = self.run(&["-C", &repo_str, "cat-file", "-t", rev])?;
+        if !res.output.status.success() {
+            return Ok(RevType::Other);
+        }
+        let kind = std::str::from_utf8(&res.output.stdout)
+            .map_err(|e| VcsError::BadOutput {
+                client: NAME,
+                argv: res.argv.clone(),
+                detail: format!("non-UTF-8 cat-file output: {e}"),
+            })?
+            .trim();
+        match kind {
+            "tag" => return Ok(RevType::Tag),
+            "commit" => {}
+            // blob/tree/other: not commit-ish; let the caller fetch
+            // (it'll fail loudly if the rev is genuinely garbage).
+            _ => return Ok(RevType::Other),
+        }
+        let res = self.run(&[
+            "-C",
+            &repo_str,
+            "rev-parse",
+            "--verify",
+            "--symbolic-full-name",
+            rev,
+        ])?;
+        if !res.output.status.success() {
+            return Ok(RevType::Other);
+        }
+        let full = std::str::from_utf8(&res.output.stdout)
+            .map_err(|e| VcsError::BadOutput {
+                client: NAME,
+                argv: res.argv.clone(),
+                detail: format!("non-UTF-8 rev-parse output: {e}"),
+            })?
+            .trim();
+        if full.starts_with("refs/heads/") || full.starts_with("refs/remotes/") {
+            Ok(RevType::Branch)
+        } else if full.starts_with("refs/tags/") {
+            // Lightweight tags land here (annotated tags exited at step 1).
+            Ok(RevType::Tag)
+        } else if full.is_empty() {
+            // No symbolic name — a raw SHA or expression like `HEAD~2`.
+            Ok(RevType::Commit)
+        } else {
+            Ok(RevType::Other)
+        }
+    }
+
     fn ls_tree_at_ref(
         &self,
         repo: &Path,
@@ -515,15 +578,20 @@ impl Vcs for GitClient {
         spec: &FetchSpec<'_>,
         out: &mut Output<'_>,
     ) -> Result<String, VcsError> {
-        // Smart strategy: if we're being asked for a specific revision and
-        // it's already resolvable here, no need to talk to the network. The
-        // caller resolves moving refs (branches) to their tip before calling
-        // us, so a hit here means the commit really is current.
+        // Smart strategy: skip the fetch when the manifest pins an
+        // immutable revision the local repo already resolves. Mirrors
+        // v1's `set_new_manifest_rev` gate (`not in ('tag', 'commit')`):
+        // branches and unknown refs always fetch; tags and SHAs short-
+        // circuit. The classification is authoritative — it asks git
+        // via `cat-file -t` / `rev-parse --symbolic-full-name`, not a
+        // string-shape heuristic, so an all-hex branch name like
+        // `cafebabe` correctly returns `Branch` and we still fetch.
         if matches!(self.opts.fetch_strategy, FetchStrategy::Smart)
             && let Some(rev) = spec.revision
+            && matches!(self.rev_type(repo, rev)?, RevType::Tag | RevType::Commit)
             && let Ok(sha) = self.sha(repo, rev)
         {
-            log::trace!("git: smart fetch skipped for {rev:?} (already local)");
+            log::trace!("git: smart fetch skipped for {rev:?} (immutable, already local)");
             return Ok(sha);
         }
 
@@ -945,3 +1013,4 @@ fn bad_option(key: &str, detail: &str) -> VcsError {
         detail: detail.to_owned(),
     }
 }
+

@@ -248,6 +248,14 @@ pub trait Vcs: fmt::Debug + Send + Sync {
         out: &mut Output<'_>,
     ) -> Result<String, VcsError>;
 
+    /// Classify `rev` relative to `repo`. See [`RevType`] for the
+    /// semantics and why the underlying tool — not a string-shape
+    /// heuristic — is the authoritative source. Tool failures (binary
+    /// missing, repo malformed) surface as `Err`; an unresolvable rev
+    /// is reported as `RevType::Other` so callers default to "fetch"
+    /// rather than "skip".
+    fn rev_type(&self, repo: &Path, rev: &str) -> Result<RevType, VcsError>;
+
     /// Move HEAD in `repo` to `target`.
     ///
     /// `Detached(rev)` lands HEAD on the commit without binding it to a
@@ -388,6 +396,34 @@ pub struct CloneSpec<'a> {
 pub struct FetchSpec<'a> {
     pub remote: &'a str,
     pub revision: Option<&'a str>,
+}
+
+/// Classification of a revision spec relative to a particular repo.
+/// Returned by [`Vcs::rev_type`] and used by fetch/cache code to decide
+/// whether smart-skip (no network round-trip when the local repo
+/// already resolves the rev) is safe.
+///
+/// Mirrors v1 west's `_rev_type` in `src/west/app/project.py`. The
+/// authoritative source is the underlying tool (`git cat-file -t`,
+/// `git rev-parse --symbolic-full-name`) — string-shape heuristics
+/// would mis-classify all-hex branch names and tags that don't look
+/// hex-like (which is most tags).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevType {
+    /// A local branch ref (`refs/heads/<name>` or a remote-tracking
+    /// `refs/remotes/<remote>/<name>`). Moves under us; never safe to
+    /// smart-skip — the local copy is a snapshot of the previous fetch.
+    Branch,
+    /// A tag (annotated or lightweight). Conventionally immutable;
+    /// smart-skip is safe.
+    Tag,
+    /// A commit SHA (or revspec that resolves to a commit but not to
+    /// any named ref). Immutable by construction; smart-skip is safe.
+    Commit,
+    /// Could not classify — either the rev doesn't resolve locally,
+    /// or the tool reported something we don't know what to do with
+    /// (blob, tree, ambiguous ref). Caller should not smart-skip.
+    Other,
 }
 
 /// A one-line snapshot of a commit. Returned by [`Vcs::commit_summary`]

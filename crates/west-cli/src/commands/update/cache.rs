@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use md5::{Digest, Md5};
 use west_core::manifest::Project;
-use west_core::vcs::{CloneSpec, FetchSpec, Output, Vcs};
+use west_core::vcs::{CloneSpec, FetchSpec, Output, RevType, Vcs};
 
 use super::Settings;
 use super::error::UpdateError;
@@ -89,10 +89,18 @@ pub(super) fn ensure_auto_cache(
     out: &mut Output<'_>,
 ) -> Result<(), UpdateError> {
     if cache_path.exists() && vcs.is_repo(cache_path).unwrap_or(false) {
-        // Smart-skip path: only when the manifest pinned a SHA-like
-        // revision and the cache already has it. The fetch we'd
+        // Smart-skip path: only when the manifest pins an immutable
+        // revision the cache already resolves. The fetch we'd
         // otherwise run is `revision: None`, which can't smart-skip.
-        if looks_like_sha(&project.revision) && vcs.sha(cache_path, &project.revision).is_ok() {
+        // Classification is authoritative — `RevType::Branch` keeps
+        // us fetching even if the branch name happens to look like a
+        // SHA, and `Tag` correctly skips even when it doesn't.
+        if matches!(
+            vcs.rev_type(cache_path, &project.revision)
+                .unwrap_or(RevType::Other),
+            RevType::Tag | RevType::Commit
+        ) && vcs.sha(cache_path, &project.revision).is_ok()
+        {
             return Ok(());
         }
         vcs.fetch(
@@ -182,17 +190,6 @@ pub(super) fn clone_via_cache(
             .map_err(UpdateError::SetRemoteUrl)?;
     }
     Ok(())
-}
-
-/// Best-effort SHA detector: 4–40 hex chars. Mirrors python's
-/// `_maybe_sha`. Used by [`ensure_auto_cache`] to decide whether the
-/// revision is immutable (skip refresh if cached) or mutable (always
-/// refresh). False positives are harmless: a tag like `v1` doesn't
-/// match (`v` isn't hex); only ambiguous all-hex names like `abcd`
-/// would, and those are pathological.
-fn looks_like_sha(rev: &str) -> bool {
-    let len = rev.len();
-    (4..=40).contains(&len) && rev.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Hex md5 of `url`. Lowercase, 32 chars. Matches python's

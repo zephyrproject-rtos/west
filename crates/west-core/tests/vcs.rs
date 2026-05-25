@@ -11,7 +11,7 @@ use tempfile::TempDir;
 use west_core::config::Configuration;
 use west_core::vcs::{
     self, CheckoutTarget, CloneSpec, FetchSpec, FetchStrategy, GitClient, GitOptions, NullSink,
-    Output, ProgressEvent, ProgressSink, SubmoduleScope, Vcs, VcsError,
+    Output, ProgressEvent, ProgressSink, RevType, SubmoduleScope, Vcs, VcsError,
 };
 
 // Test double: collects every event into an owned vector for assertions.
@@ -550,6 +550,97 @@ fn fetch_returns_resolved_sha_on_smart_skip_ignoring_stale_fetch_head() {
         )
         .unwrap();
     assert_eq!(returned, first_sha);
+}
+
+#[test]
+fn rev_type_classifies_branches_tags_and_shas() {
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    let sha = git_capture(&["rev-parse", "HEAD"], &dest);
+
+    // Annotated and lightweight tags pointing at HEAD.
+    git(&["tag", "-a", "v1.0", "-m", "release"], &dest);
+    git(&["tag", "lw"], &dest);
+
+    let v = GitClient::new(GitOptions::default());
+
+    // Branch: `main` exists locally and as remote-tracking; both classify
+    // as `Branch` because of the `refs/heads/` / `refs/remotes/` prefix.
+    assert_eq!(v.rev_type(&dest, "main").unwrap(), RevType::Branch);
+    assert_eq!(
+        v.rev_type(&dest, "origin/main").unwrap(),
+        RevType::Branch,
+        "remote-tracking branch should classify as Branch",
+    );
+
+    // Tags — annotated vs lightweight both land as `Tag`.
+    assert_eq!(v.rev_type(&dest, "v1.0").unwrap(), RevType::Tag);
+    assert_eq!(v.rev_type(&dest, "lw").unwrap(), RevType::Tag);
+
+    // Full and abbreviated SHAs — no symbolic name → `Commit`.
+    assert_eq!(v.rev_type(&dest, &sha).unwrap(), RevType::Commit);
+    assert_eq!(v.rev_type(&dest, &sha[..8]).unwrap(), RevType::Commit);
+
+    // Unresolvable: `Other` (caller defaults to fetching).
+    assert_eq!(v.rev_type(&dest, "definitely-not-a-ref").unwrap(), RevType::Other);
+}
+
+#[test]
+fn rev_type_hex_named_branch_is_branch_not_commit() {
+    // Regression: the previous string-shape heuristic (`looks_like_sha`)
+    // mis-classified an all-hex branch name as a SHA and smart-skipped
+    // its fetch. Authoritative classification via git correctly returns
+    // `Branch`.
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    git(&["branch", "cafebabe"], &dest);
+
+    let v = GitClient::new(GitOptions::default());
+    assert_eq!(v.rev_type(&dest, "cafebabe").unwrap(), RevType::Branch);
+}
+
+#[test]
+fn fetch_smart_runs_for_branch_revision_with_new_upstream_commits() {
+    // Regression for the test_update_projects failure: a manifest pinned
+    // to a branch (`revision: master`) must pick up newly-pushed commits
+    // on each `west update`. The previous smart-skip gate resolved the
+    // local `refs/remotes/origin/master` and short-circuited, leaving
+    // `manifest-rev` stale; rev_type-driven gating fetches.
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    let before = git_capture(&["rev-parse", "origin/main"], &dest);
+
+    // Add a commit upstream after the initial clone.
+    let after = add_commit_to_bare(tmp.path(), &bare, "second");
+    assert_ne!(before, after);
+
+    let v = GitClient::new(GitOptions::default()); // smart by default
+    let returned = v
+        .fetch(
+            &dest,
+            &FetchSpec {
+                remote: "origin",
+                revision: Some("main"),
+            },
+            &mut Output::Native,
+        )
+        .unwrap();
+    assert_eq!(returned, after, "fetch must advance to the new upstream tip");
 }
 
 #[test]
