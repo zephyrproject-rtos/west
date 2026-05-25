@@ -84,6 +84,17 @@ pub struct ManifestArgs {
     /// `--resolve` / `--freeze` / `--untracked`.
     #[arg(long, value_name = "PATH")]
     pub out: Option<PathBuf>,
+
+    /// Drop inactive projects (`manifest.group-filter`,
+    /// `manifest.project-filter`) from the emitted manifest. Only
+    /// meaningful with `--resolve` / `--freeze`; `--validate`,
+    /// `--path`, and `--untracked` don't emit a project list to
+    /// filter.
+    #[arg(
+        long = "active-only",
+        conflicts_with_all = ["path", "validate", "untracked"],
+    )]
+    pub active_only: bool,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -188,8 +199,11 @@ fn action_resolve(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), Manif
     let manifest = &loaded_manifest.manifest;
     let (_root, full) = manifest_paths(&workspace, &loaded.config)?;
 
+    let mut value = manifest.to_value();
+    if args.active_only {
+        retain_active_projects(&mut value, manifest, &loaded_manifest);
+    }
     let format = select_format(args.format, &full);
-    let value = manifest.to_value();
     let body = serialize(&value, format)?;
     write_output(args.out.as_deref(), &body)
 }
@@ -202,15 +216,26 @@ fn action_freeze(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), Manife
     let manifest = &loaded_manifest.manifest;
     let (_root, full) = manifest_paths(&workspace, &loaded.config)?;
 
-    // Build the canonical value, then rewrite each project's revision
-    // with the SHA the working tree currently points at. We use
-    // `manifest-rev` when available (the ref `west update` writes);
-    // otherwise fall back to `HEAD`.
+    // Decide which projects survive the filter before building the
+    // value: avoids cloning git for projects we'd drop anyway.
+    let keep: Vec<bool> = manifest
+        .projects
+        .iter()
+        .map(|p| !args.active_only || loaded_manifest.is_active(p, &[]))
+        .collect();
+
+    // Build the canonical value, then rewrite each *kept* project's
+    // revision with the SHA the working tree currently points at. We
+    // use `manifest-rev` when available (the ref `west update`
+    // writes); otherwise fall back to `HEAD`.
     let mut value = manifest.to_value();
     let projects = value["manifest"]["projects"]
         .as_array_mut()
         .expect("to_value emits manifest.projects as array");
     for (i, project) in manifest.projects.iter().enumerate() {
+        if !keep[i] {
+            continue;
+        }
         let repo = workspace.join(&project.path);
         if !is_cloned(&repo, vcs.as_ref()) {
             return Err(ManifestCmdError::UncloneProject {
@@ -224,10 +249,43 @@ fn action_freeze(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), Manife
             .map_err(|e| ManifestCmdError::Vcs(format!("{}: {e}", project.name)))?;
         projects[i]["revision"] = serde_json::Value::String(sha);
     }
+    if args.active_only {
+        // Strip the inactive entries from the emitted array.
+        let mut i = 0;
+        projects.retain(|_| {
+            let keep_this = keep[i];
+            i += 1;
+            keep_this
+        });
+    }
 
     let format = select_format(args.format, &full);
     let body = serialize(&value, format)?;
     write_output(args.out.as_deref(), &body)
+}
+
+/// In-place: drop inactive projects from a `to_value`-shaped JSON
+/// value, using the [`LoadedManifest`]'s combined group + project
+/// filter (and any cli filter the caller already composed in).
+fn retain_active_projects(
+    value: &mut serde_json::Value,
+    manifest: &west_core::manifest::Manifest,
+    loaded: &west_core::loaded::LoadedManifest,
+) {
+    let projects = value["manifest"]["projects"]
+        .as_array_mut()
+        .expect("to_value emits manifest.projects as array");
+    let keep: Vec<bool> = manifest
+        .projects
+        .iter()
+        .map(|p| loaded.is_active(p, &[]))
+        .collect();
+    let mut i = 0;
+    projects.retain(|_| {
+        let keep_this = keep[i];
+        i += 1;
+        keep_this
+    });
 }
 
 fn action_untracked(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), ManifestCmdError> {
