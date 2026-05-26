@@ -490,6 +490,9 @@ fn bootstrap_clone_failure_cleans_up_tempdir() {
 #[test]
 #[serial]
 fn local_registers_existing_checkout() {
+    // v1 idiom: `west init -l <MANIFEST_DIR>`. Topdir derives as
+    // `MANIFEST_DIR.parent`; `manifest.path` derives as
+    // `MANIFEST_DIR.file_name`.
     if !git_available() {
         eprintln!("skipping: git not installed");
         return;
@@ -502,13 +505,7 @@ fn local_registers_existing_checkout() {
     std::fs::write(manifest_dir.join("west.yml"), SAMPLE_MANIFEST).unwrap();
 
     sb.west()
-        .args([
-            "init",
-            "--local",
-            "--manifest-path",
-            "m",
-            workspace.to_str().unwrap(),
-        ])
+        .args(["init", "--local", manifest_dir.to_str().unwrap()])
         .assert()
         .success();
 
@@ -527,13 +524,7 @@ fn local_accepts_non_git_directory() {
     std::fs::write(manifest_dir.join("west.yml"), SAMPLE_MANIFEST).unwrap();
 
     sb.west()
-        .args([
-            "init",
-            "--local",
-            "--manifest-path",
-            "m",
-            workspace.to_str().unwrap(),
-        ])
+        .args(["init", "--local", manifest_dir.to_str().unwrap()])
         .assert()
         .success();
 
@@ -542,18 +533,79 @@ fn local_accepts_non_git_directory() {
 
 #[test]
 #[serial]
-fn local_requires_manifest_path() {
+fn local_explicit_topdir_and_manifest_path() {
+    // Same outcome via the orthogonal-form: `-t WORKSPACE --manifest-path
+    // SUBPATH`. Locks in the second valid local-mode shape.
     let sb = Sandbox::new();
     let workspace = sb.root().join("ws");
-    std::fs::create_dir_all(&workspace).unwrap();
+    let manifest_dir = workspace.join("m");
+    std::fs::create_dir_all(&manifest_dir).unwrap();
+    std::fs::write(manifest_dir.join("west.yml"), SAMPLE_MANIFEST).unwrap();
+
+    sb.west()
+        .args([
+            "init",
+            "--local",
+            "--topdir",
+            workspace.to_str().unwrap(),
+            "--manifest-path",
+            "m",
+        ])
+        .assert()
+        .success();
+
+    let cfg = read(&workspace.join(".west").join("config.toml"));
+    assert!(cfg.contains(r#"path = "m""#), "got: {cfg}");
+}
+
+#[test]
+#[serial]
+fn local_positional_and_manifest_path_disagree_errors() {
+    // The two shapes can be combined; we reject when they resolve to
+    // different manifest dirs.
+    let sb = Sandbox::new();
+    let workspace = sb.root().join("ws");
+    std::fs::create_dir_all(workspace.join("m")).unwrap();
+    std::fs::write(workspace.join("m").join("west.yml"), SAMPLE_MANIFEST).unwrap();
+    std::fs::create_dir_all(workspace.join("other")).unwrap();
 
     let res = sb
         .west()
-        .args(["init", "--local", workspace.to_str().unwrap()])
+        .args([
+            "init",
+            "--local",
+            "--topdir",
+            workspace.to_str().unwrap(),
+            "--manifest-path",
+            "other",
+            workspace.join("m").to_str().unwrap(),
+        ])
         .assert()
         .failure();
     let stderr = String::from_utf8_lossy(&res.get_output().stderr);
-    assert!(stderr.contains("manifest-path"), "stderr: {stderr}");
+    assert!(stderr.contains("disagree"), "stderr: {stderr}");
+}
+
+#[test]
+#[serial]
+fn local_no_args_uses_cwd_as_manifest() {
+    // `west init -l` (no positional, no `--manifest-path`) treats cwd as
+    // the manifest dir and cwd.parent as topdir — the natural "I cd'd
+    // into my manifest repo" idiom.
+    let sb = Sandbox::new();
+    let workspace = sb.root().join("ws");
+    let manifest_dir = workspace.join("m");
+    std::fs::create_dir_all(&manifest_dir).unwrap();
+    std::fs::write(manifest_dir.join("west.yml"), SAMPLE_MANIFEST).unwrap();
+
+    sb.west()
+        .args(["init", "--local"])
+        .current_dir(&manifest_dir)
+        .assert()
+        .success();
+
+    let cfg = read(&workspace.join(".west").join("config.toml"));
+    assert!(cfg.contains(r#"path = "m""#), "got: {cfg}");
 }
 
 #[test]
@@ -569,9 +621,7 @@ fn local_missing_manifest_file_errors() {
         .args([
             "init",
             "--local",
-            "--manifest-path",
-            "m",
-            workspace.to_str().unwrap(),
+            workspace.join("m").to_str().unwrap(),
         ])
         .assert()
         .failure();
@@ -582,6 +632,8 @@ fn local_missing_manifest_file_errors() {
 #[test]
 #[serial]
 fn local_honors_top_level_config() {
+    // `--config manifest.path=…` is equivalent to `--manifest-path …`
+    // (the splice in run() routes both to the same place).
     let sb = Sandbox::new();
     let workspace = sb.root().join("ws");
     let manifest_dir = workspace.join("m");
@@ -594,6 +646,7 @@ fn local_honors_top_level_config() {
             "manifest.path=m",
             "init",
             "--local",
+            "--topdir",
             workspace.to_str().unwrap(),
         ])
         .assert()
@@ -607,17 +660,14 @@ fn local_honors_top_level_config() {
 fn local_workspace_already_initialized_errors() {
     let sb = Sandbox::new();
     let workspace = sb.root().join("ws");
+    let manifest_dir = workspace.join("m");
+    std::fs::create_dir_all(&manifest_dir).unwrap();
+    std::fs::write(manifest_dir.join("west.yml"), SAMPLE_MANIFEST).unwrap();
     std::fs::create_dir_all(workspace.join(".west")).unwrap();
 
     let res = sb
         .west()
-        .args([
-            "init",
-            "--local",
-            "--manifest-path",
-            "m",
-            workspace.to_str().unwrap(),
-        ])
+        .args(["init", "--local", manifest_dir.to_str().unwrap()])
         .assert()
         .failure();
     let stderr = String::from_utf8_lossy(&res.get_output().stderr);
@@ -631,18 +681,13 @@ fn local_in_subdir_of_existing_workspace_errors() {
     let outer = sb.root().join("outer");
     std::fs::create_dir_all(outer.join(".west")).unwrap();
     let inner = outer.join("inner");
-    std::fs::create_dir_all(inner.join("m")).unwrap();
-    std::fs::write(inner.join("m").join("west.yml"), SAMPLE_MANIFEST).unwrap();
+    let manifest_dir = inner.join("m");
+    std::fs::create_dir_all(&manifest_dir).unwrap();
+    std::fs::write(manifest_dir.join("west.yml"), SAMPLE_MANIFEST).unwrap();
 
     let res = sb
         .west()
-        .args([
-            "init",
-            "--local",
-            "--manifest-path",
-            "m",
-            inner.to_str().unwrap(),
-        ])
+        .args(["init", "--local", manifest_dir.to_str().unwrap()])
         .assert()
         .failure();
     let stderr = String::from_utf8_lossy(&res.get_output().stderr);

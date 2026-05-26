@@ -1,18 +1,25 @@
 //! `west init` — bootstrap a new workspace from a manifest URL or register
 //! an existing local manifest directory.
 //!
-//! See the plan / `init --help` for the full UX. Key design points:
+//! Argument shape (matches v1, with one explicit-workspace knob added):
 //!
-//! - The positional `[DIR]` is **always the workspace** (decoupled from the
-//!   manifest directory).
-//! - `--manifest-path` and `--manifest-file` are sugar for
-//!   `--config manifest.path=...` / `--config manifest.file=...`. They're
-//!   spliced into the loaded config's inline overrides at the top of `run`,
-//!   then read back via `Configuration::get_str`.
-//! - Workspace eligibility uses `west_core::topdir::topdir`, so we reject
-//!   any candidate that's already inside an existing workspace at any depth.
-//! - Local mode does **not** require the manifest path to be a VCS working
-//!   copy — only that the manifest YAML file exists there.
+//! - The positional `[directory]` is **mode-dependent**:
+//!   - Under `-l/--local`: the existing manifest directory (default cwd).
+//!     Topdir derives as `manifest_directory.parent()` unless `-t` is set.
+//!   - Without `-l`: the workspace target (default cwd). Soft-deprecated
+//!     in favour of `-t/--topdir`.
+//! - `-t/--topdir <WORKSPACE_DIR>` is the explicit workspace knob; works
+//!   in both modes. When given, it wins.
+//! - `--manifest-path <SUBPATH>` is **remote-mode only** — the subpath of
+//!   the workspace into which the cloned manifest repository lands.
+//!   In local mode the positional carries this information; combining
+//!   `-l` with `--manifest-path` is rejected.
+//! - `--manifest-file <FILE>` is filename-only and applies in both modes.
+//!
+//! Workspace eligibility uses `west_core::topdir::topdir`, so we reject
+//! any candidate that's already inside an existing workspace at any depth.
+//! Local mode does **not** require the manifest directory to be a VCS
+//! working copy — only that the manifest YAML file exists there.
 
 use std::fs;
 use std::io::IsTerminal;
@@ -29,25 +36,39 @@ use super::config::LoadedConfig;
 
 #[derive(Args, Debug)]
 pub struct InitArgs {
-    /// Workspace directory (default: current working directory).
+    /// Mode-dependent positional:
+    ///   - with `-l`: the existing manifest directory (default cwd).
+    ///   - without `-l`: the workspace target (default cwd). Soft-deprecated
+    ///     in favour of `-t/--topdir`.
     pub directory: Option<PathBuf>,
 
     /// Initialize from an existing local manifest directory (no clone).
-    /// Requires `--manifest-path` (or `--config manifest.path=...`).
+    /// The positional `directory` (default cwd) is the manifest dir;
+    /// topdir defaults to its parent unless `-t` is given.
     #[arg(long, short = 'l')]
     pub local: bool,
 
-    /// Manifest URL to clone (bootstrap mode; required).
+    /// Manifest URL to clone (bootstrap mode; required when not `-l`).
     #[arg(long, short = 'u', conflicts_with = "local")]
     pub url: Option<String>,
 
     /// Revision (branch or tag) to check out (bootstrap mode).
     /// `--mr` is accepted as a short alias.
-    #[arg(long = "revision", visible_alias = "mr")]
+    #[arg(long = "revision", visible_alias = "mr", conflicts_with = "local")]
     pub revision: Option<String>,
 
-    /// Manifest directory relative to the workspace.
-    /// Equivalent to `--config manifest.path=PATH`.
+    /// Explicit workspace directory (the parent of the `.west/` to be
+    /// created). When set, takes precedence over any directory
+    /// derivation. Applies in both modes.
+    #[arg(long = "topdir", short = 't')]
+    pub topdir: Option<PathBuf>,
+
+    /// Subpath within the workspace where the manifest repository lives
+    /// (sets `manifest.path`). Relative to the workspace root (`-t`,
+    /// the positional directory, or cwd, in that order). With `-l`:
+    /// an alternative to specifying the manifest directory positionally;
+    /// if both are given they must resolve to the same location. With
+    /// `-u/--url`: defaults to the manifest URL's basename.
     #[arg(long = "manifest-path", visible_alias = "mp")]
     pub manifest_path: Option<PathBuf>,
 
@@ -60,9 +81,11 @@ pub struct InitArgs {
 const DEFAULT_MANIFEST_FILE: &str = "west.yml";
 
 pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
-    // Splice dedicated flags into inline config overrides so the rest of the
-    // command reads from a single source. Dedicated flags run after the
-    // top-level `--config`, so they win on conflict.
+    // Splice the dedicated flags into the inline-overrides config layer
+    // so the rest of the command reads from a single source. Dedicated
+    // flags run after top-level `--config`, so they win on conflict — but
+    // top-level `--config manifest.path=…` / `manifest.file=…` still
+    // applies when the dedicated flag isn't given.
     if let Some(p) = args.manifest_path.as_deref()
         && let Err(e) = super::config::splice_inline(
             &mut loaded.config,
@@ -84,20 +107,11 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
         return ExitCode::from(2);
     }
 
-    // Workspace dir.
-    let workspace = match resolve_workspace_dir(args.directory.as_deref()) {
-        Ok(p) => p,
-        Err(msg) => {
-            eprintln!("west: {msg}");
-            return ExitCode::FAILURE;
-        }
-    };
-
     let result = if args.local {
-        local(&workspace, &loaded.config)
+        local(&args, &loaded.config)
     } else {
         match args.url.as_deref() {
-            Some(url) => bootstrap(&workspace, url, args.revision.as_deref(), &loaded.config),
+            Some(url) => bootstrap(&args, url, &loaded.config),
             None => Err(InitError::Generic(
                 "specify --url to clone a manifest, or --local to register an existing manifest directory".into(),
             )),
@@ -108,8 +122,7 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(InitError::AlreadyInitialized(p)) => {
             eprintln!(
-                "west: directory {} is already inside a west workspace ({})",
-                p.display(),
+                "west: directory {} is already inside a west workspace",
                 p.display(),
             );
             ExitCode::FAILURE
@@ -125,19 +138,34 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
 // bootstrap mode
 // =====================================================================
 
-fn bootstrap(
-    workspace: &Path,
-    url: &str,
-    revision: Option<&str>,
-    config: &Configuration,
-) -> Result<(), InitError> {
-    fs::create_dir_all(workspace).map_err(|e| InitError::Io {
-        path: workspace.to_owned(),
+fn bootstrap(args: &InitArgs, url: &str, config: &Configuration) -> Result<(), InitError> {
+    // Topdir resolution (remote mode):
+    //   1. `-t/--topdir` if given.
+    //   2. positional `directory` (legacy / soft-deprecated form).
+    //   3. cwd.
+    // Combining `-t` and the positional is rejected — both attempt to set
+    // the same thing, and the user means one or the other.
+    if args.topdir.is_some() && args.directory.is_some() {
+        return Err(InitError::Generic(
+            "cannot combine -t/--topdir with the positional directory; \
+             use one or the other"
+                .into(),
+        ));
+    }
+    let workspace = resolve_topdir_remote(args)?;
+    let revision = args.revision.as_deref();
+
+    fs::create_dir_all(&workspace).map_err(|e| InitError::Io {
+        path: workspace.clone(),
         source: e,
     })?;
-    eligibility_check(workspace)?;
+    eligibility_check(&workspace)?;
+    let workspace = workspace.as_path();
 
-    // Resolve config-driven options up front.
+    // Manifest-path comes from config (the dedicated `--manifest-path`
+    // flag got spliced in `run`, so this picks up either the flag or a
+    // top-level `--config manifest.path=…`). Fallback below is YAML
+    // self.path or URL basename.
     let user_manifest_path = config_manifest_path(config)?;
     let manifest_file_name = config_manifest_file(config)?;
 
@@ -316,47 +344,161 @@ fn bootstrap(
 // local mode
 // =====================================================================
 
-fn local(workspace: &Path, config: &Configuration) -> Result<(), InitError> {
-    if !workspace.exists() {
-        return Err(InitError::Generic(format!(
-            "workspace {} does not exist",
-            workspace.display()
-        )));
-    }
-    eligibility_check(workspace)?;
-
-    let manifest_path = config_manifest_path(config)?.ok_or_else(|| {
-        InitError::Generic(
-            "--local requires --manifest-path (or --config manifest.path=...)".into(),
-        )
-    })?;
+fn local(args: &InitArgs, config: &Configuration) -> Result<(), InitError> {
     let manifest_file_name = config_manifest_file(config)?;
+    let (topdir, manifest_dir) = resolve_local_layout(args, config)?;
 
-    let manifest_yaml = workspace.join(&manifest_path).join(&manifest_file_name);
-    if !manifest_yaml.exists() {
+    let manifest_yaml = manifest_dir.join(&manifest_file_name);
+    if !manifest_yaml.is_file() {
         return Err(InitError::Generic(format!(
             "manifest file {} not found",
             manifest_yaml.display()
         )));
     }
 
-    write_workspace_config(workspace, &manifest_path, &manifest_file_name)?;
+    // Eligibility check after location resolution so we report against the
+    // workspace the user actually chose.
+    eligibility_check(&topdir)?;
+
+    let manifest_path_rel = manifest_dir.strip_prefix(&topdir).map_err(|_| {
+        InitError::Generic(format!(
+            "manifest directory {} is not inside workspace {}",
+            manifest_dir.display(),
+            topdir.display(),
+        ))
+    })?;
+
+    write_workspace_config(&topdir, manifest_path_rel, &manifest_file_name)?;
     Ok(())
+}
+
+/// Resolve `(topdir, manifest_dir)` for local mode. Both come back as
+/// absolute paths.
+///
+/// Inputs (any combination of):
+///   - `args.directory` (positional) — manifest dir as a filesystem path
+///     (absolute or cwd-relative).
+///   - `manifest.path` (from the dedicated `--manifest-path` flag spliced
+///     in `run`, or from a top-level `--config manifest.path=…`) — manifest
+///     dir as a workspace-relative subpath.
+///   - `args.topdir` — explicit workspace root.
+///
+/// Rules:
+///   - Manifest dir = positional > topdir-joined(`manifest.path`)
+///     > cwd-joined(`manifest.path`) > cwd.
+///   - Topdir = explicit `-t` > manifest_dir.parent.
+///   - If both positional and `manifest.path` are given, they must
+///     resolve to the same absolute manifest dir (else error).
+fn resolve_local_layout(
+    args: &InitArgs,
+    config: &Configuration,
+) -> Result<(PathBuf, PathBuf), InitError> {
+    let cwd = std::env::current_dir()
+        .map_err(|e| InitError::Generic(format!("cannot get current directory: {e}")))?;
+
+    let topdir_explicit: Option<PathBuf> = args.topdir.as_deref().map(|t| {
+        if t.is_absolute() {
+            t.to_path_buf()
+        } else {
+            cwd.join(t)
+        }
+    });
+
+    let manifest_dir_from_pos: Option<PathBuf> = args.directory.as_deref().map(|d| {
+        if d.is_absolute() {
+            d.to_path_buf()
+        } else {
+            cwd.join(d)
+        }
+    });
+
+    // `manifest.path` (either dedicated flag or top-level --config) is
+    // workspace-relative. When `-t` is given we root it at the explicit
+    // topdir; otherwise we root at cwd (the same place `-l <DIR>` would
+    // have rooted a relative positional).
+    let manifest_dir_from_mp: Option<PathBuf> = config_manifest_path(config)?.map(|mp| {
+        let base = topdir_explicit.as_deref().unwrap_or(&cwd);
+        base.join(mp)
+    });
+
+    // If both supplied, require they resolve to the same absolute path.
+    if let (Some(p), Some(m)) = (manifest_dir_from_pos.as_deref(), manifest_dir_from_mp.as_deref())
+        && canonicalize_for_compare(p) != canonicalize_for_compare(m)
+    {
+        return Err(InitError::Generic(format!(
+            "-l positional ({}) and manifest.path ({}) disagree about the manifest location",
+            p.display(),
+            m.display(),
+        )));
+    }
+
+    let manifest_dir = manifest_dir_from_pos
+        .or(manifest_dir_from_mp)
+        .unwrap_or_else(|| cwd.clone());
+
+    // Canonicalize manifest_dir if it exists on disk; otherwise leave as-is
+    // and let the "manifest file not found" check downstream report a clean
+    // error.
+    let manifest_dir = canonicalize_or_keep(&manifest_dir);
+
+    let topdir = match topdir_explicit {
+        Some(t) => canonicalize_or_keep(&t),
+        None => manifest_dir
+            .parent()
+            .ok_or_else(|| {
+                InitError::Generic(format!(
+                    "manifest directory {} has no parent; use -t/--topdir to specify the workspace",
+                    manifest_dir.display(),
+                ))
+            })?
+            .to_path_buf(),
+    };
+
+    if !manifest_dir.starts_with(&topdir) {
+        return Err(InitError::Generic(format!(
+            "manifest directory {} is not inside workspace {}",
+            manifest_dir.display(),
+            topdir.display(),
+        )));
+    }
+
+    Ok((topdir, manifest_dir))
+}
+
+/// Resolve the workspace target in remote (clone) mode. Caller has already
+/// validated `-t` and the positional aren't both set.
+fn resolve_topdir_remote(args: &InitArgs) -> Result<PathBuf, InitError> {
+    let cwd = std::env::current_dir()
+        .map_err(|e| InitError::Generic(format!("cannot get current directory: {e}")))?;
+    let raw = args
+        .topdir
+        .as_deref()
+        .or(args.directory.as_deref())
+        .map(|p| {
+            if p.is_absolute() {
+                p.to_path_buf()
+            } else {
+                cwd.join(p)
+            }
+        })
+        .unwrap_or(cwd);
+    Ok(canonicalize_or_keep(&raw))
+}
+
+fn canonicalize_or_keep(p: &Path) -> PathBuf {
+    p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// Used only for equality comparison in the local-mode validation. We
+/// don't canonicalize through filesystem if either side doesn't exist
+/// yet — the comparison falls back to the lexical absolute form.
+fn canonicalize_for_compare(p: &Path) -> PathBuf {
+    canonicalize_or_keep(p)
 }
 
 // =====================================================================
 // helpers
 // =====================================================================
-
-fn resolve_workspace_dir(positional: Option<&Path>) -> Result<PathBuf, String> {
-    let p = match positional {
-        Some(p) => p.to_path_buf(),
-        None => {
-            std::env::current_dir().map_err(|e| format!("cannot get current directory: {e}"))?
-        }
-    };
-    Ok(p)
-}
 
 /// Errors out if `workspace` is in or under an existing west workspace.
 fn eligibility_check(workspace: &Path) -> Result<(), InitError> {
