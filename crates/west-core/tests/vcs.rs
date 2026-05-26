@@ -408,6 +408,53 @@ depth = -1
     assert!(matches!(err, VcsError::BadOption { ref key, .. } if key == "tool.git.fetch.depth"));
 }
 
+#[test]
+fn from_config_default_submodules_init_config_is_empty() {
+    let cfg = empty_config();
+    let git = GitClient::from_config(&cfg).unwrap();
+    let dbg = format!("{git:?}");
+    assert!(
+        dbg.contains("submodules_init_config: []"),
+        "expected empty default; got: {dbg}"
+    );
+}
+
+#[test]
+fn from_config_reads_submodules_init_config() {
+    let (_t, cfg) = config_with(
+        r#"[tool.git.submodules]
+init-config = ["protocol.file.allow=always", "core.longpaths=true"]
+"#,
+    );
+    let git = GitClient::from_config(&cfg).unwrap();
+    let dbg = format!("{git:?}");
+    assert!(
+        dbg.contains("\"protocol.file.allow=always\""),
+        "entry missing from parsed config: {dbg}"
+    );
+    assert!(
+        dbg.contains("\"core.longpaths=true\""),
+        "entry missing from parsed config: {dbg}"
+    );
+}
+
+#[test]
+fn from_config_submodules_init_config_rejects_missing_equals() {
+    // v1's `--submodule-init-config` and `-c` semantics both require
+    // `KEY=VALUE`; reject bare strings up front rather than discovering
+    // them at submodule-update spawn time.
+    let (_t, cfg) = config_with(
+        r#"[tool.git.submodules]
+init-config = ["this-has-no-equals"]
+"#,
+    );
+    let err = GitClient::from_config(&cfg).unwrap_err();
+    assert!(
+        matches!(err, VcsError::BadOption { ref key, .. } if key == "tool.git.submodules.init-config"),
+        "got: {err:?}"
+    );
+}
+
 // ---------- fetch / checkout / is_clean / manifest-rev ----------
 
 /// Create a clone of `bare` into `<root>/clone` and return the clone path.
