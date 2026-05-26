@@ -326,6 +326,7 @@ pub trait Vcs: fmt::Debug + Send + Sync {
         &self,
         repo: &Path,
         scope: &SubmoduleScope<'_>,
+        strategy: SubmoduleStrategy,
         reference: Option<&Path>,
         out: &mut Output<'_>,
     ) -> Result<(), VcsError>;
@@ -480,6 +481,19 @@ pub enum SubmoduleScope<'a> {
     /// A specific list of submodule paths (relative to the repo root). An
     /// empty slice is a no-op.
     Specific(&'a [&'a str]),
+}
+
+/// How [`Vcs::update_submodules`] should land each submodule on its
+/// recorded super-repo revision. Mirrors v1's `--rebase` propagation
+/// from `west update -r` into the inner `git submodule update` call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubmoduleStrategy {
+    /// Hard checkout the recorded SHA. Drops local commits in the
+    /// submodule working tree. Default for `west update`.
+    Checkout,
+    /// Rebase the submodule's current HEAD onto the recorded SHA.
+    /// Preserves local commits — what `west update -r` wants.
+    Rebase,
 }
 
 /// Inputs for [`Vcs::diff`].

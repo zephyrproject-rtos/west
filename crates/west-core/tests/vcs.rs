@@ -11,7 +11,8 @@ use tempfile::TempDir;
 use west_core::config::Configuration;
 use west_core::vcs::{
     self, CheckoutTarget, CloneSpec, FetchSpec, FetchStrategy, GitClient, GitOptions, NullSink,
-    Output, ProgressEvent, ProgressSink, RevSpec, RevType, SubmoduleScope, Vcs, VcsError,
+    Output, ProgressEvent, ProgressSink, RevSpec, RevType, SubmoduleScope, SubmoduleStrategy, Vcs,
+    VcsError,
 };
 
 // Test double: collects every event into an owned vector for assertions.
@@ -1011,8 +1012,14 @@ fn update_submodules_materializes_worktree() {
     // *subprocess* of `git submodule update`, so a local config on the
     // parent repo doesn't reach it. The `GIT_CONFIG_*` env vars propagate.
     let _guard = AllowFileProtocolGuard::set();
-    v.update_submodules(&dest, &SubmoduleScope::All, None, &mut Output::Native)
-        .unwrap();
+    v.update_submodules(
+        &dest,
+        &SubmoduleScope::All,
+        SubmoduleStrategy::Checkout,
+        None,
+        &mut Output::Native,
+    )
+    .unwrap();
 
     assert!(
         dest.join("vendor/lib/LIB").exists(),
@@ -1193,6 +1200,7 @@ fn update_submodules_specific_empty_is_noop() {
     v.update_submodules(
         &dest,
         &SubmoduleScope::Specific(&[]),
+        SubmoduleStrategy::Checkout,
         None,
         &mut Output::Native,
     )

@@ -13,8 +13,8 @@ use crate::config::Configuration;
 
 use super::{
     CheckoutTarget, CloneSpec, ColorMode, CommitSummary, DiffOutcome, DiffSpec, FetchSpec, Output,
-    ProgressSink, RevSpec, RevType, StatusMode, StatusOutcome, StatusSpec, SubmoduleScope, Vcs,
-    VcsError,
+    ProgressSink, RevSpec, RevType, StatusMode, StatusOutcome, StatusSpec, SubmoduleScope,
+    SubmoduleStrategy, Vcs, VcsError,
 };
 
 const NAME: &str = "git";
@@ -748,6 +748,7 @@ impl Vcs for GitClient {
         &self,
         repo: &Path,
         scope: &SubmoduleScope<'_>,
+        strategy: SubmoduleStrategy,
         reference: Option<&Path>,
         out: &mut Output<'_>,
     ) -> Result<(), VcsError> {
@@ -785,6 +786,14 @@ impl Vcs for GitClient {
             argv.push(entry);
         }
         argv.extend(["submodule", "update", "--init", "--progress"]);
+        // v1 mirrors `west update -r` into the inner `git submodule
+        // update --rebase` so local commits in submodule worktrees
+        // survive a re-update. `--checkout` is the git default; emit
+        // it explicitly so the intent is visible in transcripts.
+        match strategy {
+            SubmoduleStrategy::Checkout => argv.push("--checkout"),
+            SubmoduleStrategy::Rebase => argv.push("--rebase"),
+        }
         if self.opts.submodules_recurse {
             argv.push("--recursive");
         }

@@ -42,7 +42,8 @@ use west_core::config::{ConfigValue, Configuration};
 use west_core::loaded::{LoadedManifest, ProjectFilter};
 use west_core::manifest::{GroupFilterEntry, ImportPolicy, Manifest, Project, Submodules};
 use west_core::vcs::{
-    self, CheckoutTarget, CommitSummary, FetchSpec, Output, RevSpec, SubmoduleScope, Vcs,
+    self, CheckoutTarget, CommitSummary, FetchSpec, Output, RevSpec, SubmoduleScope,
+    SubmoduleStrategy, Vcs,
 };
 
 use super::config::LoadedConfig;
@@ -556,7 +557,12 @@ fn run_project_steps(
     //    init reuses the cached objects too.
     let scope = submodules_scope(&project.submodules);
     if !matches!(scope, ScopeOwned::Skip) {
-        run_submodules(vcs, repo, &scope, cache_source.as_ref(), out)?;
+        let sub_strategy = if settings.rebase {
+            SubmoduleStrategy::Rebase
+        } else {
+            SubmoduleStrategy::Checkout
+        };
+        run_submodules(vcs, repo, &scope, sub_strategy, cache_source.as_ref(), out)?;
     }
 
     // 7. One-line snapshot of where HEAD landed, for the reporter to
@@ -590,6 +596,7 @@ fn run_submodules(
     vcs: &dyn Vcs,
     repo: &Path,
     scope: &ScopeOwned,
+    strategy: SubmoduleStrategy,
     cache_source: Option<&cache::CacheSource>,
     out: &mut Output<'_>,
 ) -> Result<(), UpdateError> {
@@ -599,7 +606,7 @@ fn run_submodules(
             // git initialises. We don't enumerate submodules ourselves
             // for the All scope (matches python), so cache reference
             // doesn't apply here — pass `None`.
-            .update_submodules(repo, &SubmoduleScope::All, None, out)
+            .update_submodules(repo, &SubmoduleScope::All, strategy, None, out)
             .map_err(UpdateError::Submodules),
         ScopeOwned::Skip => Ok(()),
         ScopeOwned::Specific(strings) => {
@@ -617,6 +624,7 @@ fn run_submodules(
                 vcs.update_submodules(
                     repo,
                     &SubmoduleScope::Specific(&single),
+                    strategy,
                     reference.as_deref(),
                     out,
                 )
