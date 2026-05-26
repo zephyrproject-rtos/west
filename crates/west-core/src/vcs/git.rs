@@ -36,9 +36,10 @@ pub struct GitOptions {
     pub binary: Option<PathBuf>,
     /// Sourced from `tool.git.fetch.strategy`. Default: `Smart`.
     pub fetch_strategy: FetchStrategy,
-    /// Sourced from `tool.git.fetch.tags`. `Some(true)` passes `--tags`,
-    /// `Some(false)` passes `--no-tags`, `None` leaves the flag off (git
-    /// applies its own default — fetch tags reachable from fetched commits).
+    /// Sourced from `tool.git.fetch.tags`. `Some(true)` (the default
+    /// when the config is unset) passes `--tags`, ensuring named tag
+    /// revisions land as local refs. `Some(false)` passes `--no-tags`.
+    /// Matches v1, which hardcoded `--tags`.
     pub fetch_tags: Option<bool>,
     /// Sourced from `tool.git.fetch.depth`. When set, fetches are shallow
     /// to that depth via `--depth=N`.
@@ -602,10 +603,12 @@ impl Vcs for GitClient {
         if self.opts.fetch_force {
             argv.push("--force");
         }
+        // v1 always passed `--tags` so that a manifest revision like
+        // `v2.0` lands as a local tag ref, not just FETCH_HEAD. Match
+        // that as the default; `tool.git.fetch.tags = false` opts out.
         match self.opts.fetch_tags {
-            Some(true) => argv.push("--tags"),
             Some(false) => argv.push("--no-tags"),
-            None => {}
+            Some(true) | None => argv.push("--tags"),
         }
         if let Some(d) = depth_arg.as_deref() {
             argv.push(d);
