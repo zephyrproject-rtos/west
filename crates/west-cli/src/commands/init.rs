@@ -23,7 +23,7 @@ use clap::Args;
 
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Manifest;
-use west_core::vcs;
+use west_core::vcs::{self, RevSpec};
 
 use super::config::LoadedConfig;
 
@@ -199,7 +199,7 @@ fn bootstrap(
             // route through).
             pb.finish_and_clear();
             match &res {
-                Ok(()) => match vcs.commit_summary(&tmp_dir, "HEAD") {
+                Ok(()) => match vcs.commit_summary(&tmp_dir, RevSpec::Head) {
                     Ok(summary) => {
                         eprintln!("{}", crate::progress::render_done_line(&prefix, &summary));
                     }

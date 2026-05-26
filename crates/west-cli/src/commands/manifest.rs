@@ -36,7 +36,7 @@ use std::process::ExitCode;
 use clap::{ArgGroup, Args, ValueEnum};
 
 use west_core::config::Configuration;
-use west_core::vcs::{self, Vcs};
+use west_core::vcs::{self, RevSpec, Vcs};
 
 use super::config::LoadedConfig;
 
@@ -246,8 +246,8 @@ fn action_freeze(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), Manife
             });
         }
         let sha = vcs
-            .sha(&repo, "refs/heads/manifest-rev")
-            .or_else(|_| vcs.sha(&repo, "HEAD"))
+            .sha(&repo, RevSpec::ManifestRev)
+            .or_else(|_| vcs.sha(&repo, RevSpec::Head))
             .map_err(|e| ManifestCmdError::Vcs(format!("{}: {e}", project.name)))?;
         projects[i]["revision"] = serde_json::Value::String(sha);
     }

@@ -25,7 +25,9 @@ use std::path::Path;
 use indicatif::{MultiProgress, ProgressBar};
 
 use west_core::manifest::{ImportContent, ImportSource, ImportSourceError, Project};
-use west_core::vcs::{CheckoutTarget, CloneSpec, CommitSummary, FetchSpec, Output, Vcs, VcsError};
+use west_core::vcs::{
+    CheckoutTarget, CloneSpec, CommitSummary, FetchSpec, Output, RevSpec, Vcs, VcsError,
+};
 
 use super::Settings;
 use super::cache;
@@ -166,7 +168,7 @@ impl WorkspaceImportSource<'_> {
             Ok(sha) => {
                 let summary = self
                     .vcs
-                    .commit_summary(repo, sha)
+                    .commit_summary(repo, RevSpec::Named(sha))
                     .ok()
                     .unwrap_or_else(|| CommitSummary {
                         short_sha: sha.chars().take(12).collect(),

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use west_core::loaded::LoadedManifest;
 use west_core::manifest::Project;
-use west_core::vcs::Vcs;
+use west_core::vcs::{RevSpec, Vcs};
 
 use super::select;
 
@@ -115,7 +115,7 @@ impl ProjectContext<'_> {
             return Err(FormatError::UnclonedSha(self.project.name.clone()));
         }
         self.vcs
-            .sha(&self.repo_path(), "HEAD")
+            .sha(&self.repo_path(), RevSpec::Head)
             .map_err(|e| FormatError::Vcs(e.to_string()))
     }
 }

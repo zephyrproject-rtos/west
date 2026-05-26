@@ -11,7 +11,7 @@ use tempfile::TempDir;
 use west_core::config::Configuration;
 use west_core::vcs::{
     self, CheckoutTarget, CloneSpec, FetchSpec, FetchStrategy, GitClient, GitOptions, NullSink,
-    Output, ProgressEvent, ProgressSink, RevType, SubmoduleScope, Vcs, VcsError,
+    Output, ProgressEvent, ProgressSink, RevSpec, RevType, SubmoduleScope, Vcs, VcsError,
 };
 
 // Test double: collects every event into an owned vector for assertions.
@@ -204,7 +204,7 @@ fn clone_round_trip() {
     .unwrap();
 
     assert!(v.is_repo(&dest).unwrap());
-    let head = v.sha(&dest, "HEAD").unwrap();
+    let head = v.sha(&dest, RevSpec::Head).unwrap();
     let bare_head = git_capture(&["rev-parse", "HEAD"], &bare);
     assert_eq!(head, bare_head);
 }
@@ -295,10 +295,10 @@ fn sha_resolves_head_and_short_ref() {
     )
     .unwrap();
 
-    let head = v.sha(&dest, "HEAD").unwrap();
+    let head = v.sha(&dest, RevSpec::Head).unwrap();
     assert_eq!(head.len(), 40);
     let head_short = &head[..7];
-    let by_short = v.sha(&dest, head_short).unwrap();
+    let by_short = v.sha(&dest, RevSpec::Named(head_short)).unwrap();
     assert_eq!(by_short, head);
 }
 
@@ -321,8 +321,8 @@ fn is_ancestor_true_then_false() {
     let b = git_capture(&["rev-parse", "HEAD"], &work);
 
     let v = GitClient::new(GitOptions::default());
-    assert!(v.is_ancestor(&work, &a, &b).unwrap());
-    assert!(!v.is_ancestor(&work, &b, &a).unwrap());
+    assert!(v.is_ancestor(&work, RevSpec::Named(&a), RevSpec::Named(&b)).unwrap());
+    assert!(!v.is_ancestor(&work, RevSpec::Named(&b), RevSpec::Named(&a)).unwrap());
 }
 
 #[test]
@@ -334,7 +334,7 @@ fn command_failed_carries_stderr_and_argv() {
     let tmp = TempDir::new().unwrap();
     let v = GitClient::new(GitOptions::default());
     // sha on a non-repo dir → CommandFailed.
-    let err = v.sha(tmp.path(), "HEAD").unwrap_err();
+    let err = v.sha(tmp.path(), RevSpec::Head).unwrap_err();
     match err {
         VcsError::CommandFailed {
             client,
@@ -618,23 +618,26 @@ fn rev_type_classifies_branches_tags_and_shas() {
 
     // Branch: `main` exists locally and as remote-tracking; both classify
     // as `Branch` because of the `refs/heads/` / `refs/remotes/` prefix.
-    assert_eq!(v.rev_type(&dest, "main").unwrap(), RevType::Branch);
+    assert_eq!(v.rev_type(&dest, RevSpec::Named("main")).unwrap(), RevType::Branch);
     assert_eq!(
-        v.rev_type(&dest, "origin/main").unwrap(),
+        v.rev_type(&dest, RevSpec::Named("origin/main")).unwrap(),
         RevType::Branch,
         "remote-tracking branch should classify as Branch",
     );
 
     // Tags — annotated vs lightweight both land as `Tag`.
-    assert_eq!(v.rev_type(&dest, "v1.0").unwrap(), RevType::Tag);
-    assert_eq!(v.rev_type(&dest, "lw").unwrap(), RevType::Tag);
+    assert_eq!(v.rev_type(&dest, RevSpec::Named("v1.0")).unwrap(), RevType::Tag);
+    assert_eq!(v.rev_type(&dest, RevSpec::Named("lw")).unwrap(), RevType::Tag);
 
     // Full and abbreviated SHAs — no symbolic name → `Commit`.
-    assert_eq!(v.rev_type(&dest, &sha).unwrap(), RevType::Commit);
-    assert_eq!(v.rev_type(&dest, &sha[..8]).unwrap(), RevType::Commit);
+    assert_eq!(v.rev_type(&dest, RevSpec::Named(&sha)).unwrap(), RevType::Commit);
+    assert_eq!(v.rev_type(&dest, RevSpec::Named(&sha[..8])).unwrap(), RevType::Commit);
 
     // Unresolvable: `Other` (caller defaults to fetching).
-    assert_eq!(v.rev_type(&dest, "definitely-not-a-ref").unwrap(), RevType::Other);
+    assert_eq!(
+        v.rev_type(&dest, RevSpec::Named("definitely-not-a-ref")).unwrap(),
+        RevType::Other,
+    );
 }
 
 #[test]
@@ -653,7 +656,7 @@ fn rev_type_hex_named_branch_is_branch_not_commit() {
     git(&["branch", "cafebabe"], &dest);
 
     let v = GitClient::new(GitOptions::default());
-    assert_eq!(v.rev_type(&dest, "cafebabe").unwrap(), RevType::Branch);
+    assert_eq!(v.rev_type(&dest, RevSpec::Named("cafebabe")).unwrap(), RevType::Branch);
 }
 
 #[test]
@@ -691,6 +694,35 @@ fn fetch_smart_runs_for_branch_revision_with_new_upstream_commits() {
 }
 
 #[test]
+fn rev_spec_manifest_rev_agrees_with_manifest_rev_method() {
+    // `vcs.sha(repo, RevSpec::ManifestRev)` and `vcs.manifest_rev(repo)`
+    // must resolve to the same commit. They share an underlying storage
+    // location (the git impl: `refs/heads/manifest-rev`); the RevSpec
+    // path proves consumers can stay typed instead of round-tripping
+    // through a string literal.
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = clone_into(tmp.path(), &bare);
+    let head = git_capture(&["rev-parse", "HEAD"], &dest);
+
+    let v = GitClient::new(GitOptions::default());
+    v.set_manifest_rev(&dest, &head, Some("test"))
+        .expect("set_manifest_rev");
+
+    let via_sha = v.sha(&dest, RevSpec::ManifestRev).expect("sha");
+    let via_method = v
+        .manifest_rev(&dest)
+        .expect("manifest_rev")
+        .expect("ref exists");
+    assert_eq!(via_sha, via_method);
+    assert_eq!(via_sha, head);
+}
+
+#[test]
 fn fetch_smart_runs_when_revision_is_unknown() {
     if !git_available() {
         eprintln!("skipping: git not installed");
@@ -712,7 +744,7 @@ fn fetch_smart_runs_when_revision_is_unknown() {
 
     // Smart strategy fell through to a real fetch; the new sha should now
     // be locally resolvable.
-    assert_eq!(v.sha(&dest, &new_sha).unwrap(), new_sha);
+    assert_eq!(v.sha(&dest, RevSpec::Named(&new_sha)).unwrap(), new_sha);
 }
 
 #[test]
@@ -740,7 +772,7 @@ fn checkout_detached_lands_off_branch() {
         .output()
         .unwrap();
     assert!(!sym.status.success(), "expected detached HEAD");
-    assert_eq!(v.sha(&dest, "HEAD").unwrap(), head);
+    assert_eq!(v.sha(&dest, RevSpec::Head).unwrap(), head);
 }
 
 #[test]
@@ -902,7 +934,7 @@ fn rebase_replays_local_commits_onto_target() {
     git(&["commit", "-q", "-m", "feature work"], &work);
 
     let v = GitClient::new(GitOptions::default());
-    v.rebase(&work, "target", &mut Output::Native).unwrap();
+    v.rebase(&work, RevSpec::Named("target"), &mut Output::Native).unwrap();
 
     // After rebase, feature's parent should be target's tip.
     let parent = git_capture(&["rev-parse", "HEAD^"], &work);
@@ -1197,7 +1229,7 @@ fn clone_mirror_creates_bare_mirror_repo() {
         git_capture(&["rev-parse", "--is-bare-repository"], &dest),
         "true",
     );
-    let head = v.sha(&dest, "HEAD").unwrap();
+    let head = v.sha(&dest, RevSpec::Head).unwrap();
     assert_eq!(head, git_capture(&["rev-parse", "HEAD"], &bare));
 }
 
@@ -1284,7 +1316,7 @@ fn read_at_ref_reads_from_git_not_worktree() {
 
     let v = GitClient::new(GitOptions::default());
     let got = v
-        .read_at_ref(&dest, "refs/heads/manifest-rev", Path::new("m1.yml"))
+        .read_at_ref(&dest, RevSpec::ManifestRev, Path::new("m1.yml"))
         .unwrap();
     assert_eq!(got.as_deref(), Some(b"manifest: {}\n".as_slice()));
 }
@@ -1300,7 +1332,7 @@ fn read_at_ref_returns_none_when_path_missing_at_ref() {
     let dest = clone_into(tmp.path(), &bare);
 
     let v = GitClient::new(GitOptions::default());
-    let got = v.read_at_ref(&dest, "HEAD", Path::new("does-not-exist.yml")).unwrap();
+    let got = v.read_at_ref(&dest, RevSpec::Head, Path::new("does-not-exist.yml")).unwrap();
     assert!(got.is_none());
 }
 
@@ -1318,7 +1350,7 @@ fn read_at_ref_returns_none_when_ref_missing() {
     // On a fresh clone it doesn't exist — must be Ok(None), not Err.
     let v = GitClient::new(GitOptions::default());
     let got = v
-        .read_at_ref(&dest, "refs/heads/manifest-rev", Path::new("anything"))
+        .read_at_ref(&dest, RevSpec::ManifestRev, Path::new("anything"))
         .unwrap();
     assert!(got.is_none());
 }
@@ -1346,7 +1378,7 @@ fn ls_tree_at_ref_lists_sorted_filenames() {
 
     let v = GitClient::new(GitOptions::default());
     let got = v
-        .ls_tree_at_ref(&dest, "refs/heads/manifest-rev", Path::new("d"))
+        .ls_tree_at_ref(&dest, RevSpec::ManifestRev, Path::new("d"))
         .unwrap()
         .expect("d/ is a tree at manifest-rev");
     // `git ls-tree --name-only` produces lexically sorted output.
@@ -1367,7 +1399,7 @@ fn ls_tree_at_ref_returns_none_for_blob() {
     let dest = clone_into(tmp.path(), &bare);
     let v = GitClient::new(GitOptions::default());
     // `README` was committed by `bare_source_with_one_commit`.
-    let got = v.ls_tree_at_ref(&dest, "HEAD", Path::new("README")).unwrap();
+    let got = v.ls_tree_at_ref(&dest, RevSpec::Head, Path::new("README")).unwrap();
     assert!(got.is_none());
 }
 
@@ -1382,7 +1414,7 @@ fn ls_tree_at_ref_returns_none_when_ref_missing() {
     let dest = clone_into(tmp.path(), &bare);
     let v = GitClient::new(GitOptions::default());
     let got = v
-        .ls_tree_at_ref(&dest, "refs/heads/manifest-rev", Path::new("anything"))
+        .ls_tree_at_ref(&dest, RevSpec::ManifestRev, Path::new("anything"))
         .unwrap();
     assert!(got.is_none());
 }
@@ -1395,7 +1427,7 @@ fn ls_tree_at_ref_errors_when_repo_path_is_not_a_repo() {
     }
     let tmp = TempDir::new().unwrap();
     let v = GitClient::new(GitOptions::default());
-    let res = v.ls_tree_at_ref(tmp.path(), "HEAD", Path::new("anything"));
+    let res = v.ls_tree_at_ref(tmp.path(), RevSpec::Head, Path::new("anything"));
     assert!(
         matches!(res, Err(_)),
         "non-repo dir must propagate as Err; got {res:?}"
@@ -1410,7 +1442,7 @@ fn read_at_ref_errors_when_repo_path_is_not_a_repo() {
     }
     let tmp = TempDir::new().unwrap();
     let v = GitClient::new(GitOptions::default());
-    let res = v.read_at_ref(tmp.path(), "HEAD", Path::new("anything"));
+    let res = v.read_at_ref(tmp.path(), RevSpec::Head, Path::new("anything"));
     assert!(
         matches!(res, Err(_)),
         "non-repo dir must propagate as Err, not silent Ok(None); got {res:?}"

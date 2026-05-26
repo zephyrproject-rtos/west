@@ -10,7 +10,7 @@ use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use west_core::vcs::{CloneSpec, GitClient, GitOptions, Vcs};
+use west_core::vcs::{CloneSpec, GitClient, GitOptions, RevSpec, Vcs};
 
 fn main() -> ExitCode {
     let mut args = env::args_os().skip(1);
@@ -44,7 +44,7 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    match client.sha(&dest, "HEAD") {
+    match client.sha(&dest, RevSpec::Head) {
         Ok(sha) => {
             println!("{sha}");
             ExitCode::SUCCESS

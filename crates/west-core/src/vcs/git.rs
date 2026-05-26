@@ -13,7 +13,8 @@ use crate::config::Configuration;
 
 use super::{
     CheckoutTarget, CloneSpec, ColorMode, CommitSummary, DiffOutcome, DiffSpec, FetchSpec, Output,
-    ProgressSink, RevType, StatusMode, StatusOutcome, StatusSpec, SubmoduleScope, Vcs, VcsError,
+    ProgressSink, RevSpec, RevType, StatusMode, StatusOutcome, StatusSpec, SubmoduleScope, Vcs,
+    VcsError,
 };
 
 const NAME: &str = "git";
@@ -21,8 +22,21 @@ const NAME: &str = "git";
 /// Where the manifest-rev pointer lives in a git repo. Plain
 /// `refs/heads/<name>` rather than `refs/west/<name>` so it stays visible
 /// to `git branch` and other ordinary tooling — this is the established
-/// location users expect from prior west releases.
-use crate::vcs::MANIFEST_REV_REF;
+/// location users expect from prior west releases. Resolution detail
+/// of [`RevSpec::ManifestRev`]; consumers stay typed in `RevSpec` and
+/// never see this literal.
+const MANIFEST_REV_REF: &str = "refs/heads/manifest-rev";
+
+/// Resolve a [`RevSpec`] to the string git wants on the command line.
+/// Single site for the git-specific encoding of `Head` / `ManifestRev`;
+/// callers stay shape-agnostic.
+fn resolve_rev<'a>(rev: RevSpec<'a>) -> &'a str {
+    match rev {
+        RevSpec::Head => "HEAD",
+        RevSpec::ManifestRev => MANIFEST_REV_REF,
+        RevSpec::Named(s) => s,
+    }
+}
 
 #[derive(Debug)]
 pub struct GitClient {
@@ -384,9 +398,9 @@ impl Vcs for GitClient {
         self.run_with_output(&argv, out)
     }
 
-    fn sha(&self, repo: &Path, rev: &str) -> Result<String, VcsError> {
+    fn sha(&self, repo: &Path, rev: RevSpec<'_>) -> Result<String, VcsError> {
         let repo_str = repo.to_string_lossy().into_owned();
-        let qualified = format!("{rev}^{{commit}}");
+        let qualified = format!("{rev}^{{commit}}", rev = resolve_rev(rev));
         let res = self.run(&["-C", &repo_str, "rev-parse", &qualified])?;
         check_success(&res)?;
         let stdout = std::str::from_utf8(&res.output.stdout).map_err(|e| VcsError::BadOutput {
@@ -405,7 +419,7 @@ impl Vcs for GitClient {
         Ok(trimmed.to_owned())
     }
 
-    fn rev_type(&self, repo: &Path, rev: &str) -> Result<RevType, VcsError> {
+    fn rev_type(&self, repo: &Path, rev: RevSpec<'_>) -> Result<RevType, VcsError> {
         // Two-step, mirrors v1's `_rev_type`:
         //   1. `git cat-file -t <rev>` — annotated tags come back as
         //      `tag`; lightweight tags, branches, and SHAs all come
@@ -419,7 +433,8 @@ impl Vcs for GitClient {
         // (ambiguous: same name as both a tag and a branch, etc.) map
         // to `Other`, which the fetch callers treat as "don't skip".
         let repo_str = repo.to_string_lossy().into_owned();
-        let res = self.run(&["-C", &repo_str, "cat-file", "-t", rev])?;
+        let rev_str = resolve_rev(rev);
+        let res = self.run(&["-C", &repo_str, "cat-file", "-t", rev_str])?;
         if !res.output.status.success() {
             return Ok(RevType::Other);
         }
@@ -443,7 +458,7 @@ impl Vcs for GitClient {
             "rev-parse",
             "--verify",
             "--symbolic-full-name",
-            rev,
+            rev_str,
         ])?;
         if !res.output.status.success() {
             return Ok(RevType::Other);
@@ -471,11 +486,15 @@ impl Vcs for GitClient {
     fn ls_tree_at_ref(
         &self,
         repo: &Path,
-        rev: &str,
+        rev: RevSpec<'_>,
         relative_path: &Path,
     ) -> Result<Option<Vec<String>>, VcsError> {
         let repo_str = repo.to_string_lossy().into_owned();
-        let spec = format!("{rev}:{}", relative_path.to_string_lossy());
+        let spec = format!(
+            "{rev}:{}",
+            relative_path.to_string_lossy(),
+            rev = resolve_rev(rev)
+        );
         // Two-step: first `cat-file -t` to disambiguate tree vs blob
         // vs missing (git stderrs vary by version, but the type-probe
         // is unambiguous); then `ls-tree --name-only` if it's a tree.
@@ -537,11 +556,15 @@ impl Vcs for GitClient {
     fn read_at_ref(
         &self,
         repo: &Path,
-        rev: &str,
+        rev: RevSpec<'_>,
         relative_path: &Path,
     ) -> Result<Option<Vec<u8>>, VcsError> {
         let repo_str = repo.to_string_lossy().into_owned();
-        let spec = format!("{rev}:{}", relative_path.to_string_lossy());
+        let spec = format!(
+            "{rev}:{}",
+            relative_path.to_string_lossy(),
+            rev = resolve_rev(rev)
+        );
         // `cat-file -p <rev>:<path>` writes the raw object contents to
         // stdout. Equivalent to v1's `git show <ref>:<path>` for the
         // blob case and explicit about "bytes please" — no smudge,
@@ -581,7 +604,12 @@ impl Vcs for GitClient {
         })
     }
 
-    fn is_ancestor(&self, repo: &Path, ancestor: &str, descendant: &str) -> Result<bool, VcsError> {
+    fn is_ancestor(
+        &self,
+        repo: &Path,
+        ancestor: RevSpec<'_>,
+        descendant: RevSpec<'_>,
+    ) -> Result<bool, VcsError> {
         // `git merge-base --is-ancestor A B` exits 0 if A is ancestor of B,
         // 1 if not, and >1 on real errors (bad ref, etc.).
         let repo_str = repo.to_string_lossy().into_owned();
@@ -590,8 +618,8 @@ impl Vcs for GitClient {
             &repo_str,
             "merge-base",
             "--is-ancestor",
-            ancestor,
-            descendant,
+            resolve_rev(ancestor),
+            resolve_rev(descendant),
         ])?;
         match res.output.status.code() {
             Some(0) => Ok(true),
@@ -616,8 +644,8 @@ impl Vcs for GitClient {
         // `cafebabe` correctly returns `Branch` and we still fetch.
         if matches!(self.opts.fetch_strategy, FetchStrategy::Smart)
             && let Some(rev) = spec.revision
-            && matches!(self.rev_type(repo, rev)?, RevType::Tag | RevType::Commit)
-            && let Ok(sha) = self.sha(repo, rev)
+            && matches!(self.rev_type(repo, RevSpec::Named(rev))?, RevType::Tag | RevType::Commit)
+            && let Ok(sha) = self.sha(repo, RevSpec::Named(rev))
         {
             log::trace!("git: smart fetch skipped for {rev:?} (immutable, already local)");
             return Ok(sha);
@@ -650,7 +678,7 @@ impl Vcs for GitClient {
         // just-fetched tip — that's the canonical sha for the requested
         // revision. For a default-refspec fetch (`revision: None`),
         // `FETCH_HEAD`'s merge-target line is what callers get.
-        self.sha(repo, "FETCH_HEAD")
+        self.sha(repo, RevSpec::Named("FETCH_HEAD"))
     }
 
     fn checkout(
@@ -681,9 +709,14 @@ impl Vcs for GitClient {
         }
     }
 
-    fn rebase(&self, repo: &Path, onto: &str, out: &mut Output<'_>) -> Result<(), VcsError> {
+    fn rebase(
+        &self,
+        repo: &Path,
+        onto: RevSpec<'_>,
+        out: &mut Output<'_>,
+    ) -> Result<(), VcsError> {
         let repo_str = repo.to_string_lossy().into_owned();
-        self.run_with_output(&["-C", &repo_str, "rebase", onto], out)
+        self.run_with_output(&["-C", &repo_str, "rebase", resolve_rev(onto)], out)
     }
 
     fn is_clean(&self, repo: &Path) -> Result<bool, VcsError> {
@@ -819,13 +852,20 @@ impl Vcs for GitClient {
         Ok(Some(trimmed.to_owned()))
     }
 
-    fn commit_summary(&self, repo: &Path, rev: &str) -> Result<CommitSummary, VcsError> {
+    fn commit_summary(&self, repo: &Path, rev: RevSpec<'_>) -> Result<CommitSummary, VcsError> {
         let repo_str = repo.to_string_lossy().into_owned();
         // %h = abbreviated sha (git decides the width based on
         // collision risk); %x09 = literal TAB; %s = subject line.
         // TAB is a safe separator because git collapses newlines and
         // tabs out of `%s`.
-        let res = self.run(&["-C", &repo_str, "log", "-1", "--format=%h%x09%s", rev])?;
+        let res = self.run(&[
+            "-C",
+            &repo_str,
+            "log",
+            "-1",
+            "--format=%h%x09%s",
+            resolve_rev(rev),
+        ])?;
         check_success(&res)?;
         let stdout = std::str::from_utf8(&res.output.stdout).map_err(|e| VcsError::BadOutput {
             client: NAME,
@@ -875,10 +915,10 @@ impl Vcs for GitClient {
             args.push(format!("--dst-prefix={prefix}/"));
         }
         if let Some(from) = spec.from_rev {
-            args.push(from.to_owned());
+            args.push(resolve_rev(from).to_owned());
         }
         if let Some(to) = spec.to_rev {
-            args.push(to.to_owned());
+            args.push(resolve_rev(to).to_owned());
         }
         // Forward extras inline rather than after a `--` separator.
         // git's `--` ends the option list and treats everything

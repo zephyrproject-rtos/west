@@ -162,12 +162,28 @@ impl<W: Write + Send> ProgressSink for LineSink<W> {
 /// (the tool renders its own progress); `Stream(sink)` pipes stderr
 /// through a parser into structured [`ProgressEvent`]s. Lookups (`sha`,
 /// `is_repo`, …) don't produce progress and don't take an `Output`.
-/// Fully-qualified name of the ref west uses to record the
-/// commit it most recently materialized in a project. The import
-/// resolver reads imports from this ref via [`Vcs::read_at_ref`].
-/// Implementations of [`Vcs::set_manifest_rev`] / [`Vcs::manifest_rev`]
-/// point this ref at the appropriate commit.
-pub const MANIFEST_REV_REF: &str = "refs/heads/manifest-rev";
+/// Symbolic revision passed to most read-side [`Vcs`] methods. Keeps
+/// "what does the user mean by this rev" out of caller code: callers
+/// say [`RevSpec::ManifestRev`] or [`RevSpec::Head`] instead of typing
+/// `"refs/heads/manifest-rev"` or `"HEAD"`, and the implementation
+/// resolves to whatever it stores those concepts as.
+///
+/// Raw revision strings (SHAs, branch/tag names, expressions like
+/// `HEAD~2`) go through [`RevSpec::Named`] — there is intentionally no
+/// `From<&str>` conversion, because the magic-string class of bug this
+/// enum exists to close (mistyping `"manifest-rev"` as a `Named`) only
+/// stays closed when the wrap is explicit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevSpec<'a> {
+    /// The current commit / working-tree position.
+    Head,
+    /// The west-recorded `manifest-rev` pointer — the commit
+    /// `west update` most recently materialized in this project.
+    ManifestRev,
+    /// Any revision in the underlying VCS's syntax — SHA, branch
+    /// name, tag, expression. West doesn't interpret the string.
+    Named(&'a str),
+}
 
 pub trait Vcs: fmt::Debug + Send + Sync {
     /// Client identifier (`"git"`, `"jj"`, …). Stable; surfaces in errors.
@@ -181,9 +197,8 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     /// [`CloneSpec`] for the full set of clone parameters.
     fn clone(&self, spec: &CloneSpec<'_>, out: &mut Output<'_>) -> Result<(), VcsError>;
 
-    /// Resolve `rev` to a commit SHA in `repo`. `"HEAD"` resolves the current
-    /// commit.
-    fn sha(&self, repo: &Path, rev: &str) -> Result<String, VcsError>;
+    /// Resolve `rev` to a commit SHA in `repo`.
+    fn sha(&self, repo: &Path, rev: RevSpec<'_>) -> Result<String, VcsError>;
 
     /// List the entries of the *directory* at `rev:relative_path` in
     /// `repo`. Returns `Ok(None)` when the path isn't a tree (it's a
@@ -198,7 +213,7 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     fn ls_tree_at_ref(
         &self,
         repo: &Path,
-        rev: &str,
+        rev: RevSpec<'_>,
         relative_path: &Path,
     ) -> Result<Option<Vec<String>>, VcsError>;
 
@@ -210,11 +225,11 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     /// output) surface as `Err`.
     ///
     /// The path is interpreted relative to the repo root. The west
-    /// import resolver passes `refs/heads/manifest-rev` as `rev` —
-    /// mirrors v1's `_manifest_content_at`, which loaded import data
-    /// from git rather than the working tree so a user-initiated
-    /// `git checkout` of an unrelated branch doesn't contaminate
-    /// manifest resolution.
+    /// import resolver passes [`RevSpec::ManifestRev`] — mirrors v1's
+    /// `_manifest_content_at`, which loaded import data from git
+    /// rather than the working tree so a user-initiated `git
+    /// checkout` of an unrelated branch doesn't contaminate manifest
+    /// resolution.
     ///
     /// The return type is bytes, not a string, so callers can decide
     /// whether to treat the payload as text. Manifest YAML is UTF-8
@@ -223,12 +238,17 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     fn read_at_ref(
         &self,
         repo: &Path,
-        rev: &str,
+        rev: RevSpec<'_>,
         relative_path: &Path,
     ) -> Result<Option<Vec<u8>>, VcsError>;
 
     /// Is `ancestor` reachable as an ancestor of `descendant`?
-    fn is_ancestor(&self, repo: &Path, ancestor: &str, descendant: &str) -> Result<bool, VcsError>;
+    fn is_ancestor(
+        &self,
+        repo: &Path,
+        ancestor: RevSpec<'_>,
+        descendant: RevSpec<'_>,
+    ) -> Result<bool, VcsError>;
 
     /// Bring remote refs in `repo` up to date with `spec.remote`. Whether
     /// the network call is actually made (smart-skip when the requested
@@ -254,7 +274,7 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     /// missing, repo malformed) surface as `Err`; an unresolvable rev
     /// is reported as `RevType::Other` so callers default to "fetch"
     /// rather than "skip".
-    fn rev_type(&self, repo: &Path, rev: &str) -> Result<RevType, VcsError>;
+    fn rev_type(&self, repo: &Path, rev: RevSpec<'_>) -> Result<RevType, VcsError>;
 
     /// Move HEAD in `repo` to `target`.
     ///
@@ -272,7 +292,12 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     /// Rebase the current branch in `repo` onto `onto`. Fails if the
     /// rebase has conflicts; the working tree is left in whatever state the
     /// underlying tool leaves it. Progress output is forwarded to `out`.
-    fn rebase(&self, repo: &Path, onto: &str, out: &mut Output<'_>) -> Result<(), VcsError>;
+    fn rebase(
+        &self,
+        repo: &Path,
+        onto: RevSpec<'_>,
+        out: &mut Output<'_>,
+    ) -> Result<(), VcsError>;
 
     /// `true` when `repo`'s working tree has no uncommitted changes.
     fn is_clean(&self, repo: &Path) -> Result<bool, VcsError>;
@@ -328,7 +353,7 @@ pub trait Vcs: fmt::Debug + Send + Sync {
 
     /// One-line summary of `rev`: abbreviated SHA + subject. Used to
     /// surface "what HEAD landed on" in user-facing progress output.
-    fn commit_summary(&self, repo: &Path, rev: &str) -> Result<CommitSummary, VcsError>;
+    fn commit_summary(&self, repo: &Path, rev: RevSpec<'_>) -> Result<CommitSummary, VcsError>;
 
     /// Compute a diff for `repo` and write it to `writer`. Returns
     /// whether the diff was non-empty — semantics mirror
@@ -467,9 +492,9 @@ pub enum SubmoduleScope<'a> {
 #[derive(Debug, Clone)]
 pub struct DiffSpec<'a> {
     /// Revision to diff FROM. `None` selects the tool's default base.
-    pub from_rev: Option<&'a str>,
+    pub from_rev: Option<RevSpec<'a>>,
     /// Revision to diff TO. `None` selects the working tree.
-    pub to_rev: Option<&'a str>,
+    pub to_rev: Option<RevSpec<'a>>,
     /// Color preference for the diff body.
     pub color: ColorMode,
     /// Path prefix prepended to source/destination paths in the diff

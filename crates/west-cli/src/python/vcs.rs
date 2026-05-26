@@ -15,7 +15,7 @@ use pyo3::exceptions::{PyOSError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
-use west_core::vcs::{GitClient, GitOptions, Vcs};
+use west_core::vcs::{GitClient, GitOptions, RevSpec, Vcs};
 
 /// Read `relative_path` from `repo` at the git revision `rev`.
 ///
@@ -38,7 +38,10 @@ fn read_at_ref<'py>(
         return Err(PyValueError::new_err("rev must be non-empty"));
     }
     let client = GitClient::new(GitOptions::default());
-    match client.read_at_ref(&repo, rev, &relative_path) {
+    // Python-supplied strings flow through `Named`. Python callers
+    // that conceptually want `manifest-rev` pass the literal
+    // `"refs/heads/manifest-rev"` — they don't see `RevSpec`.
+    match client.read_at_ref(&repo, RevSpec::Named(rev), &relative_path) {
         Ok(Some(bytes)) => Ok(Some(PyBytes::new(py, &bytes))),
         Ok(None) => Ok(None),
         Err(e) => Err(PyOSError::new_err(e.to_string())),
@@ -65,7 +68,7 @@ fn ls_tree_at_ref(
     }
     let client = GitClient::new(GitOptions::default());
     client
-        .ls_tree_at_ref(&repo, rev, &relative_path)
+        .ls_tree_at_ref(&repo, RevSpec::Named(rev), &relative_path)
         .map_err(|e| PyOSError::new_err(e.to_string()))
 }
 

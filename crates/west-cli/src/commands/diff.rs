@@ -40,7 +40,7 @@ use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
-use west_core::vcs::{self, ColorMode, DiffOutcome, DiffSpec, Vcs, VcsError};
+use west_core::vcs::{self, ColorMode, DiffOutcome, DiffSpec, RevSpec, Vcs, VcsError};
 
 use super::config::LoadedConfig;
 use super::select;
@@ -249,7 +249,7 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
         }
     };
 
-    let from_rev: Option<&str> = if args.manifest { Some("manifest-rev") } else { None };
+    let from_rev: Option<RevSpec<'_>> = if args.manifest { Some(RevSpec::ManifestRev) } else { None };
 
     // Per-project work. par_iter().map().collect() preserves input
     // order so the drain below sees workspace order regardless of
@@ -376,7 +376,7 @@ fn diff_one(
     project: &Project,
     workspace: &Path,
     vcs: &dyn Vcs,
-    from_rev: Option<&str>,
+    from_rev: Option<RevSpec<'_>>,
     color: ColorMode,
     extra: &[String],
 ) -> ProjectOutcome {

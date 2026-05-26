@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use md5::{Digest, Md5};
 use west_core::manifest::Project;
-use west_core::vcs::{CloneSpec, FetchSpec, Output, RevType, Vcs};
+use west_core::vcs::{CloneSpec, FetchSpec, Output, RevSpec, RevType, Vcs};
 
 use super::Settings;
 use super::error::UpdateError;
@@ -95,11 +95,11 @@ pub(super) fn ensure_auto_cache(
         // Classification is authoritative — `RevType::Branch` keeps
         // us fetching even if the branch name happens to look like a
         // SHA, and `Tag` correctly skips even when it doesn't.
+        let rev = RevSpec::Named(&project.revision);
         if matches!(
-            vcs.rev_type(cache_path, &project.revision)
-                .unwrap_or(RevType::Other),
+            vcs.rev_type(cache_path, rev).unwrap_or(RevType::Other),
             RevType::Tag | RevType::Commit
-        ) && vcs.sha(cache_path, &project.revision).is_ok()
+        ) && vcs.sha(cache_path, rev).is_ok()
         {
             return Ok(());
         }

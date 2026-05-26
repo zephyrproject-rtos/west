@@ -29,7 +29,7 @@ use west_core::loaded::{LoadedManifest, ProjectFilter, ProjectFilterError};
 use west_core::manifest::{
     ImportContent, ImportPolicy, ImportSource, ImportSourceError, Manifest, NamedBody, Project,
 };
-use west_core::vcs::{MANIFEST_REV_REF, Vcs};
+use west_core::vcs::{RevSpec, Vcs};
 
 const DEFAULT_MANIFEST_FILE: &str = "west.yml";
 
@@ -266,7 +266,7 @@ pub(crate) fn read_project_import(
 ) -> Result<Option<ImportContent>, ImportSourceError> {
     let path = std::path::Path::new(relative_file);
     match vcs
-        .ls_tree_at_ref(repo, MANIFEST_REV_REF, path)
+        .ls_tree_at_ref(repo, RevSpec::ManifestRev, path)
         .map_err(ImportSourceError::new)?
     {
         Some(mut entries) => {
@@ -283,12 +283,12 @@ pub(crate) fn read_project_import(
             for name in entries {
                 let nested = path.join(&name);
                 let bytes = vcs
-                    .read_at_ref(repo, MANIFEST_REV_REF, &nested)
+                    .read_at_ref(repo, RevSpec::ManifestRev, &nested)
                     .map_err(ImportSourceError::new)?;
                 let Some(bytes) = bytes else { continue };
                 let body = String::from_utf8(bytes).map_err(|e| {
                     ImportSourceError::msg(format!(
-                        "{project_name}: non-utf8 manifest at {MANIFEST_REV_REF}:{}: {e}",
+                        "{project_name}: non-utf8 manifest at manifest-rev:{}: {e}",
                         nested.display(),
                     ))
                 })?;
@@ -300,13 +300,13 @@ pub(crate) fn read_project_import(
         }
         None => {
             let bytes = vcs
-                .read_at_ref(repo, MANIFEST_REV_REF, path)
+                .read_at_ref(repo, RevSpec::ManifestRev, path)
                 .map_err(ImportSourceError::new)?;
             match bytes {
                 Some(b) => Ok(Some(ImportContent::Single(String::from_utf8(b).map_err(
                     |e| {
                         ImportSourceError::msg(format!(
-                            "{project_name}: non-utf8 manifest at {MANIFEST_REV_REF}:{relative_file}: {e}",
+                            "{project_name}: non-utf8 manifest at manifest-rev:{relative_file}: {e}",
                         ))
                     },
                 )?))),

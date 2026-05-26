@@ -44,7 +44,7 @@ use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
-use west_core::vcs::{self, ColorMode, CommitSummary, StatusMode, StatusSpec, Vcs, VcsError};
+use west_core::vcs::{self, ColorMode, CommitSummary, RevSpec, StatusMode, StatusSpec, Vcs, VcsError};
 
 use super::config::LoadedConfig;
 use super::select;
@@ -436,7 +436,7 @@ fn compare_one_inner(
     let mut on_branch = false;
 
     if !is_synthetic {
-        let head_sha = vcs.sha(repo, "HEAD")?;
+        let head_sha = vcs.sha(repo, RevSpec::Head)?;
         // manifest_rev() returns Ok(None) when the ref doesn't
         // exist — for a freshly-init'd workspace that hasn't been
         // updated. Treat as "no divergence to report".
@@ -445,8 +445,8 @@ fn compare_one_inner(
             has_diverged = mr != head_sha;
             // Resolve commit summaries once so we don't run git
             // again at render time.
-            head_summary = Some(vcs.commit_summary(repo, &head_sha)?);
-            manifest_rev_summary = Some(vcs.commit_summary(repo, mr)?);
+            head_summary = Some(vcs.commit_summary(repo, RevSpec::Named(&head_sha))?);
+            manifest_rev_summary = Some(vcs.commit_summary(repo, RevSpec::Named(mr))?);
         }
 
         if !ignore_branches {

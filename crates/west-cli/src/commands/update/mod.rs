@@ -42,7 +42,7 @@ use west_core::config::{ConfigValue, Configuration};
 use west_core::loaded::{LoadedManifest, ProjectFilter};
 use west_core::manifest::{GroupFilterEntry, ImportPolicy, Manifest, Project, Submodules};
 use west_core::vcs::{
-    self, CheckoutTarget, CommitSummary, FetchSpec, Output, SubmoduleScope, Vcs,
+    self, CheckoutTarget, CommitSummary, FetchSpec, Output, RevSpec, SubmoduleScope, Vcs,
 };
 
 use super::config::LoadedConfig;
@@ -517,7 +517,7 @@ fn run_project_steps(
             // keep_descendants: keep current branch checked out only if the
             // new sha is already an ancestor of it.
             let is_ancestor = vcs
-                .is_ancestor(repo, &sha, branch)
+                .is_ancestor(repo, RevSpec::Named(&sha), RevSpec::Named(branch))
                 .map_err(UpdateError::IsAncestor)?;
             if is_ancestor {
                 note(
@@ -526,7 +526,7 @@ fn run_project_steps(
                 );
                 false
             } else if settings.rebase {
-                vcs.rebase(repo, "refs/heads/manifest-rev", out)
+                vcs.rebase(repo, RevSpec::ManifestRev, out)
                     .map_err(UpdateError::Rebase)?;
                 false
             } else {
@@ -535,7 +535,7 @@ fn run_project_steps(
         }
         (false, true, Some(_)) => {
             // rebase the current branch onto manifest-rev.
-            vcs.rebase(repo, "refs/heads/manifest-rev", out)
+            vcs.rebase(repo, RevSpec::ManifestRev, out)
                 .map_err(UpdateError::Rebase)?;
             false
         }
@@ -561,7 +561,7 @@ fn run_project_steps(
 
     // 7. One-line snapshot of where HEAD landed, for the reporter to
     //    surface in its success line / per-project transcript.
-    vcs.commit_summary(repo, "HEAD")
+    vcs.commit_summary(repo, RevSpec::Head)
         .map_err(UpdateError::CommitSummary)
 }
 
