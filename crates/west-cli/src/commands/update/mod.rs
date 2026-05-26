@@ -177,17 +177,58 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
     let import_progress = (!settings.raw && io::stderr().is_terminal())
         .then(import_source::ImportProgress::new);
 
-    let manifest = match load_manifest(
-        &workspace,
-        &loaded.config,
-        vcs.as_ref(),
-        &settings,
-        import_progress.as_ref(),
-    ) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("west: {e}");
-            return ExitCode::FAILURE;
+    // Selector-driven scope (v1 contract): when the user passes
+    // explicit project selectors, only the manifest repo + its self/
+    // top-level imports are resolved — per-project `import:` bodies
+    // are NOT chased. This serves two purposes:
+    //
+    //   1. Validates that each selector names a project the manifest
+    //      directly knows about (anything reachable only via a
+    //      project import would silently make us clone the parent
+    //      project to discover it; reject those selectors instead).
+    //   2. Skips the network entirely for project imports the user
+    //      didn't ask for — `west update net-tools` against a
+    //      manifest with `zephyr: import: true` no longer clones
+    //      zephyr just to learn what its body would have contributed.
+    //
+    // Bare `west update` (no selectors) keeps the full-resolve path
+    // because the user explicitly asked for everything.
+    let normalized_selectors: Vec<String> = args
+        .projects
+        .iter()
+        .map(|s| super::workspace::normalize_project_selector(s, &workspace))
+        .collect();
+    let manifest = if normalized_selectors.is_empty() {
+        match load_manifest(
+            &workspace,
+            &loaded.config,
+            vcs.as_ref(),
+            &settings,
+            import_progress.as_ref(),
+        ) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("west: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        match manifest_repo_only_view(&workspace, &loaded.config) {
+            Ok(m) => {
+                if let Err(e) = reject_selectors_needing_project_imports(
+                    &m,
+                    &normalized_selectors,
+                    &loaded.config,
+                ) {
+                    eprintln!("west: {e}");
+                    return ExitCode::FAILURE;
+                }
+                m
+            }
+            Err(e) => {
+                eprintln!("west: {e}");
+                return ExitCode::FAILURE;
+            }
         }
     };
     // Drop the import-progress MultiProgress before the main worker
@@ -223,11 +264,6 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
     };
     let loaded_manifest = LoadedManifest::new(manifest, config_group_filter, project_filter);
 
-    let normalized_selectors: Vec<String> = args
-        .projects
-        .iter()
-        .map(|s| super::workspace::normalize_project_selector(s, &workspace))
-        .collect();
     let projects = match super::select::select_projects(
         &loaded_manifest,
         &normalized_selectors,
@@ -701,6 +737,95 @@ fn resolve_workspace_dir() -> Result<PathBuf, String> {
     let cwd = std::env::current_dir().map_err(|e| format!("cannot get current directory: {e}"))?;
     west_core::topdir::topdir(&cwd)
         .map_err(|_| "not inside a west workspace (no .west/ found)".to_string())
+}
+
+/// Preflight: reject user selectors that can't be resolved against
+/// the manifest-repo-only view (`mr_only`). A selector is acceptable
+/// if it matches a project's name OR its path. Selectors that would
+/// only resolve after running per-project imports — which would
+/// require cloning the parent project to read its manifest body —
+/// land in `offenders` and abort the run. Unknown selectors hit the
+/// same path: not in the view ⇒ no. The synthetic manifest project
+/// (`SYNTHETIC_NAME` or the configured `manifest.path`) is rejected
+/// up front with a dedicated message — it's not in `mr_only.projects`
+/// either, but the underlying reason is different from "behind an
+/// import" and the user-facing fix is also different.
+fn reject_selectors_needing_project_imports(
+    mr_only: &Manifest,
+    selectors: &[String],
+    config: &Configuration,
+) -> Result<(), String> {
+    let manifest_path = config
+        .get_str("manifest.path")
+        .map_err(|e| e.to_string())?
+        .unwrap_or_default();
+    let manifest_offenders: Vec<&str> = selectors
+        .iter()
+        .filter(|s| {
+            s.as_str() == super::select::SYNTHETIC_NAME
+                || (!manifest_path.is_empty() && s.as_str() == manifest_path)
+        })
+        .map(|s| s.as_str())
+        .collect();
+    if !manifest_offenders.is_empty() {
+        return Err(format!(
+            "cannot update {}: the manifest project itself is not a \
+             west update target — use `west init` to change it",
+            manifest_offenders.join(", "),
+        ));
+    }
+
+    let names: std::collections::HashSet<&str> =
+        mr_only.projects.iter().map(|p| p.name.as_str()).collect();
+    let paths: std::collections::HashSet<String> = mr_only
+        .projects
+        .iter()
+        .map(|p| p.path.to_string_lossy().into_owned())
+        .collect();
+    let offenders: Vec<&str> = selectors
+        .iter()
+        .filter(|s| !names.contains(s.as_str()) && !paths.contains(s.as_str()))
+        .map(|s| s.as_str())
+        .collect();
+    if offenders.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "cannot update {}: project name not found in the manifest repo \
+         (reachable only via a per-project `import:`, or unknown); \
+         clone the parent project or run `west update` with no arguments first",
+        offenders.join(", "),
+    ))
+}
+
+/// Parse the manifest with `ImportPolicy::SKIP_PROJECTS` to get the
+/// set of projects reachable from the manifest repo + its self/top-
+/// level imports alone (no per-project import resolution). Cheap —
+/// no network, no clones — because the per-project site short-
+/// circuits before any `ImportSource` call.
+fn manifest_repo_only_view(
+    workspace: &Path,
+    config: &Configuration,
+) -> Result<Manifest, String> {
+    let manifest_path: PathBuf = config
+        .get_str("manifest.path")
+        .map_err(|e| e.to_string())?
+        .map(PathBuf::from)
+        .ok_or_else(|| "manifest.path is not set in workspace config".to_string())?;
+    let manifest_file: PathBuf = config
+        .get_str("manifest.file")
+        .map_err(|e| e.to_string())?
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_MANIFEST_FILE));
+    let manifest_repo_root = workspace.join(&manifest_path);
+    let full = manifest_repo_root.join(&manifest_file);
+    Manifest::from_path_with(
+        &full,
+        Some(&manifest_repo_root),
+        None,
+        ImportPolicy::SKIP_PROJECTS,
+    )
+    .map_err(|e| format!("manifest {}: {e}", full.display()))
 }
 
 fn load_manifest(

@@ -200,6 +200,7 @@ fn action_resolve(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), Manif
     let (_root, full) = manifest_paths(&workspace, &loaded.config)?;
 
     let mut value = manifest.to_value();
+    substitute_self_path_from_workspace(&mut value, manifest, &loaded.config)?;
     if args.active_only {
         retain_active_projects(&mut value, manifest, &loaded_manifest);
     }
@@ -229,6 +230,7 @@ fn action_freeze(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), Manife
     // use `manifest-rev` when available (the ref `west update`
     // writes); otherwise fall back to `HEAD`.
     let mut value = manifest.to_value();
+    substitute_self_path_from_workspace(&mut value, manifest, &loaded.config)?;
     let projects = value["manifest"]["projects"]
         .as_array_mut()
         .expect("to_value emits manifest.projects as array");
@@ -496,6 +498,30 @@ fn write_output(out: Option<&Path>, body: &str) -> Result<(), ManifestCmdError> 
                 })
         }
     }
+}
+
+/// When the source manifest didn't set `self.path:` explicitly, the
+/// resolver defaults it to the literal string `"manifest"`. For the
+/// emitted `--resolve` / `--freeze` output we want the *actual*
+/// workspace location of the manifest repo instead (sourced from the
+/// workspace's `manifest.path` config). Substitute when `path_raw`
+/// is absent; preserve any explicit YAML value otherwise.
+fn substitute_self_path_from_workspace(
+    value: &mut serde_json::Value,
+    manifest: &west_core::manifest::Manifest,
+    config: &Configuration,
+) -> Result<(), ManifestCmdError> {
+    if manifest.self_.path_raw.is_some() {
+        return Ok(());
+    }
+    let Some(manifest_path) = config
+        .get_str("manifest.path")
+        .map_err(|e| ManifestCmdError::Config(e.to_string()))?
+    else {
+        return Ok(());
+    };
+    value["manifest"]["self"]["path"] = serde_json::Value::String(manifest_path);
+    Ok(())
 }
 
 /// Resolve `(manifest_repo_root, manifest_file_path)` from the
