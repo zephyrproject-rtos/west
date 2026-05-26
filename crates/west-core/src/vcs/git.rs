@@ -55,6 +55,15 @@ pub struct GitOptions {
     /// Sourced from `tool.git.submodules.sync`. Default `true`. When `true`,
     /// runs `git submodule sync` before `git submodule update`.
     pub submodules_sync: bool,
+    /// Sourced from `tool.git.submodules.init-config` (a TOML array of
+    /// `KEY=VALUE` strings). Each entry is prepended as `-c KEY=VALUE` to
+    /// the `git submodule update --init` invocation, mirroring v1's
+    /// `--submodule-init-config` flag. The narrow scope (only the
+    /// submodule-init step, not arbitrary git calls) matches v1: the
+    /// motivating case is opting back into `protocol.file.allow=always`
+    /// for sandboxed submodule clones without weakening other git
+    /// operations.
+    pub submodules_init_config: Vec<String>,
 }
 
 impl Default for GitOptions {
@@ -67,6 +76,7 @@ impl Default for GitOptions {
             fetch_force: true,
             submodules_recurse: true,
             submodules_sync: true,
+            submodules_init_config: Vec::new(),
         }
     }
 }
@@ -149,6 +159,22 @@ impl GitClient {
             Err(e) => return Err(bad_option("tool.git.submodules.sync", &e.to_string())),
         };
 
+        let submodules_init_config = match config.get_list_str("tool.git.submodules.init-config") {
+            Ok(opt) => {
+                let entries = opt.unwrap_or_default();
+                for entry in &entries {
+                    if !entry.contains('=') {
+                        return Err(bad_option(
+                            "tool.git.submodules.init-config",
+                            &format!("each entry must be KEY=VALUE, got {entry:?}"),
+                        ));
+                    }
+                }
+                entries
+            }
+            Err(e) => return Err(bad_option("tool.git.submodules.init-config", &e.to_string())),
+        };
+
         Ok(Self::new(GitOptions {
             binary,
             fetch_strategy,
@@ -157,6 +183,7 @@ impl GitClient {
             fetch_force,
             submodules_recurse,
             submodules_sync,
+            submodules_init_config,
         }))
     }
 
@@ -714,14 +741,17 @@ impl Vcs for GitClient {
         }
 
         let reference_str = reference.map(|p| p.to_string_lossy().into_owned());
-        let mut argv: Vec<&str> = vec![
-            "-C",
-            &repo_str,
-            "submodule",
-            "update",
-            "--init",
-            "--progress",
-        ];
+        let mut argv: Vec<&str> = vec!["-C", &repo_str];
+        // `tool.git.submodules.init-config` entries land here as
+        // `-c KEY=VALUE` (between `-C <repo>` and the `submodule`
+        // verb), matching v1's `--submodule-init-config` semantics:
+        // applies only to the `submodule update --init` call, not to
+        // `submodule sync` or any other git invocation.
+        for entry in &self.opts.submodules_init_config {
+            argv.push("-c");
+            argv.push(entry);
+        }
+        argv.extend(["submodule", "update", "--init", "--progress"]);
         if self.opts.submodules_recurse {
             argv.push("--recursive");
         }
