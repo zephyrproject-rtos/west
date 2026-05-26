@@ -1385,8 +1385,6 @@ manifest:
   group-filter:
   - -Bdisabled
   - -Ddisabled
-  self:
-    path: mp
   projects:
   - name: p1
     url: https://example.com/p1
@@ -1397,6 +1395,8 @@ manifest:
     path: project-two
     clone-depth: 1
     west-commands: commands.yml
+  self:
+    path: mp
 '''
 
     with open(manifest_repo / 'west.yml', 'w') as f:

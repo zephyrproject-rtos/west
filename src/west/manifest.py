@@ -374,14 +374,15 @@ class Project:
 
     def as_dict(self) -> dict[str, Any]:
         '''Return a representation of this project as a dict, in the same
-        shape as the equivalent YAML manifest entry.'''
-        ret: dict[str, Any] = {
-            'name': self.name,
-            'url': self.url,
-            'revision': self.revision,
-        }
+        shape as the equivalent YAML manifest entry. Key order matches
+        the rust `Manifest::to_value` canonical ordering so that
+        `as_yaml()` and `west manifest --resolve` / `--freeze` produce
+        the same YAML for the same source manifest.'''
+        ret: dict[str, Any] = {'name': self.name}
         if self.description:
             ret['description'] = self.description
+        ret['url'] = self.url
+        ret['revision'] = self.revision
         if self.path != self.name:
             ret['path'] = self.path
         if self.clone_depth:
@@ -1106,7 +1107,10 @@ class Manifest:
     # ---- Serialization -------------------------------------------------
 
     def as_dict(self, active_only: bool = False) -> dict[str, Any]:
-        '''Dict representation in manifest-YAML shape.'''
+        '''Dict representation in manifest-YAML shape. Key order
+        (`group-filter`, `projects`, `self`) matches rust
+        `Manifest::to_value` so `as_yaml()` and
+        `west manifest --resolve` / `--freeze` agree byte-for-byte.'''
         manifest_block: dict[str, Any] = {}
         # Serialize only the effective (disabling) entries, sorted by
         # group name for deterministic output. `+enabled` tokens are the
@@ -1114,18 +1118,18 @@ class Manifest:
         effective_filter = sorted(t for t in self.group_filter if t.startswith('-'))
         if effective_filter:
             manifest_block['group-filter'] = effective_filter
-        # `self:` block.
-        mp = self._projects[MANIFEST_PROJECT_INDEX]
-        self_block = mp.as_dict() if isinstance(mp, ManifestProject) else {}
-        if self_block:
-            manifest_block['self'] = self_block
-        # Projects block.
+        # Projects block (before `self:` to match v1 / rust canonical).
         projects: list[dict[str, Any]] = []
         for p in self._projects[1:]:
             if active_only and not self.is_active(p):
                 continue
             projects.append(p.as_dict())
         manifest_block['projects'] = projects
+        # `self:` block.
+        mp = self._projects[MANIFEST_PROJECT_INDEX]
+        self_block = mp.as_dict() if isinstance(mp, ManifestProject) else {}
+        if self_block:
+            manifest_block['self'] = self_block
         return {'manifest': manifest_block}
 
     def as_yaml(self, active_only: bool = False) -> str:
@@ -1161,11 +1165,11 @@ class Manifest:
         effective_filter = sorted(t for t in self.group_filter if t.startswith('-'))
         if effective_filter:
             manifest_block['group-filter'] = effective_filter
+        manifest_block['projects'] = frozen_projects
         mp = self._projects[MANIFEST_PROJECT_INDEX]
         self_block = mp.as_dict() if isinstance(mp, ManifestProject) else {}
         if self_block:
             manifest_block['self'] = self_block
-        manifest_block['projects'] = frozen_projects
         return {'manifest': manifest_block}
 
     def as_frozen_yaml(self, active_only: bool = False) -> str:
