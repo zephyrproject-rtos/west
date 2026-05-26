@@ -172,9 +172,45 @@ pythonpath = "src"
 # files migrate over.
 testpaths = ["tests"]
 
+# Build the rust artifacts the test suite needs:
+#   - `target/release/west` — the CLI binary. `tests/conftest.py`
+#     spawns this directly (NOT via `python -m west`), and prefers the
+#     release build over the debug one. Build the bin target only,
+#     and without the `pyo3` feature — see note below.
+#   - `_west_native.abi3.so` — the PyO3 extension that `west.manifest`
+#     and friends import. `maturin develop` builds this (the cdylib)
+#     and installs it into the active venv.
+#
+# Why `--bin west` (not `-p west-cli`) and no `--features pyo3` on
+# step 1: maturin's cargo invocation runs with
+# `PYO3_BUILD_EXTENSION_MODULE=1` plus pyo3's extension-module
+# linkage, which produces a different build fingerprint for the
+# cdylib than a plain `cargo build --features pyo3`. If both
+# invocations touch the cdylib they thrash each other's cache. Build
+# *only* the bin here and let maturin own the cdylib.
+#
+# Cargo is incremental so the no-op case is cheap; tasks that depend
+# on either artifact should declare `deps = ["build"]`. The CI
+# `gh-test` task intentionally skips this — CI builds via
+# `pip install .` (which goes through the maturin build backend) and
+# would double-build if `build` were chained.
+[tool.poe.tasks.build]
+sequence = [
+    {cmd = "cargo build --release -p west-cli --bin west"},
+    # Maturin compiles the cdylib with `--features pyo3` and
+    # `PYO3_BUILD_EXTENSION_MODULE=1`; cargo's fingerprint for the
+    # west-cli lib then differs from the bin build above, causing
+    # cross-invalidation on every alternation. Pin maturin to its own
+    # target dir so the two cargo worlds keep their fingerprints
+    # apart. Costs a few hundred MB of disk; in exchange a no-source-
+    # change rerun finishes in well under a second.
+    {cmd = "maturin develop --release --uv", env = {CARGO_TARGET_DIR = "target/maturin"}},
+]
+
 [tool.poe.tasks.test]
 cmd = "python -m pytest -W error"
 env = {PYTHONIOENCODING = "utf-8"}
+deps = ["build"]
 
 [tool.poe.tasks.test-xdist]
 ref = "test -n auto"
