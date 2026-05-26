@@ -245,8 +245,11 @@ impl WorkspaceImportSource<'_> {
             .vcs
             .fetch(
                 repo,
+                // Fetch by URL — v1 contract; the local
+                // `[remote "<remote_name>"]` git config is a user
+                // convenience, not the source of truth for west.
                 &FetchSpec {
-                    remote: &project.remote_name,
+                    remote: &project.url,
                     revision: Some(&project.revision),
                 },
                 out,

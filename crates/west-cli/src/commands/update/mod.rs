@@ -446,17 +446,22 @@ fn run_project_steps(
     //    `FETCH_HEAD` directly: it persists across runs, so on smart-skip
     //    it's stale from a previous fetch and would point at the wrong
     //    commit.
+    // Fetch by URL, not by configured git-remote name — v1 contract.
+    // The `[remote "<name>"]` set up by clone is a user convenience
+    // (so they can `git fetch <name>` directly); west itself never
+    // depends on it, so an `as_yaml()` round-trip that drops
+    // `remote-name:` doesn't break the next `west update`.
     let sha = vcs
         .fetch(
             repo,
             &FetchSpec {
-                remote: &project.remote_name,
+                remote: &project.url,
                 revision: Some(&project.revision),
             },
             out,
         )
         .map_err(|source| UpdateError::Fetch {
-            remote: project.remote_name.clone(),
+            remote: project.url.clone(),
             source,
         })?;
 
