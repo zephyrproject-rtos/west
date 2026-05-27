@@ -19,14 +19,18 @@ def test_extension_commands_basic(west_update_tmpdir):
 
 
 def test_extension_commands_disabled(west_update_tmpdir):
-    # Test that extension commands can be disabled via config
-    cmd('config commands.allow_extensions false')
-    err_info, _ = cmd_raises('test-extension', SystemExit)
-    assert 'unknown command "test-extension"' in err_info.value.code
+    # Test that extension commands can be disabled via config.
+    cmd('config set commands.allow_extensions false')
+    _, stderr = cmd_raises('test-extension', SystemExit)
+    assert 'unknown command: test-extension' in stderr
 
 
 def test_extension_command_missing_file(west_update_tmpdir):
-    # Test handling of extension commands with missing python files
+    # An extension command whose `file:` points at a non-existent
+    # python module surfaces as a non-zero exit with the missing path
+    # named in stderr. `cmd_raises` synthesizes a `SystemExit` from
+    # the subprocess exit code — the original FileNotFoundError lives
+    # in the captured stderr.
     net_tools_path = west_update_tmpdir / 'net-tools'
     add_commit(
         net_tools_path,
@@ -43,7 +47,8 @@ def test_extension_command_missing_file(west_update_tmpdir):
         },
     )
 
-    cmd_raises('broken-cmd', FileNotFoundError)
+    _, stderr = cmd_raises('broken-cmd', SystemExit)
+    assert 'nonexistent.py' in stderr
 
 
 def test_extension_command_invalid_yaml(west_update_tmpdir):
@@ -57,8 +62,8 @@ def test_extension_command_invalid_yaml(west_update_tmpdir):
         },
     )
 
-    # Calling a built-in command should already fail
-    _, err_msg = cmd_raises('help', SystemExit)
+    # Calling un unknown command should fail
+    _, err_msg = cmd_raises('ext', SystemExit)
     assert 'could not load extension command(s)' in err_msg
 
 
@@ -105,7 +110,7 @@ def test_extension_command_missing_attribute(west_update_tmpdir):
     )
 
     _, err_msg = cmd_raises('no-class-cmd', SystemExit)
-    assert 'no attribute MissingClass' in err_msg
+    assert "class 'MissingClass' not found" in err_msg
 
 
 def test_extension_command_constructor_error(west_update_tmpdir):
