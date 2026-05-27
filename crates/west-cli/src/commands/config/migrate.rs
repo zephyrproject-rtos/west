@@ -315,10 +315,21 @@ fn parse_v1(path: &Path) -> Result<(Vec<(String, ConfigValue)>, Vec<String>), St
             Some(section_name) => {
                 for (key, value) in props.iter() {
                     let dotted = format!("{section_name}.{key}");
-                    let (cv, warn) = coerce(&dotted, value);
-                    pairs.push((dotted, cv));
-                    if let Some(w) = warn {
-                        warnings.push(w);
+                    let rewrite = rewrite_v1_key(&dotted);
+                    if let Rewrite::Renamed(new_keys) = &rewrite {
+                        // Successful translation, not a failure — flag it so
+                        // the user knows their v1 key shape moved namespace.
+                        warnings.push(format!(
+                            "{dotted} renamed to {} (v1 key removed in v2)",
+                            new_keys.join(" + ")
+                        ));
+                    }
+                    for target_key in rewrite.targets(&dotted) {
+                        let (cv, warn) = coerce(target_key, value);
+                        pairs.push((target_key.to_owned(), cv));
+                        if let Some(w) = warn {
+                            warnings.push(w);
+                        }
                     }
                 }
             }
@@ -328,6 +339,53 @@ fn parse_v1(path: &Path) -> Result<(Vec<(String, ConfigValue)>, Vec<String>), St
     // gives reproducible v2 output across migration runs.
     pairs.sort_by(|a, b| a.0.cmp(&b.0));
     Ok((pairs, warnings))
+}
+
+// --- v1 → v2 key rewrites ----------------------------------------------------
+//
+// A handful of v1 keys moved namespace or split into multiple v2 keys.
+// Apply the rewrite before coercion so the v2 key drives the type lookup
+// (which is what landed in v2's `get_bool` / `get_i64` / `get_list_str`
+// callsites).
+
+enum Rewrite {
+    /// Key carries over unchanged (the common case).
+    Same,
+    /// One v1 key maps to one or more v2 keys with the same value
+    /// applied to each. Two-element form covers the
+    /// `update.sync-submodules` → `tool.git.submodules.{sync,recurse}`
+    /// split.
+    Renamed(Vec<&'static str>),
+}
+
+impl Rewrite {
+    /// v2 key(s) this rewrite produces for `original`. Returns the
+    /// original key untouched for the `Same` case so the parse loop
+    /// can branch on the rewrite once and then iterate uniformly.
+    fn targets<'a>(&'a self, original: &'a str) -> Vec<&'a str> {
+        match self {
+            Rewrite::Same => vec![original],
+            Rewrite::Renamed(ks) => ks.to_vec(),
+        }
+    }
+}
+
+/// v2 key(s) this v1 key migrates to. Most v1 keys carry over
+/// unchanged; the listed ones moved namespace in v2 or were split
+/// into multiple knobs.
+fn rewrite_v1_key(v1_key: &str) -> Rewrite {
+    match v1_key {
+        // String enum (`always` | `smart`), same value shape, just moved
+        // under the `tool.<client>.*` namespace introduced in v2.
+        "update.fetch" => Rewrite::Renamed(vec!["tool.git.fetch.strategy"]),
+        // v1's single boolean controlled both `git submodule sync` and
+        // `git submodule update --init --recursive`. v2 separates those
+        // into two knobs; both should track the v1 value.
+        "update.sync-submodules" => {
+            Rewrite::Renamed(vec!["tool.git.submodules.sync", "tool.git.submodules.recurse"])
+        }
+        _ => Rewrite::Same,
+    }
 }
 
 // --- coercion ----------------------------------------------------------------
@@ -529,6 +587,32 @@ mod tests {
         assert!(matches!(items[0], ConfigValue::String(ref s) if s == "+a"));
         assert!(matches!(items[1], ConfigValue::String(ref s) if s == "-b"));
         assert!(matches!(items[2], ConfigValue::String(ref s) if s == "+c"));
+    }
+
+    #[test]
+    fn rewrite_update_fetch_renames_to_strategy() {
+        match rewrite_v1_key("update.fetch") {
+            Rewrite::Renamed(ks) => assert_eq!(ks, vec!["tool.git.fetch.strategy"]),
+            Rewrite::Same => panic!("expected rename"),
+        }
+    }
+
+    #[test]
+    fn rewrite_sync_submodules_splits_into_two() {
+        match rewrite_v1_key("update.sync-submodules") {
+            Rewrite::Renamed(ks) => assert_eq!(
+                ks,
+                vec!["tool.git.submodules.sync", "tool.git.submodules.recurse"]
+            ),
+            Rewrite::Same => panic!("expected split"),
+        }
+    }
+
+    #[test]
+    fn rewrite_unrelated_key_passes_through() {
+        assert!(matches!(rewrite_v1_key("manifest.path"), Rewrite::Same));
+        // Verify .targets() returns the original for the Same case.
+        assert_eq!(Rewrite::Same.targets("manifest.path"), vec!["manifest.path"]);
     }
 
     #[test]

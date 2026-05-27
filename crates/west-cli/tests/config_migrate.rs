@@ -137,6 +137,54 @@ fn list_coercion_comma_split() {
 
 #[test]
 #[serial]
+fn rewrite_update_fetch_to_strategy() {
+    let sb = Sandbox::new();
+    std::fs::write(&sb.v1_local, "[update]\nfetch = smart\n").unwrap();
+
+    let out = sb
+        .west()
+        .args(["config", "migrate", "--local"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("update.fetch renamed to tool.git.fetch.strategy"),
+        "stderr was: {stderr}"
+    );
+
+    let toml = read(&sb.v2_local);
+    assert!(toml.contains("strategy = \"smart\""));
+    // Old v1 key should not appear in the v2 output.
+    assert!(!toml.contains("[update]"));
+}
+
+#[test]
+#[serial]
+fn rewrite_sync_submodules_splits_to_two_bools() {
+    let sb = Sandbox::new();
+    std::fs::write(&sb.v1_local, "[update]\nsync-submodules = yes\n").unwrap();
+
+    let out = sb
+        .west()
+        .args(["config", "migrate", "--local"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("tool.git.submodules.sync + tool.git.submodules.recurse"),
+        "stderr was: {stderr}"
+    );
+
+    let toml = read(&sb.v2_local);
+    // Both v2 keys land as native bools.
+    assert!(toml.contains("sync = true"), "got: {toml}");
+    assert!(toml.contains("recurse = true"), "got: {toml}");
+}
+
+#[test]
+#[serial]
 fn unknown_key_preserved_as_string_with_warning() {
     let sb = Sandbox::new();
     std::fs::write(
