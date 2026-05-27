@@ -132,6 +132,18 @@ pub(crate) fn run(args: &[OsString], loaded: &LoadedConfig) -> ExitCode {
     }
 }
 
+/// `commands.allow_extensions` — v1's workspace opt-out. When set to
+/// `false`, extension discovery is bypassed entirely (every name
+/// surfaces as "unknown command"). Default `true`.
+fn allow_extensions(loaded: &LoadedConfig) -> bool {
+    loaded
+        .config
+        .get_bool("commands.allow_extensions")
+        .ok()
+        .flatten()
+        .unwrap_or(true)
+}
+
 /// Discover and look up `name`. Returns `Ok(None)` when discovery
 /// succeeded but no extension matches; `Err` when discovery itself
 /// failed (vcs unavailable, manifest unparseable, etc.).
@@ -140,6 +152,9 @@ fn find_spec(
     workspace: &Path,
     loaded: &LoadedConfig,
 ) -> Result<Option<ExtensionSpec>, ExtensionError> {
+    if !allow_extensions(loaded) {
+        return Ok(None);
+    }
     let vcs = vcs::from_config(&loaded.config).map_err(|e| ExtensionError::Vcs(e.to_string()))?;
     let source = super::workspace::ReadOnlyImportSource::new(workspace, vcs.as_ref());
     let loaded_manifest = super::workspace::load_manifest(workspace, &loaded.config, &source)?;
@@ -282,6 +297,9 @@ pub(crate) struct ProjectExtensions {
 pub(crate) fn list_for_help(
     loaded: &LoadedConfig,
 ) -> Result<Vec<ProjectExtensions>, ExtensionError> {
+    if !allow_extensions(loaded) {
+        return Ok(Vec::new());
+    }
     let workspace = super::workspace::resolve_workspace_dir()?;
     let vcs = vcs::from_config(&loaded.config).map_err(|e| ExtensionError::Vcs(e.to_string()))?;
     let source = super::workspace::ReadOnlyImportSource::new(&workspace, vcs.as_ref());
