@@ -8,6 +8,7 @@ use west_core::config_paths::{ResolvedConfig, resolve};
 
 pub mod get;
 pub mod list;
+pub mod migrate;
 pub mod set;
 pub mod unset;
 
@@ -27,6 +28,8 @@ pub enum Action {
     Unset(unset::UnsetArgs),
     /// List all configuration values.
     List(list::ListArgs),
+    /// Migrate a v1 INI config to v2 TOML.
+    Migrate(migrate::MigrateArgs),
 }
 
 pub fn run(args: ConfigArgs, loaded: &mut LoadedConfig) -> ExitCode {
@@ -35,6 +38,7 @@ pub fn run(args: ConfigArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Action::Set(a) => set::run(a, loaded),
         Action::Unset(a) => unset::run(a, loaded),
         Action::List(a) => list::run(a, loaded),
+        Action::Migrate(a) => migrate::run(a, loaded),
     }
 }
 

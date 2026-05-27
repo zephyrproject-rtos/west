@@ -26,11 +26,20 @@ pyo3 = ["dep:pyo3", "dep:pyo3-log"]
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 console = "0.15"
+# Used by `west config migrate` to locate the legacy v1 global config
+# (`~/.westconfig`). Already in the dep tree via west-core; pinning
+# here for west-cli's own use.
+dirs = "5"
 env_logger = "0.11"
 indicatif = "0.17"
 log = "0.4"
 md-5 = "0.10"
 rayon = "1"
+# v1 west configs are INI-format (configparser). `west config migrate`
+# parses them with rust-ini. Tiny crate, no transitive deps. Lifecycle
+# is tied to v1's: when v1 is gone, this dep and
+# `commands/config/migrate.rs` go with it.
+rust-ini = "0.21"
 shlex = "1"
 strfmt = "0.2"
 thiserror.workspace = true
