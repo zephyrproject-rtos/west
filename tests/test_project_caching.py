@@ -1,5 +1,6 @@
 # Copyright (c) 2020, Nordic Semiconductor ASA
 
+import io
 import os
 import shutil
 import subprocess
@@ -108,7 +109,7 @@ def test_update_name_cache(tmpdir):
     # (We can't use shutil.rmtree here because Windows.)
     shutil.move(os.fspath(foo), os.fspath(tmpdir))
     shutil.move(os.fspath(bar), os.fspath(tmpdir))
-    cmd(['config', 'update.name-cache', name_cache_dir])
+    cmd(['config', 'set', 'update.name-cache', name_cache_dir])
     cmd('update')
     assert foo.check(dir=1)
     assert bar.check(dir=1)
@@ -172,7 +173,7 @@ def test_update_path_cache(tmpdir):
     # (We can't use shutil.rmtree here because Windows.)
     shutil.move(os.fspath(foo), os.fspath(tmpdir))
     shutil.move(os.fspath(bar), os.fspath(tmpdir))
-    cmd(['config', 'update.path-cache', path_cache_dir])
+    cmd(['config', 'set', 'update.path-cache', path_cache_dir])
     cmd('update')
     assert foo.check(dir=1)
     assert bar.check(dir=1)
@@ -254,7 +255,7 @@ def test_update_auto_cache(tmpdir):
     shutil.move(os.fspath(bar), os.fspath(bar) + ".moved")
     shutil.move(os.fspath(auto_cache_dir / "foo"), os.fspath(auto_cache_dir / "foo") + ".moved")
     shutil.move(os.fspath(auto_cache_dir / "bar"), os.fspath(auto_cache_dir / "bar") + ".moved")
-    cmd(['config', 'update.auto-cache', os.fspath(auto_cache_dir)])
+    cmd(['config', 'set', 'update.auto-cache', os.fspath(auto_cache_dir)])
     cmd(['update'])
     assert foo.check(dir=1)
     assert bar.check(dir=1)
@@ -335,9 +336,13 @@ def test_update_auto_cache_skipped_remote_update(tmpdir):
             bar_remote=bar_remote,
             bar_head=bar_head,
         )
+        # The auto-cache progress messages are rust `log::debug!`
+        # records — they land on stderr at Debug level (`-vvv`), unlike
+        # v1 which printed them to stdout at `-v`.
+        err = io.StringIO()
         with chdir(workspace):
-            stdout = cmd(['-v', 'update', '--auto-cache', auto_cache_dir])
-        return stdout
+            cmd(['-vvv', 'update', '--auto-cache', auto_cache_dir], stderr=err)
+        return err.getvalue()
 
     create_repo(foo_remote)
     create_repo(bar_remote)
@@ -362,7 +367,7 @@ def test_update_auto_cache_skipped_remote_update(tmpdir):
     # west update should work with according messages as there is no need to update remotes.
     foo_moved = Path(tmpdir / 'remotes' / 'foo.moved')
     shutil.move(foo_remote, foo_moved)
-    stdout = setup_workspace_and_west_update(
+    output = setup_workspace_and_west_update(
         tmpdir / 'workspace2',
         foo_head=foo_commit2,
         bar_head=bar_commit2,
@@ -375,11 +380,11 @@ def test_update_auto_cache_skipped_remote_update(tmpdir):
         f"bar: cloning from {auto_cache_dir_bar}",
     ]
     for msg in msgs:
-        assert msg in stdout
+        assert msg in output
 
     # If a new commit is used, the auto-cache should be updated with remote
     foo_commit3, bar_commit3 = create_foo_bar_commits()
-    stdout = setup_workspace_and_west_update(
+    output = setup_workspace_and_west_update(
         tmpdir / 'workspace3',
         foo_head=foo_commit3,
         bar_head=bar_commit3,
@@ -391,10 +396,10 @@ def test_update_auto_cache_skipped_remote_update(tmpdir):
         f"bar: cloning from {auto_cache_dir_bar}",
     ]
     for msg in msgs:
-        assert msg in stdout
+        assert msg in output
 
     # If a branch is used as revision, the auto-cache must be updated.
-    stdout = setup_workspace_and_west_update(
+    output = setup_workspace_and_west_update(
         tmpdir / 'workspace4',
         foo_head='master',
         bar_head='master',
@@ -406,7 +411,7 @@ def test_update_auto_cache_skipped_remote_update(tmpdir):
         f"bar: cloning from {auto_cache_dir_bar}",
     ]
     for msg in msgs:
-        assert msg in stdout
+        assert msg in output
 
 
 def test_update_caches_priorities(tmpdir):
