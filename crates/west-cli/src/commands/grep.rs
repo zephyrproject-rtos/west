@@ -132,6 +132,8 @@ enum GrepError {
     Config(String),
     #[error("{0}")]
     Manifest(String),
+    #[error("{0}")]
+    Vcs(String),
     #[error("grep tool {tool:?} not found, please use --tool-path")]
     ToolNotFound { tool: &'static str },
 }
@@ -147,13 +149,7 @@ impl From<super::workspace::WorkspaceError> for GrepError {
 }
 
 pub fn run(args: GrepArgs, loaded: &mut LoadedConfig) -> ExitCode {
-    if let Some(jobs) = args.jobs
-        && let Err(e) = super::config::splice_inline(
-            &mut loaded.config,
-            "grep.jobs",
-            ConfigValue::Integer(jobs as i64),
-        )
-    {
+    if let Err(e) = splice_flags_into_config(&args, &mut loaded.config) {
         log::error!("{e}");
         return ExitCode::from(2);
     }
@@ -179,7 +175,7 @@ enum Outcome {
 fn run_inner(args: GrepArgs, loaded: &LoadedConfig) -> Result<Outcome, GrepError> {
     let workspace = super::workspace::resolve_workspace_dir()?;
     let vcs = west_core::vcs::from_config(&loaded.config)
-        .map_err(|e| GrepError::Config(e.to_string()))?;
+        .map_err(|e| GrepError::Vcs(e.to_string()))?;
     let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
     let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
     let manifest = &loaded_manifest.manifest;
@@ -270,7 +266,15 @@ fn run_inner(args: GrepArgs, loaded: &LoadedConfig) -> Result<Outcome, GrepError
     }
 
     let settings = Settings::from_config(&loaded.config).map_err(GrepError::Config)?;
-    let jobs = settings.jobs.min(projects.len());
+    // `output.raw` forces serial execution (same gate diff / status /
+    // compare / forall use). Useful when the user wants live stdio
+    // pass-through rather than per-project buffered drain — and the
+    // natural override when N-way interleaving isn't worth it.
+    let jobs = if settings.raw {
+        1
+    } else {
+        settings.jobs.min(projects.len())
+    };
 
     // Buffered parallel execution. Order = manifest order (par_iter
     // + collect preserves input order); we don't want completion-
@@ -520,6 +524,7 @@ fn parse_color(s: &str, key: &str) -> Result<ColorArg, GrepError> {
 #[derive(Debug)]
 struct Settings {
     jobs: usize,
+    raw: bool,
     quiet: bool,
 }
 
@@ -535,6 +540,10 @@ impl Settings {
                 return Err(format!("grep.jobs must be an integer (got {other:?})"));
             }
         };
+        let raw = config
+            .get_bool("output.raw")
+            .map_err(|e| e.to_string())?
+            .unwrap_or(false);
         let quiet = config
             .get_bool("output.quiet")
             .map_err(|e| e.to_string())?
@@ -542,12 +551,20 @@ impl Settings {
         // Same `_is_tty` reservation as `forall`'s Settings: kept here
         // so future colour heuristics have a single read site.
         let _is_tty = io::stdout().is_terminal();
-        Ok(Self { jobs, quiet })
+        Ok(Self { jobs, raw, quiet })
     }
+}
+
+fn splice_flags_into_config(args: &GrepArgs, config: &mut Configuration) -> Result<(), String> {
+    if let Some(jobs) = args.jobs {
+        super::config::splice_inline(config, "grep.jobs", ConfigValue::Integer(jobs as i64))?;
+    }
+    Ok(())
 }
 
 fn default_jobs() -> usize {
     std::thread::available_parallelism()
-        .map(|n| n.get().min(MAX_DEFAULT_JOBS))
+        .map(|n| n.get())
         .unwrap_or(1)
+        .clamp(1, MAX_DEFAULT_JOBS)
 }
