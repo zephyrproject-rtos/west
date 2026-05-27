@@ -140,14 +140,14 @@ impl FetchArg {
 
 pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
     if let Err(e) = splice_flags_into_config(&args, &mut loaded.config) {
-        eprintln!("west: {e}");
+        log::error!("{e}");
         return ExitCode::from(2);
     }
 
     let workspace = match resolve_workspace_dir() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::FAILURE;
         }
     };
@@ -158,7 +158,7 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
     let vcs = match vcs::from_config(&loaded.config) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::FAILURE;
         }
     };
@@ -172,7 +172,7 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
     let settings = match Settings::from_config(&loaded.config) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::from(2);
         }
     };
@@ -216,7 +216,7 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         ) {
             Ok(m) => m,
             Err(e) => {
-                eprintln!("west: {e}");
+                log::error!("{e}");
                 return ExitCode::FAILURE;
             }
         }
@@ -228,13 +228,13 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
                     &normalized_selectors,
                     &loaded.config,
                 ) {
-                    eprintln!("west: {e}");
+                    log::error!("{e}");
                     return ExitCode::FAILURE;
                 }
                 m
             }
             Err(e) => {
-                eprintln!("west: {e}");
+                log::error!("{e}");
                 return ExitCode::FAILURE;
             }
         }
@@ -247,7 +247,7 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
     let cli_group_filter = match read_cli_group_filter(&loaded.config) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::from(2);
         }
     };
@@ -259,14 +259,14 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
     let config_group_filter = match super::select::read_manifest_group_filter(&loaded.config) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::from(2);
         }
     };
     let project_filter = match ProjectFilter::from_config(&loaded.config) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::from(2);
         }
     };
@@ -279,13 +279,13 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
     ) {
         Ok(ps) => ps,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::FAILURE;
         }
     };
 
     if projects.is_empty() {
-        eprintln!("west: no projects to update");
+        log::warn!("no projects to update");
         return ExitCode::SUCCESS;
     }
 
@@ -316,7 +316,7 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
     let pool = match rayon::ThreadPoolBuilder::new().num_threads(jobs).build() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("west: failed to start worker pool: {e}");
+            log::error!("failed to start worker pool: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -343,7 +343,7 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
     if summary.is_empty() {
         ExitCode::SUCCESS
     } else {
-        eprintln!("west: {}", summary.render());
+        log::error!("{}", summary.render());
         ExitCode::FAILURE
     }
 }
@@ -530,10 +530,13 @@ fn run_project_steps(
         if settings.keep_descendants && is_ancestor {
             // The branch already contains manifest-rev: leave it checked
             // out (keep-descendants takes priority over --rebase).
-            log::info!("west update: left descendant branch {branch:?} checked out");
+            log::info!(
+                "{}: left descendant branch {branch:?} checked out",
+                project.name,
+            );
             false
         } else if settings.rebase {
-            log::info!("west update: rebasing to manifest-rev {sha}");
+            log::info!("{}: rebasing to manifest-rev {sha}", project.name);
             vcs.rebase(repo, RevSpec::ManifestRev, out)
                 .map_err(UpdateError::Rebase)?;
             false

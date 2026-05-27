@@ -21,7 +21,7 @@ pub fn run(args: ListArgs, loaded: &mut LoadedConfig) -> ExitCode {
     let scope_path = match scope_to_path(&args.scope, &loaded.resolved) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::from(2);
         }
     };
@@ -30,7 +30,7 @@ pub fn run(args: ListArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Some(p) => match loaded.config.items_in(&p) {
             Ok(items) => items,
             Err(e) => {
-                eprintln!("west: {e}");
+                log::error!("{e}");
                 return ExitCode::from(2);
             }
         },
@@ -45,14 +45,14 @@ fn list_single_file(file: &Path) -> ExitCode {
     let single = match Configuration::load([file.to_path_buf()]) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::FAILURE;
         }
     };
     let items = match single.items_in(file) {
         Ok(items) => items,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::from(2);
         }
     };

@@ -121,7 +121,7 @@ impl From<super::workspace::WorkspaceError> for DiffError {
 
 pub fn run(args: DiffArgs, loaded: &mut LoadedConfig) -> ExitCode {
     if let Err(e) = splice_flags_into_config(&args, &mut loaded.config) {
-        eprintln!("west: {e}");
+        log::error!("{e}");
         return ExitCode::from(2);
     }
 
@@ -131,11 +131,11 @@ pub fn run(args: DiffArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(Outcome::SomeNonEmpty { exit_code_flag: true }) => ExitCode::from(1),
         Ok(Outcome::Failures) => ExitCode::FAILURE,
         Err(e @ DiffError::UnclonedPositional { .. }) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::from(2)
         }
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::FAILURE
         }
     }
@@ -230,7 +230,7 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
     }
 
     if projects.is_empty() {
-        eprintln!("west: diff: no projects matched");
+        log::warn!("diff: no projects matched");
         return Ok(Outcome::AllEmpty);
     }
 
@@ -358,11 +358,11 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
 
     if !failures.is_empty() {
         for (name, msg) in &failures {
-            eprintln!("west: diff failed for {name}: {msg}");
+            log::error!("diff failed for {name}: {msg}");
         }
         let names: Vec<&str> = failures.iter().map(|(n, _)| n.as_str()).collect();
-        eprintln!(
-            "west: diff failed for {} project{}: {}",
+        log::error!(
+            "diff failed for {} project{}: {}",
             names.len(),
             if names.len() == 1 { "" } else { "s" },
             names.join(", "),

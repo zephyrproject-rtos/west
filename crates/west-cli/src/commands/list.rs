@@ -98,11 +98,11 @@ pub fn run(args: ListArgs, loaded: &mut LoadedConfig) -> ExitCode {
         // partial success with a non-zero exit so scripts notice.
         Ok(true) => ExitCode::FAILURE,
         Err(e @ ListError::InactiveWithPositional) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::from(2)
         }
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::FAILURE
         }
     }
@@ -217,12 +217,11 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
     skipped.dedup();
     if !skipped.is_empty() {
         let plural = if skipped.len() == 1 { "" } else { "s" };
-        eprintln!(
-            "west: warning: skipped import{plural} from {} uncloned project{plural}: {}",
+        log::warn!(
+            "skipped import{plural} from {} uncloned project{plural}: {}\n    run `west update` first to enumerate imported projects",
             skipped.len(),
             skipped.join(", "),
         );
-        eprintln!("    run `west update` first to enumerate imported projects");
         return Ok(true);
     }
     Ok(false)

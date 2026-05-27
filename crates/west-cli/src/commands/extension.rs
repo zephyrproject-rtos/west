@@ -88,7 +88,7 @@ pub(crate) fn run(args: &[OsString], loaded: &LoadedConfig) -> ExitCode {
     let name = match args.first() {
         Some(a) => a.to_string_lossy().into_owned(),
         None => {
-            eprintln!("west: unknown command");
+            log::error!("unknown command");
             return ExitCode::FAILURE;
         }
     };
@@ -103,7 +103,7 @@ pub(crate) fn run(args: &[OsString], loaded: &LoadedConfig) -> ExitCode {
     let workspace = match super::workspace::resolve_workspace_dir() {
         Ok(w) => w,
         Err(_) => {
-            eprintln!("west: unknown command: {name}");
+            log::error!("unknown command: {name}");
             return ExitCode::FAILURE;
         }
     };
@@ -118,7 +118,7 @@ pub(crate) fn run(args: &[OsString], loaded: &LoadedConfig) -> ExitCode {
     let spec = match find_spec(&name, &workspace, loaded) {
         Ok(Some(s)) => s,
         Ok(None) | Err(_) => {
-            eprintln!("west: unknown command: {name}");
+            log::error!("unknown command: {name}");
             return ExitCode::FAILURE;
         }
     };
@@ -126,7 +126,7 @@ pub(crate) fn run(args: &[OsString], loaded: &LoadedConfig) -> ExitCode {
     match spawn(&spec, &user_argv, &workspace, loaded) {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::FAILURE
         }
     }

@@ -154,7 +154,7 @@ impl From<super::workspace::WorkspaceError> for CompareError {
 
 pub fn run(args: CompareArgs, loaded: &mut LoadedConfig) -> ExitCode {
     if let Err(e) = splice_flags_into_config(&args, &mut loaded.config) {
-        eprintln!("west: {e}");
+        log::error!("{e}");
         return ExitCode::from(2);
     }
     match run_inner(args, loaded) {
@@ -163,11 +163,11 @@ pub fn run(args: CompareArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(Outcome::SomePrinted { exit_code_flag: true }) => ExitCode::from(1),
         Ok(Outcome::Failures) => ExitCode::FAILURE,
         Err(e @ CompareError::UnclonedPositional { .. }) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::from(2)
         }
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::FAILURE
         }
     }
@@ -250,7 +250,7 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
     }
 
     if projects.is_empty() {
-        eprintln!("west: compare: no projects matched");
+        log::warn!("compare: no projects matched");
         return Ok(Outcome::AllAligned);
     }
 
@@ -392,11 +392,11 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
 
     if !failures.is_empty() {
         for (name, msg) in &failures {
-            eprintln!("west: compare failed for {name}: {msg}");
+            log::error!("compare failed for {name}: {msg}");
         }
         let names: Vec<&str> = failures.iter().map(|(n, _)| n.as_str()).collect();
-        eprintln!(
-            "west: compare failed for {} project{}: {}",
+        log::error!(
+            "compare failed for {} project{}: {}",
             names.len(),
             if names.len() == 1 { "" } else { "s" },
             names.join(", "),

@@ -107,7 +107,7 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
             ConfigValue::String(p.to_string_lossy().into_owned()),
         )
     {
-        eprintln!("west: {e}");
+        log::error!("{e}");
         return ExitCode::from(2);
     }
     if let Some(f) = args.manifest_file.as_deref()
@@ -117,7 +117,7 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
             ConfigValue::String(f.to_string_lossy().into_owned()),
         )
     {
-        eprintln!("west: {e}");
+        log::error!("{e}");
         return ExitCode::from(2);
     }
     if !args.clone_opt.is_empty() {
@@ -128,11 +128,11 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
             Ok(None) => Vec::new(),
             Ok(Some(ConfigValue::List(items))) => items,
             Ok(Some(other)) => {
-                eprintln!("west: tool.git.clone.extra-args must be a list, got {other:?}");
+                log::error!("tool.git.clone.extra-args must be a list, got {other:?}");
                 return ExitCode::from(2);
             }
             Err(e) => {
-                eprintln!("west: {e}");
+                log::error!("{e}");
                 return ExitCode::from(2);
             }
         };
@@ -142,7 +142,7 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
             "tool.git.clone.extra-args",
             ConfigValue::List(combined),
         ) {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::from(2);
         }
     }
@@ -172,11 +172,11 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(InitError::AlreadyInitialized(p)) => {
-            eprintln!("west: already initialized in {}", p.display());
+            log::error!("already initialized in {}", p.display());
             ExitCode::FAILURE
         }
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::FAILURE
         }
     }
@@ -339,8 +339,8 @@ fn bootstrap(args: &InitArgs, url: &str, config: &Configuration) -> Result<(), I
             Some(user) => {
                 if let Some(yaml) = &yaml_self_path {
                     if yaml != &user && yaml != Path::new("manifest") {
-                        eprintln!(
-                            "west: warning: --manifest-path={} differs from the manifest's self.path ({}); the workspace layout will not match the manifest's documented layout",
+                        log::warn!(
+                            "--manifest-path={} differs from the manifest's self.path ({}); the workspace layout will not match the manifest's documented layout",
                             user.display(),
                             yaml.display(),
                         );

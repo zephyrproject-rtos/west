@@ -26,7 +26,7 @@ pub fn run(args: SetArgs, loaded: &mut LoadedConfig) -> ExitCode {
     let value = match ConfigValue::parse(&args.value) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::from(2);
         }
     };
@@ -42,19 +42,19 @@ pub fn run(args: SetArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(None) => match loaded.resolved.local.clone() {
             Some(p) => p,
             None => {
-                eprintln!("west: --local: not in a workspace; use --file or run inside one");
+                log::error!("--local: not in a workspace; use --file or run inside one");
                 return ExitCode::from(3);
             }
         },
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             let code = if e.contains("workspace") { 3 } else { 2 };
             return ExitCode::from(code);
         }
     };
 
     if let Err(e) = loaded.config.set(&args.name, value, &target) {
-        eprintln!("west: {e}");
+        log::error!("{e}");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
@@ -64,12 +64,12 @@ fn set_in_single_file(name: &str, value: ConfigValue, file: &Path) -> ExitCode {
     let mut single = match Configuration::load([file.to_path_buf()]) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::FAILURE;
         }
     };
     if let Err(e) = single.set(name, value, file) {
-        eprintln!("west: {e}");
+        log::error!("{e}");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS

@@ -120,7 +120,7 @@ impl From<super::workspace::WorkspaceError> for ForallError {
 
 pub fn run(args: ForallArgs, loaded: &mut LoadedConfig) -> ExitCode {
     if let Err(e) = splice_flags_into_config(&args, &mut loaded.config) {
-        eprintln!("west: {e}");
+        log::error!("{e}");
         return ExitCode::from(2);
     }
 
@@ -128,11 +128,11 @@ pub fn run(args: ForallArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
         Err(e @ ForallError::UnclonedPositional { .. }) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::from(2)
         }
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::FAILURE
         }
     }
@@ -225,7 +225,7 @@ fn run_inner(args: ForallArgs, loaded: &mut LoadedConfig) -> Result<bool, Forall
     }
 
     if projects.is_empty() {
-        eprintln!("west: forall: no projects matched");
+        log::warn!("forall: no projects matched");
         return Ok(true);
     }
 
@@ -401,12 +401,12 @@ fn summarize(failed: Vec<String>) -> Result<bool, ForallError> {
     let n = failed.len();
     let plural = if n == 1 { "" } else { "s" };
     if n < 20 {
-        eprintln!(
-            "west: forall failed for {n} project{plural}: {}",
+        log::error!(
+            "forall failed for {n} project{plural}: {}",
             failed.join(", "),
         );
     } else {
-        eprintln!("west: forall failed for {n} projects; see above");
+        log::error!("forall failed for {n} projects; see above");
     }
     Ok(false)
 }

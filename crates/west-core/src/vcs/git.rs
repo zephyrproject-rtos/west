@@ -801,8 +801,11 @@ impl Vcs for GitClient {
         {
             // v1's `dbg('skipping unnecessary fetch')` — the smart
             // strategy short-circuited because the pinned immutable
-            // revision is already resolvable locally.
-            log::debug!("skipping unnecessary fetch for {rev}");
+            // revision is already resolvable locally. Prefix with the
+            // repo dir's basename (usually the project's name) for
+            // provenance without dragging the full workspace path
+            // into every line.
+            log::debug!("{}: skipping unnecessary fetch for {rev}", repo_label(repo));
             return Ok(sha);
         }
 
@@ -851,13 +854,13 @@ impl Vcs for GitClient {
             argv.push(rev);
         }
         // v1's `small_banner(f'{name}: fetching, need revision {rev}')`.
-        // No project name at this layer (we operate on a repo path); the
-        // indicatif bar carries it visually. DEBUG (not INFO), because
-        // with N projects fetching in parallel this fires N times in
-        // close succession — keeping it behind `-vv` lets `-v` stay
-        // quiet for default-volume diagnostics.
+        // No project name at this layer (we operate on a repo path), so
+        // the repo dir's basename prefixes the message — usually the
+        // project name, short enough to keep `-vv` readable when N
+        // projects fetch in parallel. DEBUG (not INFO) so `-v` stays
+        // quiet at default volume.
         if let Some(rev) = spec.revision {
-            log::debug!("fetching, need revision {rev}");
+            log::debug!("{}: fetching, need revision {rev}", repo_label(repo));
         }
         self.run_with_output(&argv, out)?;
 
@@ -1305,6 +1308,18 @@ fn bad_option(key: &str, detail: &str) -> VcsError {
     VcsError::BadOption {
         key: key.to_owned(),
         detail: detail.to_owned(),
+    }
+}
+
+/// Short human label for a repo path — its basename, falling back to
+/// the full display when the path has no terminating component
+/// (root, `..`-only). Used as the prefix on per-fetch log lines so a
+/// parallel `west update -vv` stays readable without dragging the
+/// full workspace path into every diagnostic.
+fn repo_label(repo: &std::path::Path) -> std::borrow::Cow<'_, str> {
+    match repo.file_name() {
+        Some(name) => name.to_string_lossy(),
+        None => repo.to_string_lossy(),
     }
 }
 

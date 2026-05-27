@@ -185,7 +185,7 @@ fn resolve(name: &str, loaded: &LoadedConfig, visited: &mut HashSet<String>) -> 
     //    A naked-flag first token can't appear (alias::lookup rejects
     //    those). An empty alias also can't reach here.
     if !visited.insert(name.to_owned()) {
-        eprintln!("west: alias cycle resolving help for {name:?}");
+        log::error!("alias cycle resolving help for {name:?}");
         return ExitCode::FAILURE;
     }
     match alias::lookup(&loaded.config, name) {
@@ -195,7 +195,7 @@ fn resolve(name: &str, loaded: &LoadedConfig, visited: &mut HashSet<String>) -> 
         }
         Ok(None) => {}
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::FAILURE;
         }
     }

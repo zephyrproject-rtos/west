@@ -25,7 +25,7 @@ pub fn run(args: GetArgs, loaded: &mut LoadedConfig) -> ExitCode {
     let scope_path = match scope_to_path(&args.scope, &loaded.resolved) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::from(2);
         }
     };
@@ -42,7 +42,7 @@ fn get_from_single_file(name: &str, file: &Path) -> ExitCode {
     let single = match Configuration::load([file.to_path_buf()]) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::FAILURE;
         }
     };
@@ -65,7 +65,7 @@ fn emit(value: Result<Option<ConfigValue>, west_core::config::ConfigError>) -> E
         }
         Ok(None) => ExitCode::FAILURE,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::from(2)
         }
     }

@@ -178,7 +178,7 @@ pub fn run() -> ExitCode {
     let mut loaded = match commands::config::load(&initial.config_file, &initial.config) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::FAILURE;
         }
     };
@@ -198,7 +198,7 @@ pub fn run() -> ExitCode {
             west_core::config::ConfigValue::Bool(true),
         )
     {
-        eprintln!("west: -q: {e}");
+        log::error!("-q: {e}");
         return ExitCode::FAILURE;
     }
 
@@ -209,7 +209,7 @@ pub fn run() -> ExitCode {
             west_core::config::ConfigValue::Bool(true),
         )
     {
-        eprintln!("west: --raw: {e}");
+        log::error!("--raw: {e}");
         return ExitCode::FAILURE;
     }
 
@@ -219,7 +219,7 @@ pub fn run() -> ExitCode {
     let cli = match alias::resolve_loop(argv, &loaded.config) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             return ExitCode::FAILURE;
         }
     };

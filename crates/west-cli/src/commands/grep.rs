@@ -154,18 +154,18 @@ pub fn run(args: GrepArgs, loaded: &mut LoadedConfig) -> ExitCode {
             ConfigValue::Integer(jobs as i64),
         )
     {
-        eprintln!("west: {e}");
+        log::error!("{e}");
         return ExitCode::from(2);
     }
     match run_inner(args, loaded) {
         Ok(Outcome::Ok) => ExitCode::SUCCESS,
         Ok(Outcome::SomeFailed) => ExitCode::FAILURE,
         Err(e @ GrepError::ToolNotFound { .. }) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::from(2)
         }
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::FAILURE
         }
     }
@@ -265,7 +265,7 @@ fn run_inner(args: GrepArgs, loaded: &LoadedConfig) -> Result<Outcome, GrepError
         .collect();
 
     if projects.is_empty() {
-        eprintln!("west: grep: no projects matched");
+        log::warn!("grep: no projects matched");
         return Ok(Outcome::Ok);
     }
 
@@ -297,7 +297,10 @@ fn run_inner(args: GrepArgs, loaded: &LoadedConfig) -> Result<Outcome, GrepError
     let stderr = io::stderr();
     let mut out_lock = stdout.lock();
     let mut err_lock = stderr.lock();
-    let mut failed: Vec<String> = Vec::new();
+    // Per-project failures are collected here and logged after the
+    // stderr lock is dropped — logging while holding the lock would
+    // deadlock against the logger's own writer.
+    let mut failed: Vec<(String, String)> = Vec::new();
     for o in outcomes {
         match o.classify() {
             BodyOutcome::Skip => {}
@@ -316,12 +319,11 @@ fn run_inner(args: GrepArgs, loaded: &LoadedConfig) -> Result<Outcome, GrepError
                     let _ = out_lock.flush();
                     let _ = writeln!(err_lock, "=== {} ({}):", o.project.name, o.project.path.display());
                 }
-                // The tool's own stderr and west's diagnostic both go
-                // to stderr. `writeln!` (not `eprintln!`) because we
-                // already hold the stderr lock.
+                // The tool's own stderr is part of the per-project
+                // output block; flush it while we still own the lock
+                // so the upcoming `log::error!` line lands below.
                 let _ = err_lock.write_all(&o.stderr);
-                let _ = writeln!(err_lock, "west: grep: {} failed: {why}", o.project.name);
-                failed.push(o.project.name.clone());
+                failed.push((o.project.name.clone(), why));
             }
         }
     }
@@ -329,11 +331,15 @@ fn run_inner(args: GrepArgs, loaded: &LoadedConfig) -> Result<Outcome, GrepError
     drop(err_lock);
 
     if !failed.is_empty() {
-        eprintln!(
-            "west: grep failed for {} project{}: {}",
-            failed.len(),
-            if failed.len() == 1 { "" } else { "s" },
-            failed.join(", "),
+        for (name, why) in &failed {
+            log::error!("grep: {name} failed: {why}");
+        }
+        let names: Vec<&str> = failed.iter().map(|(n, _)| n.as_str()).collect();
+        log::error!(
+            "grep failed for {} project{}: {}",
+            names.len(),
+            if names.len() == 1 { "" } else { "s" },
+            names.join(", "),
         );
         return Ok(Outcome::SomeFailed);
     }

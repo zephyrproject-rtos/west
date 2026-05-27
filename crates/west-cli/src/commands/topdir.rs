@@ -4,7 +4,7 @@ pub fn run() -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("west: cannot get current directory: {e}");
+            log::error!("cannot get current directory: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -14,7 +14,7 @@ pub fn run() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::FAILURE
         }
     }

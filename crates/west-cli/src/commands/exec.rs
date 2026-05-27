@@ -39,7 +39,7 @@ pub fn run(args: ExecArgs) -> ExitCode {
             ExitCode::FAILURE
         }
         Err(e) => {
-            eprintln!("west: exec {}: {e}", prog.to_string_lossy());
+            log::error!("exec {}: {e}", prog.to_string_lossy());
             ExitCode::FAILURE
         }
     }

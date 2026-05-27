@@ -123,7 +123,7 @@ impl From<super::workspace::WorkspaceError> for StatusError {
 
 pub fn run(args: StatusArgs, loaded: &mut LoadedConfig) -> ExitCode {
     if let Err(e) = splice_flags_into_config(&args, &mut loaded.config) {
-        eprintln!("west: {e}");
+        log::error!("{e}");
         return ExitCode::from(2);
     }
     match run_inner(args, loaded) {
@@ -132,11 +132,11 @@ pub fn run(args: StatusArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(Outcome::SomeDirty { exit_code_flag: true }) => ExitCode::from(1),
         Ok(Outcome::Failures) => ExitCode::FAILURE,
         Err(e @ StatusError::UnclonedPositional { .. }) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::from(2)
         }
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::FAILURE
         }
     }
@@ -218,7 +218,7 @@ fn run_inner(args: StatusArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Sta
     }
 
     if projects.is_empty() {
-        eprintln!("west: status: no projects matched");
+        log::warn!("status: no projects matched");
         return Ok(Outcome::AllClean);
     }
 
@@ -334,11 +334,11 @@ fn run_inner(args: StatusArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Sta
 
     if !failures.is_empty() {
         for (name, msg) in &failures {
-            eprintln!("west: status failed for {name}: {msg}");
+            log::error!("status failed for {name}: {msg}");
         }
         let names: Vec<&str> = failures.iter().map(|(n, _)| n.as_str()).collect();
-        eprintln!(
-            "west: status failed for {} project{}: {}",
+        log::error!(
+            "status failed for {} project{}: {}",
             names.len(),
             if names.len() == 1 { "" } else { "s" },
             names.join(", "),

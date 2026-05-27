@@ -145,7 +145,7 @@ pub fn run(args: ManifestArgs, loaded: &mut LoadedConfig) -> ExitCode {
     match run_inner(args, loaded) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("west: {e}");
+            log::error!("{e}");
             ExitCode::FAILURE
         }
     }
