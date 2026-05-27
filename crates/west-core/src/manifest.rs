@@ -1573,7 +1573,7 @@ fn name_already_claimed(
 /// segments without touching the filesystem. A cleaned path that
 /// starts with `..` means the original tried to back out past the
 /// anchor; an absolute path stays absolute after cleaning.
-fn relative_path_escapes_root(path: &Path) -> bool {
+pub fn relative_path_escapes_root(path: &Path) -> bool {
     if path.is_absolute() {
         return true;
     }

@@ -17,8 +17,9 @@
 //!    token of the expansion and recurse. The recursion tracks
 //!    visited names to terminate cycles.
 //! 3. **Extension** — anything declared in any project's
-//!    `west-commands.yml`. Spawn it with `--help` via the existing
-//!    `extension::run` dispatcher.
+//!    `west-commands` file (`.yml` / `.yaml` / `.toml` / `.json`).
+//!    Spawn it with `--help` via the existing `extension::run`
+//!    dispatcher.
 //! 4. **Unknown** — `extension::run` emits
 //!    `west: unknown command: <name>` for misses.
 //!

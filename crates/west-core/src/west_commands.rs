@@ -1,9 +1,12 @@
-//! `west-commands.yml` parser.
+//! `west-commands` file parser (YAML / TOML / JSON).
 //!
 //! A west-commands file lives inside a project (referenced from the
 //! manifest's per-project `west-commands:` field or the manifest's
 //! `self.west-commands:` field) and declares one or more python
-//! extension commands the project ships:
+//! extension commands the project ships. The format is chosen by
+//! the file's extension (`.yml` / `.yaml` for YAML, `.toml` for
+//! TOML, `.json` for JSON); the same schema applies across all
+//! three. YAML is the canonical example:
 //!
 //! ```yaml
 //! west-commands:
@@ -28,7 +31,7 @@ use std::path::{Path, PathBuf};
 use garde::Validate;
 use serde::Deserialize;
 
-/// A parsed `west-commands.yml`.
+/// A parsed `west-commands` file (YAML / TOML / JSON).
 #[derive(Debug, Clone, PartialEq)]
 pub struct WestCommandsFile {
     /// All entries declared at top level under `west-commands:`.
@@ -39,7 +42,7 @@ pub struct WestCommandsFile {
 #[derive(Debug, Clone, PartialEq)]
 pub struct WestCommandsEntry {
     /// Path to the python file, relative to the *project* that owns
-    /// the `west-commands.yml`. Resolution to an absolute path is
+    /// the `west-commands` file. Resolution to an absolute path is
     /// the caller's concern.
     pub file: PathBuf,
     /// Commands declared in `file`.

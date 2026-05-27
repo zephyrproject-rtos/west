@@ -1,8 +1,9 @@
 //! Python extension command discovery + dispatch.
 //!
 //! Today's `west` (python) lets any project ship its own subcommands
-//! via a `west-commands.yml` file referenced from the manifest's
-//! per-project `west-commands:` field (or `self.west-commands:`).
+//! via a `west-commands` file (YAML, TOML, or JSON — extension
+//! decides the format) referenced from the manifest's per-project
+//! `west-commands:` field (or `self.west-commands:`).
 //! The classic flow is "all-python, same-process"; the rust port
 //! keeps discovery + the rust↔python protocol on this side, and
 //! delegates the actual command implementation to a python
@@ -14,10 +15,13 @@
 //!    same `ReadOnlyImportSource` shape as `list` / `forall`).
 //! 2. Walk `manifest.projects` + the synthetic manifest project for
 //!    declarations. Each project that declares `west_commands:`
-//!    points at one or more YAML files relative to its own root.
-//! 3. Read + parse each YAML. Build a flat `HashMap<command-name,
-//!    ExtensionSpec>`. Skip projects that aren't cloned (their
-//!    YAML isn't on disk yet).
+//!    points at one or more `west-commands` files relative to its
+//!    own root.
+//! 3. Read + parse each file via `WestCommandsFile::from_path`
+//!    (format chosen by extension: `.yml` / `.yaml` / `.toml` /
+//!    `.json`). Build a flat `HashMap<command-name, ExtensionSpec>`.
+//!    Skip projects that aren't cloned (their files can't be on
+//!    disk yet).
 //! 4. Look up `<name>` in the map. Miss → `west: unknown command`.
 //! 5. Hit → spawn `python -m west._dispatch <module-path>
 //!    <class-name> -- <user-argv>` with the resolved python
@@ -28,7 +32,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-use west_core::manifest::Manifest;
+use west_core::manifest::{Manifest, relative_path_escapes_root};
 use west_core::vcs::{self, Vcs};
 use west_core::west_commands::{WestCommandsError, WestCommandsFile};
 
@@ -58,14 +62,26 @@ pub(crate) enum ExtensionError {
     Manifest(String),
     #[error("{0}")]
     Vcs(String),
-    // `WestCommandsError` carries a `serde_saphyr::Error` which is
-    // a big enum — box it so the outer `Result<_, ExtensionError>`
-    // stays small (clippy's `result_large_err` lint).
+    // `WestCommandsError` carries serde_saphyr / toml_edit / serde_json
+    // error sources (a big enum) — box it so the outer
+    // `Result<_, ExtensionError>` stays small (clippy's
+    // `result_large_err` lint).
     #[error("{}: {source}", path.display())]
-    YamlParse {
+    ParseCommandsFile {
         path: PathBuf,
         #[source]
         source: Box<WestCommandsError>,
+    },
+    /// A `west-commands` file declared a `file:` whose path traverses
+    /// out of the owning project. v1 matched the wording exactly:
+    /// "extension command python file ... escapes project path ...".
+    #[error(
+        "extension command python file {file:?} escapes project path {}",
+        project_path.display()
+    )]
+    EscapesProject {
+        project_path: PathBuf,
+        file: PathBuf,
     },
     #[error("spawn python: {0}")]
     Spawn(#[source] std::io::Error),
@@ -108,16 +124,35 @@ pub(crate) fn run(args: &[OsString], loaded: &LoadedConfig) -> ExitCode {
         }
     };
 
-    // Any failure to discover (no manifest configured, vcs
-    // unavailable, yaml parse error in a project) is treated as
-    // "no extensions available" — the user's typo wasn't an
-    // extension and the surrounding error surfaces are off-topic
-    // here. The user gets a clean "unknown command". Real
-    // workspace problems show up when they invoke other commands
-    // (list / update / etc.) that legitimately need the manifest.
+    // Failure-to-discover handling, mirroring v1's split:
+    //
+    //   - Extension-source problems (`ParseCommandsFile`,
+    //     `EscapesProject`) get surfaced verbatim — a malformed
+    //     `west-commands` file or a `file:` that traverses out of
+    //     its project is an extension-author bug the workspace
+    //     owner needs to see, even when the typed name isn't in the
+    //     broken file.
+    //   - Other errors (no workspace, manifest unparseable, vcs
+    //     unavailable) are off-topic for the extension layer — the
+    //     user typed a command name from outside a healthy
+    //     workspace, and those surfaces will fire when they run a
+    //     command that legitimately needs them. Treat as a clean
+    //     "unknown command".
     let spec = match find_spec(&name, &workspace, loaded) {
         Ok(Some(s)) => s,
-        Ok(None) | Err(_) => {
+        Ok(None) => {
+            log::error!("unknown command: {name}");
+            return ExitCode::FAILURE;
+        }
+        Err(e @ ExtensionError::ParseCommandsFile { .. }) => {
+            log::error!("could not load extension command(s): {e}");
+            return ExitCode::FAILURE;
+        }
+        Err(e @ ExtensionError::EscapesProject { .. }) => {
+            log::error!("{e}");
+            return ExitCode::FAILURE;
+        }
+        Err(_) => {
             log::error!("unknown command: {name}");
             return ExitCode::FAILURE;
         }
@@ -200,8 +235,8 @@ fn spawn(
 
 /// Discover every extension command reachable from `manifest`,
 /// keyed by the user-visible command name. Skips uncloned projects
-/// silently (their YAML can't be on disk yet); skips projects with
-/// no `west_commands:` declaration.
+/// silently (their `west-commands` files can't be on disk yet);
+/// skips projects with no `west_commands:` declaration.
 fn discover(
     workspace: &Path,
     manifest: &Manifest,
@@ -213,47 +248,72 @@ fn discover(
     // entry lives at `<workspace>/<self.path>`.
     let self_root = workspace.join(&manifest.self_.path);
     if is_cloned(&self_root, vcs) {
-        for yml in &manifest.self_.west_commands {
-            absorb_yaml(&self_root, yml, "manifest", &mut out)?;
+        for cmd_file in &manifest.self_.west_commands {
+            absorb_commands_file(
+                &self_root,
+                &manifest.self_.path,
+                cmd_file,
+                "manifest",
+                &mut out,
+            )?;
         }
     }
 
     // Per-project entries. Each project may declare zero or more
-    // YAML paths relative to its own root.
+    // west-commands paths (.yml/.yaml/.toml/.json) relative to its
+    // own root.
     for project in &manifest.projects {
         let project_root = workspace.join(&project.path);
         if !is_cloned(&project_root, vcs) {
             continue;
         }
-        for yml in &project.west_commands {
-            absorb_yaml(&project_root, yml, &project.name, &mut out)?;
+        for cmd_file in &project.west_commands {
+            absorb_commands_file(
+                &project_root,
+                &project.path,
+                cmd_file,
+                &project.name,
+                &mut out,
+            )?;
         }
     }
 
     Ok(out)
 }
 
-fn absorb_yaml(
+fn absorb_commands_file(
     project_root: &Path,
-    yml_rel: &Path,
+    project_rel_path: &Path,
+    file_rel: &Path,
     project_name: &str,
     out: &mut HashMap<String, ExtensionSpec>,
 ) -> Result<(), ExtensionError> {
-    let yml_abs = project_root.join(yml_rel);
-    if !yml_abs.exists() {
-        // Manifest pointed at a yaml that isn't checked in;
-        // silently skip (matches python's behaviour for missing
-        // west-commands files).
+    let file_abs = project_root.join(file_rel);
+    if !file_abs.exists() {
+        // Manifest pointed at a west-commands file that isn't
+        // checked in; silently skip (matches v1's behaviour). The
+        // format dispatch happens inside `WestCommandsFile::from_path`
+        // off the extension — we don't care about it here.
         return Ok(());
     }
-    let file =
-        WestCommandsFile::from_path(&yml_abs).map_err(|source| ExtensionError::YamlParse {
-            path: yml_abs.clone(),
+    let file = WestCommandsFile::from_path(&file_abs).map_err(|source| {
+        ExtensionError::ParseCommandsFile {
+            path: file_abs.clone(),
             source: Box::new(source),
-        })?;
+        }
+    })?;
     for entry in file.entries {
+        // Reject `file:` values whose lexical normalization traverses
+        // out of the owning project (e.g. `../../zephyr/evil.py`).
+        // Matches v1's `escapes_directory` check in `commands.py`.
+        if relative_path_escapes_root(&entry.file) {
+            return Err(ExtensionError::EscapesProject {
+                project_path: project_rel_path.to_path_buf(),
+                file: entry.file.clone(),
+            });
+        }
         // The python file path is relative to the project root,
-        // not to the yaml file.
+        // not to the west-commands file.
         let module_path = project_root.join(&entry.file);
         for cmd in entry.commands {
             // First-declaration-wins (matches `commands.py`'s
@@ -284,16 +344,17 @@ pub(crate) struct ProjectExtensions {
     /// Workspace-relative path, the way the manifest declares it.
     pub(crate) path: PathBuf,
     /// `(command-name, help-text)` pairs in declaration order. Help
-    /// is the `help:` field from `west-commands.yml`; absent fields
-    /// become an empty string in the output.
+    /// is the `help:` field from the project's `west-commands`
+    /// file; absent fields become an empty string in the output.
     pub(crate) commands: Vec<(String, String)>,
 }
 
 /// Discover extensions and return them grouped by project, in
 /// manifest order, for the `west help` listing. Aligns with python
 /// v1's "extension commands from project <name> (path: <path>):"
-/// section format. Uncloned and yaml-less projects are silently
-/// excluded — same contract as `discover`.
+/// section format. Uncloned projects and projects without a
+/// `west-commands` file are silently excluded — same contract as
+/// `discover`.
 pub(crate) fn list_for_help(
     loaded: &LoadedConfig,
 ) -> Result<Vec<ProjectExtensions>, ExtensionError> {
@@ -313,8 +374,8 @@ pub(crate) fn list_for_help(
     let self_root = workspace.join(&manifest.self_.path);
     if is_cloned(&self_root, vcs.as_ref()) {
         let mut commands: Vec<(String, String)> = Vec::new();
-        for yml in &manifest.self_.west_commands {
-            collect_commands_into(&self_root, yml, &mut commands)?;
+        for cmd_file in &manifest.self_.west_commands {
+            collect_commands_into(&self_root, cmd_file, &mut commands)?;
         }
         if !commands.is_empty() {
             groups.push(ProjectExtensions {
@@ -331,8 +392,8 @@ pub(crate) fn list_for_help(
             continue;
         }
         let mut commands: Vec<(String, String)> = Vec::new();
-        for yml in &project.west_commands {
-            collect_commands_into(&project_root, yml, &mut commands)?;
+        for cmd_file in &project.west_commands {
+            collect_commands_into(&project_root, cmd_file, &mut commands)?;
         }
         if !commands.is_empty() {
             groups.push(ProjectExtensions {
@@ -348,18 +409,19 @@ pub(crate) fn list_for_help(
 
 fn collect_commands_into(
     project_root: &Path,
-    yml_rel: &Path,
+    file_rel: &Path,
     out: &mut Vec<(String, String)>,
 ) -> Result<(), ExtensionError> {
-    let yml_abs = project_root.join(yml_rel);
-    if !yml_abs.exists() {
+    let file_abs = project_root.join(file_rel);
+    if !file_abs.exists() {
         return Ok(());
     }
-    let file =
-        WestCommandsFile::from_path(&yml_abs).map_err(|source| ExtensionError::YamlParse {
-            path: yml_abs.clone(),
+    let file = WestCommandsFile::from_path(&file_abs).map_err(|source| {
+        ExtensionError::ParseCommandsFile {
+            path: file_abs.clone(),
             source: Box::new(source),
-        })?;
+        }
+    })?;
     for entry in file.entries {
         for cmd in entry.commands {
             out.push((cmd.name, cmd.help.unwrap_or_default()));
