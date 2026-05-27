@@ -24,7 +24,9 @@
 //!   - builtin defaults (`--recursive` for `grep`; empty otherwise)
 //!
 //! Output ordering: parallel execution + manifest-order drain.
-//! Banner + body on stdout. `-q` suppresses the banner.
+//! The `=== name (path):` banner is chrome and goes to stderr;
+//! matched lines (the result) go to stdout, like `grep -r`, so
+//! `west grep … > f` stays banner-free. `-q` suppresses the banner.
 //! Exit-code semantics from v1: 1 = no match (silent skip),
 //! 0 = match (emit body), anything else = error (record + summary).
 //!
@@ -287,31 +289,44 @@ fn run_inner(args: GrepArgs, loaded: &LoadedConfig) -> Result<Outcome, GrepError
 
     // Drain in manifest order. v1 exit-code semantics:
     //   1   → no match: skip entirely (no banner, no body).
-    //   0   → match: print banner + stdout.
-    //   else→ tool failure: print banner + stderr, record failure.
+    //   0   → match: banner (chrome) to stderr, matched lines to stdout.
+    //   else→ tool failure: banner + the tool's stderr to stderr, record.
+    // Matched lines on stdout (like `grep -r`) keeps `west grep … > f`
+    // free of banner noise.
     let stdout = io::stdout();
-    let mut lock = stdout.lock();
+    let stderr = io::stderr();
+    let mut out_lock = stdout.lock();
+    let mut err_lock = stderr.lock();
     let mut failed: Vec<String> = Vec::new();
     for o in outcomes {
         match o.classify() {
             BodyOutcome::Skip => {}
             BodyOutcome::Match => {
                 if !settings.quiet {
-                    let _ = writeln!(lock, "=== {} ({}):", o.project.name, o.project.path.display());
+                    // Flush stdout first so the banner heads its matches
+                    // when both streams share a terminal.
+                    let _ = out_lock.flush();
+                    let _ = writeln!(err_lock, "=== {} ({}):", o.project.name, o.project.path.display());
+                    let _ = err_lock.flush();
                 }
-                let _ = lock.write_all(&o.stdout);
+                let _ = out_lock.write_all(&o.stdout);
             }
             BodyOutcome::Failure(why) => {
                 if !settings.quiet {
-                    let _ = writeln!(lock, "=== {} ({}):", o.project.name, o.project.path.display());
+                    let _ = out_lock.flush();
+                    let _ = writeln!(err_lock, "=== {} ({}):", o.project.name, o.project.path.display());
                 }
-                let _ = lock.write_all(&o.stderr);
-                eprintln!("west: grep: {} failed: {why}", o.project.name);
+                // The tool's own stderr and west's diagnostic both go
+                // to stderr. `writeln!` (not `eprintln!`) because we
+                // already hold the stderr lock.
+                let _ = err_lock.write_all(&o.stderr);
+                let _ = writeln!(err_lock, "west: grep: {} failed: {why}", o.project.name);
                 failed.push(o.project.name.clone());
             }
         }
     }
-    drop(lock);
+    drop(out_lock);
+    drop(err_lock);
 
     if !failed.is_empty() {
         eprintln!(

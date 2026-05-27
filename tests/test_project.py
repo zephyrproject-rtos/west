@@ -680,8 +680,11 @@ def test_compare(west_init_tmpdir):
     foo = west_init_tmpdir / 'zephyr' / 'foo'
     with open(foo, 'w'):
         pass
-    actual = cmd('compare')
-    assert actual.startswith('=== manifest')
+    # The '=== <name> ...' banner is chrome and goes to stderr; the
+    # comparison body (status, dirty filenames) goes to stdout.
+    err = io.StringIO()
+    actual = cmd('compare', stderr=err)
+    assert '=== manifest' in err.getvalue()
     assert 'foo' in actual
 
     # --exit-code should work for the manifest repository too.
@@ -698,8 +701,9 @@ def test_compare(west_init_tmpdir):
     bar = kconfiglib / 'bar'
     with open(bar, 'w'):
         pass
-    actual = cmd('compare')
-    assert actual.startswith('=== Kconfiglib (subdir/Kconfiglib):')
+    err = io.StringIO()
+    actual = cmd('compare', stderr=err)
+    assert '=== Kconfiglib (subdir/Kconfiglib):' in err.getvalue()
     assert 'bar' in actual
 
     # We shouldn't get any output for inactive projects by default, so
@@ -708,8 +712,12 @@ def test_compare(west_init_tmpdir):
     cmd('config set manifest.group-filter -- -Kconfiglib-group')
     assert cmd('compare') == ''
     # unless we ask for it with --all, or the project by name
-    assert cmd('compare Kconfiglib').startswith('=== Kconfiglib (subdir/Kconfiglib)')
-    assert cmd('compare --all').startswith('=== Kconfiglib (subdir/Kconfiglib)')
+    err = io.StringIO()
+    cmd('compare Kconfiglib', stderr=err)
+    assert '=== Kconfiglib (subdir/Kconfiglib)' in err.getvalue()
+    err = io.StringIO()
+    cmd('compare --all', stderr=err)
+    assert '=== Kconfiglib (subdir/Kconfiglib)' in err.getvalue()
     # Activate the project again.
     cmd('config unset manifest.group-filter')
 
@@ -722,8 +730,9 @@ def test_compare(west_init_tmpdir):
     # By default, a checked-out branch should print output, even if
     # the tree is otherwise clean...
     check_output(['git', 'checkout', '-b', 'mybranch'], cwd=kconfiglib)
-    actual = cmd('compare')
-    assert actual.startswith('=== Kconfiglib (subdir/Kconfiglib):')
+    err = io.StringIO()
+    actual = cmd('compare', stderr=err)
+    assert '=== Kconfiglib (subdir/Kconfiglib):' in err.getvalue()
     assert 'mybranch' in actual
     # unless we disable that explicitly...
     assert cmd('compare --ignore-branches') == ''
@@ -990,11 +999,12 @@ def test_grep(west_init_tmpdir):
     # Make sure we don't find things we don't expect, and do find
     # things we do.
 
-    actual_before_update = cmd('grep net-').strip()
-    actual_before_update_lines = actual_before_update.splitlines()
-    assert len(actual_before_update_lines) == 2
-    assert re.fullmatch(r'=== manifest \(zephyr\):', actual_before_update_lines[0])
-    assert re.search('net-tools', actual_before_update_lines[1])
+    # The '=== <name> ...' banner is chrome on stderr; matched lines
+    # go to stdout (like `grep -r`), so the pattern can be piped.
+    err = io.StringIO()
+    actual_before_update = cmd('grep net-', stderr=err).strip()
+    assert re.search(r'=== manifest \(zephyr\):', err.getvalue())
+    assert re.search('net-tools', actual_before_update)
 
     assert not re.search('hello', cmd('grep hello'))
 

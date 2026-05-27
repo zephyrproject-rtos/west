@@ -169,10 +169,11 @@ fn compare_clean_workspace_emits_no_output() {
         ])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
+    // Banner is chrome → stderr; an aligned workspace emits nothing.
     assert!(
-        !stdout.contains("=== alpha"),
-        "expected no alpha banner on aligned workspace: {stdout:?}"
+        !stderr.contains("=== alpha"),
+        "expected no alpha banner on aligned workspace: {stderr:?}"
     );
 }
 
@@ -201,10 +202,14 @@ fn compare_dirty_project_emits_output() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
+    // `=== alpha` banner is chrome → stderr; the comparison body
+    // (rev info + status) → stdout.
     assert!(
-        stdout.contains("=== alpha"),
-        "missing alpha banner: {stdout:?}"
+        stderr.contains("=== alpha"),
+        "missing alpha banner on stderr: {stderr:?}"
     );
+    assert!(!stdout.contains("=== alpha"), "banner leaked onto stdout: {stdout:?}");
     assert!(
         stdout.contains("--- manifest-rev:"),
         "missing manifest-rev sub-banner: {stdout:?}"
@@ -249,9 +254,10 @@ fn compare_head_diverges_from_manifest_rev_emits_output() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
     assert!(
-        stdout.contains("=== alpha"),
-        "missing banner on divergent HEAD: {stdout:?}"
+        stderr.contains("=== alpha"),
+        "missing banner on divergent HEAD on stderr: {stderr:?}"
     );
     assert!(
         stdout.contains("--- manifest-rev:") && stdout.contains("HEAD:"),
@@ -290,10 +296,10 @@ fn compare_branch_only_signal_shows_by_default() {
         ])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
     assert!(
-        stdout.contains("=== alpha"),
-        "expected banner for branch-only signal: {stdout:?}"
+        stderr.contains("=== alpha"),
+        "expected banner for branch-only signal on stderr: {stderr:?}"
     );
 }
 
@@ -327,10 +333,10 @@ fn compare_ignore_branches_skips_branch_only_signal() {
         ])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
     assert!(
-        !stdout.contains("=== alpha"),
-        "expected no banner with --ignore-branches: {stdout:?}"
+        !stderr.contains("=== alpha"),
+        "expected no banner with --ignore-branches: {stderr:?}"
     );
 }
 
@@ -369,10 +375,10 @@ fn compare_ignore_branches_pair_last_one_wins() {
         ])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
     assert!(
-        stdout.contains("=== alpha"),
-        "last-wins broken: --no-ignore-branches at end should re-enable branch signal: {stdout:?}"
+        stderr.contains("=== alpha"),
+        "last-wins broken: --no-ignore-branches at end should re-enable branch signal: {stderr:?}"
     );
 
     // Case 2: `--no-ignore-branches --ignore-branches` — last
@@ -390,10 +396,10 @@ fn compare_ignore_branches_pair_last_one_wins() {
         ])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
     assert!(
-        !stdout.contains("=== alpha"),
-        "last-wins broken: --ignore-branches at end should suppress branch signal: {stdout:?}"
+        !stderr.contains("=== alpha"),
+        "last-wins broken: --ignore-branches at end should suppress branch signal: {stderr:?}"
     );
 }
 
@@ -438,10 +444,10 @@ fn compare_no_ignore_branches_overrides_config() {
         ])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
     assert!(
-        stdout.contains("=== alpha"),
-        "expected banner with --no-ignore-branches override: {stdout:?}"
+        stderr.contains("=== alpha"),
+        "expected banner with --no-ignore-branches override: {stderr:?}"
     );
 }
 
@@ -522,14 +528,14 @@ fn compare_filters_projects_by_positional_name() {
         ])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
     assert!(
-        stdout.contains("=== alpha"),
-        "missing alpha banner: {stdout:?}"
+        stderr.contains("=== alpha"),
+        "missing alpha banner on stderr: {stderr:?}"
     );
     assert!(
-        !stdout.contains("=== beta"),
-        "unexpected beta banner: {stdout:?}"
+        !stderr.contains("=== beta"),
+        "unexpected beta banner: {stderr:?}"
     );
 }
 
@@ -557,11 +563,11 @@ fn compare_color_always_emits_colored_banner() {
         ])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
-    let banner_line = stdout
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
+    let banner_line = stderr
         .lines()
         .find(|l| l.contains("=== alpha"))
-        .unwrap_or_else(|| panic!("missing banner: {stdout:?}"));
+        .unwrap_or_else(|| panic!("missing banner on stderr: {stderr:?}"));
     assert!(
         banner_line.starts_with("\x1b["),
         "banner not coloured under --color always: {banner_line:?}"

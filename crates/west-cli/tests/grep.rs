@@ -173,16 +173,15 @@ fn grep_default_git_grep_matches_emit_banner() {
             "hello",
         ])
         .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let s = String::from_utf8_lossy(&out);
-    assert!(s.contains("=== p1 (p1):"), "p1 banner missing in: {s}");
-    assert!(s.contains("hello world"), "match line missing in: {s}");
+        .success();
+    let stdout = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
+    // Banner (chrome) → stderr; matched lines (result) → stdout.
+    assert!(stderr.contains("=== p1 (p1):"), "p1 banner missing in stderr: {stderr}");
+    assert!(stdout.contains("hello world"), "match line missing in stdout: {stdout}");
     assert!(
-        !s.contains("=== p2"),
-        "p2 has no match — banner should be suppressed; got: {s}"
+        !stderr.contains("=== p2"),
+        "p2 has no match — banner should be suppressed; got: {stderr}"
     );
 }
 
@@ -411,11 +410,10 @@ fn grep_parallel_manifest_order() {
             "match",
         ])
         .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let s = String::from_utf8_lossy(&out);
+        .success();
+    // Banners (chrome) carry the project names and land on stderr in
+    // manifest order.
+    let s = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
     let pa_pos = s.find("=== pa").expect("pa banner");
     let pb_pos = s.find("=== pb").expect("pb banner");
     let pc_pos = s.find("=== pc").expect("pc banner");
@@ -454,16 +452,15 @@ fn grep_default_includes_synthetic_manifest_project() {
             "my-manifest",
         ])
         .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let s = String::from_utf8_lossy(&out);
+        .success();
+    let stdout = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
+    // Banner → stderr; matched line → stdout.
     assert!(
-        s.contains("=== manifest (my-manifest):"),
-        "synthetic manifest project banner missing: {s}"
+        stderr.contains("=== manifest (my-manifest):"),
+        "synthetic manifest project banner missing in stderr: {stderr}"
     );
-    assert!(s.contains("my-manifest"), "match line missing: {s}");
+    assert!(stdout.contains("my-manifest"), "match line missing in stdout: {stdout}");
 }
 
 #[test]
@@ -528,11 +525,9 @@ fn grep_project_flag_resolves_synthetic() {
             "my-manifest",
         ])
         .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let s = String::from_utf8_lossy(&out);
+        .success();
+    // Banners (chrome) → stderr.
+    let s = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
     assert!(
         s.contains("=== manifest (my-manifest):"),
         "synthetic banner missing on `-p manifest`: {s}"
@@ -568,14 +563,13 @@ fn grep_quiet_suppresses_banner() {
             "hello",
         ])
         .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let s = String::from_utf8_lossy(&out);
+        .success();
+    let stdout = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
+    // Banner lives on stderr now; `-q` must suppress it there.
     assert!(
-        !s.contains("=== p1"),
-        "-q should suppress banner; got: {s:?}"
+        !stderr.contains("=== p1"),
+        "-q should suppress banner; got: {stderr:?}"
     );
-    assert!(s.contains("hello"), "body still expected; got: {s:?}");
+    assert!(stdout.contains("hello"), "body still expected on stdout; got: {stdout:?}");
 }

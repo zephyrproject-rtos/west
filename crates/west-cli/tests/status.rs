@@ -185,10 +185,13 @@ fn status_dirty_project_emits_banner_and_body() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
+    // Banner is chrome → stderr; the porcelain body → stdout.
     assert!(
-        stdout.contains("=== status of alpha"),
-        "missing banner: {stdout:?}"
+        stderr.contains("=== status of alpha"),
+        "missing banner on stderr: {stderr:?}"
     );
+    assert!(!stdout.contains("=== status of"), "banner leaked onto stdout: {stdout:?}");
     // Porcelain v1: ` M R` (modified, unstaged) — accept either
     // single-letter or two-column shape, just look for `R` and
     // the modification marker.
@@ -264,13 +267,15 @@ fn status_long_shows_every_project_including_clean() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
+    // Banners are chrome → stderr; the long-form bodies → stdout.
     assert!(
-        stdout.contains("=== status of alpha"),
-        "missing alpha banner: {stdout:?}"
+        stderr.contains("=== status of alpha"),
+        "missing alpha banner on stderr: {stderr:?}"
     );
     assert!(
-        stdout.contains("=== status of beta"),
-        "missing beta banner (clean projects must show under --long): {stdout:?}"
+        stderr.contains("=== status of beta"),
+        "missing beta banner (clean projects must show under --long): {stderr:?}"
     );
     // Long form contains the "nothing to commit" phrase for the
     // clean side and a modification marker for the dirty side.
@@ -300,14 +305,14 @@ fn status_filters_projects_by_positional_name() {
         .args(["-C", ws.to_str().unwrap(), "status", "alpha"])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
     assert!(
-        stdout.contains("=== status of alpha"),
-        "missing alpha banner: {stdout:?}"
+        stderr.contains("=== status of alpha"),
+        "missing alpha banner on stderr: {stderr:?}"
     );
     assert!(
-        !stdout.contains("=== status of beta"),
-        "unexpected beta banner: {stdout:?}"
+        !stderr.contains("=== status of beta"),
+        "unexpected beta banner: {stderr:?}"
     );
 }
 
@@ -356,11 +361,11 @@ fn status_color_always_emits_colored_banner() {
         ])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
-    let banner_line = stdout
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
+    let banner_line = stderr
         .lines()
         .find(|l| l.contains("=== status of alpha"))
-        .unwrap_or_else(|| panic!("missing banner: {stdout:?}"));
+        .unwrap_or_else(|| panic!("missing banner on stderr: {stderr:?}"));
     assert!(
         banner_line.starts_with("\x1b["),
         "banner not coloured under --color always: {banner_line:?}"
@@ -391,11 +396,11 @@ fn status_color_never_strips_banner_color() {
         ])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
-    let banner_line = stdout
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
+    let banner_line = stderr
         .lines()
         .find(|l| l.contains("=== status of alpha"))
-        .unwrap_or_else(|| panic!("missing banner: {stdout:?}"));
+        .unwrap_or_else(|| panic!("missing banner on stderr: {stderr:?}"));
     assert!(
         !banner_line.contains("\x1b["),
         "banner has colour escapes despite --color never: {banner_line:?}"
@@ -488,14 +493,17 @@ fn status_parallel_does_not_interleave_output() {
         .args(["-C", ws.to_str().unwrap(), "status", "-j", "2"])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
-    let alpha_pos = stdout
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
+    // Banners (chrome) carry the project names and land on stderr;
+    // the porcelain bodies (`M R`) are identical per project, so the
+    // banner order on stderr is what proves workspace-order drain.
+    let alpha_pos = stderr
         .find("=== status of alpha")
-        .unwrap_or_else(|| panic!("missing alpha banner: {stdout:?}"));
-    let beta_pos = stdout
+        .unwrap_or_else(|| panic!("missing alpha banner on stderr: {stderr:?}"));
+    let beta_pos = stderr
         .find("=== status of beta")
-        .unwrap_or_else(|| panic!("missing beta banner: {stdout:?}"));
-    assert!(alpha_pos < beta_pos, "out-of-order banners: {stdout:?}");
+        .unwrap_or_else(|| panic!("missing beta banner on stderr: {stderr:?}"));
+    assert!(alpha_pos < beta_pos, "out-of-order banners: {stderr:?}");
 }
 
 #[test]
@@ -520,11 +528,13 @@ fn status_quiet_suppresses_banner() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
+    // Banner lives on stderr now; `-q` must suppress it there.
     assert!(
-        !stdout.contains("=== status of"),
-        "banner present despite -q: {stdout:?}"
+        !stderr.contains("=== status of"),
+        "banner present despite -q: {stderr:?}"
     );
-    // Body still printed.
+    // Body still printed to stdout.
     assert!(
         stdout.contains("R"),
         "expected short-status body under -q: {stdout:?}"

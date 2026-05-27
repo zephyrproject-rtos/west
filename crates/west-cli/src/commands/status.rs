@@ -9,6 +9,10 @@
 //!
 //! UX improvements over v1:
 //!
+//! - Per-project `=== status of …` banners and the tail summary go
+//!   to **stderr**; only the status bodies hit stdout, so
+//!   `west status > out` stays banner-free. v1 emitted both on
+//!   stdout.
 //! - Default is short / porcelain-v1 format and SKIPS CLEAN
 //!   PROJECTS. v1 ran `git status` per project regardless of
 //!   state; in a 100-project workspace that emitted 99 copies of
@@ -261,20 +265,23 @@ fn run_inner(args: StatusArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Sta
     // Drain. In `Short` mode, skip clean projects (their body is
     // empty anyway and the banner would be noise). In `Long`
     // mode, print everything — the user explicitly opted into the
-    // verbose shape.
+    // verbose shape. Per-project banner (chrome) goes to stderr;
+    // the status body (result) goes to stdout, matching `diff` /
+    // `forall` so `west status > out` stays banner-free.
     let mut stdout = io::stdout().lock();
+    let mut stderr = io::stderr().lock();
     let mut clean_count: usize = 0;
     let mut had_dirty = false;
     let mut failures: Vec<(String, String)> = Vec::new();
     // Bright green + bold matches python v1's banner palette
-    // (`colorama.Fore.LIGHTGREEN_EX`). `force_styling(true)`
-    // overrides console's auto-strip so banners stay coloured
-    // under `--color always` even when stdout is captured — same
-    // reasoning as the diff path.
-    let banner_style = match resolved_color {
-        ColorMode::Always => Style::new().green().bright().bold().force_styling(true),
-        ColorMode::Never => Style::new().force_styling(false),
-        ColorMode::Auto => Style::new().green().bright().bold(),
+    // (`colorama.Fore.LIGHTGREEN_EX`). The banner lands on stderr,
+    // so `auto` follows stderr's TTY-ness; `--color always/never`
+    // force the choice. (`resolved_color`, keyed off stdout, colours
+    // the long-form body git emits.)
+    let banner_style = match args.color {
+        ColorArg::Always => Style::new().green().bright().bold().force_styling(true),
+        ColorArg::Never => Style::new().force_styling(false),
+        ColorArg::Auto => Style::new().green().bright().bold().for_stderr(),
     };
     for o in outcomes {
         match o.result {
@@ -286,8 +293,11 @@ fn run_inner(args: StatusArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Sta
                     had_dirty = true;
                 }
                 if !settings.quiet {
+                    // Flush stdout first so the banner heads its body
+                    // when both share a terminal.
+                    let _ = stdout.flush();
                     let _ = writeln!(
-                        stdout,
+                        stderr,
                         "{}",
                         banner_style.apply_to(format!(
                             "=== status of {} ({})",
@@ -295,6 +305,7 @@ fn run_inner(args: StatusArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Sta
                             o.path.display(),
                         )),
                     );
+                    let _ = stderr.flush();
                 }
                 let _ = stdout.write_all(&o.body);
                 // `Short` mode's porcelain output has no trailing
@@ -309,14 +320,17 @@ fn run_inner(args: StatusArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Sta
             Err(e) => failures.push((o.name, e.to_string())),
         }
     }
+    // Tail summary is chrome → stderr alongside the banners.
     if !settings.quiet && had_dirty && clean_count > 0 && !args.long {
+        let _ = stdout.flush();
         let _ = writeln!(
-            stdout,
+            stderr,
             "Clean working tree in {clean_count} project{}.",
             if clean_count == 1 { "" } else { "s" }
         );
     }
     drop(stdout);
+    drop(stderr);
 
     if !failures.is_empty() {
         for (name, msg) in &failures {

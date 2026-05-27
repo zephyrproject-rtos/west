@@ -33,6 +33,10 @@
 //! The colon-aligned `manifest-rev:` / `HEAD:` labels match v1's
 //! layout. The body indentation is python v1's
 //! `textwrap.indent(..., ' ' * 4)`.
+//!
+//! The `=== <name> (<path>):` banner is chrome and goes to stderr;
+//! only the comparison body (and the `-f` machine-readable lines)
+//! reach stdout, matching `diff` / `status` / `forall`.
 
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
@@ -328,12 +332,19 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
             .collect()
     };
 
-    // Drain in workspace order.
+    // Drain in workspace order. Per-project banner (chrome) goes to
+    // stderr; the comparison body (result) to stdout, matching
+    // `diff` / `status` / `forall`. The `-f` machine-readable mode
+    // is itself the result, so its lines stay on stdout.
     let mut stdout = io::stdout().lock();
-    let banner_style = match resolved_color {
-        ColorMode::Always => Style::new().green().bright().bold().force_styling(true),
-        ColorMode::Never => Style::new().force_styling(false),
-        ColorMode::Auto => Style::new().green().bright().bold(),
+    let mut stderr = io::stderr().lock();
+    // Banner lands on stderr, so `auto` follows stderr's TTY-ness;
+    // `--color always/never` force the choice. (`resolved_color`,
+    // keyed off stdout, colours the embedded git status body.)
+    let banner_style = match args.color {
+        ColorArg::Always => Style::new().green().bright().bold().force_styling(true),
+        ColorArg::Never => Style::new().force_styling(false),
+        ColorArg::Auto => Style::new().green().bright().bold().for_stderr(),
     };
     let mut printed_any = false;
     let mut failures: Vec<(String, String)> = Vec::new();
@@ -356,8 +367,11 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
                     let _ = writeln!(stdout, "{line}");
                 } else {
                     if !settings.quiet {
+                        // Flush stdout first so the banner heads its
+                        // body when both share a terminal.
+                        let _ = stdout.flush();
                         let _ = writeln!(
-                            stdout,
+                            stderr,
                             "{}",
                             banner_style.apply_to(format!(
                                 "=== {} ({}):",
@@ -365,6 +379,7 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
                                 o.project.path.display(),
                             )),
                         );
+                        let _ = stderr.flush();
                     }
                     let _ = stdout.write_all(&body);
                 }
@@ -373,6 +388,7 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
         }
     }
     drop(stdout);
+    drop(stderr);
 
     if !failures.is_empty() {
         for (name, msg) in &failures {
