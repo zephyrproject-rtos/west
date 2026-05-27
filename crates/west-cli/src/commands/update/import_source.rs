@@ -26,7 +26,7 @@ use indicatif::{MultiProgress, ProgressBar};
 
 use west_core::manifest::{ImportContent, ImportSource, ImportSourceError, Project};
 use west_core::vcs::{
-    CheckoutTarget, CloneKind, CloneSpec, CommitSummary, FetchSpec, Output, RevSpec, Vcs, VcsError,
+    CheckoutTarget, CommitSummary, FetchSpec, InitSpec, Output, RevSpec, Vcs, VcsError,
 };
 
 use super::Settings;
@@ -204,10 +204,17 @@ impl WorkspaceImportSource<'_> {
         let already_cloned = repo.exists() && self.vcs.is_repo(repo).unwrap_or(false);
         if !already_cloned {
             match self.settings {
+                // With settings (the normal `west update` flow) the
+                // cache helper picks init-vs-clone based on whether a
+                // cache source matches.
                 Some(settings) => {
-                    cache::clone_via_cache(self.vcs, project, settings, repo, out)
+                    cache::materialize(self.vcs, project, settings, repo, out)
                         .map_err(ImportSourceError::new)?;
                 }
+                // No settings ⇒ no cache possible. Init an empty repo
+                // wired to the URL; the fetch below pulls exactly the
+                // requested revision (manifests routinely pin bare
+                // SHAs, which a clone --branch wouldn't accept anyway).
                 None => {
                     if let Some(parent) = repo.parent() {
                         std::fs::create_dir_all(parent)
@@ -217,22 +224,12 @@ impl WorkspaceImportSource<'_> {
                             })
                             .map_err(ImportSourceError::new)?;
                     }
-                    // Don't pass `revision` to clone: git clone --branch
-                    // refuses bare commit SHAs and manifests commonly pin
-                    // projects at SHAs. The subsequent fetch + detached
-                    // checkout below land the working tree at the right
-                    // commit regardless.
                     self.vcs
-                        .clone(
-                            &CloneSpec {
-                                url: &project.url,
-                                dest: repo,
-                                revision: None,
-                                origin: Some(&project.remote_name),
-                                kind: CloneKind::Managed,
-                            },
-                            out,
-                        )
+                        .init(&InitSpec {
+                            url: &project.url,
+                            dest: repo,
+                            origin: Some(&project.remote_name),
+                        })
                         .map_err(ImportSourceError::new)?;
                 }
             }

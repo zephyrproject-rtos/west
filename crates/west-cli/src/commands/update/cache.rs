@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use md5::{Digest, Md5};
 use west_core::manifest::Project;
-use west_core::vcs::{CloneKind, CloneSpec, FetchSpec, Output, RevSpec, RevType, Vcs};
+use west_core::vcs::{CloneKind, CloneSpec, FetchSpec, InitSpec, Output, RevSpec, RevType, Vcs};
 
 use super::Settings;
 use super::error::UpdateError;
@@ -139,15 +139,24 @@ pub(super) fn ensure_auto_cache(
     })
 }
 
-/// Populate the auto-cache (if configured) and clone `project` into
-/// `dest`. The clone source is the cache directory when a cache
-/// flag matched; otherwise the project URL directly. After a
-/// cache-driven clone the recorded remote URL is rewritten to the
-/// project's real upstream so subsequent fetches go to the network.
+/// Materialize `project`'s repo at `dest`, ready for the worker's
+/// follow-up fetch + checkout.
 ///
-/// Caller must guarantee `dest` is not already a valid git repo;
-/// this function only handles the "first clone" case.
-pub(super) fn clone_via_cache(
+/// - **Cache hit** (name / path / auto): seed objects with a managed
+///   clone from the local cache directory — cheap, hardlinked — then
+///   point the convenience remote back at the real upstream so later
+///   fetches hit the network. This is the only place a `clone` is
+///   worthwhile, because cloning from a local path hardlinks the
+///   object store.
+/// - **No cache**: there's no local object store to hardlink from, so
+///   cloning from the URL would over-fetch the default branch and add
+///   a redundant round-trip. Instead `init` an empty repo wired to
+///   the URL and let the worker's fetch pull exactly the requested
+///   revision. Mirrors v1's `init_project`.
+///
+/// Caller must guarantee `dest` is not already a valid git repo; this
+/// only handles the "first materialization" case.
+pub(super) fn materialize(
     vcs: &dyn Vcs,
     project: &Project,
     settings: &Settings,
@@ -164,30 +173,40 @@ pub(super) fn clone_via_cache(
             source,
         })?;
     }
-    let clone_url = match cache_source.as_ref() {
-        Some(src) => src
-            .path()
-            .to_str()
-            .ok_or_else(|| UpdateError::NonUtf8CachePath(src.path().to_path_buf()))?,
-        None => &project.url,
-    };
-    vcs.clone(
-        &CloneSpec {
-            url: clone_url,
-            dest,
-            revision: None,
-            origin: Some(&project.remote_name),
-            kind: CloneKind::Managed,
-        },
-        out,
-    )
-    .map_err(|source| UpdateError::Clone {
-        url: clone_url.to_owned(),
-        source,
-    })?;
-    if cache_source.is_some() {
-        vcs.set_remote_url(dest, &project.remote_name, &project.url)
-            .map_err(UpdateError::SetRemoteUrl)?;
+    match cache_source.as_ref() {
+        Some(src) => {
+            let clone_url = src
+                .path()
+                .to_str()
+                .ok_or_else(|| UpdateError::NonUtf8CachePath(src.path().to_path_buf()))?;
+            vcs.clone(
+                &CloneSpec {
+                    url: clone_url,
+                    dest,
+                    revision: None,
+                    origin: Some(&project.remote_name),
+                    kind: CloneKind::Managed,
+                },
+                out,
+            )
+            .map_err(|source| UpdateError::Clone {
+                url: clone_url.to_owned(),
+                source,
+            })?;
+            vcs.set_remote_url(dest, &project.remote_name, &project.url)
+                .map_err(UpdateError::SetRemoteUrl)?;
+        }
+        None => {
+            vcs.init(&InitSpec {
+                url: &project.url,
+                dest,
+                origin: Some(&project.remote_name),
+            })
+            .map_err(|source| UpdateError::Clone {
+                url: project.url.clone(),
+                source,
+            })?;
+        }
     }
     Ok(())
 }

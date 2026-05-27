@@ -872,20 +872,34 @@ impl Vcs for GitClient {
 
     fn head_branch(&self, repo: &Path) -> Result<Option<String>, VcsError> {
         let repo_str = repo.to_string_lossy().into_owned();
-        let res = self.run(&["-C", &repo_str, "rev-parse", "--abbrev-ref", "HEAD"])?;
-        check_success(&res)?;
+        // `symbolic-ref --short -q HEAD` names the branch HEAD is on
+        // (born OR unborn) and exits 1 with no output when HEAD is
+        // detached. Preferred over `rev-parse --abbrev-ref HEAD`,
+        // which errors on an unborn HEAD (fresh `init`) instead of
+        // reporting the branch.
+        let res = self.run(&["-C", &repo_str, "symbolic-ref", "--short", "-q", "HEAD"])?;
+        match res.output.status.code() {
+            Some(0) => {}
+            // Detached HEAD: no branch.
+            Some(1) => return Ok(None),
+            _ => return Err(make_command_failed(&res)),
+        }
         let stdout = std::str::from_utf8(&res.output.stdout).map_err(|e| VcsError::BadOutput {
             client: NAME,
             argv: res.argv.clone(),
             detail: format!("non-UTF-8 stdout: {e}"),
         })?;
         let trimmed = stdout.trim();
-        // git emits the literal "HEAD" when HEAD is detached.
-        if trimmed.is_empty() || trimmed == "HEAD" {
-            Ok(None)
-        } else {
-            Ok(Some(trimmed.to_owned()))
+        if trimmed.is_empty() {
+            return Ok(None);
         }
+        // An unborn branch (fresh init, no commit yet) has no history
+        // to keep or rebase onto — report None so callers detach.
+        let verify = self.run(&["-C", &repo_str, "rev-parse", "--verify", "--quiet", "HEAD"])?;
+        if !verify.output.status.success() {
+            return Ok(None);
+        }
+        Ok(Some(trimmed.to_owned()))
     }
 
     fn update_submodules(

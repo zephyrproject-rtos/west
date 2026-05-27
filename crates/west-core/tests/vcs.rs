@@ -1632,3 +1632,49 @@ fn managed_clone_leaves_no_local_branch() {
         "Managed clone must leave a detached HEAD"
     );
 }
+
+#[test]
+fn head_branch_distinguishes_born_unborn_and_detached() {
+    // `init` leaves an unborn HEAD; the worker calls head_branch to
+    // decide keep/rebase/detach. Unborn (no history to keep) and
+    // detached both map to None; only a born branch reports a name.
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let dest = tmp.path().join("repo");
+    let v = GitClient::new(GitOptions::default());
+
+    // Unborn (fresh init, no commit yet).
+    v.init(&InitSpec {
+        url: "ignored",
+        dest: &dest,
+        origin: None,
+    })
+    .unwrap();
+    assert_eq!(
+        v.head_branch(&dest).unwrap(),
+        None,
+        "unborn HEAD must report no branch"
+    );
+
+    // Born branch.
+    std::fs::write(dest.join("f"), b"x\n").unwrap();
+    git(&["add", "."], &dest);
+    git(&["commit", "-q", "-m", "c"], &dest);
+    assert_eq!(
+        v.head_branch(&dest).unwrap().as_deref(),
+        Some("west-init"),
+        "born branch must report its name"
+    );
+
+    // Detached.
+    let sha = v.sha(&dest, RevSpec::Head).unwrap();
+    git(&["checkout", "-q", "--detach", &sha], &dest);
+    assert_eq!(
+        v.head_branch(&dest).unwrap(),
+        None,
+        "detached HEAD must report no branch"
+    );
+}

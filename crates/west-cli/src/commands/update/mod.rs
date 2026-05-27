@@ -446,12 +446,13 @@ fn run_project_steps(
     settings: &Settings,
     out: &mut Output<'_>,
 ) -> Result<CommitSummary, UpdateError> {
-    // 1. Ensure cloned. We deliberately don't pass `revision` here:
-    //    git clone --branch only accepts branches/tags, but manifests
-    //    routinely pin projects at bare commit SHAs (zephyr does this
-    //    for every project). Clone the remote's default branch and let
-    //    the subsequent fetch + detached checkout land us on the right
-    //    commit.
+    // 1. Ensure the repo exists. `cache::materialize` inits an empty
+    //    repo (no cache) or seeds it with a managed clone from a local
+    //    cache; either way it leaves no working revision and no stray
+    //    branch. The subsequent fetch + detached checkout (steps 2 &
+    //    5) land the exact manifest revision — which is why we never
+    //    need a clone --branch here (manifests routinely pin bare SHAs
+    //    that --branch wouldn't accept anyway).
     //
     // If a cache flag matched, the clone source is the cache directory
     // (a local path) instead of the project URL. The auto-cache branch
@@ -474,7 +475,7 @@ fn run_project_steps(
     }
     let already_cloned = repo.exists() && vcs.is_repo(repo).unwrap_or(false);
     if !already_cloned {
-        cache::clone_via_cache(vcs, project, settings, repo, out)?;
+        cache::materialize(vcs, project, settings, repo, out)?;
     }
 
     // 2. Fetch. `Vcs::fetch` returns the sha that the requested revision
