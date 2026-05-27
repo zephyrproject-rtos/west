@@ -90,6 +90,11 @@ pub struct GitOptions {
     /// `--filter=blob:none`, …). The CLI's `--fetch-opt` maps onto it.
     /// Mirrors v1's `-o`/`--fetch-opt`.
     pub fetch_extra_args: Vec<String>,
+    /// Sourced from `tool.git.clone.extra-args` (a TOML list of
+    /// strings). Spliced verbatim into a non-mirror `git clone` argv
+    /// before the `--` separator. `west init`'s `--clone-opt` maps
+    /// onto it. Mirrors v1's `-o`/`--clone-opt`.
+    pub clone_extra_args: Vec<String>,
     /// Sourced from `tool.git.fetch.depth`. When set, fetches are shallow
     /// to that depth via `--depth=N`.
     pub fetch_depth: Option<u32>,
@@ -123,6 +128,7 @@ impl Default for GitOptions {
             fetch_tags: None,
             fetch_narrow: false,
             fetch_extra_args: Vec::new(),
+            clone_extra_args: Vec::new(),
             fetch_depth: None,
             fetch_force: true,
             submodules_recurse: true,
@@ -181,6 +187,11 @@ impl GitClient {
         let fetch_extra_args = match config.get_list_str("tool.git.fetch.extra-args") {
             Ok(opt) => opt.unwrap_or_default(),
             Err(e) => return Err(bad_option("tool.git.fetch.extra-args", &e.to_string())),
+        };
+
+        let clone_extra_args = match config.get_list_str("tool.git.clone.extra-args") {
+            Ok(opt) => opt.unwrap_or_default(),
+            Err(e) => return Err(bad_option("tool.git.clone.extra-args", &e.to_string())),
         };
 
         let fetch_depth = match config.get("tool.git.fetch.depth") {
@@ -242,6 +253,7 @@ impl GitClient {
             fetch_tags,
             fetch_narrow,
             fetch_extra_args,
+            clone_extra_args,
             fetch_depth,
             fetch_force,
             submodules_recurse,
@@ -490,6 +502,13 @@ impl Vcs for GitClient {
                 // remote's tagOpt so future fetches stay tag-free.
                 if self.no_tags() {
                     argv.push("--no-tags");
+                }
+                // Caller-supplied passthrough (`tool.git.clone.extra-args`
+                // / `--clone-opt`), spliced before the `--` separator.
+                // Mirror clones are internal (auto-cache) and don't take
+                // it.
+                for arg in &self.opts.clone_extra_args {
+                    argv.push(arg);
                 }
             }
         }

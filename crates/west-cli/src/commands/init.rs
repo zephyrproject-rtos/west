@@ -76,6 +76,13 @@ pub struct InitArgs {
     /// Equivalent to `--config manifest.file=FILE`. Default: `west.yml`.
     #[arg(long = "manifest-file", visible_alias = "mf")]
     pub manifest_file: Option<PathBuf>,
+
+    /// Extra option to pass through to `git clone` when bootstrapping
+    /// the manifest repo (e.g. `-o=--depth=1`). Repeatable. Appends to
+    /// `tool.git.clone.extra-args`. Cannot be combined with `-l` (which
+    /// doesn't clone).
+    #[arg(short = 'o', long = "clone-opt", value_name = "OPT", conflicts_with = "local", action = clap::ArgAction::Append)]
+    pub clone_opt: Vec<String>,
 }
 
 const DEFAULT_MANIFEST_FILE: &str = "west.yml";
@@ -105,6 +112,32 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
     {
         eprintln!("west: {e}");
         return ExitCode::from(2);
+    }
+    if !args.clone_opt.is_empty() {
+        // Append to whatever `tool.git.clone.extra-args` already holds,
+        // so the git client (built from this config) picks up the
+        // passthrough when it clones the manifest repo.
+        let mut combined: Vec<ConfigValue> = match loaded.config.get("tool.git.clone.extra-args") {
+            Ok(None) => Vec::new(),
+            Ok(Some(ConfigValue::List(items))) => items,
+            Ok(Some(other)) => {
+                eprintln!("west: tool.git.clone.extra-args must be a list, got {other:?}");
+                return ExitCode::from(2);
+            }
+            Err(e) => {
+                eprintln!("west: {e}");
+                return ExitCode::from(2);
+            }
+        };
+        combined.extend(args.clone_opt.iter().cloned().map(ConfigValue::String));
+        if let Err(e) = super::config::splice_inline(
+            &mut loaded.config,
+            "tool.git.clone.extra-args",
+            ConfigValue::List(combined),
+        ) {
+            eprintln!("west: {e}");
+            return ExitCode::from(2);
+        }
     }
 
     let result = if args.local {
