@@ -136,7 +136,18 @@ def main():
     topdir = os.environ.get("WEST_TOPDIR")
 
     cls = _load_command_class(module_path, class_name)
-    cmd = cls()
+    try:
+        cmd = cls()
+    except Exception as e:
+        # Mirror v1's "command constructor threw an exception" wording
+        # so any user docs / scripts grepping for that phrase keep
+        # working. Surface the original exception's message so the
+        # author can see what went wrong without digging through a
+        # traceback.
+        raise SystemExit(
+            f"west._dispatch: {class_name!r} command constructor threw "
+            f"an exception: {type(e).__name__}: {e}"
+        ) from e
     # Surface the issue-927 deprecation note in this command's --help
     # when the extension's constructor set the ignored `help` field.
     # The help shown to users comes from west-commands.yml, not this
