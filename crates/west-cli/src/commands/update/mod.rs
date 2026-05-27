@@ -515,40 +515,34 @@ fn run_project_steps(
     vcs.set_manifest_rev(repo, &sha, Some(&reason))
         .map_err(UpdateError::SetManifestRev)?;
 
-    // 5. Decide strategy.
+    // 5. Decide strategy. Mirrors v1's decide_update_strategy +
+    //    post_checkout_help: compute `is_ancestor` once (is the new
+    //    manifest-rev already contained in the checked-out branch?),
+    //    then keep-descendants beats rebase beats detached checkout.
     let head_branch = vcs.head_branch(repo).map_err(UpdateError::HeadBranch)?;
-    let detach = match (
-        settings.keep_descendants,
-        settings.rebase,
-        head_branch.as_deref(),
-    ) {
-        (true, _, Some(branch)) => {
-            // keep_descendants: keep current branch checked out only if the
-            // new sha is already an ancestor of it.
-            let is_ancestor = vcs
-                .is_ancestor(repo, RevSpec::Named(&sha), RevSpec::Named(branch))
-                .map_err(UpdateError::IsAncestor)?;
-            if is_ancestor {
-                note(
-                    out,
-                    &format!("keeping branch {branch:?} (manifest-rev is an ancestor)"),
-                );
-                false
-            } else if settings.rebase {
-                vcs.rebase(repo, RevSpec::ManifestRev, out)
-                    .map_err(UpdateError::Rebase)?;
-                false
-            } else {
-                true
-            }
-        }
-        (false, true, Some(_)) => {
-            // rebase the current branch onto manifest-rev.
+    let is_ancestor = match head_branch.as_deref() {
+        Some(branch) => vcs
+            .is_ancestor(repo, RevSpec::Named(&sha), RevSpec::Named(branch))
+            .map_err(UpdateError::IsAncestor)?,
+        None => false,
+    };
+    let detach = if let Some(branch) = head_branch.as_deref() {
+        if settings.keep_descendants && is_ancestor {
+            // The branch already contains manifest-rev: leave it checked
+            // out (keep-descendants takes priority over --rebase).
+            log::info!("west update: left descendant branch {branch:?} checked out");
+            false
+        } else if settings.rebase {
+            log::info!("west update: rebasing to manifest-rev {sha}");
             vcs.rebase(repo, RevSpec::ManifestRev, out)
                 .map_err(UpdateError::Rebase)?;
             false
+        } else {
+            true
         }
-        _ => true,
+    } else {
+        // Already detached — nothing to keep or rebase.
+        true
     };
 
     if detach {
@@ -557,6 +551,12 @@ fn run_project_steps(
                 sha: sha.clone(),
                 source,
             })?;
+        // A branch was checked out before this detach: tell the user
+        // it's been left behind and how to get back to it (v1's
+        // post_checkout_help). WARN, so it shows by default.
+        if let Some(branch) = head_branch.as_deref() {
+            post_checkout_help(project, repo, branch, &sha, is_ancestor);
+        }
     }
 
     // 6. Submodules. If the parent project was cache-cloned and the
@@ -643,13 +643,33 @@ fn run_submodules(
     }
 }
 
-/// Emit a non-vcs note from the worker. Native mode prints to stderr;
-/// Stream mode pushes a `Line` event into the sink so it interleaves
-/// with the captured transcript at the right point.
-fn note(out: &mut Output<'_>, msg: &str) {
-    match out {
-        Output::Native => eprintln!("{msg}"),
-        Output::Stream(sink) => sink.event(west_core::vcs::ProgressEvent::Line(msg)),
+/// Warn that a detached checkout left a local branch behind, and show
+/// the exact command to get back to it — fast-forward when the branch
+/// already contains the new manifest-rev, rebase otherwise. Mirrors
+/// v1's `post_checkout_help`; emitted at WARN so it shows by default,
+/// with the "automate this" pointer at DEBUG.
+///
+/// Routed through `log::` (not the per-project transcript) on purpose:
+/// it fires on a *successful* update, and the indicatif reporter only
+/// replays a project's transcript on failure — so a transcript note
+/// would be invisible here. The Phase-2 logger suspends the live bars
+/// to print it above them.
+fn post_checkout_help(project: &Project, repo: &Path, branch: &str, sha: &str, is_ancestor: bool) {
+    let path = repo.display();
+    if is_ancestor {
+        log::warn!(
+            "left behind {} branch {branch:?}; to switch back to it (fast forward):\n  git -C {path} checkout {branch}",
+            project.name,
+        );
+        log::debug!(
+            "(To do this automatically in the future, use \"west update --keep-descendants\".)"
+        );
+    } else {
+        log::warn!(
+            "left behind {} branch {branch:?}; to rebase onto the new HEAD:\n  git -C {path} rebase {sha} {branch}",
+            project.name,
+        );
+        log::debug!("(To do this automatically in the future, use \"west update --rebase\".)");
     }
 }
 

@@ -196,6 +196,72 @@ fn update_clones_missing_projects() {
 
 #[test]
 #[serial]
+fn update_warns_about_left_behind_branch() {
+    // v1's post_checkout_help: detaching over a checked-out branch
+    // warns (at WARN, so it shows by default) and prints the exact
+    // command to get back. The branch sits on the same commit as the
+    // new manifest-rev here, so the hint is the fast-forward form.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1");
+    let manifest = manifest_yaml(&[("p1", &p1, &[])]);
+    let ws = init_workspace(&sb, &manifest);
+
+    // First update clones p1 with a detached manifest-rev.
+    sb.west()
+        .args(["-C", ws.to_str().unwrap(), "update"])
+        .assert()
+        .success();
+
+    // Check out a local branch on top of the manifest-rev commit.
+    git(&["checkout", "-b", "topic"], &ws.join("p1"));
+
+    // Second update detaches again, leaving "topic" behind.
+    let out = sb
+        .west()
+        .args(["-C", ws.to_str().unwrap(), "update"])
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
+    assert!(
+        stderr.contains(r#"left behind p1 branch "topic""#),
+        "missing left-behind warning: {stderr:?}"
+    );
+    assert!(
+        stderr.contains("fast forward") && stderr.contains("checkout topic"),
+        "missing fast-forward recovery hint: {stderr:?}"
+    );
+}
+
+#[test]
+#[serial]
+fn update_verbose_reports_fetching() {
+    // v1's `small_banner('… fetching, need revision …')` — restored at
+    // INFO, so `-v` surfaces what each project is pulling.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1");
+    let manifest = manifest_yaml(&[("p1", &p1, &[])]);
+    let ws = init_workspace(&sb, &manifest);
+
+    let out = sb
+        .west()
+        .args(["-C", ws.to_str().unwrap(), "-v", "update"])
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
+    assert!(
+        stderr.contains("fetching, need revision main"),
+        "missing fetch info line under -v: {stderr:?}"
+    );
+}
+
+#[test]
+#[serial]
 fn update_records_manifest_rev() {
     if !git_available() {
         return;

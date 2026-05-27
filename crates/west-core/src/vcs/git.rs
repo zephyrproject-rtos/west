@@ -799,7 +799,10 @@ impl Vcs for GitClient {
             && matches!(self.rev_type(repo, RevSpec::Named(rev))?, RevType::Tag | RevType::Commit)
             && let Ok(sha) = self.sha(repo, RevSpec::Named(rev))
         {
-            log::trace!("git: smart fetch skipped for {rev:?} (immutable, already local)");
+            // v1's `dbg('skipping unnecessary fetch')` — the smart
+            // strategy short-circuited because the pinned immutable
+            // revision is already resolvable locally.
+            log::debug!("skipping unnecessary fetch");
             return Ok(sha);
         }
 
@@ -846,6 +849,13 @@ impl Vcs for GitClient {
             argv.push(WEST_SCRATCH_REFSPEC);
         } else if let Some(rev) = spec.revision {
             argv.push(rev);
+        }
+        // v1's `small_banner(f'{name}: fetching, need revision {rev}')`.
+        // No project name at this layer (we operate on a repo path); the
+        // indicatif bar carries it visually. INFO, so default runs stay
+        // quiet and `-v` surfaces what's being pulled.
+        if let Some(rev) = spec.revision {
+            log::info!("fetching, need revision {rev}");
         }
         self.run_with_output(&argv, out)?;
 
