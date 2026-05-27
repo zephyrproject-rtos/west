@@ -152,19 +152,27 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
     } else {
         match args.url.as_deref() {
             Some(url) => bootstrap(&args, url, &loaded.config),
-            None => Err(InitError::Generic(
-                "specify --url to clone a manifest, or --local to register an existing manifest directory".into(),
-            )),
+            None => {
+                // No mode chosen. Re-running `init` inside an existing
+                // workspace is the common case here, so surface the
+                // "already initialized" guard first (matching v1, and
+                // every other invocation); only otherwise tell the user
+                // to pick a mode.
+                resolve_topdir_remote(&args)
+                    .and_then(|ws| eligibility_check(&ws))
+                    .and_then(|()| {
+                        Err(InitError::Generic(
+                            "specify --url to clone a manifest, or --local to register an existing manifest directory".into(),
+                        ))
+                    })
+            }
         }
     };
 
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(InitError::AlreadyInitialized(p)) => {
-            eprintln!(
-                "west: directory {} is already inside a west workspace",
-                p.display(),
-            );
+            eprintln!("west: already initialized in {}", p.display());
             ExitCode::FAILURE
         }
         Err(e) => {
