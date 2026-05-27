@@ -18,7 +18,6 @@ use std::process::ExitCode;
 use clap::Args;
 
 use west_core::manifest::Project;
-use west_core::vcs;
 
 use super::config::LoadedConfig;
 use super::project_format::{self, FormatError, ProjectContext};
@@ -86,6 +85,7 @@ impl From<super::workspace::WorkspaceError> for ListError {
             super::workspace::WorkspaceError::NotInWorkspace => ListError::NotInWorkspace,
             super::workspace::WorkspaceError::Config(s) => ListError::Config(s),
             super::workspace::WorkspaceError::Manifest(s) => ListError::Manifest(s),
+            super::workspace::WorkspaceError::Vcs(s) => ListError::Vcs(s),
         }
     }
 }
@@ -118,9 +118,8 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
     }
 
     let workspace = super::workspace::resolve_workspace_dir()?;
-    let vcs = vcs::from_config(&loaded.config).map_err(|e| ListError::Vcs(e.to_string()))?;
-    let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
-    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let (loaded_manifest, vcs, mut skipped) =
+        super::workspace::load_manifest_resolved(workspace.as_path(), &loaded.config)?;
     let manifest = &loaded_manifest.manifest;
 
     // The "manifest project" — a synthetic entry representing the
@@ -212,7 +211,6 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
     // Surface any imports that were skipped because their owning project
     // wasn't cloned. The listing is real but incomplete; warn and
     // signal partial success via a non-zero exit (returned by `run`).
-    let mut skipped = source.skipped();
     skipped.sort();
     skipped.dedup();
     if !skipped.is_empty() {

@@ -41,6 +41,8 @@ pub(crate) enum WorkspaceError {
     Config(String),
     #[error("{0}")]
     Manifest(String),
+    #[error("{0}")]
+    Vcs(String),
 }
 
 /// Walk up from the current working directory until `.west/` is
@@ -126,6 +128,49 @@ pub(crate) fn load_manifest(
         config_group_filter,
         project_filter,
     ))
+}
+
+/// One-shot variant of [`load_manifest`] for the common case: build
+/// the [`Vcs`] from config, wrap it in a [`ReadOnlyImportSource`],
+/// and return the loaded manifest, the live vcs handle, and the names
+/// of any uncloned projects whose per-project imports were silently
+/// skipped during resolution.
+///
+/// Every per-project-iterating command (`list`, `forall`, `grep`,
+/// `diff`, `status`, `compare`, `extension`, `manifest`) used to
+/// repeat the same three lines — `from_config`, `ReadOnlyImportSource::new`,
+/// `load_manifest` — with each command re-exposing a `Vcs(...)` error
+/// variant of its own. This entry collapses all three into one call
+/// and routes vcs-construction failures through [`WorkspaceError::Vcs`]
+/// so the command's existing `From<WorkspaceError>` is the only thing
+/// that needs to know.
+///
+/// Most callers ignore the skipped-imports list. `list` uses it to
+/// emit a one-line "partial listing" warning and signal partial
+/// success with a non-zero exit code.
+#[allow(clippy::type_complexity)]
+pub(crate) fn load_manifest_resolved(
+    workspace: &Path,
+    config: &Configuration,
+) -> Result<(LoadedManifest, Box<dyn Vcs>, Vec<String>), WorkspaceError> {
+    let vcs = west_core::vcs::from_config(config)
+        .map_err(|e| WorkspaceError::Vcs(e.to_string()))?;
+    let source = ReadOnlyImportSource::new(workspace, vcs.as_ref());
+    let loaded = load_manifest(workspace, config, &source)?;
+    let skipped = source.skipped();
+    Ok((loaded, vcs, skipped))
+}
+
+/// "Has this project's working tree been materialized by
+/// `west update`?" — the per-project filter that gates parallel
+/// per-project work (diff/status/compare/grep/forall/extension).
+///
+/// `exists && vcs.is_repo` covers the two ways a project can be
+/// missing: not on disk at all (never updated) or on disk as a
+/// non-repo (half-clone or stale directory). VCS errors collapse
+/// to `false` — same v1 behaviour.
+pub(crate) fn is_cloned(vcs: &dyn Vcs, abs_path: &Path) -> bool {
+    abs_path.exists() && vcs.is_repo(abs_path).unwrap_or(false)
 }
 
 /// Read the workspace's `manifest.path` config option — the

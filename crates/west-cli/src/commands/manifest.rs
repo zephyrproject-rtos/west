@@ -36,7 +36,7 @@ use std::process::ExitCode;
 use clap::{ArgGroup, Args, ValueEnum};
 
 use west_core::config::Configuration;
-use west_core::vcs::{self, RevSpec, Vcs};
+use west_core::vcs::RevSpec;
 
 use super::config::LoadedConfig;
 
@@ -137,6 +137,7 @@ impl From<super::workspace::WorkspaceError> for ManifestCmdError {
             super::workspace::WorkspaceError::NotInWorkspace => ManifestCmdError::NotInWorkspace,
             super::workspace::WorkspaceError::Config(s) => ManifestCmdError::Config(s),
             super::workspace::WorkspaceError::Manifest(s) => ManifestCmdError::Manifest(s),
+            super::workspace::WorkspaceError::Vcs(s) => ManifestCmdError::Vcs(s),
         }
     }
 }
@@ -184,18 +185,15 @@ fn action_validate(loaded: &LoadedConfig) -> Result<(), ManifestCmdError> {
     // load_manifest already does the full parse + import resolution;
     // any failure surfaces with a clear message.
     let workspace = super::workspace::resolve_workspace_dir()?;
-    let vcs = vcs::from_config(&loaded.config).map_err(|e| ManifestCmdError::Vcs(e.to_string()))?;
-    let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
-    let _ = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let _ = super::workspace::load_manifest_resolved(workspace.as_path(), &loaded.config)?;
     println!("manifest is valid");
     Ok(())
 }
 
 fn action_resolve(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), ManifestCmdError> {
     let workspace = super::workspace::resolve_workspace_dir()?;
-    let vcs = vcs::from_config(&loaded.config).map_err(|e| ManifestCmdError::Vcs(e.to_string()))?;
-    let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
-    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let (loaded_manifest, _vcs, _skipped) =
+        super::workspace::load_manifest_resolved(workspace.as_path(), &loaded.config)?;
     let manifest = &loaded_manifest.manifest;
     let (_root, full) = manifest_paths(&workspace, &loaded.config)?;
 
@@ -211,9 +209,8 @@ fn action_resolve(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), Manif
 
 fn action_freeze(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), ManifestCmdError> {
     let workspace = super::workspace::resolve_workspace_dir()?;
-    let vcs = vcs::from_config(&loaded.config).map_err(|e| ManifestCmdError::Vcs(e.to_string()))?;
-    let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
-    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let (loaded_manifest, vcs, _skipped) =
+        super::workspace::load_manifest_resolved(workspace.as_path(), &loaded.config)?;
     let manifest = &loaded_manifest.manifest;
     let (_root, full) = manifest_paths(&workspace, &loaded.config)?;
 
@@ -239,7 +236,7 @@ fn action_freeze(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), Manife
             continue;
         }
         let repo = workspace.join(&project.path);
-        if !is_cloned(&repo, vcs.as_ref()) {
+        if !super::workspace::is_cloned(vcs.as_ref(), &repo) {
             return Err(ManifestCmdError::UncloneProject {
                 name: project.name.clone(),
                 path: repo,
@@ -292,9 +289,8 @@ fn retain_active_projects(
 
 fn action_untracked(args: ManifestArgs, loaded: &LoadedConfig) -> Result<(), ManifestCmdError> {
     let workspace = super::workspace::resolve_workspace_dir()?;
-    let vcs = vcs::from_config(&loaded.config).map_err(|e| ManifestCmdError::Vcs(e.to_string()))?;
-    let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
-    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let (loaded_manifest, _vcs, _skipped) =
+        super::workspace::load_manifest_resolved(workspace.as_path(), &loaded.config)?;
     let manifest = &loaded_manifest.manifest;
 
     // Owned roots: directories west and its projects manage. A
@@ -549,6 +545,3 @@ fn manifest_paths(
     Ok((manifest_repo_root, full))
 }
 
-fn is_cloned(path: &Path, vcs: &dyn Vcs) -> bool {
-    path.exists() && vcs.is_repo(path).unwrap_or(false)
-}

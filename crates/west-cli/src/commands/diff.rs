@@ -44,7 +44,7 @@ use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
-use west_core::vcs::{self, ColorMode, DiffOutcome, DiffSpec, RevSpec, Vcs, VcsError};
+use west_core::vcs::{ColorMode, DiffOutcome, DiffSpec, RevSpec, Vcs, VcsError};
 
 use super::config::LoadedConfig;
 use super::select;
@@ -115,6 +115,7 @@ impl From<super::workspace::WorkspaceError> for DiffError {
             super::workspace::WorkspaceError::NotInWorkspace => DiffError::NotInWorkspace,
             super::workspace::WorkspaceError::Config(s) => DiffError::Config(s),
             super::workspace::WorkspaceError::Manifest(s) => DiffError::Manifest(s),
+            super::workspace::WorkspaceError::Vcs(s) => DiffError::Vcs(s),
         }
     }
 }
@@ -156,10 +157,8 @@ enum Outcome {
 
 fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffError> {
     let workspace = super::workspace::resolve_workspace_dir()?;
-    let vcs = vcs::from_config(&loaded.config).map_err(|e| DiffError::Vcs(e.to_string()))?;
-
-    let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
-    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let (loaded_manifest, vcs, _skipped) =
+        super::workspace::load_manifest_resolved(workspace.as_path(), &loaded.config)?;
     let manifest = &loaded_manifest.manifest;
 
     let synthetic_path = super::workspace::manifest_path_from_config(&loaded.config)?;
@@ -216,7 +215,7 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
         .into_iter()
         .filter(|p| {
             let abs = workspace.join(&p.path);
-            let cloned = abs.exists() && vcs.is_repo(&abs).unwrap_or(false);
+            let cloned = super::workspace::is_cloned(vcs.as_ref(), &abs);
             if !cloned && !args.projects.is_empty() {
                 uncloned_positional.push(p.name.clone());
             }

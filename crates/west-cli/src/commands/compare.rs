@@ -48,7 +48,7 @@ use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
-use west_core::vcs::{self, ColorMode, CommitSummary, RevSpec, StatusMode, StatusSpec, Vcs, VcsError};
+use west_core::vcs::{ColorMode, CommitSummary, RevSpec, StatusMode, StatusSpec, Vcs, VcsError};
 
 use super::config::LoadedConfig;
 use super::select;
@@ -148,6 +148,7 @@ impl From<super::workspace::WorkspaceError> for CompareError {
             super::workspace::WorkspaceError::NotInWorkspace => CompareError::NotInWorkspace,
             super::workspace::WorkspaceError::Config(s) => CompareError::Config(s),
             super::workspace::WorkspaceError::Manifest(s) => CompareError::Manifest(s),
+            super::workspace::WorkspaceError::Vcs(s) => CompareError::Vcs(s),
         }
     }
 }
@@ -186,10 +187,8 @@ enum Outcome {
 
 fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, CompareError> {
     let workspace = super::workspace::resolve_workspace_dir()?;
-    let vcs = vcs::from_config(&loaded.config).map_err(|e| CompareError::Vcs(e.to_string()))?;
-
-    let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
-    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let (loaded_manifest, vcs, _skipped) =
+        super::workspace::load_manifest_resolved(workspace.as_path(), &loaded.config)?;
     let manifest = &loaded_manifest.manifest;
 
     let synthetic_path = super::workspace::manifest_path_from_config(&loaded.config)?;
@@ -236,7 +235,7 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
         .into_iter()
         .filter(|p| {
             let abs = workspace.join(&p.path);
-            let cloned = abs.exists() && vcs.is_repo(&abs).unwrap_or(false);
+            let cloned = super::workspace::is_cloned(vcs.as_ref(), &abs);
             if !cloned && !args.projects.is_empty() {
                 uncloned_positional.push(p.name.clone());
             }

@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use west_core::manifest::{Manifest, relative_path_escapes_root};
-use west_core::vcs::{self, Vcs};
+use west_core::vcs::Vcs;
 use west_core::west_commands::{WestCommandsError, WestCommandsFile};
 
 use super::config::LoadedConfig;
@@ -93,6 +93,7 @@ impl From<super::workspace::WorkspaceError> for ExtensionError {
             super::workspace::WorkspaceError::NotInWorkspace => ExtensionError::NotInWorkspace,
             super::workspace::WorkspaceError::Config(s) => ExtensionError::Config(s),
             super::workspace::WorkspaceError::Manifest(s) => ExtensionError::Manifest(s),
+            super::workspace::WorkspaceError::Vcs(s) => ExtensionError::Vcs(s),
         }
     }
 }
@@ -190,9 +191,8 @@ fn find_spec(
     if !allow_extensions(loaded) {
         return Ok(None);
     }
-    let vcs = vcs::from_config(&loaded.config).map_err(|e| ExtensionError::Vcs(e.to_string()))?;
-    let source = super::workspace::ReadOnlyImportSource::new(workspace, vcs.as_ref());
-    let loaded_manifest = super::workspace::load_manifest(workspace, &loaded.config, &source)?;
+    let (loaded_manifest, vcs, _skipped) =
+        super::workspace::load_manifest_resolved(workspace, &loaded.config)?;
     let extensions = discover(workspace, &loaded_manifest.manifest, vcs.as_ref())?;
     Ok(extensions.get(name).cloned())
 }
@@ -247,7 +247,7 @@ fn discover(
     // Manifest project's own `self.west-commands:`. The synthetic
     // entry lives at `<workspace>/<self.path>`.
     let self_root = workspace.join(&manifest.self_.path);
-    if is_cloned(&self_root, vcs) {
+    if super::workspace::is_cloned(vcs, &self_root) {
         for cmd_file in &manifest.self_.west_commands {
             absorb_commands_file(
                 &self_root,
@@ -264,7 +264,7 @@ fn discover(
     // own root.
     for project in &manifest.projects {
         let project_root = workspace.join(&project.path);
-        if !is_cloned(&project_root, vcs) {
+        if !super::workspace::is_cloned(vcs, &project_root) {
             continue;
         }
         for cmd_file in &project.west_commands {
@@ -329,10 +329,6 @@ fn absorb_commands_file(
     Ok(())
 }
 
-fn is_cloned(path: &Path, vcs: &dyn Vcs) -> bool {
-    path.exists() && vcs.is_repo(path).unwrap_or(false)
-}
-
 /// One project's contribution to the workspace's extension command
 /// catalog. Used by `west help` to render the
 /// "extension commands from project X (path: Y):" sections.
@@ -362,9 +358,8 @@ pub(crate) fn list_for_help(
         return Ok(Vec::new());
     }
     let workspace = super::workspace::resolve_workspace_dir()?;
-    let vcs = vcs::from_config(&loaded.config).map_err(|e| ExtensionError::Vcs(e.to_string()))?;
-    let source = super::workspace::ReadOnlyImportSource::new(&workspace, vcs.as_ref());
-    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let (loaded_manifest, vcs, _skipped) =
+        super::workspace::load_manifest_resolved(&workspace, &loaded.config)?;
     let manifest = &loaded_manifest.manifest;
 
     let mut groups: Vec<ProjectExtensions> = Vec::new();
@@ -372,7 +367,7 @@ pub(crate) fn list_for_help(
     // Self-project ("manifest") first. Matches the order the
     // dispatcher uses and python v1's section order.
     let self_root = workspace.join(&manifest.self_.path);
-    if is_cloned(&self_root, vcs.as_ref()) {
+    if super::workspace::is_cloned(vcs.as_ref(), &self_root) {
         let mut commands: Vec<(String, String)> = Vec::new();
         for cmd_file in &manifest.self_.west_commands {
             collect_commands_into(&self_root, cmd_file, &mut commands)?;
@@ -388,7 +383,7 @@ pub(crate) fn list_for_help(
 
     for project in &manifest.projects {
         let project_root = workspace.join(&project.path);
-        if !is_cloned(&project_root, vcs.as_ref()) {
+        if !super::workspace::is_cloned(vcs.as_ref(), &project_root) {
             continue;
         }
         let mut commands: Vec<(String, String)> = Vec::new();

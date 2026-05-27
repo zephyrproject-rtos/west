@@ -47,7 +47,6 @@ use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
-use west_core::vcs;
 
 use super::config::LoadedConfig;
 use super::select;
@@ -114,6 +113,7 @@ impl From<super::workspace::WorkspaceError> for ForallError {
             super::workspace::WorkspaceError::NotInWorkspace => ForallError::NotInWorkspace,
             super::workspace::WorkspaceError::Config(s) => ForallError::Config(s),
             super::workspace::WorkspaceError::Manifest(s) => ForallError::Manifest(s),
+            super::workspace::WorkspaceError::Vcs(s) => ForallError::Vcs(s),
         }
     }
 }
@@ -142,12 +142,8 @@ pub fn run(args: ForallArgs, loaded: &mut LoadedConfig) -> ExitCode {
 /// `Ok(false)` = at least one failed (summary already printed).
 fn run_inner(args: ForallArgs, loaded: &mut LoadedConfig) -> Result<bool, ForallError> {
     let workspace = super::workspace::resolve_workspace_dir()?;
-    let vcs = vcs::from_config(&loaded.config).map_err(|e| ForallError::Vcs(e.to_string()))?;
-
-    // Read-only manifest resolution: per-project imports for uncloned
-    // projects are skipped silently (we'll filter to cloned anyway).
-    let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
-    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let (loaded_manifest, vcs, _skipped) =
+        super::workspace::load_manifest_resolved(workspace.as_path(), &loaded.config)?;
     let manifest = &loaded_manifest.manifest;
 
     let synthetic_path = super::workspace::manifest_path_from_config(&loaded.config)?;
@@ -211,7 +207,7 @@ fn run_inner(args: ForallArgs, loaded: &mut LoadedConfig) -> Result<bool, Forall
         .into_iter()
         .filter(|p| {
             let abs = workspace.join(&p.path);
-            let cloned = abs.exists() && vcs.is_repo(&abs).unwrap_or(false);
+            let cloned = super::workspace::is_cloned(vcs.as_ref(), &abs);
             if !cloned && !args.projects.is_empty() {
                 uncloned_positional.push(p.name.clone());
             }

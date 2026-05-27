@@ -144,6 +144,7 @@ impl From<super::workspace::WorkspaceError> for GrepError {
             super::workspace::WorkspaceError::NotInWorkspace => GrepError::NotInWorkspace,
             super::workspace::WorkspaceError::Config(s) => GrepError::Config(s),
             super::workspace::WorkspaceError::Manifest(s) => GrepError::Manifest(s),
+            super::workspace::WorkspaceError::Vcs(s) => GrepError::Vcs(s),
         }
     }
 }
@@ -174,10 +175,8 @@ enum Outcome {
 
 fn run_inner(args: GrepArgs, loaded: &LoadedConfig) -> Result<Outcome, GrepError> {
     let workspace = super::workspace::resolve_workspace_dir()?;
-    let vcs = west_core::vcs::from_config(&loaded.config)
-        .map_err(|e| GrepError::Vcs(e.to_string()))?;
-    let source = super::workspace::ReadOnlyImportSource::new(workspace.as_path(), vcs.as_ref());
-    let loaded_manifest = super::workspace::load_manifest(&workspace, &loaded.config, &source)?;
+    let (loaded_manifest, vcs, _skipped) =
+        super::workspace::load_manifest_resolved(workspace.as_path(), &loaded.config)?;
     let manifest = &loaded_manifest.manifest;
 
     // Resolve tool selection: --tool > grep.tool > GitGrep.
@@ -256,7 +255,7 @@ fn run_inner(args: GrepArgs, loaded: &LoadedConfig) -> Result<Outcome, GrepError
         .into_iter()
         .filter(|p| {
             let abs = workspace.join(&p.path);
-            abs.exists() && vcs.is_repo(&abs).unwrap_or(false)
+            super::workspace::is_cloned(vcs.as_ref(), &abs)
         })
         .collect();
 
