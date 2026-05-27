@@ -1551,6 +1551,46 @@ fn fetch_lands_bare_sha_via_scratch_refspec_then_set_manifest_rev_tidies_it() {
 }
 
 #[test]
+fn narrow_fetch_uses_direct_refspec_for_sha() {
+    // Under narrow, a SHA revision is fetched directly — no
+    // all-branches scratch refspec. Local transport serves a
+    // reachable SHA, so this succeeds and leaves refs/west/* empty.
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let (bare, side_sha) = bare_source_with_side_branch(tmp.path());
+    let dest = tmp.path().join("dest");
+    std::fs::create_dir_all(&dest).unwrap();
+    git(&["init", "-q", "--initial-branch=placeholder", "."], &dest);
+
+    let v = GitClient::new(GitOptions {
+        fetch_narrow: true,
+        ..GitOptions::default()
+    });
+    let resolved = v
+        .fetch(
+            &dest,
+            &FetchSpec {
+                remote: bare.to_str().unwrap(),
+                revision: Some(&side_sha),
+            },
+            &mut Output::Native,
+        )
+        .unwrap();
+    assert_eq!(resolved, side_sha);
+    let scratch = git_capture(
+        &["for-each-ref", "--format=%(refname)", "refs/west/"],
+        &dest,
+    );
+    assert!(
+        scratch.is_empty(),
+        "narrow fetch must use the direct refspec, not the scratch namespace; got {scratch:?}"
+    );
+}
+
+#[test]
 fn init_then_fetch_lands_revision_with_clean_branch_namespace() {
     // The full no-cache network path at the vcs level: init an empty
     // repo wired to a remote, fetch a branch revision, pin it, and

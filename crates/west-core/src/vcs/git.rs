@@ -84,6 +84,12 @@ pub struct GitOptions {
     /// fail depending on the Git host). The CLI's `--narrow` /
     /// `update.narrow` map onto this. Mirrors v1's `--narrow`.
     pub fetch_narrow: bool,
+    /// Sourced from `tool.git.fetch.extra-args` (a TOML list of
+    /// strings). Spliced verbatim into the `git fetch` argv before the
+    /// `--` separator — a general escape hatch (shallow `--depth=N`,
+    /// `--filter=blob:none`, …). The CLI's `--fetch-opt` maps onto it.
+    /// Mirrors v1's `-o`/`--fetch-opt`.
+    pub fetch_extra_args: Vec<String>,
     /// Sourced from `tool.git.fetch.depth`. When set, fetches are shallow
     /// to that depth via `--depth=N`.
     pub fetch_depth: Option<u32>,
@@ -116,6 +122,7 @@ impl Default for GitOptions {
             fetch_strategy: FetchStrategy::default(),
             fetch_tags: None,
             fetch_narrow: false,
+            fetch_extra_args: Vec::new(),
             fetch_depth: None,
             fetch_force: true,
             submodules_recurse: true,
@@ -169,6 +176,11 @@ impl GitClient {
         let fetch_narrow = match config.get_bool("tool.git.fetch.narrow") {
             Ok(opt) => opt.unwrap_or(false),
             Err(e) => return Err(bad_option("tool.git.fetch.narrow", &e.to_string())),
+        };
+
+        let fetch_extra_args = match config.get_list_str("tool.git.fetch.extra-args") {
+            Ok(opt) => opt.unwrap_or_default(),
+            Err(e) => return Err(bad_option("tool.git.fetch.extra-args", &e.to_string())),
         };
 
         let fetch_depth = match config.get("tool.git.fetch.depth") {
@@ -229,6 +241,7 @@ impl GitClient {
             fetch_strategy,
             fetch_tags,
             fetch_narrow,
+            fetch_extra_args,
             fetch_depth,
             fetch_force,
             submodules_recurse,
@@ -802,6 +815,11 @@ impl Vcs for GitClient {
         argv.push(if self.no_tags() { "--no-tags" } else { "--tags" });
         if let Some(d) = depth_arg.as_deref() {
             argv.push(d);
+        }
+        // Caller-supplied passthrough (`tool.git.fetch.extra-args` /
+        // `--fetch-opt`), spliced verbatim before the `--` separator.
+        for arg in &self.opts.fetch_extra_args {
+            argv.push(arg);
         }
         argv.push("--");
         argv.push(spec.remote);

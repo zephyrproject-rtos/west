@@ -81,10 +81,17 @@ pub struct UpdateArgs {
     #[arg(short = 'f', long, value_enum)]
     pub fetch: Option<FetchArg>,
 
-    /// Skip `--tags` in fetch. Equivalent to
-    /// `--config tool.git.fetch.tags=false`.
+    /// Fetch just the requested revision: skip tags and fetch the
+    /// revision directly (may fail for a SHA on some hosts). Equivalent
+    /// to `--config tool.git.fetch.narrow=true`.
     #[arg(short = 'n', long)]
     pub narrow: bool,
+
+    /// Extra option to pass through to `git fetch` (e.g.
+    /// `-o=--depth=1`). Repeatable. Appends to
+    /// `tool.git.fetch.extra-args`.
+    #[arg(short = 'o', long = "fetch-opt", value_name = "OPT", action = clap::ArgAction::Append)]
+    pub fetch_opt: Vec<String>,
 
     /// If on a branch that's an ancestor of manifest-rev, keep it
     /// checked out instead of detaching.
@@ -662,17 +669,20 @@ fn splice_flags_into_config(args: &UpdateArgs, config: &mut Configuration) -> Re
     if args.keep_descendants {
         splice_inline(config, "update.keep-descendants", ConfigValue::Bool(true))?;
     }
-    // `--narrow` (CLI) OR `update.narrow` (config) suppresses tag
-    // fetching. The git layer only knows `tool.git.fetch.tags`, so
-    // translate either source into that key. The CLI flag wins when
-    // set; otherwise honor the persisted config option.
+    // `--narrow` (CLI) OR `update.narrow` (config) enables the git
+    // layer's narrow fetch: skip tags AND fetch the exact revision
+    // directly (no all-branches scratch refspec, even for a SHA —
+    // which may fail on some hosts, narrow's documented trade-off).
+    // The git client reads `tool.git.fetch.narrow`; map either source
+    // onto it. The CLI flag wins when set; otherwise honor the
+    // persisted config option.
     let narrow = args.narrow
         || config
             .get_bool("update.narrow")
             .map_err(|e| e.to_string())?
             .unwrap_or(false);
     if narrow {
-        splice_inline(config, "tool.git.fetch.tags", ConfigValue::Bool(false))?;
+        splice_inline(config, "tool.git.fetch.narrow", ConfigValue::Bool(true))?;
     }
     if let Some(f) = args.fetch {
         splice_inline(
@@ -680,6 +690,24 @@ fn splice_flags_into_config(args: &UpdateArgs, config: &mut Configuration) -> Re
             "tool.git.fetch.strategy",
             ConfigValue::String(f.as_config_str().to_owned()),
         )?;
+    }
+    if !args.fetch_opt.is_empty() {
+        // Append to whatever is already present in
+        // `tool.git.fetch.extra-args`.
+        let mut combined: Vec<ConfigValue> = match config
+            .get("tool.git.fetch.extra-args")
+            .map_err(|e| e.to_string())?
+        {
+            None => Vec::new(),
+            Some(ConfigValue::List(items)) => items,
+            Some(other) => {
+                return Err(format!("tool.git.fetch.extra-args must be a list, got {other:?}"));
+            }
+        };
+        for raw in &args.fetch_opt {
+            combined.push(ConfigValue::String(raw.clone()));
+        }
+        splice_inline(config, "tool.git.fetch.extra-args", ConfigValue::List(combined))?;
     }
     if !args.group_filter.is_empty() {
         // Append to whatever is already present in `update.group-filter`.
