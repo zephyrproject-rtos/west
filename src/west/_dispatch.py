@@ -88,8 +88,7 @@ def _load_command_class(module_path, class_name):
     if not p.is_file():
         raise SystemExit(f"west._dispatch: module file not found: {module_path}")
     # Append the file's directory to sys.path so the extension can
-    # do `from sibling_module import …` — matches python `west`'s
-    # `_commands_module_from_file` behaviour.
+    # do `from sibling_module import …`.
     sys.path.insert(0, str(p.parent))
     spec = importlib.util.spec_from_file_location(f"west.commands.ext.{class_name}", str(p))
     if spec is None or spec.loader is None:
@@ -138,6 +137,21 @@ def main():
 
     cls = _load_command_class(module_path, class_name)
     cmd = cls()
+    # Surface the issue-927 deprecation note in this command's --help
+    # when the extension's constructor set the ignored `help` field.
+    # The help shown to users comes from west-commands.yml, not this
+    # field; flag it so authors can drop it. See
+    # https://github.com/zephyrproject-rtos/west/issues/927.
+    if cmd.help:
+        cmd.description += f'''
+WARNING: in file {module_path},
+  the WestCommand constructor of the west extension '{cmd.name}' sets
+  the ignored 'help' field to "{cmd.help}"
+  but only the help from the west-commands.yml file has ever been used.
+  See west bug https://github.com/zephyrproject-rtos/west/issues/927.
+  Change that help field to "" to silence this warning while preserving
+  compatibility with older west versions that unfortunately required
+  that help parameter.'''
 
     # Build a parent ArgumentParser with a subparsers slot, then let
     # the command register its own subparser via add_parser. Mirrors

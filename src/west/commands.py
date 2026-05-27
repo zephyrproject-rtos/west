@@ -5,20 +5,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse
-import importlib.util
-import itertools
 import os
 import re
 import shutil
 import subprocess
 import sys
 from abc import ABC, abstractmethod
-from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
 from enum import IntEnum
-from pathlib import Path
-from types import ModuleType
 from typing import NoReturn
 
 # Enable ANSI escape interpretation on Windows 10 1607+ (Aug 2016)
@@ -39,10 +33,9 @@ if sys.platform == "win32":
             _k32.SetConsoleMode(_h, _mode.value | _ENABLE_VT)
     del _handle_id, _h, _mode, _ENABLE_VT, _k32, _ctypes
 
-from west import _west_native
 from west.configuration import Configuration
-from west.manifest import Manifest, Project
-from west.util import PathType, escapes_directory, quote_sh_list
+from west.manifest import Manifest
+from west.util import PathType, quote_sh_list
 
 '''\
 This package provides WestCommand, which is the common abstraction all
@@ -51,12 +44,6 @@ west commands subclass.
 This package also provides support for extension commands.'''
 
 __all__ = ['CommandContextError', 'CommandError', 'WestCommand']
-
-# Cache which maps files implementing extension commands to their
-# imported modules.
-_EXT_MODULES_CACHE: dict[str, ModuleType] = {}
-# Infinite iterator of "fresh" extension command module names.
-_EXT_MODULES_NAME_IT = (f'west.commands.ext.cmd_{i}' for i in itertools.count(1))
 
 
 class CommandError(RuntimeError):
@@ -571,199 +558,3 @@ class WestCommand(ABC):
     def color_ui(self) -> bool:
         '''Should we colorize output?'''
         return self.config.getboolean('color.ui', default=True) if self.has_config else True
-
-
-#
-# Private extension API
-#
-# This is used internally by main.py but should be considered an
-# implementation detail.
-#
-
-
-@dataclass
-class _ExtFactory:
-    py_file: str
-    name: str
-    attr: str
-
-    def __call__(self):
-        # Append the python file's directory to sys.path. This lets
-        # its code import helper modules in a natural way.
-        py_dir = os.path.dirname(self.py_file)
-        sys.path.append(py_dir)
-
-        # Load the module containing the command. Convert only
-        # expected exceptions to ExtensionCommandError.
-        try:
-            mod = _commands_module_from_file(self.py_file)
-        except ImportError as ie:
-            raise ExtensionCommandError(hint=f'could not import {self.py_file}') from ie
-
-        # Get the attribute which provides the WestCommand subclass.
-        try:
-            cls = getattr(mod, self.attr)
-        except AttributeError as ae:
-            raise ExtensionCommandError(hint=f'no attribute {self.attr} in {self.py_file}') from ae
-
-        # Create the command instance and return it.
-        try:
-            cmd = cls()
-        except Exception as e:
-            raise ExtensionCommandError(hint='command constructor threw an exception') from e
-
-        if cmd.help:
-            # Very "soft" warning that does not pollute expected output
-            cmd.description += f'''
-WARNING: in file {self.py_file},
-  the WestCommand constructor of the west extension '{cmd.name}' sets
-  the ignored 'help' field to "{cmd.help}"
-  but only the help from the west-commands.yml file has ever been used.
-  See west bug https://github.com/zephyrproject-rtos/west/issues/927.
-  Change that help field to "" to silence this warning while preserving
-  compatibility with older west versions that unfortunately required
-  that help parameter.'''
-
-        return cmd
-
-
-@dataclass
-class WestExtCommandSpec:
-    # An object which allows instantiating a west extension.
-
-    # Command name, as known to the user
-    name: str
-
-    # Project instance which defined the command
-    project: Project
-
-    # Help string in west-commands.yml, or a default value
-    help: str
-
-    # "Factory" callable for the command.
-    #
-    # This returns a WestCommand instance when called.
-    # It may do some additional steps (like importing the definition of
-    # the command) before constructing it, however.
-    factory: _ExtFactory
-
-
-def extension_commands(config: Configuration, manifest: Manifest | None = None):
-    # Get descriptions of available extension commands.
-    #
-    # The return value is an ordered map from project paths to lists of
-    # WestExtCommandSpec objects, for projects which define extension
-    # commands. The map's iteration order matches the manifest.projects
-    # order.
-    #
-    # The return value is empty if configuration option
-    # ``commands.allow_extensions`` is false.
-    #
-    # :param manifest: a parsed ``west.manifest.Manifest`` object, or None
-    #                  to reload a new one.
-
-    allow_extensions = config.getboolean('commands.allow_extensions', default=True)
-    if not allow_extensions:
-        return {}
-
-    if manifest is None:
-        manifest = Manifest.from_file()
-
-    specs = OrderedDict()
-    for project in manifest.projects:
-        if project.west_commands:
-            specs[project.path] = _ext_specs(project)
-    return specs
-
-
-def _ext_specs(project):
-    # Get a list of WestExtCommandSpec objects for the given
-    # west.manifest.Project.
-
-    ret = []
-
-    for cmd in project.west_commands:
-        spec_file = os.path.join(project.abspath, cmd)
-
-        # Verify project.west_commands isn't trying a directory traversal
-        # outside of the project.
-        if escapes_directory(spec_file, project.abspath):
-            raise ExtensionCommandError(
-                hint=f'west-commands file {cmd} escapes project path {project.path}'
-            )
-
-        # The project may not be cloned yet, or this might be coming
-        # from a manifest that was copy/pasted into a self import
-        # location.
-        if not os.path.exists(spec_file):
-            continue
-
-        # Load the spec file. Schema validation against
-        # `west-commands.yml`'s structure is owned by the rust core
-        # (`west_core::west_commands::WestCommandsFile`); the rust
-        # binary runs that check during its own extension discovery.
-        # The python path here just parses the file as structured
-        # data — a malformed key shape surfaces as a KeyError /
-        # TypeError below.
-        with open(spec_file) as f:
-            try:
-                commands_spec = _west_native.parse_yaml(f.read())
-            except ValueError as e:
-                raise ExtensionCommandError from e
-
-        for commands_desc in commands_spec['west-commands']:
-            ret.extend(_ext_specs_from_desc(project, commands_desc))
-    return ret
-
-
-def _ext_specs_from_desc(project, commands_desc):
-    py_file = os.path.join(project.abspath, commands_desc['file'])
-
-    # Verify the YAML's python file doesn't escape the project directory.
-    if escapes_directory(py_file, project.abspath):
-        raise ExtensionCommandError(
-            hint=f'extension command python file "{commands_desc["file"]}" '
-            f'escapes project path {project.path}'
-        )
-
-    # Create the command thunks.
-    thunks = []
-    for command_desc in commands_desc['commands']:
-        name = command_desc['name']
-        attr = command_desc.get('class', name)
-        help = command_desc.get('help', f'(no help provided; try "west {name} -h")')
-        factory = _ExtFactory(py_file, name, attr)
-        thunks.append(WestExtCommandSpec(name, project, help, factory))
-
-    # Return the thunks for this project.
-    return thunks
-
-
-def _commands_module_from_file(file):
-    # Python magic for importing a module containing west extension
-    # commands. To avoid polluting the sys.modules key space, we put
-    # these modules in an (otherwise unpopulated) west.commands.ext
-    # package.
-    #
-    # The file is imported as a module named
-    # west.commands.ext.A_FRESH_IDENTIFIER. This module object is
-    # returned from a cache if the same file is ever imported again,
-    # to avoid a double import in case the file maintains module-level
-    # state or defines multiple commands.
-
-    # Use an absolute pathobj to handle canonicalization, e.g.:
-    #
-    # - Windows and macOS have case insensitive names
-    # - Windows accepts slash or backslash as separator
-    # - POSIX operating systems have symlinks
-    pathobj = Path(file).resolve()
-    if pathobj in _EXT_MODULES_CACHE:
-        return _EXT_MODULES_CACHE[pathobj]
-
-    mod_name = next(_EXT_MODULES_NAME_IT)
-    spec = importlib.util.spec_from_file_location(mod_name, os.fspath(pathobj))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    _EXT_MODULES_CACHE[file] = mod
-
-    return mod
