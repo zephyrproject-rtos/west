@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{ArgAction, Args, Parser};
+use console::Style;
 use log::LevelFilter;
 
 pub mod alias;
@@ -87,13 +88,17 @@ pub struct VerbosityArgs {
 impl VerbosityArgs {
     pub fn log_level_filter(&self) -> LevelFilter {
         let net = i32::from(self.verbose) - i32::from(self.quiet);
+        // Warnings are visible by default — they're actionable, not
+        // progress (the indicatif bars are the progress UI). Info and
+        // below are opt-in via `-v`. `-q` drops to errors-only and
+        // `-qq` silences everything.
         match net {
-            i32::MIN..=-1 => LevelFilter::Off,
-            0 => LevelFilter::Error,
-            1 => LevelFilter::Warn,
-            2 => LevelFilter::Info,
-            3 => LevelFilter::Debug,
-            _ => LevelFilter::Trace,
+            i32::MIN..=-2 => LevelFilter::Off, // -qq (and beyond)
+            -1 => LevelFilter::Error,          // -q
+            0 => LevelFilter::Warn,            // default
+            1 => LevelFilter::Info,            // -v
+            2 => LevelFilter::Debug,           // -vv
+            _ => LevelFilter::Trace,           // -vvv+
         }
     }
 }
@@ -113,8 +118,32 @@ pub fn run() -> ExitCode {
         }
     }
 
+    // Clean, tool-like log lines — no timestamp or Rust module path.
+    // `error:`/`warning:` get a coloured prefix (NO_COLOR / non-tty
+    // aware via `console`, which inspects stderr); info/debug are the
+    // bare message (milestone/diagnostic content already carries its
+    // own `project:` framing); trace keeps the target for deep
+    // debugging. All on stderr, so stdout stays machine-readable.
     env_logger::Builder::new()
         .filter_level(initial.verbosity.log_level_filter())
+        .format(|buf, record| {
+            use std::io::Write;
+            let msg = record.args();
+            match record.level() {
+                log::Level::Error => writeln!(
+                    buf,
+                    "{} {msg}",
+                    Style::new().red().bold().for_stderr().apply_to("west: error:")
+                ),
+                log::Level::Warn => writeln!(
+                    buf,
+                    "{} {msg}",
+                    Style::new().yellow().bold().for_stderr().apply_to("west: warning:")
+                ),
+                log::Level::Info | log::Level::Debug => writeln!(buf, "{msg}"),
+                log::Level::Trace => writeln!(buf, "[{}] {msg}", record.target()),
+            }
+        })
         .init();
 
     let mut loaded = match commands::config::load(&initial.config_file, &initial.config) {

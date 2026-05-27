@@ -107,11 +107,12 @@ fn exec_via_alias_overrides_top_level_flags() {
     let stdout = std::str::from_utf8(&res.get_output().stdout).unwrap();
     let stderr = std::str::from_utf8(&res.get_output().stderr).unwrap();
     assert_eq!(stdout, "value\n");
-    // -vvv ⇒ Debug-level filter. west_core::topdir emits a `debug!` line per
-    // directory it checks; that line is the visible evidence that the
-    // subprocess saw the elevated verbosity.
+    // -vvv ⇒ Trace-level filter. Trace lines carry their module
+    // target; west_core::config logs each config layer it loads, so a
+    // `[west_core::config]` line is the visible, -vvv-specific evidence
+    // the subprocess saw the elevated verbosity.
     assert!(
-        stderr.contains("DEBUG west_core::topdir"),
-        "expected debug output from -vvv subprocess, got stderr: {stderr}"
+        stderr.contains("west_core::config"),
+        "expected trace output from -vvv subprocess, got stderr: {stderr}"
     );
 }
