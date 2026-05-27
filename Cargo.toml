@@ -16,3 +16,13 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 thiserror = "2"
+
+# Release tuned for distribution size. The `west` binary is shipped
+# inside the maturin wheel + via `cargo install`, so build time is
+# paid once by us and download/disk space is what end users feel.
+# `lto = "fat"` cross-crate inlines and dead-strips; `codegen-units
+# = 1` gives LTO the full picture to chew on. Costs ~2-3× release
+# build time.
+[profile.release]
+lto = "fat"
+codegen-units = 1
