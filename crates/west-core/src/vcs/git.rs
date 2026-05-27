@@ -802,7 +802,7 @@ impl Vcs for GitClient {
             // v1's `dbg('skipping unnecessary fetch')` — the smart
             // strategy short-circuited because the pinned immutable
             // revision is already resolvable locally.
-            log::debug!("skipping unnecessary fetch");
+            log::debug!("skipping unnecessary fetch for {rev}");
             return Ok(sha);
         }
 
@@ -852,10 +852,12 @@ impl Vcs for GitClient {
         }
         // v1's `small_banner(f'{name}: fetching, need revision {rev}')`.
         // No project name at this layer (we operate on a repo path); the
-        // indicatif bar carries it visually. INFO, so default runs stay
-        // quiet and `-v` surfaces what's being pulled.
+        // indicatif bar carries it visually. DEBUG (not INFO), because
+        // with N projects fetching in parallel this fires N times in
+        // close succession — keeping it behind `-vv` lets `-v` stay
+        // quiet for default-volume diagnostics.
         if let Some(rev) = spec.revision {
-            log::info!("fetching, need revision {rev}");
+            log::debug!("fetching, need revision {rev}");
         }
         self.run_with_output(&argv, out)?;
 

@@ -238,8 +238,9 @@ fn update_warns_about_left_behind_branch() {
 #[test]
 #[serial]
 fn update_verbose_reports_fetching() {
-    // v1's `small_banner('… fetching, need revision …')` — restored at
-    // INFO, so `-v` surfaces what each project is pulling.
+    // v1's `small_banner('… fetching, need revision …')` — at DEBUG
+    // (so `-vv` reveals per-project fetch chatter, with `-v` keeping
+    // the diagnostic volume to the lower-frequency milestones).
     if !git_available() {
         return;
     }
@@ -250,13 +251,13 @@ fn update_verbose_reports_fetching() {
 
     let out = sb
         .west()
-        .args(["-C", ws.to_str().unwrap(), "-v", "update"])
+        .args(["-C", ws.to_str().unwrap(), "-vv", "update"])
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
     assert!(
         stderr.contains("fetching, need revision main"),
-        "missing fetch info line under -v: {stderr:?}"
+        "missing fetch debug line under -vv: {stderr:?}"
     );
 }
 
