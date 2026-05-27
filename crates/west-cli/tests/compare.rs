@@ -160,13 +160,7 @@ fn compare_clean_workspace_emits_no_output() {
 
     let out = sb
         .west()
-        .args([
-            "-C",
-            ws.to_str().unwrap(),
-            "compare",
-            "--color",
-            "never",
-        ])
+        .args(["-C", ws.to_str().unwrap(), "compare", "--color", "never"])
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
@@ -192,13 +186,7 @@ fn compare_dirty_project_emits_output() {
 
     let out = sb
         .west()
-        .args([
-            "-C",
-            ws.to_str().unwrap(),
-            "compare",
-            "--color",
-            "never",
-        ])
+        .args(["-C", ws.to_str().unwrap(), "compare", "--color", "never"])
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
@@ -209,12 +197,18 @@ fn compare_dirty_project_emits_output() {
         stderr.contains("=== alpha"),
         "missing alpha banner on stderr: {stderr:?}"
     );
-    assert!(!stdout.contains("=== alpha"), "banner leaked onto stdout: {stdout:?}");
+    assert!(
+        !stdout.contains("=== alpha"),
+        "banner leaked onto stdout: {stdout:?}"
+    );
     assert!(
         stdout.contains("--- manifest-rev:"),
         "missing manifest-rev sub-banner: {stdout:?}"
     );
-    assert!(stdout.contains("HEAD:"), "missing HEAD sub-banner: {stdout:?}");
+    assert!(
+        stdout.contains("HEAD:"),
+        "missing HEAD sub-banner: {stdout:?}"
+    );
     assert!(
         stdout.contains("--- status:"),
         "missing status sub-banner: {stdout:?}"
@@ -244,13 +238,7 @@ fn compare_head_diverges_from_manifest_rev_emits_output() {
 
     let out = sb
         .west()
-        .args([
-            "-C",
-            ws.to_str().unwrap(),
-            "compare",
-            "--color",
-            "never",
-        ])
+        .args(["-C", ws.to_str().unwrap(), "compare", "--color", "never"])
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
@@ -287,13 +275,7 @@ fn compare_branch_only_signal_shows_by_default() {
 
     let out = sb
         .west()
-        .args([
-            "-C",
-            ws.to_str().unwrap(),
-            "compare",
-            "--color",
-            "never",
-        ])
+        .args(["-C", ws.to_str().unwrap(), "compare", "--color", "never"])
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
@@ -554,13 +536,7 @@ fn compare_color_always_emits_colored_banner() {
 
     let out = sb
         .west()
-        .args([
-            "-C",
-            ws.to_str().unwrap(),
-            "compare",
-            "--color",
-            "always",
-        ])
+        .args(["-C", ws.to_str().unwrap(), "compare", "--color", "always"])
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();

@@ -40,7 +40,6 @@ use west_core::vcs::RevSpec;
 
 use super::config::LoadedConfig;
 
-
 #[derive(Args, Debug)]
 #[command(group = ArgGroup::new("action")
     .required(true)
@@ -430,10 +429,7 @@ fn find_untracked(dir: &Path, owned: &[PathBuf], out: &mut Vec<PathBuf>) {
 /// `Some(format)` → wrap as `{untracked: [...]}` and serialize via
 /// the chosen format. The wrap is mandatory for TOML (top-level
 /// must be a table) and incidentally reads cleanly under jq / yq.
-fn format_untracked(
-    paths: &[String],
-    format: Option<Format>,
-) -> Result<String, ManifestCmdError> {
+fn format_untracked(paths: &[String], format: Option<Format>) -> Result<String, ManifestCmdError> {
     match format {
         None => {
             if paths.is_empty() {
@@ -544,4 +540,3 @@ fn manifest_paths(
     let full = manifest_repo_root.join(&manifest_file);
     Ok((manifest_repo_root, full))
 }
-

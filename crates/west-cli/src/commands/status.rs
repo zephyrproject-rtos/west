@@ -129,8 +129,12 @@ pub fn run(args: StatusArgs, loaded: &mut LoadedConfig) -> ExitCode {
     }
     match run_inner(args, loaded) {
         Ok(Outcome::AllClean) => ExitCode::SUCCESS,
-        Ok(Outcome::SomeDirty { exit_code_flag: false }) => ExitCode::SUCCESS,
-        Ok(Outcome::SomeDirty { exit_code_flag: true }) => ExitCode::from(1),
+        Ok(Outcome::SomeDirty {
+            exit_code_flag: false,
+        }) => ExitCode::SUCCESS,
+        Ok(Outcome::SomeDirty {
+            exit_code_flag: true,
+        }) => ExitCode::from(1),
         Ok(Outcome::Failures) => ExitCode::FAILURE,
         Err(e @ StatusError::UnclonedPositional { .. }) => {
             log::error!("{e}");
@@ -251,13 +255,31 @@ fn run_inner(args: StatusArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Sta
         pool.install(|| {
             projects
                 .par_iter()
-                .map(|p| status_one(p, &workspace, vcs.as_ref(), mode, resolved_color, &args.extra))
+                .map(|p| {
+                    status_one(
+                        p,
+                        &workspace,
+                        vcs.as_ref(),
+                        mode,
+                        resolved_color,
+                        &args.extra,
+                    )
+                })
                 .collect()
         })
     } else {
         projects
             .iter()
-            .map(|p| status_one(p, &workspace, vcs.as_ref(), mode, resolved_color, &args.extra))
+            .map(|p| {
+                status_one(
+                    p,
+                    &workspace,
+                    vcs.as_ref(),
+                    mode,
+                    resolved_color,
+                    &args.extra,
+                )
+            })
             .collect()
     };
 

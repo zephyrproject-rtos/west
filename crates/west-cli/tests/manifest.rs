@@ -499,7 +499,10 @@ fn manifest_untracked_empty_on_clean_workspace() {
     let sb = Sandbox::new();
     let ws = updated_workspace(&sb);
     let printed = run_untracked(&sb, &ws, &[]);
-    assert_eq!(printed, "", "fresh workspace should have no orphan files; got: {printed:?}");
+    assert_eq!(
+        printed, "",
+        "fresh workspace should have no orphan files; got: {printed:?}"
+    );
 }
 
 #[test]
@@ -575,7 +578,10 @@ fn manifest_untracked_skips_cloned_project_tree() {
     // Both projects (alpha + beta) were cloned with a file named `R`
     // each. Confirm those don't appear.
     let printed = run_untracked(&sb, &ws, &[]);
-    assert!(!printed.contains("alpha/R"), "alpha tree leaked: {printed:?}");
+    assert!(
+        !printed.contains("alpha/R"),
+        "alpha tree leaked: {printed:?}"
+    );
     assert!(!printed.contains("beta/R"), "beta tree leaked: {printed:?}");
 }
 
@@ -607,7 +613,10 @@ fn manifest_untracked_writes_to_out_path() {
         .clone();
     assert!(stdout.is_empty(), "stdout should be empty with --out");
     let body = std::fs::read_to_string(&target).unwrap();
-    assert!(body.lines().any(|l| l == "orphan.txt"), "got file: {body:?}");
+    assert!(
+        body.lines().any(|l| l == "orphan.txt"),
+        "got file: {body:?}"
+    );
 }
 
 #[test]

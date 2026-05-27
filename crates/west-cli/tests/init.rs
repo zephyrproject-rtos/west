@@ -618,11 +618,7 @@ fn local_missing_manifest_file_errors() {
 
     let res = sb
         .west()
-        .args([
-            "init",
-            "--local",
-            workspace.join("m").to_str().unwrap(),
-        ])
+        .args(["init", "--local", workspace.join("m").to_str().unwrap()])
         .assert()
         .failure();
     let stderr = String::from_utf8_lossy(&res.get_output().stderr);

@@ -367,7 +367,10 @@ impl ManifestRepo {
     fn from_core(r: &core::ManifestRepo) -> Self {
         ManifestRepo {
             path: r.path.to_string_lossy().into_owned(),
-            path_raw: r.path_raw.as_ref().map(|p| p.to_string_lossy().into_owned()),
+            path_raw: r
+                .path_raw
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned()),
             west_commands: r
                 .west_commands
                 .iter()
@@ -717,7 +720,7 @@ impl ImportSource for PyImportSource {
     name = "ProjectFilter",
     module = "west._west_native",
     frozen,
-    skip_from_py_object,
+    skip_from_py_object
 )]
 #[derive(Clone)]
 pub struct ProjectFilter {

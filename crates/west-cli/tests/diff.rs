@@ -197,10 +197,18 @@ fn diff_modified_file_emits_banner_and_body() {
     let stdout = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
     let stderr = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
     // Banner is chrome → stderr; the diff body → stdout.
-    assert!(stderr.contains("=== diff in alpha"), "missing banner on stderr: {stderr:?}");
-    assert!(!stdout.contains("=== diff in"), "banner leaked onto stdout: {stdout:?}");
-    assert!(stdout.contains("CHANGED") || stdout.contains("@@"),
-        "expected diff body on stdout: {stdout:?}");
+    assert!(
+        stderr.contains("=== diff in alpha"),
+        "missing banner on stderr: {stderr:?}"
+    );
+    assert!(
+        !stdout.contains("=== diff in"),
+        "banner leaked onto stdout: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("CHANGED") || stdout.contains("@@"),
+        "expected diff body on stdout: {stdout:?}"
+    );
 }
 
 #[test]
@@ -273,8 +281,10 @@ fn diff_manifest_compares_against_manifest_rev() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&no_m.get_output().stdout).into_owned();
-    assert!(!stdout.contains("=== diff in alpha"),
-        "expected no banner without --manifest: {stdout:?}");
+    assert!(
+        !stdout.contains("=== diff in alpha"),
+        "expected no banner without --manifest: {stdout:?}"
+    );
 
     // With `-m`: manifest-rev vs working tree → diff present.
     let with_m = sb
@@ -284,10 +294,14 @@ fn diff_manifest_compares_against_manifest_rev() {
         .success();
     let stdout = String::from_utf8_lossy(&with_m.get_output().stdout).into_owned();
     let stderr = String::from_utf8_lossy(&with_m.get_output().stderr).into_owned();
-    assert!(stderr.contains("=== diff in alpha"),
-        "missing banner with --manifest on stderr: {stderr:?}");
-    assert!(stdout.contains("LOCAL-CHANGE") || stdout.contains("@@"),
-        "expected diff body on stdout: {stdout:?}");
+    assert!(
+        stderr.contains("=== diff in alpha"),
+        "missing banner with --manifest on stderr: {stderr:?}"
+    );
+    assert!(
+        stdout.contains("LOCAL-CHANGE") || stdout.contains("@@"),
+        "expected diff body on stdout: {stdout:?}"
+    );
 }
 
 #[test]
@@ -319,10 +333,14 @@ fn diff_filters_projects_by_positional_name() {
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
-    assert!(stderr.contains("=== diff in alpha"),
-        "missing alpha banner on stderr: {stderr:?}");
-    assert!(!stderr.contains("=== diff in beta"),
-        "unexpected beta banner: {stderr:?}");
+    assert!(
+        stderr.contains("=== diff in alpha"),
+        "missing alpha banner on stderr: {stderr:?}"
+    );
+    assert!(
+        !stderr.contains("=== diff in beta"),
+        "unexpected beta banner: {stderr:?}"
+    );
 }
 
 #[test]
@@ -376,12 +394,16 @@ fn diff_extra_args_forwarded_to_git() {
         .success();
     let stdout = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
     assert!(
-        stdout.contains("file changed") || stdout.contains("insertion") || stdout.contains("deletion"),
+        stdout.contains("file changed")
+            || stdout.contains("insertion")
+            || stdout.contains("deletion"),
         "expected --stat-shaped output in: {stdout:?}"
     );
     // The full-hunk markers should NOT be present under --stat.
-    assert!(!stdout.contains("@@"),
-        "didn't expect a full hunk under --stat: {stdout:?}");
+    assert!(
+        !stdout.contains("@@"),
+        "didn't expect a full hunk under --stat: {stdout:?}"
+    );
 }
 
 #[test]
@@ -404,13 +426,7 @@ fn diff_color_always_emits_colored_banner() {
 
     let out = sb
         .west()
-        .args([
-            "-C",
-            ws.to_str().unwrap(),
-            "diff",
-            "--color",
-            "always",
-        ])
+        .args(["-C", ws.to_str().unwrap(), "diff", "--color", "always"])
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
@@ -443,13 +459,7 @@ fn diff_color_never_strips_banner_color() {
 
     let out = sb
         .west()
-        .args([
-            "-C",
-            ws.to_str().unwrap(),
-            "diff",
-            "--color",
-            "never",
-        ])
+        .args(["-C", ws.to_str().unwrap(), "diff", "--color", "never"])
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
@@ -480,13 +490,7 @@ fn diff_color_always_includes_ansi_when_piped() {
     // ANSI escapes should appear regardless.
     let out = sb
         .west()
-        .args([
-            "-C",
-            ws.to_str().unwrap(),
-            "diff",
-            "--color",
-            "always",
-        ])
+        .args(["-C", ws.to_str().unwrap(), "diff", "--color", "always"])
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
@@ -511,13 +515,7 @@ fn diff_color_never_strips_ansi() {
 
     let out = sb
         .west()
-        .args([
-            "-C",
-            ws.to_str().unwrap(),
-            "diff",
-            "--color",
-            "never",
-        ])
+        .args(["-C", ws.to_str().unwrap(), "diff", "--color", "never"])
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
@@ -584,14 +582,7 @@ fn diff_quiet_works_regardless_of_position() {
     // After the subcommand.
     let after = sb
         .west()
-        .args([
-            "-C",
-            ws.to_str().unwrap(),
-            "diff",
-            "-q",
-            "--color",
-            "never",
-        ])
+        .args(["-C", ws.to_str().unwrap(), "diff", "-q", "--color", "never"])
         .assert()
         .success();
     let after_stdout = String::from_utf8_lossy(after.get_output().stdout.as_slice()).into_owned();
@@ -606,14 +597,7 @@ fn diff_quiet_works_regardless_of_position() {
     // Before the subcommand.
     let before = sb
         .west()
-        .args([
-            "-C",
-            ws.to_str().unwrap(),
-            "-q",
-            "diff",
-            "--color",
-            "never",
-        ])
+        .args(["-C", ws.to_str().unwrap(), "-q", "diff", "--color", "never"])
         .assert()
         .success();
     let before_stdout = String::from_utf8_lossy(before.get_output().stdout.as_slice()).into_owned();
@@ -717,7 +701,10 @@ fn diff_parallel_does_not_interleave_output() {
     let beta_banner = stderr
         .find("=== diff in beta")
         .unwrap_or_else(|| panic!("missing beta banner on stderr: {stderr:?}"));
-    assert!(alpha_banner < beta_banner, "out-of-order banners: {stderr:?}");
+    assert!(
+        alpha_banner < beta_banner,
+        "out-of-order banners: {stderr:?}"
+    );
     // Bodies (result) land on stdout as contiguous blocks in
     // workspace order — alpha's hunk fully precedes beta's, with no
     // beta fragment interleaved before it.
@@ -728,5 +715,8 @@ fn diff_parallel_does_not_interleave_output() {
         .find("B-CHANGED")
         .unwrap_or_else(|| panic!("missing beta body on stdout: {stdout:?}"));
     assert!(alpha_body < beta_body, "out-of-order bodies: {stdout:?}");
-    assert!(!stdout.contains("=== diff in"), "banner leaked onto stdout: {stdout:?}");
+    assert!(
+        !stdout.contains("=== diff in"),
+        "banner leaked onto stdout: {stdout:?}"
+    );
 }

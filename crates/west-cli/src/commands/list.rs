@@ -165,9 +165,9 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
             .iter()
             .map(|s| super::workspace::normalize_project_selector(s, &workspace))
             .collect();
-        let (synthetic_hits, leftover): (Vec<_>, Vec<_>) = normalized
-            .iter()
-            .partition(|s| s.as_str() == select::SYNTHETIC_NAME || s.as_str() == synthetic_path_str);
+        let (synthetic_hits, leftover): (Vec<_>, Vec<_>) = normalized.iter().partition(|s| {
+            s.as_str() == select::SYNTHETIC_NAME || s.as_str() == synthetic_path_str
+        });
 
         let mut acc: Vec<&Project> = Vec::new();
         if !synthetic_hits.is_empty() {
@@ -228,4 +228,3 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
 // Per-project lookup + format rendering live in
 // `commands/project_format.rs`; `list` consumes them and converts
 // `FormatError` to `ListError` via the From impl above.
-

@@ -322,8 +322,14 @@ fn is_ancestor_true_then_false() {
     let b = git_capture(&["rev-parse", "HEAD"], &work);
 
     let v = GitClient::new(GitOptions::default());
-    assert!(v.is_ancestor(&work, RevSpec::Named(&a), RevSpec::Named(&b)).unwrap());
-    assert!(!v.is_ancestor(&work, RevSpec::Named(&b), RevSpec::Named(&a)).unwrap());
+    assert!(
+        v.is_ancestor(&work, RevSpec::Named(&a), RevSpec::Named(&b))
+            .unwrap()
+    );
+    assert!(
+        !v.is_ancestor(&work, RevSpec::Named(&b), RevSpec::Named(&a))
+            .unwrap()
+    );
 }
 
 #[test]
@@ -619,7 +625,10 @@ fn rev_type_classifies_branches_tags_and_shas() {
 
     // Branch: `main` exists locally and as remote-tracking; both classify
     // as `Branch` because of the `refs/heads/` / `refs/remotes/` prefix.
-    assert_eq!(v.rev_type(&dest, RevSpec::Named("main")).unwrap(), RevType::Branch);
+    assert_eq!(
+        v.rev_type(&dest, RevSpec::Named("main")).unwrap(),
+        RevType::Branch
+    );
     assert_eq!(
         v.rev_type(&dest, RevSpec::Named("origin/main")).unwrap(),
         RevType::Branch,
@@ -627,16 +636,29 @@ fn rev_type_classifies_branches_tags_and_shas() {
     );
 
     // Tags — annotated vs lightweight both land as `Tag`.
-    assert_eq!(v.rev_type(&dest, RevSpec::Named("v1.0")).unwrap(), RevType::Tag);
-    assert_eq!(v.rev_type(&dest, RevSpec::Named("lw")).unwrap(), RevType::Tag);
+    assert_eq!(
+        v.rev_type(&dest, RevSpec::Named("v1.0")).unwrap(),
+        RevType::Tag
+    );
+    assert_eq!(
+        v.rev_type(&dest, RevSpec::Named("lw")).unwrap(),
+        RevType::Tag
+    );
 
     // Full and abbreviated SHAs — no symbolic name → `Commit`.
-    assert_eq!(v.rev_type(&dest, RevSpec::Named(&sha)).unwrap(), RevType::Commit);
-    assert_eq!(v.rev_type(&dest, RevSpec::Named(&sha[..8])).unwrap(), RevType::Commit);
+    assert_eq!(
+        v.rev_type(&dest, RevSpec::Named(&sha)).unwrap(),
+        RevType::Commit
+    );
+    assert_eq!(
+        v.rev_type(&dest, RevSpec::Named(&sha[..8])).unwrap(),
+        RevType::Commit
+    );
 
     // Unresolvable: `Other` (caller defaults to fetching).
     assert_eq!(
-        v.rev_type(&dest, RevSpec::Named("definitely-not-a-ref")).unwrap(),
+        v.rev_type(&dest, RevSpec::Named("definitely-not-a-ref"))
+            .unwrap(),
         RevType::Other,
     );
 }
@@ -657,7 +679,10 @@ fn rev_type_hex_named_branch_is_branch_not_commit() {
     git(&["branch", "cafebabe"], &dest);
 
     let v = GitClient::new(GitOptions::default());
-    assert_eq!(v.rev_type(&dest, RevSpec::Named("cafebabe")).unwrap(), RevType::Branch);
+    assert_eq!(
+        v.rev_type(&dest, RevSpec::Named("cafebabe")).unwrap(),
+        RevType::Branch
+    );
 }
 
 #[test]
@@ -691,7 +716,10 @@ fn fetch_smart_runs_for_branch_revision_with_new_upstream_commits() {
             &mut Output::Native,
         )
         .unwrap();
-    assert_eq!(returned, after, "fetch must advance to the new upstream tip");
+    assert_eq!(
+        returned, after,
+        "fetch must advance to the new upstream tip"
+    );
 }
 
 #[test]
@@ -935,7 +963,8 @@ fn rebase_replays_local_commits_onto_target() {
     git(&["commit", "-q", "-m", "feature work"], &work);
 
     let v = GitClient::new(GitOptions::default());
-    v.rebase(&work, RevSpec::Named("target"), &mut Output::Native).unwrap();
+    v.rebase(&work, RevSpec::Named("target"), &mut Output::Native)
+        .unwrap();
 
     // After rebase, feature's parent should be target's tip.
     let parent = git_capture(&["rev-parse", "HEAD^"], &work);
@@ -1340,7 +1369,9 @@ fn read_at_ref_returns_none_when_path_missing_at_ref() {
     let dest = clone_into(tmp.path(), &bare);
 
     let v = GitClient::new(GitOptions::default());
-    let got = v.read_at_ref(&dest, RevSpec::Head, Path::new("does-not-exist.yml")).unwrap();
+    let got = v
+        .read_at_ref(&dest, RevSpec::Head, Path::new("does-not-exist.yml"))
+        .unwrap();
     assert!(got.is_none());
 }
 
@@ -1407,7 +1438,9 @@ fn ls_tree_at_ref_returns_none_for_blob() {
     let dest = clone_into(tmp.path(), &bare);
     let v = GitClient::new(GitOptions::default());
     // `README` was committed by `bare_source_with_one_commit`.
-    let got = v.ls_tree_at_ref(&dest, RevSpec::Head, Path::new("README")).unwrap();
+    let got = v
+        .ls_tree_at_ref(&dest, RevSpec::Head, Path::new("README"))
+        .unwrap();
     assert!(got.is_none());
 }
 
@@ -1629,9 +1662,15 @@ fn init_then_fetch_lands_revision_with_clean_branch_namespace() {
         .unwrap();
 
     // Working tree populated from the fetched commit.
-    assert!(dest.join("README").is_file(), "checkout should populate worktree");
+    assert!(
+        dest.join("README").is_file(),
+        "checkout should populate worktree"
+    );
     // Only manifest-rev lives in the branch namespace.
-    let branches = git_capture(&["for-each-ref", "--format=%(refname)", "refs/heads/"], &dest);
+    let branches = git_capture(
+        &["for-each-ref", "--format=%(refname)", "refs/heads/"],
+        &dest,
+    );
     assert_eq!(
         branches, "refs/heads/manifest-rev",
         "init+fetch must leave only manifest-rev; got {branches:?}"
@@ -1665,8 +1704,14 @@ fn managed_clone_leaves_no_local_branch() {
     )
     .unwrap();
 
-    let branches = git_capture(&["for-each-ref", "--format=%(refname)", "refs/heads/"], &dest);
-    assert!(branches.is_empty(), "Managed clone must leave no local branches; got {branches:?}");
+    let branches = git_capture(
+        &["for-each-ref", "--format=%(refname)", "refs/heads/"],
+        &dest,
+    );
+    assert!(
+        branches.is_empty(),
+        "Managed clone must leave no local branches; got {branches:?}"
+    );
     assert!(
         v.head_branch(&dest).unwrap().is_none(),
         "Managed clone must leave a detached HEAD"

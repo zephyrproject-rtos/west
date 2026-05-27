@@ -441,7 +441,12 @@ fn list_sha_for_cloned_project() {
     // resolves to a 40-char hex SHA.
     assert_eq!(lines.len(), 2);
     assert_eq!(lines[0], "N/A", "synthetic manifest sha should be N/A");
-    assert_eq!(lines[1].len(), 40, "expected 40-char sha, got: {:?}", lines[1]);
+    assert_eq!(
+        lines[1].len(),
+        40,
+        "expected 40-char sha, got: {:?}",
+        lines[1]
+    );
     assert!(lines[1].chars().all(|c| c.is_ascii_hexdigit()));
 }
 

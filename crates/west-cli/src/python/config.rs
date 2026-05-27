@@ -84,10 +84,7 @@ impl Configuration {
     /// `set(..., configfile=LOCAL)` operate on a sensible set.
     #[new]
     #[pyo3(signature = (topdir=None, extra_files=None))]
-    fn py_new(
-        topdir: Option<PathBuf>,
-        extra_files: Option<Vec<PathBuf>>,
-    ) -> PyResult<Self> {
+    fn py_new(topdir: Option<PathBuf>, extra_files: Option<Vec<PathBuf>>) -> PyResult<Self> {
         let mut resolved = resolve(topdir.as_deref());
         if let Some(extras) = extra_files {
             // Extras are highest-precedence file-backed layers —
@@ -161,11 +158,7 @@ impl Configuration {
     /// always returns `list[str]` regardless of which form is on disk.
     /// Comma-separated strings are split on `,` and whitespace-stripped.
     #[pyo3(signature = (option, configfile=ConfigFile::ALL))]
-    fn get_list_str(
-        &self,
-        option: &str,
-        configfile: ConfigFile,
-    ) -> PyResult<Option<Vec<String>>> {
+    fn get_list_str(&self, option: &str, configfile: ConfigFile) -> PyResult<Option<Vec<String>>> {
         if configfile == ConfigFile::ALL {
             return match self.inner.get_list_str(option) {
                 Ok(v) => Ok(v),

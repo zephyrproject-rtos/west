@@ -156,12 +156,20 @@ pub fn run() -> ExitCode {
                 log::Level::Error => writeln!(
                     buf,
                     "{} {msg}",
-                    Style::new().red().bold().for_stderr().apply_to("west: error:")
+                    Style::new()
+                        .red()
+                        .bold()
+                        .for_stderr()
+                        .apply_to("west: error:")
                 ),
                 log::Level::Warn => writeln!(
                     buf,
                     "{} {msg}",
-                    Style::new().yellow().bold().for_stderr().apply_to("west: warning:")
+                    Style::new()
+                        .yellow()
+                        .bold()
+                        .for_stderr()
+                        .apply_to("west: warning:")
                 ),
                 log::Level::Info | log::Level::Debug => writeln!(buf, "{msg}"),
                 log::Level::Trace => writeln!(buf, "[{}] {msg}", record.target()),
@@ -189,8 +197,7 @@ pub fn run() -> ExitCode {
     // env_logger threshold; both consume the same primitive so
     // `-q` and `-v` compose consistently across log level AND
     // banner suppression.
-    let net_verbosity =
-        i32::from(initial.verbosity.verbose) - i32::from(initial.verbosity.quiet);
+    let net_verbosity = i32::from(initial.verbosity.verbose) - i32::from(initial.verbosity.quiet);
     if net_verbosity < 0
         && let Err(e) = commands::config::splice_inline(
             &mut loaded.config,

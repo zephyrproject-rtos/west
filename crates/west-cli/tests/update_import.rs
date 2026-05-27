@@ -261,14 +261,14 @@ fn list_reads_per_project_imports_from_manifest_rev_not_worktree() {
     // that still reads from disk returns "missing" — only `manifest-rev`
     // can answer truthfully.
     let p_yml_path = ws.join("p/west.yml");
-    assert!(p_yml_path.exists(), "precondition: west update should land P/west.yml");
+    assert!(
+        p_yml_path.exists(),
+        "precondition: west update should land P/west.yml"
+    );
     std::fs::remove_file(&p_yml_path).unwrap();
     // Verify `manifest-rev` still has it. The pre-fix resolver would now
     // silently lose Q because it reads from the missing worktree path.
-    let from_git = git_capture(
-        &["show", "refs/heads/manifest-rev:west.yml"],
-        &ws.join("p"),
-    );
+    let from_git = git_capture(&["show", "refs/heads/manifest-rev:west.yml"], &ws.join("p"));
     assert!(
         from_git.contains("name: q"),
         "precondition: west.yml at manifest-rev still references Q; got {from_git:?}"
@@ -276,13 +276,7 @@ fn list_reads_per_project_imports_from_manifest_rev_not_worktree() {
 
     let assert = sb
         .west()
-        .args([
-            "-C",
-            ws.to_str().unwrap(),
-            "list",
-            "-f",
-            "{name}",
-        ])
+        .args(["-C", ws.to_str().unwrap(), "list", "-f", "{name}"])
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
@@ -347,6 +341,12 @@ fn update_resolves_per_project_directory_import() {
     // Both Q and R should be cloned (pulled in by P's directory
     // import); the non-YAML entry must not have caused parse errors.
     assert!(ws.join("p/d/m1.yml").exists(), "P/d/m1.yml must be present");
-    assert!(ws.join("q/README").exists(), "Q (from d/m1.yml) must be cloned");
-    assert!(ws.join("r/README").exists(), "R (from d/m2.yml) must be cloned");
+    assert!(
+        ws.join("q/README").exists(),
+        "Q (from d/m1.yml) must be cloned"
+    );
+    assert!(
+        ws.join("r/README").exists(),
+        "R (from d/m2.yml) must be cloned"
+    );
 }

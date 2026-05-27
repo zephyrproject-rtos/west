@@ -493,4 +493,3 @@ fn default_jobs() -> usize {
         .unwrap_or(1)
         .clamp(1, MAX_DEFAULT_JOBS)
 }
-

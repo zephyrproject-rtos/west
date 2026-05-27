@@ -177,8 +177,14 @@ fn grep_default_git_grep_matches_emit_banner() {
     let stdout = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
     let stderr = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
     // Banner (chrome) → stderr; matched lines (result) → stdout.
-    assert!(stderr.contains("=== p1 (p1):"), "p1 banner missing in stderr: {stderr}");
-    assert!(stdout.contains("hello world"), "match line missing in stdout: {stdout}");
+    assert!(
+        stderr.contains("=== p1 (p1):"),
+        "p1 banner missing in stderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("hello world"),
+        "match line missing in stdout: {stdout}"
+    );
     assert!(
         !stderr.contains("=== p2"),
         "p2 has no match — banner should be suppressed; got: {stderr}"
@@ -250,10 +256,7 @@ fn grep_passthrough_args_separator() {
         .stdout
         .clone();
     let s = String::from_utf8_lossy(&out);
-    assert!(
-        s.contains("Hello World"),
-        "expected -i match; got: {s:?}"
-    );
+    assert!(s.contains("Hello World"), "expected -i match; got: {s:?}");
 }
 
 #[test]
@@ -460,7 +463,10 @@ fn grep_default_includes_synthetic_manifest_project() {
         stderr.contains("=== manifest (my-manifest):"),
         "synthetic manifest project banner missing in stderr: {stderr}"
     );
-    assert!(stdout.contains("my-manifest"), "match line missing in stdout: {stdout}");
+    assert!(
+        stdout.contains("my-manifest"),
+        "match line missing in stdout: {stdout}"
+    );
 }
 
 #[test]
@@ -533,10 +539,7 @@ fn grep_project_flag_resolves_synthetic() {
         "synthetic banner missing on `-p manifest`: {s}"
     );
     // p1 should NOT appear — we asked only for the manifest project.
-    assert!(
-        !s.contains("=== p1"),
-        "p1 should not be searched: {s}"
-    );
+    assert!(!s.contains("=== p1"), "p1 should not be searched: {s}");
 }
 
 #[test]
@@ -571,5 +574,8 @@ fn grep_quiet_suppresses_banner() {
         !stderr.contains("=== p1"),
         "-q should suppress banner; got: {stderr:?}"
     );
-    assert!(stdout.contains("hello"), "body still expected on stdout; got: {stdout:?}");
+    assert!(
+        stdout.contains("hello"),
+        "body still expected on stdout; got: {stdout:?}"
+    );
 }

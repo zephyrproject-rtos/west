@@ -113,8 +113,13 @@ fn help_no_arg_lists_configured_aliases() {
         .assert()
         .success();
     sb.west()
-        .args(["config", "set", "--global", "alias.menuconfig",
-               "build --pristine never -t menuconfig"])
+        .args([
+            "config",
+            "set",
+            "--global",
+            "alias.menuconfig",
+            "build --pristine never -t menuconfig",
+        ])
         .assert()
         .success();
 
@@ -128,8 +133,7 @@ fn help_no_arg_lists_configured_aliases() {
         "missing `up` alias in: {s}",
     );
     assert!(
-        s.contains("  menuconfig ")
-            && s.contains("build --pristine never -t menuconfig"),
+        s.contains("  menuconfig ") && s.contains("build --pristine never -t menuconfig"),
         "missing `menuconfig` alias in: {s}",
     );
 }
@@ -285,7 +289,10 @@ west-commands:
     )
     .unwrap();
     std::fs::write(manifest_work.join("scripts/hello.py"), "# stub\n").unwrap();
-    git(&["init", "-q", "--initial-branch=main", "."], &manifest_work);
+    git(
+        &["init", "-q", "--initial-branch=main", "."],
+        &manifest_work,
+    );
     git(&["add", "."], &manifest_work);
     git(&["commit", "-q", "-m", "initial"], &manifest_work);
     let bare = sb.workspace.parent().unwrap().join("manifest.git");

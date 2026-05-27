@@ -191,7 +191,10 @@ fn status_dirty_project_emits_banner_and_body() {
         stderr.contains("=== status of alpha"),
         "missing banner on stderr: {stderr:?}"
     );
-    assert!(!stdout.contains("=== status of"), "banner leaked onto stdout: {stdout:?}");
+    assert!(
+        !stdout.contains("=== status of"),
+        "banner leaked onto stdout: {stdout:?}"
+    );
     // Porcelain v1: ` M R` (modified, unstaged) — accept either
     // single-letter or two-column shape, just look for `R` and
     // the modification marker.
@@ -352,13 +355,7 @@ fn status_color_always_emits_colored_banner() {
 
     let out = sb
         .west()
-        .args([
-            "-C",
-            ws.to_str().unwrap(),
-            "status",
-            "--color",
-            "always",
-        ])
+        .args(["-C", ws.to_str().unwrap(), "status", "--color", "always"])
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
@@ -387,13 +384,7 @@ fn status_color_never_strips_banner_color() {
 
     let out = sb
         .west()
-        .args([
-            "-C",
-            ws.to_str().unwrap(),
-            "status",
-            "--color",
-            "never",
-        ])
+        .args(["-C", ws.to_str().unwrap(), "status", "--color", "never"])
         .assert()
         .success();
     let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
@@ -425,13 +416,7 @@ fn status_short_color_always_includes_ansi() {
 
     let out = sb
         .west()
-        .args([
-            "-C",
-            ws.to_str().unwrap(),
-            "status",
-            "--color",
-            "always",
-        ])
+        .args(["-C", ws.to_str().unwrap(), "status", "--color", "always"])
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();

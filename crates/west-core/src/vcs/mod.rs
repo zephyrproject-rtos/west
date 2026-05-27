@@ -299,12 +299,7 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     /// Rebase the current branch in `repo` onto `onto`. Fails if the
     /// rebase has conflicts; the working tree is left in whatever state the
     /// underlying tool leaves it. Progress output is forwarded to `out`.
-    fn rebase(
-        &self,
-        repo: &Path,
-        onto: RevSpec<'_>,
-        out: &mut Output<'_>,
-    ) -> Result<(), VcsError>;
+    fn rebase(&self, repo: &Path, onto: RevSpec<'_>, out: &mut Output<'_>) -> Result<(), VcsError>;
 
     /// `true` when `repo`'s working tree has no uncommitted changes.
     fn is_clean(&self, repo: &Path) -> Result<bool, VcsError>;

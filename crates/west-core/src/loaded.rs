@@ -159,8 +159,10 @@ pub enum ProjectFilterError {
     /// string and whose entries are whitespace-trimmed). Triggered only
     /// when a non-empty project-filter is present — without it the same
     /// situation is surfaced as a warning instead.
-    #[error("project \"{name}\" contains comma (\",\") or whitespace; \
-             such names cannot be referenced from manifest.project-filter")]
+    #[error(
+        "project \"{name}\" contains comma (\",\") or whitespace; \
+             such names cannot be referenced from manifest.project-filter"
+    )]
     UnreachableProjectName { name: String },
     /// Reading the option from `Configuration` itself failed (I/O, syntax).
     #[error(transparent)]

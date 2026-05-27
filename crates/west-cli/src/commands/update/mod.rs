@@ -182,8 +182,8 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
     // the main worker pool uses below: TTY + non-raw → indicatif;
     // otherwise (raw or non-TTY) git stdio attaches natively to the
     // parent's terminal.
-    let import_progress = (!settings.raw && io::stderr().is_terminal())
-        .then(import_source::ImportProgress::new);
+    let import_progress =
+        (!settings.raw && io::stderr().is_terminal()).then(import_source::ImportProgress::new);
 
     // Selector-driven scope (v1 contract): when the user passes
     // explicit project selectors, only the manifest repo + its self/
@@ -724,13 +724,19 @@ fn splice_flags_into_config(args: &UpdateArgs, config: &mut Configuration) -> Re
             None => Vec::new(),
             Some(ConfigValue::List(items)) => items,
             Some(other) => {
-                return Err(format!("tool.git.fetch.extra-args must be a list, got {other:?}"));
+                return Err(format!(
+                    "tool.git.fetch.extra-args must be a list, got {other:?}"
+                ));
             }
         };
         for raw in &args.fetch_opt {
             combined.push(ConfigValue::String(raw.clone()));
         }
-        splice_inline(config, "tool.git.fetch.extra-args", ConfigValue::List(combined))?;
+        splice_inline(
+            config,
+            "tool.git.fetch.extra-args",
+            ConfigValue::List(combined),
+        )?;
     }
     if !args.group_filter.is_empty() {
         // Append to whatever is already present in `update.group-filter`.
@@ -872,10 +878,7 @@ fn reject_selectors_needing_project_imports(
 /// level imports alone (no per-project import resolution). Cheap —
 /// no network, no clones — because the per-project site short-
 /// circuits before any `ImportSource` call.
-fn manifest_repo_only_view(
-    workspace: &Path,
-    config: &Configuration,
-) -> Result<Manifest, String> {
+fn manifest_repo_only_view(workspace: &Path, config: &Configuration) -> Result<Manifest, String> {
     let manifest_path: PathBuf = config
         .get_str("manifest.path")
         .map_err(|e| e.to_string())?

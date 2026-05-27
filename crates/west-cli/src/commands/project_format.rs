@@ -70,7 +70,11 @@ impl ProjectContext<'_> {
                     .join(&self.project.path)
                     .to_string_lossy()
                     .into_owned();
-                if cfg!(windows) { s.replace('\\', "/") } else { s }
+                if cfg!(windows) {
+                    s.replace('\\', "/")
+                } else {
+                    s
+                }
             }),
             "revision" => Ok(or_na(&self.project.revision)),
             "remote" => Ok(self.project.remote_name.clone()),

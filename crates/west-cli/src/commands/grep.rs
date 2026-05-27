@@ -312,7 +312,12 @@ fn run_inner(args: GrepArgs, loaded: &LoadedConfig) -> Result<Outcome, GrepError
                     // Flush stdout first so the banner heads its matches
                     // when both streams share a terminal.
                     let _ = out_lock.flush();
-                    let _ = writeln!(err_lock, "=== {} ({}):", o.project.name, o.project.path.display());
+                    let _ = writeln!(
+                        err_lock,
+                        "=== {} ({}):",
+                        o.project.name,
+                        o.project.path.display()
+                    );
                     let _ = err_lock.flush();
                 }
                 let _ = out_lock.write_all(&o.stdout);
@@ -320,7 +325,12 @@ fn run_inner(args: GrepArgs, loaded: &LoadedConfig) -> Result<Outcome, GrepError
             BodyOutcome::Failure(why) => {
                 if !settings.quiet {
                     let _ = out_lock.flush();
-                    let _ = writeln!(err_lock, "=== {} ({}):", o.project.name, o.project.path.display());
+                    let _ = writeln!(
+                        err_lock,
+                        "=== {} ({}):",
+                        o.project.name,
+                        o.project.path.display()
+                    );
                 }
                 // The tool's own stderr is part of the per-project
                 // output block; flush it while we still own the lock
@@ -469,8 +479,9 @@ fn build_tool_args(
         .get_str(&format!("grep.{}-args", tool.key()))
         .map_err(|e| GrepError::Config(e.to_string()))?;
     if let Some(s) = config_args {
-        let parsed = shlex::split(&s)
-            .ok_or_else(|| GrepError::Config(format!("grep.{}-args: shlex split failed", tool.key())))?;
+        let parsed = shlex::split(&s).ok_or_else(|| {
+            GrepError::Config(format!("grep.{}-args: shlex split failed", tool.key()))
+        })?;
         out.extend(parsed);
     } else {
         // Builtin defaults: only `grep` needs `--recursive` to walk
@@ -484,7 +495,10 @@ fn build_tool_args(
     Ok(out)
 }
 
-fn resolve_color(arg_color: Option<ColorArg>, config: &Configuration) -> Result<ColorArg, GrepError> {
+fn resolve_color(
+    arg_color: Option<ColorArg>,
+    config: &Configuration,
+) -> Result<ColorArg, GrepError> {
     if let Some(c) = arg_color {
         return Ok(c);
     }

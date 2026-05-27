@@ -302,8 +302,10 @@ pub enum ManifestError {
     AbsoluteProjectPath { project: String, path: String },
     #[error("project {project:?} has path {path:?} that escapes the workspace topdir")]
     EscapingProjectPath { project: String, path: String },
-    #[error("project {project:?} has reserved path {path:?} (the .west directory \
-             and its subdirectories are reserved for workspace metadata)")]
+    #[error(
+        "project {project:?} has reserved path {path:?} (the .west directory \
+             and its subdirectories are reserved for workspace metadata)"
+    )]
     ReservedProjectPath { project: String, path: String },
     /// Retired: emitted by the strict policy on legacy callers, but kept
     /// in the enum so external `match` arms don't break. New code should
@@ -508,15 +510,17 @@ impl<'de> Deserialize<'de> for ImportSchema {
         match value {
             serde_json::Value::Bool(b) => Ok(ImportSchema::Bool(b)),
             serde_json::Value::String(s) => Ok(ImportSchema::Str(s)),
-            serde_json::Value::Array(_) => {
-                serde_json::from_value(value).map(ImportSchema::List).map_err(D::Error::custom)
-            }
+            serde_json::Value::Array(_) => serde_json::from_value(value)
+                .map(ImportSchema::List)
+                .map_err(D::Error::custom),
             serde_json::Value::Object(_) => {
                 // ImportMap's derived `deny_unknown_fields` reports
                 // unknown keys with the list of valid ones; each field
                 // type produces serde's natural "invalid type" error
                 // when wrong-shaped.
-                serde_json::from_value(value).map(ImportSchema::Map).map_err(D::Error::custom)
+                serde_json::from_value(value)
+                    .map(ImportSchema::Map)
+                    .map_err(D::Error::custom)
             }
             other => Err(D::Error::custom(format!(
                 "invalid `import:` value: expected bool, string, list, or map; got {}",
@@ -620,7 +624,8 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for OneOrMany<T> {
             where
                 S: SeqAccess<'de>,
             {
-                let items = Vec::<T>::deserialize(serde::de::value::SeqAccessDeserializer::new(seq))?;
+                let items =
+                    Vec::<T>::deserialize(serde::de::value::SeqAccessDeserializer::new(seq))?;
                 Ok(OneOrMany::Many(items))
             }
 
@@ -980,8 +985,7 @@ impl<'a> Resolver<'a> {
         // locals (phase B), and thread a `skip` set down to the
         // recursive imports so the inner phase B knows which names the
         // outer file will claim.
-        let my_locals: HashSet<String> =
-            m.projects.iter().map(|p| p.name.clone()).collect();
+        let my_locals: HashSet<String> = m.projects.iter().map(|p| p.name.clone()).collect();
         let mut child_skip: HashSet<String> = parent_skip.clone();
         child_skip.extend(my_locals.iter().cloned());
 
@@ -1288,13 +1292,7 @@ impl<'a> Resolver<'a> {
                 .collect();
             entries.sort();
             for path in entries {
-                self.absorb_one_file(
-                    &path,
-                    &composed_filter,
-                    &composed_prefix,
-                    site,
-                    parent_skip,
-                )?;
+                self.absorb_one_file(&path, &composed_filter, &composed_prefix, site, parent_skip)?;
             }
             return Ok(());
         }
@@ -3249,7 +3247,13 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         // Imported projects come before locally-defined ones in the
         // output list — v1's `self.import:` ordering contract.
@@ -3276,7 +3280,13 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let err = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap_err();
+        let err = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap_err();
         match err {
             ManifestError::Validation(msg) => {
                 assert!(
@@ -3326,7 +3336,13 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         // Imports come first in the output list (q from a.yml, r
         // from b.yml), then the locally-defined `p`.
@@ -3363,7 +3379,13 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["keepme", "p"]);
     }
@@ -3400,7 +3422,13 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["b", "p"]);
     }
@@ -3433,7 +3461,13 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap();
         let q = m.project("q").unwrap();
         assert_eq!(q.path, PathBuf::from("vendor/q"));
     }
@@ -3464,7 +3498,13 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap();
         assert_eq!(m.projects.len(), 1);
         // Parent wins.
         assert_eq!(m.projects[0].url, "https://parent");
@@ -3495,7 +3535,13 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let err = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap_err();
+        let err = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap_err();
         assert!(
             matches!(
                 err,
@@ -3531,7 +3577,13 @@ manifest:
       url: https://example.com/cmsis
 "#,
         );
-        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["zephyr", "cmsis"]);
         assert_eq!(source.calls.borrow().len(), 1);
@@ -3592,7 +3644,13 @@ manifest:
             )
             .with_root("zephyr", project_root_dir.path().to_path_buf());
 
-        let m = Manifest::from_path_with(&outer_root, Some(outer.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(
+            &outer_root,
+            Some(outer.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["zephyr", "cmsis"]);
     }
@@ -3641,7 +3699,13 @@ manifest:
 "#,
         );
 
-        let m = Manifest::from_path_with(&outer_root, Some(outer.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(
+            &outer_root,
+            Some(outer.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["zephyr", "cmsis"]);
     }
@@ -3672,7 +3736,13 @@ manifest:
       url: https://example.com/hal_nordic
 "#,
         );
-        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["zephyr", "cmsis"]);
     }
@@ -3692,7 +3762,13 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new(); // no entry for "zephyr"
-        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["zephyr"]);
     }
@@ -3741,7 +3817,13 @@ manifest:
         std::fs::write(sub.join("README"), "ignore me").unwrap();
 
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["from-a", "from-b"]);
     }
@@ -3793,7 +3875,13 @@ url = "https://b"
         std::fs::write(sub.join("README.txt"), "ignore me").unwrap();
 
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap();
         let mut names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         names.sort();
         assert_eq!(names, vec!["from-json", "from-toml", "from-yaml"]);
@@ -3837,7 +3925,13 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::RESOLVE_ALL).unwrap();
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::RESOLVE_ALL,
+        )
+        .unwrap();
         let p = m.project("deep").unwrap();
         assert_eq!(p.path, PathBuf::from("outer/inner/deep"));
     }
@@ -3864,7 +3958,12 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::SKIP_PROJECTS)
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::SKIP_PROJECTS,
+        )
         .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["p", "q"]);
@@ -3951,7 +4050,12 @@ manifest:
 "#,
         );
         let source = StaticImportSource::new();
-        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::IGNORE_ALL)
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::IGNORE_ALL,
+        )
         .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["p", "q"]);
@@ -3985,7 +4089,12 @@ manifest:
       url: https://from-p
 "#;
         let source = StaticImportSource::new().with("p", imported);
-        let m = Manifest::from_path_with(&root, Some(dir.path()), Some(&source), ImportPolicy::PROJECTS_ONLY)
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            Some(&source),
+            ImportPolicy::PROJECTS_ONLY,
+        )
         .unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["p", "from-p"]);
@@ -4001,14 +4110,18 @@ manifest:
         // `bar/foo` alongside the projects pulled in from foo's
         // imported body (which `absorb_project_import` composes onto
         // the same prefix when recursing).
-        let m = Manifest::from_yaml_str_with(r#"
+        let m = Manifest::from_yaml_str_with(
+            r#"
 manifest:
   projects:
     - name: foo
       url: https://example.com/foo
       import:
         path-prefix: bar
-"#, None, ImportPolicy::IGNORE_ALL)
+"#,
+            None,
+            ImportPolicy::IGNORE_ALL,
+        )
         .unwrap();
         assert_eq!(m.projects[0].path, PathBuf::from("bar/foo"));
     }
@@ -4033,8 +4146,8 @@ manifest:
       url: upstream.com/nested
 "#;
         let source = StaticImportSource::new().with("upstream", imported);
-        let m = Manifest::from_yaml_str_with(body, Some(&source), ImportPolicy::PROJECTS_ONLY)
-            .unwrap();
+        let m =
+            Manifest::from_yaml_str_with(body, Some(&source), ImportPolicy::PROJECTS_ONLY).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["upstream", "downstream", "nested"]);
     }

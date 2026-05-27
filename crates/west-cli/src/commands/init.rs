@@ -252,10 +252,8 @@ fn bootstrap(args: &InitArgs, url: &str, config: &Configuration) -> Result<(), I
             // Show the URL's basename (e.g. `example-application`) rather
             // than a truncated full URL — same logic init uses elsewhere
             // when falling back from the manifest's `self.path`.
-            let prefix = crate::progress::truncate_prefix(
-                &url_basename(url),
-                crate::progress::PREFIX_WIDTH,
-            );
+            let prefix =
+                crate::progress::truncate_prefix(&url_basename(url), crate::progress::PREFIX_WIDTH);
             pb.set_prefix(prefix.clone());
             pb.set_style(crate::progress::spinner_style());
             pb.set_message("cloning…");
@@ -288,13 +286,16 @@ fn bootstrap(args: &InitArgs, url: &str, config: &Configuration) -> Result<(), I
                         // has no HEAD). Fall back to a minimal success
                         // line so the user still sees the clone
                         // finished.
-                        eprintln!("{}", crate::progress::render_done_line(
-                            &prefix,
-                            &vcs::CommitSummary {
-                                short_sha: String::new(),
-                                subject: "cloned".into(),
-                            },
-                        ));
+                        eprintln!(
+                            "{}",
+                            crate::progress::render_done_line(
+                                &prefix,
+                                &vcs::CommitSummary {
+                                    short_sha: String::new(),
+                                    subject: "cloned".into(),
+                                },
+                            )
+                        );
                     }
                 },
                 Err(e) => {
@@ -473,8 +474,10 @@ fn resolve_local_layout(
     });
 
     // If both supplied, require they resolve to the same absolute path.
-    if let (Some(p), Some(m)) = (manifest_dir_from_pos.as_deref(), manifest_dir_from_mp.as_deref())
-        && canonicalize_for_compare(p) != canonicalize_for_compare(m)
+    if let (Some(p), Some(m)) = (
+        manifest_dir_from_pos.as_deref(),
+        manifest_dir_from_mp.as_deref(),
+    ) && canonicalize_for_compare(p) != canonicalize_for_compare(m)
     {
         return Err(InitError::Generic(format!(
             "-l positional ({}) and manifest.path ({}) disagree about the manifest location",

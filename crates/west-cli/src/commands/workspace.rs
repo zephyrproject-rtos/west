@@ -120,8 +120,8 @@ pub(crate) fn load_manifest(
     source: &dyn ImportSource,
 ) -> Result<LoadedManifest, WorkspaceError> {
     let manifest = load_bare_manifest(workspace, config, source)?;
-    let config_group_filter = super::select::read_manifest_group_filter(config)
-        .map_err(WorkspaceError::Config)?;
+    let config_group_filter =
+        super::select::read_manifest_group_filter(config).map_err(WorkspaceError::Config)?;
     let project_filter = ProjectFilter::from_config(config).map_err(WorkspaceError::from)?;
     Ok(LoadedManifest::new(
         manifest,
@@ -153,8 +153,8 @@ pub(crate) fn load_manifest_resolved(
     workspace: &Path,
     config: &Configuration,
 ) -> Result<(LoadedManifest, Box<dyn Vcs>, Vec<String>), WorkspaceError> {
-    let vcs = west_core::vcs::from_config(config)
-        .map_err(|e| WorkspaceError::Vcs(e.to_string()))?;
+    let vcs =
+        west_core::vcs::from_config(config).map_err(|e| WorkspaceError::Vcs(e.to_string()))?;
     let source = ReadOnlyImportSource::new(workspace, vcs.as_ref());
     let loaded = load_manifest(workspace, config, &source)?;
     let skipped = source.skipped();
@@ -179,9 +179,7 @@ pub(crate) fn is_cloned(vcs: &dyn Vcs, abs_path: &Path) -> bool {
 /// (the YAML's `self.path` field, which is advisory). Callers that
 /// need the synthetic manifest-project's `path` for output rendering
 /// should use this value by default.
-pub(crate) fn manifest_path_from_config(
-    config: &Configuration,
-) -> Result<PathBuf, WorkspaceError> {
+pub(crate) fn manifest_path_from_config(config: &Configuration) -> Result<PathBuf, WorkspaceError> {
     config
         .get_str("manifest.path")
         .map_err(|e| WorkspaceError::Config(e.to_string()))?
@@ -361,7 +359,6 @@ pub(crate) fn read_project_import(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,9 +431,6 @@ mod tests {
         let ws_can = ws.path().canonicalize().unwrap();
         let leaf = ws_can.join("not-yet-cloned");
         let s = leaf.to_str().unwrap();
-        assert_eq!(
-            normalize_project_selector(s, ws.path()),
-            "not-yet-cloned"
-        );
+        assert_eq!(normalize_project_selector(s, ws.path()), "not-yet-cloned");
     }
 }

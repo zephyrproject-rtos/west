@@ -139,7 +139,9 @@ pub(super) fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
         let f: f64 = value.extract()?;
         return serde_json::Number::from_f64(f)
             .map(Value::Number)
-            .ok_or_else(|| PyValueError::new_err("non-finite float (NaN / inf) is not serializable"));
+            .ok_or_else(|| {
+                PyValueError::new_err("non-finite float (NaN / inf) is not serializable")
+            });
     }
     if value.is_instance_of::<PyString>() {
         return Ok(Value::String(value.extract::<String>()?));

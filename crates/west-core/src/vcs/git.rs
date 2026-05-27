@@ -244,7 +244,12 @@ impl GitClient {
                 }
                 entries
             }
-            Err(e) => return Err(bad_option("tool.git.submodules.init-config", &e.to_string())),
+            Err(e) => {
+                return Err(bad_option(
+                    "tool.git.submodules.init-config",
+                    &e.to_string(),
+                ));
+            }
         };
 
         Ok(Self::new(GitOptions {
@@ -279,7 +284,13 @@ impl GitClient {
     /// with `for-each-ref` and drop each. Empty namespace ⇒ no-op.
     fn delete_refs_under(&self, repo: &Path, pattern: &str) -> Result<(), VcsError> {
         let repo_str = repo.to_string_lossy().into_owned();
-        let res = self.run(&["-C", &repo_str, "for-each-ref", "--format=%(refname)", pattern])?;
+        let res = self.run(&[
+            "-C",
+            &repo_str,
+            "for-each-ref",
+            "--format=%(refname)",
+            pattern,
+        ])?;
         check_success(&res)?;
         let stdout = std::str::from_utf8(&res.output.stdout).map_err(|e| VcsError::BadOutput {
             client: NAME,
@@ -796,7 +807,10 @@ impl Vcs for GitClient {
         // `cafebabe` correctly returns `Branch` and we still fetch.
         if matches!(self.opts.fetch_strategy, FetchStrategy::Smart)
             && let Some(rev) = spec.revision
-            && matches!(self.rev_type(repo, RevSpec::Named(rev))?, RevType::Tag | RevType::Commit)
+            && matches!(
+                self.rev_type(repo, RevSpec::Named(rev))?,
+                RevType::Tag | RevType::Commit
+            )
             && let Ok(sha) = self.sha(repo, RevSpec::Named(rev))
         {
             // v1's `dbg('skipping unnecessary fetch')` — the smart
@@ -837,7 +851,11 @@ impl Vcs for GitClient {
         // `v2.0` lands as a local tag ref, not just FETCH_HEAD. Match
         // that as the default; `--narrow` / `tool.git.fetch.tags =
         // false` opts out.
-        argv.push(if self.no_tags() { "--no-tags" } else { "--tags" });
+        argv.push(if self.no_tags() {
+            "--no-tags"
+        } else {
+            "--tags"
+        });
         if let Some(d) = depth_arg.as_deref() {
             argv.push(d);
         }
@@ -905,12 +923,7 @@ impl Vcs for GitClient {
         }
     }
 
-    fn rebase(
-        &self,
-        repo: &Path,
-        onto: RevSpec<'_>,
-        out: &mut Output<'_>,
-    ) -> Result<(), VcsError> {
+    fn rebase(&self, repo: &Path, onto: RevSpec<'_>, out: &mut Output<'_>) -> Result<(), VcsError> {
         let repo_str = repo.to_string_lossy().into_owned();
         self.run_with_output(&["-C", &repo_str, "rebase", resolve_rev(onto)], out)
     }
@@ -1182,10 +1195,12 @@ impl Vcs for GitClient {
         // empty in that case, so this is a zero-byte write, which
         // simplifies the contract for callers (the writer is always
         // populated with whatever stdout produced).
-        writer.write_all(&res.output.stdout).map_err(|source| VcsError::Io {
-            path: repo.to_path_buf(),
-            source,
-        })?;
+        writer
+            .write_all(&res.output.stdout)
+            .map_err(|source| VcsError::Io {
+                path: repo.to_path_buf(),
+                source,
+            })?;
         Ok(outcome)
     }
 
@@ -1322,4 +1337,3 @@ fn repo_label(repo: &std::path::Path) -> std::borrow::Cow<'_, str> {
         None => repo.to_string_lossy(),
     }
 }
-

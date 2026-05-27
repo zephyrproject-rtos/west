@@ -160,8 +160,12 @@ pub fn run(args: CompareArgs, loaded: &mut LoadedConfig) -> ExitCode {
     }
     match run_inner(args, loaded) {
         Ok(Outcome::AllAligned) => ExitCode::SUCCESS,
-        Ok(Outcome::SomePrinted { exit_code_flag: false }) => ExitCode::SUCCESS,
-        Ok(Outcome::SomePrinted { exit_code_flag: true }) => ExitCode::from(1),
+        Ok(Outcome::SomePrinted {
+            exit_code_flag: false,
+        }) => ExitCode::SUCCESS,
+        Ok(Outcome::SomePrinted {
+            exit_code_flag: true,
+        }) => ExitCode::from(1),
         Ok(Outcome::Failures) => ExitCode::FAILURE,
         Err(e @ CompareError::UnclonedPositional { .. }) => {
             log::error!("{e}");
@@ -484,7 +488,11 @@ fn compare_one_inner(
         // The 12-space indent before "HEAD:" aligns the colons
         // with `--- manifest-rev:` above (matches python v1).
         let _ = writeln!(body, "--- manifest-rev: {} {}", mr.short_sha, mr.subject);
-        let _ = writeln!(body, "            HEAD: {} {}", head.short_sha, head.subject);
+        let _ = writeln!(
+            body,
+            "            HEAD: {} {}",
+            head.short_sha, head.subject
+        );
     }
 
     let _ = writeln!(body, "--- status:");

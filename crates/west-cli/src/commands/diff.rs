@@ -128,8 +128,12 @@ pub fn run(args: DiffArgs, loaded: &mut LoadedConfig) -> ExitCode {
 
     match run_inner(args, loaded) {
         Ok(Outcome::AllEmpty) => ExitCode::SUCCESS,
-        Ok(Outcome::SomeNonEmpty { exit_code_flag: false }) => ExitCode::SUCCESS,
-        Ok(Outcome::SomeNonEmpty { exit_code_flag: true }) => ExitCode::from(1),
+        Ok(Outcome::SomeNonEmpty {
+            exit_code_flag: false,
+        }) => ExitCode::SUCCESS,
+        Ok(Outcome::SomeNonEmpty {
+            exit_code_flag: true,
+        }) => ExitCode::from(1),
         Ok(Outcome::Failures) => ExitCode::FAILURE,
         Err(e @ DiffError::UnclonedPositional { .. }) => {
             log::error!("{e}");
@@ -252,7 +256,11 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
         }
     };
 
-    let from_rev: Option<RevSpec<'_>> = if args.manifest { Some(RevSpec::ManifestRev) } else { None };
+    let from_rev: Option<RevSpec<'_>> = if args.manifest {
+        Some(RevSpec::ManifestRev)
+    } else {
+        None
+    };
 
     // Per-project work. par_iter().map().collect() preserves input
     // order so the drain below sees workspace order regardless of
@@ -464,4 +472,3 @@ fn default_jobs() -> usize {
         .unwrap_or(1)
         .clamp(1, MAX_DEFAULT_JOBS)
 }
-
