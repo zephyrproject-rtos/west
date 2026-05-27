@@ -9,6 +9,10 @@
 //!
 //! UX improvements over v1:
 //!
+//! - Per-project `=== diff in …` banners go to **stderr**; only the
+//!   diff bodies hit stdout. `west diff > out.patch` therefore yields
+//!   an appliable patch instead of one polluted with banner lines.
+//!   v1 emitted both on stdout.
 //! - `--exit-code` returns 1 when any project has a non-empty diff,
 //!   for CI / scripting. v1 always exited 0.
 //! - `--color {always,never,auto}` (default `auto`) replaces the
@@ -290,24 +294,27 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
             .collect()
     };
 
-    // Drain: banners + bodies for non-empty, count empties,
-    // collect failures.
+    // Drain: per-project banner (chrome) to stderr, diff body
+    // (result) to stdout, so `west diff > out.patch` yields an
+    // appliable patch — the `=== diff in …` banners aren't valid
+    // diff syntax and would break `git apply` if mixed into stdout.
     let mut stdout = io::stdout().lock();
+    let mut stderr = io::stderr().lock();
     let mut empty_count: usize = 0;
     let mut had_nonempty = false;
     let mut failures: Vec<(String, String)> = Vec::new();
     // Bright green + bold matches python v1's banner palette
     // (`colorama.Fore.LIGHTGREEN_EX`, plus a bold modifier for
     // extra prominence at the row-density of multi-project runs).
-    // `force_styling(true)` overrides console's CLICOLOR-style
-    // auto-strip so the banner stays coloured under `--color
-    // always` even when stdout is a pipe — matches what we did
-    // for the diff body (passing `--color=always` to git
-    // regardless of git's own TTY heuristic).
-    let banner_style = match resolved_color {
-        ColorMode::Always => Style::new().green().bright().bold().force_styling(true),
-        ColorMode::Never => Style::new().force_styling(false),
-        ColorMode::Auto => Style::new().green().bright().bold(),
+    // The banner now lands on stderr, so `auto` follows stderr's
+    // TTY-ness (`for_stderr`); `--color always/never` force the
+    // choice via `force_styling`. The diff *body* colour is a
+    // separate decision (`resolved_color`, keyed off stdout) since
+    // it's what gets redirected.
+    let banner_style = match args.color {
+        ColorArg::Always => Style::new().green().bright().bold().force_styling(true),
+        ColorArg::Never => Style::new().force_styling(false),
+        ColorArg::Auto => Style::new().green().bright().bold().for_stderr(),
     };
     for o in outcomes {
         match o.result {
@@ -315,8 +322,11 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
             Ok(DiffOutcome::NonEmpty) => {
                 had_nonempty = true;
                 if !settings.quiet {
+                    // Flush stdout first so the banner prints above
+                    // the body it heads when both share a terminal.
+                    let _ = stdout.flush();
                     let _ = writeln!(
-                        stdout,
+                        stderr,
                         "{}",
                         banner_style.apply_to(format!(
                             "=== diff in {} ({})",
@@ -324,6 +334,7 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
                             o.path.display(),
                         )),
                     );
+                    let _ = stderr.flush();
                 }
                 let _ = stdout.write_all(&o.body);
             }
@@ -333,14 +344,17 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
     // Suppress the chrome under `--quiet`: banner is already gated
     // above, and the tail summary line ("Empty diff in N
     // projects.") is the only other chrome `west diff` produces.
+    // It's chrome, so it joins the banners on stderr.
     if !settings.quiet && had_nonempty && empty_count > 0 {
+        let _ = stdout.flush();
         let _ = writeln!(
-            stdout,
+            stderr,
             "Empty diff in {empty_count} project{}.",
             if empty_count == 1 { "" } else { "s" }
         );
     }
     drop(stdout);
+    drop(stderr);
 
     if !failures.is_empty() {
         for (name, msg) in &failures {

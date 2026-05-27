@@ -513,12 +513,57 @@ fn forall_synthetic_manifest_included() {
 
 #[test]
 #[serial]
+fn forall_banner_to_stderr_command_output_to_stdout() {
+    // The `=== running …` banner is chrome and must land on stderr;
+    // the command's own stdout must stay clean on stdout so a redirect
+    // captures only the command output.
+    if !git_available() {
+        return;
+    }
+    let sb = Sandbox::new();
+    let p1 = make_bare_with_one_commit(sb.root(), "p1", "p1");
+    let manifest = manifest_yaml(None, &[("p1", &p1, &[])]);
+    let ws = init_workspace(&sb, &manifest);
+    update_all(&sb, &ws);
+
+    let out = sb
+        .west()
+        .args([
+            "-C",
+            ws.to_str().unwrap(),
+            "forall",
+            "-j",
+            "1",
+            "-c",
+            "echo COMMAND-STDOUT",
+            "p1",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
+    assert!(
+        stdout.contains("COMMAND-STDOUT"),
+        "command output missing from stdout: {stdout:?}"
+    );
+    assert!(
+        !stdout.contains("=== running"),
+        "banner leaked onto stdout: {stdout:?}"
+    );
+    assert!(
+        stderr.contains("=== running") && stderr.contains("p1"),
+        "banner missing from stderr: {stderr:?}"
+    );
+}
+
+#[test]
+#[serial]
 fn forall_parallel_buffers_output_per_project() {
     // -j 2 with two projects each writing 50 numbered lines: the
     // captured stdout must show each project's lines in a contiguous
-    // block (banner + all lines, no interleaving). forall drains
-    // banner + body to stdout (matching `diff` / `status` / `compare`
-    // and v1); stderr is for west's own diagnostics.
+    // block (no interleaving). The `=== running` banner is chrome and
+    // goes to stderr; only the commands' own stdout reaches stdout, so
+    // this contiguity check sees just the `name-NN` body lines.
     if !git_available() {
         return;
     }

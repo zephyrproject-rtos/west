@@ -195,9 +195,12 @@ fn diff_modified_file_emits_banner_and_body() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
-    assert!(stdout.contains("=== diff in alpha"), "missing banner: {stdout:?}");
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
+    // Banner is chrome → stderr; the diff body → stdout.
+    assert!(stderr.contains("=== diff in alpha"), "missing banner on stderr: {stderr:?}");
+    assert!(!stdout.contains("=== diff in"), "banner leaked onto stdout: {stdout:?}");
     assert!(stdout.contains("CHANGED") || stdout.contains("@@"),
-        "expected diff body in: {stdout:?}");
+        "expected diff body on stdout: {stdout:?}");
 }
 
 #[test]
@@ -280,10 +283,11 @@ fn diff_manifest_compares_against_manifest_rev() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&with_m.get_output().stdout).into_owned();
-    assert!(stdout.contains("=== diff in alpha"),
-        "missing banner with --manifest: {stdout:?}");
+    let stderr = String::from_utf8_lossy(&with_m.get_output().stderr).into_owned();
+    assert!(stderr.contains("=== diff in alpha"),
+        "missing banner with --manifest on stderr: {stderr:?}");
     assert!(stdout.contains("LOCAL-CHANGE") || stdout.contains("@@"),
-        "expected diff body in: {stdout:?}");
+        "expected diff body on stdout: {stdout:?}");
 }
 
 #[test]
@@ -314,11 +318,11 @@ fn diff_filters_projects_by_positional_name() {
         ])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
-    assert!(stdout.contains("=== diff in alpha"),
-        "missing alpha banner: {stdout:?}");
-    assert!(!stdout.contains("=== diff in beta"),
-        "unexpected beta banner: {stdout:?}");
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
+    assert!(stderr.contains("=== diff in alpha"),
+        "missing alpha banner on stderr: {stderr:?}");
+    assert!(!stderr.contains("=== diff in beta"),
+        "unexpected beta banner: {stderr:?}");
 }
 
 #[test]
@@ -387,7 +391,7 @@ fn diff_color_always_emits_colored_banner() {
     // green + bold, matching python v1's banner palette
     // (`colorama.Fore.LIGHTGREEN_EX`). When the user passes
     // `--color always`, the banner stays coloured even when
-    // stdout is captured (assert_cmd's pipe).
+    // stderr is captured (assert_cmd's pipe).
     if !git_available() {
         return;
     }
@@ -409,15 +413,14 @@ fn diff_color_always_emits_colored_banner() {
         ])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
-    // Find the banner line and confirm it's wrapped in colour
-    // escapes. `\x1b[1;92m` (bold + bright green) or its
-    // variants — accept any escape sequence preceding the
-    // banner text.
-    let banner_line = stdout
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
+    // Find the banner line (now on stderr) and confirm it's wrapped
+    // in colour escapes. `\x1b[1;92m` (bold + bright green) or its
+    // variants — accept any escape sequence preceding the banner.
+    let banner_line = stderr
         .lines()
         .find(|l| l.contains("=== diff in alpha"))
-        .unwrap_or_else(|| panic!("missing banner: {stdout:?}"));
+        .unwrap_or_else(|| panic!("missing banner on stderr: {stderr:?}"));
     assert!(
         banner_line.starts_with("\x1b["),
         "banner not coloured under --color always: {banner_line:?}"
@@ -449,11 +452,11 @@ fn diff_color_never_strips_banner_color() {
         ])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
-    let banner_line = stdout
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
+    let banner_line = stderr
         .lines()
         .find(|l| l.contains("=== diff in alpha"))
-        .unwrap_or_else(|| panic!("missing banner: {stdout:?}"));
+        .unwrap_or_else(|| panic!("missing banner on stderr: {stderr:?}"));
     assert!(
         !banner_line.contains("\x1b["),
         "banner has colour escapes despite --color never: {banner_line:?}"
@@ -553,10 +556,10 @@ fn diff_verbose_cancels_quiet() {
         ])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(out.get_output().stdout.as_slice()).into_owned();
+    let stderr = String::from_utf8_lossy(out.get_output().stderr.as_slice()).into_owned();
     assert!(
-        stdout.contains("=== diff in alpha"),
-        "expected banner when -q and -v cancel: {stdout:?}"
+        stderr.contains("=== diff in alpha"),
+        "expected banner on stderr when -q and -v cancel: {stderr:?}"
     );
 }
 
@@ -592,9 +595,12 @@ fn diff_quiet_works_regardless_of_position() {
         .assert()
         .success();
     let after_stdout = String::from_utf8_lossy(after.get_output().stdout.as_slice()).into_owned();
+    let after_stderr = String::from_utf8_lossy(after.get_output().stderr.as_slice()).into_owned();
+    // The banner lives on stderr now, so `-q`'s suppression is what
+    // we assert there; stdout never carries it.
     assert!(
-        !after_stdout.contains("=== diff in"),
-        "`west diff -q`: banner present: {after_stdout:?}"
+        !after_stderr.contains("=== diff in"),
+        "`west diff -q`: banner present on stderr: {after_stderr:?}"
     );
 
     // Before the subcommand.
@@ -611,14 +617,16 @@ fn diff_quiet_works_regardless_of_position() {
         .assert()
         .success();
     let before_stdout = String::from_utf8_lossy(before.get_output().stdout.as_slice()).into_owned();
+    let before_stderr = String::from_utf8_lossy(before.get_output().stderr.as_slice()).into_owned();
     assert!(
-        !before_stdout.contains("=== diff in"),
-        "`west -q diff`: banner present: {before_stdout:?}"
+        !before_stderr.contains("=== diff in"),
+        "`west -q diff`: banner present on stderr: {before_stderr:?}"
     );
 
-    // Both positions produce the SAME output — that's the user
-    // expectation the global flag exists to satisfy.
+    // Both positions produce the SAME output on both streams — that's
+    // the user expectation the global flag exists to satisfy.
     assert_eq!(after_stdout, before_stdout);
+    assert_eq!(after_stderr, before_stderr);
 }
 
 #[test]
@@ -651,15 +659,18 @@ fn diff_quiet_suppresses_banners_and_empty_summary() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
+    // Banner and the "Empty diff in N projects." summary are chrome on
+    // stderr; `--quiet` must suppress both there.
     assert!(
-        !stdout.contains("=== diff in"),
-        "banner present despite --quiet: {stdout:?}"
+        !stderr.contains("=== diff in"),
+        "banner present despite --quiet: {stderr:?}"
     );
     assert!(
-        !stdout.contains("Empty diff in"),
-        "empty-summary present despite --quiet: {stdout:?}"
+        !stderr.contains("Empty diff in"),
+        "empty-summary present despite --quiet: {stderr:?}"
     );
-    // Body still printed.
+    // Body still printed to stdout.
     assert!(
         stdout.contains("@@") || stdout.contains("CHANGED"),
         "body missing under --quiet: {stdout:?}"
@@ -698,17 +709,24 @@ fn diff_parallel_does_not_interleave_output() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
-    let alpha_pos = stdout
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
+    // Banners (chrome) land on stderr, in workspace order.
+    let alpha_banner = stderr
         .find("=== diff in alpha")
-        .unwrap_or_else(|| panic!("missing alpha banner: {stdout:?}"));
-    let beta_pos = stdout
+        .unwrap_or_else(|| panic!("missing alpha banner on stderr: {stderr:?}"));
+    let beta_banner = stderr
         .find("=== diff in beta")
-        .unwrap_or_else(|| panic!("missing beta banner: {stdout:?}"));
-    // Workspace-order: alpha's block comes before beta's.
-    assert!(alpha_pos < beta_pos, "out-of-order banners: {stdout:?}");
-    // Between alpha's banner and beta's banner, no fragment of
-    // beta's body should appear.
-    let between = &stdout[alpha_pos..beta_pos];
-    assert!(!between.contains("B-CHANGED"),
-        "beta body leaked into alpha's block: {between:?}");
+        .unwrap_or_else(|| panic!("missing beta banner on stderr: {stderr:?}"));
+    assert!(alpha_banner < beta_banner, "out-of-order banners: {stderr:?}");
+    // Bodies (result) land on stdout as contiguous blocks in
+    // workspace order — alpha's hunk fully precedes beta's, with no
+    // beta fragment interleaved before it.
+    let alpha_body = stdout
+        .find("A-CHANGED")
+        .unwrap_or_else(|| panic!("missing alpha body on stdout: {stdout:?}"));
+    let beta_body = stdout
+        .find("B-CHANGED")
+        .unwrap_or_else(|| panic!("missing beta body on stdout: {stdout:?}"));
+    assert!(alpha_body < beta_body, "out-of-order bodies: {stdout:?}");
+    assert!(!stdout.contains("=== diff in"), "banner leaked onto stdout: {stdout:?}");
 }

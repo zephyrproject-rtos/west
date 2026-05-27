@@ -1,6 +1,7 @@
 # Copyright (c) 2020, Nordic Semiconductor ASA
 
 import collections
+import io
 import os
 import re
 import shutil
@@ -888,51 +889,67 @@ def test_status(west_init_tmpdir):
 def test_forall(west_init_tmpdir):
     # Note that the 'echo' command is available in both Unix shells
     # and Windows .bat files.
+    #
+    # The per-project '=== running ...' banner is chrome and goes to
+    # stderr; only the command's own stdout reaches stdout. So we
+    # assert the echoed values on stdout and the banners on stderr.
 
     # 'forall' with no projects cloned shouldn't fail
 
-    assert cmd(['forall', '--raw', '-c', 'echo foo']).splitlines() == [
-        '=== running "echo foo" in manifest (zephyr):',
+    err = io.StringIO()
+    assert cmd(['forall', '--raw', '-c', 'echo foo'], stderr=err).splitlines() == [
         'foo',
     ]
+    assert '=== running "echo foo" in manifest (zephyr):' in err.getvalue()
 
     # Neither should it fail after cloning one or both projects
 
     cmd('update net-tools')
-    assert cmd(['forall', '--raw', '-c', 'echo foo']).splitlines() == [
-        '=== running "echo foo" in manifest (zephyr):',
+    err = io.StringIO()
+    assert cmd(['forall', '--raw', '-c', 'echo foo'], stderr=err).splitlines() == [
         'foo',
-        '=== running "echo foo" in net-tools (net-tools):',
         'foo',
     ]
+    banners = err.getvalue()
+    assert '=== running "echo foo" in manifest (zephyr):' in banners
+    assert '=== running "echo foo" in net-tools (net-tools):' in banners
 
     # Use environment variables
 
     env_var = "%WEST_PROJECT_NAME%" if WINDOWS else "$WEST_PROJECT_NAME"
 
-    assert cmd(['forall', '--raw', '-c', f'echo {env_var}']).splitlines() == [
-        f'=== running "echo {env_var}" in manifest (zephyr):',
+    err = io.StringIO()
+    assert cmd(['forall', '--raw', '-c', f'echo {env_var}'], stderr=err).splitlines() == [
         'manifest',
-        f'=== running "echo {env_var}" in net-tools (net-tools):',
         'net-tools',
     ]
+    banners = err.getvalue()
+    assert f'=== running "echo {env_var}" in manifest (zephyr):' in banners
+    assert f'=== running "echo {env_var}" in net-tools (net-tools):' in banners
 
     cmd('update Kconfiglib')
-    assert cmd(['forall', '--raw', '-c', 'echo foo']).splitlines() == [
-        '=== running "echo foo" in manifest (zephyr):',
+    err = io.StringIO()
+    assert cmd(['forall', '--raw', '-c', 'echo foo'], stderr=err).splitlines() == [
         'foo',
-        '=== running "echo foo" in Kconfiglib (subdir/Kconfiglib):',
         'foo',
-        '=== running "echo foo" in net-tools (net-tools):',
         'foo',
     ]
+    banners = err.getvalue()
+    assert '=== running "echo foo" in manifest (zephyr):' in banners
+    assert '=== running "echo foo" in Kconfiglib (subdir/Kconfiglib):' in banners
+    assert '=== running "echo foo" in net-tools (net-tools):' in banners
 
+    err = io.StringIO()
     assert cmd(
-        'forall --raw --group Kconfiglib-group -c'.split() + ['echo foo']
+        'forall --raw --group Kconfiglib-group -c'.split() + ['echo foo'],
+        stderr=err,
     ).splitlines() == [
-        '=== running "echo foo" in Kconfiglib (subdir/Kconfiglib):',
         'foo',
     ]
+    assert (
+        '=== running "echo foo" in Kconfiglib (subdir/Kconfiglib):'
+        in err.getvalue()
+    )
 
 
 TEST_CASES_FORALL_ENV_VARS = [
@@ -957,13 +974,16 @@ def test_forall_env_vars(west_init_tmpdir, test_case):
     # Windows vs. Linux
     env_var = f'%{env_var}%' if WINDOWS else f'${env_var}'
 
-    stdout = cmd(['forall', '--raw', '-c', f'echo {env_var}'])
+    err = io.StringIO()
+    stdout = cmd(['forall', '--raw', '-c', f'echo {env_var}'], stderr=err)
+    # Banner is chrome on stderr; only the echoed values hit stdout.
     assert stdout.splitlines() == [
-        f'=== running "echo {env_var}" in manifest (zephyr):',
         f'{expected_zephyr}',
-        f'=== running "echo {env_var}" in net-tools (net-tools):',
         f'{expected_net_tools}',
     ]
+    banners = err.getvalue()
+    assert f'=== running "echo {env_var}" in manifest (zephyr):' in banners
+    assert f'=== running "echo {env_var}" in net-tools (net-tools):' in banners
 
 
 def test_grep(west_init_tmpdir):

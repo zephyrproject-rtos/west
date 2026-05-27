@@ -17,19 +17,24 @@
 //! - Cloned-only: empty-positionals path silently skips uncloned
 //!   projects; named-positionals path errors.
 //!
+//! The per-project `=== running …` banner is chrome and goes to
+//! **stderr**; the command's own stdout stays on stdout. So
+//! `west forall -c 'cat VERSION' > out` captures only the commands'
+//! output, not the banners. v1 put the banner on stdout.
+//!
 //! Two stdio modes:
 //!
-//! - **Serial** (`-j 1` or `output.raw=true`): banner via stdout
+//! - **Serial** (`-j 1` or `output.raw=true`): banner to stderr
 //!   then `Stdio::inherit` — output flows live to the user's
-//!   terminal. Banner on stdout matches v1, the other banner-
-//!   emitting commands (`diff` / `status` / `compare`), and the
-//!   parallel path below. Users who want banner-less output
-//!   can pass `-q` (the autouse top-level quiet flag).
+//!   terminal. Users who want banner-less stderr too can pass `-q`
+//!   (the autouse top-level quiet flag).
 //! - **Parallel** (`-j N>1`): `Stdio::piped` + per-project capture;
 //!   workers return their banner + captured streams, and the driver
-//!   drains them in completion order to stdout at the end. Keeps
-//!   parallel runs interleave-free without an indicatif UI (we
-//!   don't have phase/tick events from a generic shell command).
+//!   drains them in completion order at the end — banner and the
+//!   child's stderr to the parent's stderr, the child's stdout to
+//!   the parent's stdout. Keeps parallel runs interleave-free
+//!   without an indicatif UI (we don't have phase/tick events from
+//!   a generic shell command).
 
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -248,16 +253,17 @@ fn run_serial(
     quiet: bool,
 ) -> Result<bool, ForallError> {
     // Bright green + bold matches python v1's banner palette
-    // (`colorama.Fore.LIGHTGREEN_EX`). console::Style's
-    // auto-detect (against stdout) strips the colour when
-    // stdout isn't a TTY.
-    let bold = Style::new().green().bright().bold().for_stdout();
+    // (`colorama.Fore.LIGHTGREEN_EX`). The banner is chrome, so it
+    // goes to stderr (auto-detect colour against stderr); the
+    // command's own stdout stays clean on stdout. Lets
+    // `west forall -c '…' > out` capture only the command output.
+    let bold = Style::new().green().bright().bold().for_stderr();
     let mut failed: Vec<String> = Vec::new();
     for project in projects {
         let abspath = workspace.join(&project.path);
         let cwd = args.cwd.as_deref().unwrap_or(&abspath);
         if !quiet {
-            println!(
+            eprintln!(
                 "{}",
                 bold.apply_to(format!(
                     "=== running \"{}\" in {} ({}):",
@@ -338,24 +344,33 @@ fn run_parallel(
 
     let outcomes = outcomes.into_inner().unwrap_or_else(|p| p.into_inner());
     // Bright green + bold matches python v1's banner palette
-    // (`colorama.Fore.LIGHTGREEN_EX`). console::Style's
-    // auto-detect (against stdout) strips the colour when
-    // stdout isn't a TTY.
-    let bold = Style::new().green().bright().bold().for_stdout();
+    // (`colorama.Fore.LIGHTGREEN_EX`). Banner is chrome → stderr
+    // (auto-detect colour against stderr); the child's captured
+    // stdout/stderr are demultiplexed back onto the parent's
+    // matching streams, so a redirect of `west forall` stdout
+    // captures only the commands' stdout.
+    let bold = Style::new().green().bright().bold().for_stderr();
     let stdout = io::stdout();
-    let mut lock = stdout.lock();
+    let stderr = io::stderr();
+    let mut out_lock = stdout.lock();
+    let mut err_lock = stderr.lock();
     let mut failed: Vec<String> = Vec::new();
     for outcome in outcomes {
         if !quiet {
-            let _ = writeln!(lock, "{}", bold.apply_to(&outcome.banner));
+            // Flush stdout so the banner heads this project's output
+            // block when both streams share a terminal.
+            let _ = out_lock.flush();
+            let _ = writeln!(err_lock, "{}", bold.apply_to(&outcome.banner));
+            let _ = err_lock.flush();
         }
-        let _ = lock.write_all(&outcome.stdout);
-        let _ = lock.write_all(&outcome.stderr);
+        let _ = out_lock.write_all(&outcome.stdout);
+        let _ = out_lock.flush();
+        let _ = err_lock.write_all(&outcome.stderr);
         match outcome.status {
             Some(s) if !s.success() => failed.push(outcome.name),
             None => {
                 let _ = writeln!(
-                    lock,
+                    err_lock,
                     "west: forall: spawn failed for {}: {}",
                     outcome.name,
                     outcome.spawn_err.as_deref().unwrap_or("(unknown)"),
@@ -365,7 +380,8 @@ fn run_parallel(
             _ => {}
         }
     }
-    drop(lock);
+    drop(out_lock);
+    drop(err_lock);
     summarize(failed)
 }
 
