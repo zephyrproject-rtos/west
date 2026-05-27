@@ -50,8 +50,10 @@ pub struct ImportProgress {
 
 impl ImportProgress {
     pub fn new() -> Self {
+        // Share the process-wide MultiProgress (see crate::progress)
+        // so the logger can suspend these bars when emitting records.
         Self {
-            multi: MultiProgress::new(),
+            multi: crate::progress::multi().clone(),
         }
     }
 }

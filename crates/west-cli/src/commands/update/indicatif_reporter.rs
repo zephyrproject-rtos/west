@@ -47,7 +47,10 @@ struct IndicatifState {
 
 impl IndicatifReporter {
     pub fn new(total_projects: usize) -> Self {
-        let multi = MultiProgress::new();
+        // Share the process-wide MultiProgress so the logger (routed
+        // through the same instance) can suspend these bars to print
+        // log lines above them.
+        let multi = crate::progress::multi().clone();
 
         // Bottom summary line as a styled bar (text-only).
         let summary = multi.add(ProgressBar::new(total_projects as u64));
@@ -129,7 +132,9 @@ impl Reporter for IndicatifReporter {
         if let Some(s) = &state.summary_bar {
             s.finish();
         }
-        // Drop the MultiProgress; remaining bars (if any) are flushed.
+        // The MultiProgress is the process-global singleton, so we
+        // don't drop it; per-project bars were already cleared and the
+        // summary bar is left finished (rendered) above.
         FailureSummary {
             failed: state.failed,
         }

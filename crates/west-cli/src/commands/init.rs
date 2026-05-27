@@ -245,7 +245,10 @@ fn bootstrap(args: &InitArgs, url: &str, config: &Configuration) -> Result<(), I
             .map_err(InitError::Config)?
             .unwrap_or(false);
         if !raw && std::io::stderr().is_terminal() {
-            let pb = indicatif::ProgressBar::new_spinner();
+            // Attach to the process-wide MultiProgress so any log
+            // records (routed through the same instance) suspend the
+            // spinner and print above it instead of tearing the frame.
+            let pb = crate::progress::multi().add(indicatif::ProgressBar::new_spinner());
             // Show the URL's basename (e.g. `example-application`) rather
             // than a truncated full URL — same logic init uses elsewhere
             // when falling back from the manifest's `self.path`.

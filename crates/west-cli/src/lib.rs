@@ -57,11 +57,34 @@ pub struct Cli {
     pub command: commands::Command,
 }
 
+/// `log::Log` adapter that emits each record through the shared
+/// [`progress::multi`] `MultiProgress` via `suspend`, so a log line
+/// pauses any live progress bars, prints above them, and lets them
+/// redraw — instead of writing straight to stderr mid-frame. With no
+/// bars active (most commands) `suspend` just runs the write. The
+/// wrapped `env_logger::Logger` owns level filtering and formatting.
+struct ProgressLogger {
+    inner: env_logger::Logger,
+}
+
+impl log::Log for ProgressLogger {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        self.inner.enabled(metadata)
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        progress::multi().suspend(|| self.inner.log(record));
+    }
+
+    fn flush(&self) {
+        self.inner.flush();
+    }
+}
+
 // `-v` / `-q` count flags driving the `log` crate's `LevelFilter`.
 //
-// Default: `Error`. `-v` → `Warn`, `-vv` → `Info`, `-vvv` → `Debug`,
-// `-vvvv` → `Trace`. `-q` subtracts; multiple `-q`s silence the logger
-// entirely.
+// Default: `Warn`. `-v` → `Info`, `-vv` → `Debug`, `-vvv` → `Trace`.
+// `-q` subtracts: `-q` → `Error`, `-qq` → `Off`.
 #[derive(Args, Debug)]
 pub struct VerbosityArgs {
     /// Increase logging verbosity. Composes with `-q`: the net is
@@ -124,7 +147,7 @@ pub fn run() -> ExitCode {
     // bare message (milestone/diagnostic content already carries its
     // own `project:` framing); trace keeps the target for deep
     // debugging. All on stderr, so stdout stays machine-readable.
-    env_logger::Builder::new()
+    let inner = env_logger::Builder::new()
         .filter_level(initial.verbosity.log_level_filter())
         .format(|buf, record| {
             use std::io::Write;
@@ -144,7 +167,13 @@ pub fn run() -> ExitCode {
                 log::Level::Trace => writeln!(buf, "[{}] {msg}", record.target()),
             }
         })
-        .init();
+        .build();
+    // Route records through the shared `MultiProgress` so log lines
+    // suspend any live progress bars and print above them, rather than
+    // writing straight to stderr mid-frame and tearing the display.
+    let max_level = inner.filter();
+    let _ = log::set_boxed_logger(Box::new(ProgressLogger { inner }));
+    log::set_max_level(max_level);
 
     let mut loaded = match commands::config::load(&initial.config_file, &initial.config) {
         Ok(l) => l,

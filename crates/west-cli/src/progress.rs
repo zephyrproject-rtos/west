@@ -4,13 +4,24 @@
 //! updates; the reporter wrapping is the per-command concern.
 
 use std::io::Write;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use console::Style;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use west_core::vcs::{CommitSummary, ProgressEvent, ProgressSink};
+
+/// The process-wide `MultiProgress`. There's one terminal, so one
+/// `MultiProgress` owns it: every progress bar (update workers,
+/// import-resolution clones, `west init`) attaches here, and the
+/// logger routes its records through this same instance (see
+/// `lib.rs`) so log lines print cleanly above any live bars instead
+/// of tearing them.
+pub fn multi() -> &'static MultiProgress {
+    static MULTI: OnceLock<MultiProgress> = OnceLock::new();
+    MULTI.get_or_init(MultiProgress::new)
+}
 
 /// How often a bar pulses while waiting for the first Tick (so the
 /// spinner moves visibly even on slow networks).
