@@ -58,6 +58,12 @@ pub(super) enum UpdateError {
         #[source]
         source: VcsError,
     },
+    #[error("write cache info file {}: {source}", path.display())]
+    WriteCacheInfo {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("set origin URL: {0}")]
     SetRemoteUrl(#[source] VcsError),
     #[error("read HEAD commit summary: {0}")]

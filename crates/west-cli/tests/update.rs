@@ -824,13 +824,16 @@ fn update_auto_cache_populates_then_serves_offline() {
         .assert()
         .success();
 
-    // Cache directory exists with the basename/md5 layout.
-    let entries: Vec<_> = std::fs::read_dir(auto_cache.join("p1"))
+    // Cache directory exists with the basename/md5 layout. The dir
+    // holds the bare md5 mirror plus a `<md5>.info` sidecar; count
+    // only the mirror subdir.
+    let dirs: Vec<_> = std::fs::read_dir(auto_cache.join("p1"))
         .unwrap()
         .filter_map(Result::ok)
+        .filter(|e| e.path().is_dir())
         .collect();
-    assert_eq!(entries.len(), 1, "exactly one md5 subdir");
-    let md5_dir = entries[0].path();
+    assert_eq!(dirs.len(), 1, "exactly one md5 subdir");
+    let md5_dir = dirs[0].path();
     assert_eq!(
         git_capture(&["rev-parse", "--is-bare-repository"], &md5_dir),
         "true",
@@ -889,12 +892,14 @@ fn update_auto_cache_refreshes_on_subsequent_run() {
         .assert()
         .success();
 
-    // Cache's main starts at the original commit.
-    let entries: Vec<_> = std::fs::read_dir(auto_cache.join("p1"))
+    // Cache's main starts at the original commit. Skip the
+    // `<md5>.info` sidecar; the bare mirror is the only subdir.
+    let dirs: Vec<_> = std::fs::read_dir(auto_cache.join("p1"))
         .unwrap()
         .filter_map(Result::ok)
+        .filter(|e| e.path().is_dir())
         .collect();
-    let cache_dir = entries[0].path();
+    let cache_dir = dirs[0].path();
     let initial_sha = git_capture(&["rev-parse", "HEAD"], &p1);
     assert_eq!(
         git_capture(&["rev-parse", "refs/heads/main"], &cache_dir),

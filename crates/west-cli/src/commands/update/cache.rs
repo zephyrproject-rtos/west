@@ -96,13 +96,27 @@ pub(super) fn ensure_auto_cache(
         // us fetching even if the branch name happens to look like a
         // SHA, and `Tag` correctly skips even when it doesn't.
         let rev = RevSpec::Named(&project.revision);
-        if matches!(
-            vcs.rev_type(cache_path, rev).unwrap_or(RevType::Other),
-            RevType::Tag | RevType::Commit
-        ) && vcs.sha(cache_path, rev).is_ok()
-        {
+        let rev_type = vcs.rev_type(cache_path, rev).unwrap_or(RevType::Other);
+        if matches!(rev_type, RevType::Tag | RevType::Commit) && vcs.sha(cache_path, rev).is_ok() {
+            // Immutable revision already in the mirror — no remote
+            // round-trip needed.
+            let kind = if matches!(rev_type, RevType::Tag) {
+                "tag"
+            } else {
+                "commit"
+            };
+            log::debug!(
+                "{}: auto-cache remote update is skipped as it already contains {kind} {}",
+                project.name,
+                project.revision,
+            );
             return Ok(());
         }
+        log::debug!(
+            "{}: update auto-cache ({}) with remote",
+            project.name,
+            cache_path.display(),
+        );
         vcs.fetch(
             cache_path,
             &FetchSpec {
@@ -123,6 +137,12 @@ pub(super) fn ensure_auto_cache(
             source,
         })?;
     }
+    log::debug!(
+        "{}: create auto-cache for {} in {}",
+        project.name,
+        project.url,
+        cache_path.display(),
+    );
     vcs.clone(
         &CloneSpec {
             url: &project.url,
@@ -135,6 +155,32 @@ pub(super) fn ensure_auto_cache(
     )
     .map_err(|source| UpdateError::CachePopulate {
         url: project.url.clone(),
+        source,
+    })?;
+    write_auto_cache_info(cache_path, &project.url)
+}
+
+/// Write the `<cache_dir>.info` sidecar describing an auto-created
+/// mirror, mirroring v1's `create_auto_cache_info`. Best-effort
+/// metadata for humans poking around the cache root; a write failure
+/// is surfaced so we don't silently leave an undocumented cache.
+fn write_auto_cache_info(cache_path: &Path, url: &str) -> Result<(), UpdateError> {
+    let info_path = {
+        let mut p = cache_path.as_os_str().to_owned();
+        p.push(".info");
+        PathBuf::from(p)
+    };
+    let hash = cache_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let content = format!(
+        "\nThe following local cache directory was automatically created by west:\n\
+         - Local Cache:  {hash}\n\
+         - Project Url:  {url}\n"
+    );
+    std::fs::write(&info_path, content).map_err(|source| UpdateError::WriteCacheInfo {
+        path: info_path,
         source,
     })
 }
@@ -179,6 +225,7 @@ pub(super) fn materialize(
                 .path()
                 .to_str()
                 .ok_or_else(|| UpdateError::NonUtf8CachePath(src.path().to_path_buf()))?;
+            log::debug!("{}: cloning from {}", project.name, clone_url);
             vcs.clone(
                 &CloneSpec {
                     url: clone_url,
