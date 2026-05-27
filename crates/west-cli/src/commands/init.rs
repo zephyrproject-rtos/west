@@ -49,7 +49,14 @@ pub struct InitArgs {
     pub local: bool,
 
     /// Manifest URL to clone (bootstrap mode; required when not `-l`).
-    #[arg(long, short = 'u', conflicts_with = "local")]
+    /// `-m` / `--manifest-url` are accepted as v1-compatible aliases.
+    #[arg(
+        long,
+        short = 'u',
+        visible_alias = "manifest-url",
+        visible_short_alias = 'm',
+        conflicts_with = "local"
+    )]
     pub url: Option<String>,
 
     /// Revision (branch or tag) to check out (bootstrap mode).
