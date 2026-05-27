@@ -216,7 +216,7 @@ fn bootstrap(args: &InitArgs, url: &str, config: &Configuration) -> Result<(), I
                 dest: &tmp_dir,
                 revision,
                 origin: None,
-                mirror: false,
+                kind: vcs::CloneKind::Working,
             };
             let res = vcs.clone(&spec, &mut out);
             // Replace the spinner with the same `✓ <sha> <subject>` /
@@ -261,7 +261,7 @@ fn bootstrap(args: &InitArgs, url: &str, config: &Configuration) -> Result<(), I
                 dest: &tmp_dir,
                 revision,
                 origin: None,
-                mirror: false,
+                kind: vcs::CloneKind::Working,
             };
             vcs.clone(&spec, &mut out).map_err(InitError::Vcs)?;
         }

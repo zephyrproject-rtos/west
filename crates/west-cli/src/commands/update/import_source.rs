@@ -26,7 +26,7 @@ use indicatif::{MultiProgress, ProgressBar};
 
 use west_core::manifest::{ImportContent, ImportSource, ImportSourceError, Project};
 use west_core::vcs::{
-    CheckoutTarget, CloneSpec, CommitSummary, FetchSpec, Output, RevSpec, Vcs, VcsError,
+    CheckoutTarget, CloneKind, CloneSpec, CommitSummary, FetchSpec, Output, RevSpec, Vcs, VcsError,
 };
 
 use super::Settings;
@@ -229,7 +229,7 @@ impl WorkspaceImportSource<'_> {
                                 dest: repo,
                                 revision: None,
                                 origin: Some(&project.remote_name),
-                                mirror: false,
+                                kind: CloneKind::Managed,
                             },
                             out,
                         )

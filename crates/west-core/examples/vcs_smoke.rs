@@ -10,7 +10,7 @@ use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use west_core::vcs::{CloneSpec, GitClient, GitOptions, RevSpec, Vcs};
+use west_core::vcs::{CloneKind, CloneSpec, GitClient, GitOptions, RevSpec, Vcs};
 
 fn main() -> ExitCode {
     let mut args = env::args_os().skip(1);
@@ -37,7 +37,7 @@ fn main() -> ExitCode {
         dest: &dest,
         revision: None,
         origin: None,
-        mirror: false,
+        kind: CloneKind::Working,
     };
     if let Err(e) = client.clone(&spec, &mut out) {
         eprintln!("clone failed: {e}");

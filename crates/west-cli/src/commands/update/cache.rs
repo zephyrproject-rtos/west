@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use md5::{Digest, Md5};
 use west_core::manifest::Project;
-use west_core::vcs::{CloneSpec, FetchSpec, Output, RevSpec, RevType, Vcs};
+use west_core::vcs::{CloneKind, CloneSpec, FetchSpec, Output, RevSpec, RevType, Vcs};
 
 use super::Settings;
 use super::error::UpdateError;
@@ -129,7 +129,7 @@ pub(super) fn ensure_auto_cache(
             dest: cache_path,
             revision: None,
             origin: None,
-            mirror: true,
+            kind: CloneKind::Mirror,
         },
         out,
     )
@@ -177,7 +177,7 @@ pub(super) fn clone_via_cache(
             dest,
             revision: None,
             origin: Some(&project.remote_name),
-            mirror: false,
+            kind: CloneKind::Managed,
         },
         out,
     )

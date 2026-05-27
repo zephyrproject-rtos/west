@@ -197,6 +197,13 @@ pub trait Vcs: fmt::Debug + Send + Sync {
     /// [`CloneSpec`] for the full set of clone parameters.
     fn clone(&self, spec: &CloneSpec<'_>, out: &mut Output<'_>) -> Result<(), VcsError>;
 
+    /// Create a fresh, empty repository at `spec.dest`, optionally
+    /// wired to a convenience remote. The result has no commits and a
+    /// detached/unborn HEAD; it's ready for a subsequent [`Vcs::fetch`].
+    /// Quick and local (no network), so — like `set_remote_url` — it
+    /// takes no `Output`.
+    fn init(&self, spec: &InitSpec<'_>) -> Result<(), VcsError>;
+
     /// Resolve `rev` to a commit SHA in `repo`.
     fn sha(&self, repo: &Path, rev: RevSpec<'_>) -> Result<String, VcsError>;
 
@@ -398,18 +405,55 @@ pub trait Vcs: fmt::Debug + Send + Sync {
 /// Git note: `revision` is passed to `git clone --branch`, which accepts
 /// branch and tag names only. Landing at a bare commit SHA requires a
 /// follow-up [`Vcs::checkout`].
-///
-/// `mirror = true` produces a bare mirror clone (`git clone --mirror`),
-/// suitable as a reference cache for subsequent normal clones from
-/// `dest`. In mirror mode `revision` and `origin` are ignored — they
-/// don't apply to a `--mirror` clone.
 #[derive(Debug, Clone, Copy)]
 pub struct CloneSpec<'a> {
     pub url: &'a str,
     pub dest: &'a Path,
+    /// Branch/tag to check out. Only consulted for [`CloneKind::Working`];
+    /// `Managed` lands its revision via a follow-up fetch + checkout and
+    /// `Mirror` has no working tree.
     pub revision: Option<&'a str>,
+    /// Name for the convenience remote (`--origin`). Applies to
+    /// `Working` and `Managed`; ignored for `Mirror`.
     pub origin: Option<&'a str>,
-    pub mirror: bool,
+    pub kind: CloneKind,
+}
+
+/// The shape of repository a [`Vcs::clone`] should produce.
+///
+/// Splitting these out keeps the "what state do I want the clone in"
+/// intent declarative — the client picks the mechanics. `west init`
+/// wants `Working`; the update worker's cache-seed wants `Managed`;
+/// the auto-cache wants `Mirror`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloneKind {
+    /// A normal working clone: the default branch (or `revision`, if
+    /// given) is checked out on a local branch. For repositories a
+    /// human edits — e.g. the manifest repo `west init` clones.
+    Working,
+    /// A west-managed clone: HEAD is left detached and no local
+    /// branches remain. West owns the branch namespace (it tracks the
+    /// checked-out revision via `manifest-rev`) and lands the working
+    /// revision through a follow-up fetch + checkout. Used to seed a
+    /// workspace project from a local cache.
+    Managed,
+    /// A bare mirror (`git clone --mirror`), suitable as a reference
+    /// cache for subsequent clones. `revision` / `origin` don't apply.
+    Mirror,
+}
+
+/// Parameters for [`Vcs::init`] — create a fresh, empty repository.
+///
+/// Counterpart to [`CloneSpec`] for the no-cache network path: rather
+/// than cloning, the worker inits an empty repo and lets a subsequent
+/// [`Vcs::fetch`] pull exactly the requested revision. `origin` names
+/// an optional convenience remote pointing at `url`; west always
+/// fetches by URL, so the remote is purely for the user's benefit.
+#[derive(Debug, Clone, Copy)]
+pub struct InitSpec<'a> {
+    pub url: &'a str,
+    pub dest: &'a Path,
+    pub origin: Option<&'a str>,
 }
 
 /// What to fetch.

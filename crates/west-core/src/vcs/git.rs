@@ -12,9 +12,9 @@ use std::sync::Mutex;
 use crate::config::Configuration;
 
 use super::{
-    CheckoutTarget, CloneSpec, ColorMode, CommitSummary, DiffOutcome, DiffSpec, FetchSpec, Output,
-    ProgressSink, RevSpec, RevType, StatusMode, StatusOutcome, StatusSpec, SubmoduleScope,
-    SubmoduleStrategy, Vcs, VcsError,
+    CheckoutTarget, CloneKind, CloneSpec, ColorMode, CommitSummary, DiffOutcome, DiffSpec,
+    FetchSpec, InitSpec, Output, ProgressSink, RevSpec, RevType, StatusMode, StatusOutcome,
+    StatusSpec, SubmoduleScope, SubmoduleStrategy, Vcs, VcsError,
 };
 
 const NAME: &str = "git";
@@ -249,18 +249,12 @@ impl GitClient {
         self.opts.fetch_narrow || self.opts.fetch_tags == Some(false)
     }
 
-    /// Delete every ref under [`WEST_SCRATCH_PATTERN`]. `update-ref
-    /// -d` takes no globs, so enumerate with `for-each-ref` and drop
-    /// each. Empty namespace ⇒ no-op.
-    fn clear_west_scratch_refs(&self, repo: &Path) -> Result<(), VcsError> {
+    /// Delete every ref under `pattern` (e.g. `refs/west/` or
+    /// `refs/heads/`). `update-ref -d` takes no globs, so enumerate
+    /// with `for-each-ref` and drop each. Empty namespace ⇒ no-op.
+    fn delete_refs_under(&self, repo: &Path, pattern: &str) -> Result<(), VcsError> {
         let repo_str = repo.to_string_lossy().into_owned();
-        let res = self.run(&[
-            "-C",
-            &repo_str,
-            "for-each-ref",
-            "--format=%(refname)",
-            WEST_SCRATCH_PATTERN,
-        ])?;
+        let res = self.run(&["-C", &repo_str, "for-each-ref", "--format=%(refname)", pattern])?;
         check_success(&res)?;
         let stdout = std::str::from_utf8(&res.output.stdout).map_err(|e| VcsError::BadOutput {
             client: NAME,
@@ -272,6 +266,18 @@ impl GitClient {
             check_success(&res)?;
         }
         Ok(())
+    }
+
+    /// Post-`clone` cleanup for [`CloneKind::Managed`]: detach HEAD so
+    /// the local branch git clone checked out isn't current, then drop
+    /// every local branch. West owns the branch namespace via
+    /// `manifest-rev` (which doesn't exist yet on a fresh clone, so
+    /// deleting all of `refs/heads/` is safe here).
+    fn detach_and_prune_branches(&self, repo: &Path) -> Result<(), VcsError> {
+        let repo_str = repo.to_string_lossy().into_owned();
+        let res = self.run(&["-C", &repo_str, "checkout", "--quiet", "--detach", "HEAD"])?;
+        check_success(&res)?;
+        self.delete_refs_under(repo, "refs/heads/")
     }
 
     /// Run `git` with `args`. stdout/stderr are captured. The current
@@ -443,37 +449,73 @@ impl Vcs for GitClient {
     fn clone(&self, spec: &CloneSpec<'_>, out: &mut Output<'_>) -> Result<(), VcsError> {
         let dest_str = spec.dest.to_string_lossy().into_owned();
         let mut argv: Vec<&str> = vec!["clone", "--progress"];
-        if spec.mirror {
-            // `--mirror` implies `--bare` and a refspec that mirrors every
-            // ref under `refs/*`. `--branch` / `--origin` don't apply to a
-            // bare mirror — git rejects the combination — so we ignore
-            // them in this mode.
-            argv.push("--mirror");
-        } else {
-            // `git clone --branch` accepts branch and tag names. Bare commit
-            // SHAs aren't supported here; landing on one requires a follow-up
-            // checkout.
-            if let Some(r) = spec.revision {
-                argv.extend(["--branch", r]);
+        match spec.kind {
+            CloneKind::Mirror => {
+                // `--mirror` implies `--bare` and a refspec that mirrors
+                // every ref under `refs/*`. `--branch` / `--origin` don't
+                // apply to a bare mirror — git rejects the combination —
+                // so they're ignored in this mode.
+                argv.push("--mirror");
             }
-            if let Some(o) = spec.origin {
-                argv.extend(["--origin", o]);
-            }
-            // `git clone` fetches all tags by default, so a later
-            // `--no-tags` fetch wouldn't undo them. When tags are
-            // disabled (`--narrow` / `tool.git.fetch.tags = false`),
-            // clone with `--no-tags` too — this also configures the
-            // remote's tagOpt so future fetches stay tag-free. (Mirror
-            // clones are deliberately complete, so they keep tags.)
-            if self.no_tags() {
-                argv.push("--no-tags");
+            CloneKind::Working | CloneKind::Managed => {
+                // `--branch` accepts branch and tag names (not bare SHAs)
+                // and only matters for a working checkout. `Managed` lands
+                // its revision via a follow-up fetch + checkout, so it
+                // never sets `revision`.
+                if matches!(spec.kind, CloneKind::Working)
+                    && let Some(r) = spec.revision
+                {
+                    argv.extend(["--branch", r]);
+                }
+                if let Some(o) = spec.origin {
+                    argv.extend(["--origin", o]);
+                }
+                // `git clone` fetches all tags by default, so a later
+                // `--no-tags` fetch wouldn't undo them. When tags are
+                // disabled (`--narrow` / `tool.git.fetch.tags = false`),
+                // clone with `--no-tags` too — this also configures the
+                // remote's tagOpt so future fetches stay tag-free.
+                if self.no_tags() {
+                    argv.push("--no-tags");
+                }
             }
         }
         // `--` to be explicit about argv boundaries.
         argv.push("--");
         argv.push(spec.url);
         argv.push(&dest_str);
-        self.run_with_output(&argv, out)
+        self.run_with_output(&argv, out)?;
+
+        // West-managed clones own no local branches: detach HEAD and
+        // drop the branch git clone left behind (west tracks the
+        // checked-out revision via manifest-rev instead).
+        if matches!(spec.kind, CloneKind::Managed) {
+            self.detach_and_prune_branches(spec.dest)?;
+        }
+        Ok(())
+    }
+
+    fn init(&self, spec: &InitSpec<'_>) -> Result<(), VcsError> {
+        let dest_str = spec.dest.to_string_lossy().into_owned();
+        // `-c init.defaultBranch=…` silences the "Using 'master' as the
+        // name…" advice on every git version (the flag `--initial-branch`
+        // is 2.28+, but the config key predates it). The placeholder
+        // branch is unborn and we never commit on it — the network flow
+        // fetches then checks out a detached HEAD — so it never
+        // materialises as a real ref.
+        let res = self.run(&[
+            "-c",
+            "init.defaultBranch=west-init",
+            "init",
+            "--",
+            &dest_str,
+        ])?;
+        check_success(&res)?;
+        if let Some(origin) = spec.origin {
+            let res = self.run(&["-C", &dest_str, "remote", "add", "--", origin, spec.url])?;
+            check_success(&res)?;
+        }
+        Ok(())
     }
 
     fn sha(&self, repo: &Path, rev: RevSpec<'_>) -> Result<String, VcsError> {
@@ -933,7 +975,7 @@ impl Vcs for GitClient {
         // revisions. manifest-rev now pins those objects, so dropping
         // `refs/west/*` can't lose them. No-op when the fetch took the
         // direct refspec (the namespace is empty).
-        self.clear_west_scratch_refs(repo)
+        self.delete_refs_under(repo, WEST_SCRATCH_PATTERN)
     }
 
     fn manifest_rev(&self, repo: &Path) -> Result<Option<String>, VcsError> {

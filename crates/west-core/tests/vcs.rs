@@ -10,9 +10,9 @@ use tempfile::TempDir;
 
 use west_core::config::Configuration;
 use west_core::vcs::{
-    self, CheckoutTarget, CloneSpec, FetchSpec, FetchStrategy, GitClient, GitOptions, NullSink,
-    Output, ProgressEvent, ProgressSink, RevSpec, RevType, SubmoduleScope, SubmoduleStrategy, Vcs,
-    VcsError,
+    self, CheckoutTarget, CloneKind, CloneSpec, FetchSpec, FetchStrategy, GitClient, GitOptions,
+    InitSpec, NullSink, Output, ProgressEvent, ProgressSink, RevSpec, RevType, SubmoduleScope,
+    SubmoduleStrategy, Vcs, VcsError,
 };
 
 // Test double: collects every event into an owned vector for assertions.
@@ -198,7 +198,7 @@ fn clone_round_trip() {
             dest: &dest,
             revision: None,
             origin: None,
-            mirror: false,
+            kind: CloneKind::Working,
         },
         &mut Output::Native,
     )
@@ -237,7 +237,7 @@ fn clone_with_branch() {
             dest: &dest,
             revision: Some("feature"),
             origin: None,
-            mirror: false,
+            kind: CloneKind::Working,
         },
         &mut Output::Native,
     )
@@ -264,7 +264,7 @@ fn clone_with_custom_origin() {
             dest: &dest,
             revision: None,
             origin: Some("upstream"),
-            mirror: false,
+            kind: CloneKind::Working,
         },
         &mut Output::Native,
     )
@@ -290,7 +290,7 @@ fn sha_resolves_head_and_short_ref() {
             dest: &dest,
             revision: None,
             origin: None,
-            mirror: false,
+            kind: CloneKind::Working,
         },
         &mut Output::Native,
     )
@@ -468,7 +468,7 @@ fn clone_into(root: &Path, bare: &Path) -> PathBuf {
             dest: &dest,
             revision: None,
             origin: None,
-            mirror: false,
+            kind: CloneKind::Working,
         },
         &mut Output::Native,
     )
@@ -1000,7 +1000,7 @@ fn update_submodules_materializes_worktree() {
             dest: &dest,
             revision: None,
             origin: None,
-            mirror: false,
+            kind: CloneKind::Working,
         },
         &mut Output::Native,
     )
@@ -1110,7 +1110,7 @@ fn clone_with_native_succeeds() {
             dest: &dest,
             revision: None,
             origin: None,
-            mirror: false,
+            kind: CloneKind::Working,
         },
         &mut Output::Native,
     )
@@ -1136,7 +1136,7 @@ fn clone_streams_lines_and_terminates_with_finished() {
             dest: &dest,
             revision: None,
             origin: None,
-            mirror: false,
+            kind: CloneKind::Working,
         },
         &mut Output::Stream(&mut sink),
     )
@@ -1177,7 +1177,7 @@ fn null_sink_is_a_valid_target() {
             dest: &dest,
             revision: None,
             origin: None,
-            mirror: false,
+            kind: CloneKind::Working,
         },
         &mut Output::Stream(&mut NullSink),
     )
@@ -1224,7 +1224,7 @@ fn clone_mirror_creates_bare_mirror_repo() {
             dest: &dest,
             revision: None,
             origin: None,
-            mirror: true,
+            kind: CloneKind::Mirror,
         },
         &mut Output::Native,
     )
@@ -1547,5 +1547,88 @@ fn fetch_lands_bare_sha_via_scratch_refspec_then_set_manifest_rev_tidies_it() {
     assert!(
         scratch_after.is_empty(),
         "set_manifest_rev should clear refs/west/*; got {scratch_after:?}"
+    );
+}
+
+#[test]
+fn init_then_fetch_lands_revision_with_clean_branch_namespace() {
+    // The full no-cache network path at the vcs level: init an empty
+    // repo wired to a remote, fetch a branch revision, pin it, and
+    // detach onto it. The result must have the working tree populated
+    // and only `manifest-rev` in refs/heads/ — no stray default
+    // branch (the whole point of init+fetch over clone).
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = tmp.path().join("dest");
+
+    let v = GitClient::new(GitOptions::default());
+    v.init(&InitSpec {
+        url: bare.to_str().unwrap(),
+        dest: &dest,
+        origin: Some("origin"),
+    })
+    .unwrap();
+    assert!(v.is_repo(&dest).unwrap(), "init should produce a repo");
+
+    let sha = v
+        .fetch(
+            &dest,
+            &FetchSpec {
+                remote: bare.to_str().unwrap(),
+                revision: Some("main"),
+            },
+            &mut Output::Native,
+        )
+        .unwrap();
+    v.set_manifest_rev(&dest, &sha, Some("test")).unwrap();
+    v.checkout(&dest, &CheckoutTarget::Detached(&sha), &mut Output::Native)
+        .unwrap();
+
+    // Working tree populated from the fetched commit.
+    assert!(dest.join("README").is_file(), "checkout should populate worktree");
+    // Only manifest-rev lives in the branch namespace.
+    let branches = git_capture(&["for-each-ref", "--format=%(refname)", "refs/heads/"], &dest);
+    assert_eq!(
+        branches, "refs/heads/manifest-rev",
+        "init+fetch must leave only manifest-rev; got {branches:?}"
+    );
+}
+
+#[test]
+fn managed_clone_leaves_no_local_branch() {
+    // A CloneKind::Managed clone seeds objects but must leave a
+    // detached HEAD and no local branches — west owns the branch
+    // namespace. (Contrast with the stray `main`/`master` a plain
+    // clone leaves behind.)
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let bare = bare_source_with_one_commit(tmp.path());
+    let dest = tmp.path().join("managed");
+
+    let v = GitClient::new(GitOptions::default());
+    v.clone(
+        &CloneSpec {
+            url: bare.to_str().unwrap(),
+            dest: &dest,
+            revision: None,
+            origin: Some("origin"),
+            kind: CloneKind::Managed,
+        },
+        &mut Output::Native,
+    )
+    .unwrap();
+
+    let branches = git_capture(&["for-each-ref", "--format=%(refname)", "refs/heads/"], &dest);
+    assert!(branches.is_empty(), "Managed clone must leave no local branches; got {branches:?}");
+    assert!(
+        v.head_branch(&dest).unwrap().is_none(),
+        "Managed clone must leave a detached HEAD"
     );
 }
