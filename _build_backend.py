@@ -8,12 +8,17 @@ wheel containing only the `_west_native` cdylib — no PATH-installable
 auto-build `[[bin]]` targets (see PyO3/maturin#368).
 
 The workaround: before delegating to maturin, run
-`cargo build --release --features pyo3 -p west-cli` and copy the
-resulting binary to `.wheel-data/scripts/`. Maturin's
+`cargo build --release --bin west -p west-cli` and copy the resulting
+binary to `.wheel-data/scripts/`. Maturin's
 `[tool.maturin] data = ".wheel-data"` directive then packs everything
 under that directory into the wheel's `<name>-<version>.data/` tree,
 which pip unpacks to `scripts/` on the destination interpreter
 (PEP 427).
+
+The bin build deliberately omits `--features pyo3` — that feature is
+for the cdylib (maturin enables it itself), and turning it on for the
+bin pulls pyo3 symbols into the binary's link step without
+`-undefined dynamic_lookup` or a libpython link, which breaks on macOS.
 
 Once #368 lands native support, this file can be deleted and
 `build-backend` switched back to plain `"maturin"`.
@@ -88,8 +93,8 @@ def _stage_cli_binary() -> None:
                 "cargo",
                 "build",
                 "--release",
-                "--features",
-                "pyo3",
+                "--bin",
+                "west",
                 "-p",
                 "west-cli",
             ],
