@@ -94,7 +94,15 @@ def _load_command_class(module_path, class_name):
     if spec is None or spec.loader is None:
         raise SystemExit(f"west._dispatch: failed to load spec for {module_path}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Mirror v1's "could not import" wording when the extension's own
+    # imports fail (typo, missing dep, etc.). Surface the original
+    # exception type + message so authors don't need a traceback.
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        raise SystemExit(
+            f"west._dispatch: could not import {module_path}: {type(e).__name__}: {e}"
+        ) from e
     try:
         return getattr(module, class_name)
     except AttributeError as e:
