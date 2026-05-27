@@ -708,7 +708,17 @@ impl ImportSource for PyImportSource {
 /// Standalone so the python `_filesystem_importer` (built *before* the
 /// native parse) can short-circuit imports for inactive projects without
 /// holding a [`LoadedManifest`] yet.
-#[pyclass(name = "ProjectFilter", module = "west._west_native", frozen)]
+// `skip_from_py_object` is pyo3 0.27+'s opt-out for the auto-generated
+// `FromPyObject` derive on `#[pyclass] + Clone`. We never convert
+// python-side instances back to a rust `ProjectFilter`, so opting out
+// here silences pyo3's transition deprecation warning without changing
+// behaviour.
+#[pyclass(
+    name = "ProjectFilter",
+    module = "west._west_native",
+    frozen,
+    skip_from_py_object,
+)]
 #[derive(Clone)]
 pub struct ProjectFilter {
     inner: CoreProjectFilter,

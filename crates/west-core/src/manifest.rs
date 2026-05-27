@@ -680,15 +680,6 @@ impl ManifestProbeFile {
     }
 }
 
-impl<T> OneOrMany<T> {
-    fn into_vec(self) -> Vec<T> {
-        match self {
-            OneOrMany::One(t) => vec![t],
-            OneOrMany::Many(v) => v,
-        }
-    }
-}
-
 impl<T: Clone> OneOrMany<T> {
     fn to_vec(&self) -> Vec<T> {
         match self {
