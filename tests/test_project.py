@@ -955,10 +955,7 @@ def test_forall(west_init_tmpdir):
     ).splitlines() == [
         'foo',
     ]
-    assert (
-        '=== running "echo foo" in Kconfiglib (subdir/Kconfiglib):'
-        in err.getvalue()
-    )
+    assert '=== running "echo foo" in Kconfiglib (subdir/Kconfiglib):' in err.getvalue()
 
 
 TEST_CASES_FORALL_ENV_VARS = [

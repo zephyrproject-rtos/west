@@ -65,13 +65,16 @@ def cfg(f=ALL, topdir=None):
 
 def update_testcfg(section, key, value, configfile=LOCAL, topdir=None):
     Configuration(topdir=topdir).set(
-        option=f'{section}.{key}', value=value, configfile=configfile,
+        option=f'{section}.{key}',
+        value=value,
+        configfile=configfile,
     )
 
 
 def delete_testcfg(section, key, configfile=None, topdir=None):
     Configuration(topdir=topdir).delete(
-        option=f'{section}.{key}', configfile=configfile,
+        option=f'{section}.{key}',
+        configfile=configfile,
     )
 
 
