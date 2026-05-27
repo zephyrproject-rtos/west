@@ -27,6 +27,15 @@ const NAME: &str = "git";
 /// never see this literal.
 const MANIFEST_REV_REF: &str = "refs/heads/manifest-rev";
 
+/// Scratch ref namespace used by [`GitClient::fetch`] to land a
+/// revision the server won't serve directly (a bare SHA). The fetch
+/// pulls every branch into `refs/west/*` and resolves the SHA from
+/// there; [`GitClient::set_manifest_rev`] tears the namespace down
+/// once `manifest-rev` pins the objects, so it never accumulates.
+/// Internal to this client — the trait never mentions it.
+const WEST_SCRATCH_REFSPEC: &str = "+refs/heads/*:refs/west/*";
+const WEST_SCRATCH_PATTERN: &str = "refs/west/";
+
 /// Resolve a [`RevSpec`] to the string git wants on the command line.
 /// Single site for the git-specific encoding of `Head` / `ManifestRev`;
 /// callers stay shape-agnostic.
@@ -36,6 +45,20 @@ fn resolve_rev<'a>(rev: RevSpec<'a>) -> &'a str {
         RevSpec::ManifestRev => MANIFEST_REV_REF,
         RevSpec::Named(s) => s,
     }
+}
+
+/// Heuristic: could this revision string be a raw git object name
+/// (SHA)? Used by `fetch` to decide whether to fetch the revision
+/// directly (servers may refuse a bare SHA) or via the all-branches
+/// scratch refspec. Matches v1's `_maybe_sha`: all hex, no longer
+/// than a full SHA-1 (40). Deliberately permissive — a hex-looking
+/// branch/tag name misclassified here just takes the (always-safe)
+/// scratch path, which fetches everything and still resolves it. The
+/// inverse error (a real SHA treated as a name) is the costly one, so
+/// we lean toward "yes". (SHA-256's 64-char names are not covered;
+/// west's object-format support is a separate concern.)
+fn looks_like_sha(rev: &str) -> bool {
+    !rev.is_empty() && rev.len() <= 40 && rev.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 #[derive(Debug)]
@@ -55,6 +78,12 @@ pub struct GitOptions {
     /// revisions land as local refs. `Some(false)` passes `--no-tags`.
     /// Matches v1, which hardcoded `--tags`.
     pub fetch_tags: Option<bool>,
+    /// Sourced from `tool.git.fetch.narrow`. When `true`, fetch the
+    /// exact requested revision and nothing else: skip tags, and fetch
+    /// the revision directly even when it looks like a SHA (which may
+    /// fail depending on the Git host). The CLI's `--narrow` /
+    /// `update.narrow` map onto this. Mirrors v1's `--narrow`.
+    pub fetch_narrow: bool,
     /// Sourced from `tool.git.fetch.depth`. When set, fetches are shallow
     /// to that depth via `--depth=N`.
     pub fetch_depth: Option<u32>,
@@ -86,6 +115,7 @@ impl Default for GitOptions {
             binary: None,
             fetch_strategy: FetchStrategy::default(),
             fetch_tags: None,
+            fetch_narrow: false,
             fetch_depth: None,
             fetch_force: true,
             submodules_recurse: true,
@@ -134,6 +164,11 @@ impl GitClient {
         let fetch_tags = match config.get_bool("tool.git.fetch.tags") {
             Ok(opt) => opt,
             Err(e) => return Err(bad_option("tool.git.fetch.tags", &e.to_string())),
+        };
+
+        let fetch_narrow = match config.get_bool("tool.git.fetch.narrow") {
+            Ok(opt) => opt.unwrap_or(false),
+            Err(e) => return Err(bad_option("tool.git.fetch.narrow", &e.to_string())),
         };
 
         let fetch_depth = match config.get("tool.git.fetch.depth") {
@@ -193,6 +228,7 @@ impl GitClient {
             binary,
             fetch_strategy,
             fetch_tags,
+            fetch_narrow,
             fetch_depth,
             fetch_force,
             submodules_recurse,
@@ -203,6 +239,39 @@ impl GitClient {
 
     fn binary(&self) -> &Path {
         self.opts.binary.as_deref().unwrap_or(Path::new("git"))
+    }
+
+    /// Whether to suppress tag fetching. `--narrow` implies it;
+    /// otherwise honor the explicit `tool.git.fetch.tags` (which
+    /// defaults to fetching tags). Shared by `clone` and `fetch` so
+    /// they stay consistent.
+    fn no_tags(&self) -> bool {
+        self.opts.fetch_narrow || self.opts.fetch_tags == Some(false)
+    }
+
+    /// Delete every ref under [`WEST_SCRATCH_PATTERN`]. `update-ref
+    /// -d` takes no globs, so enumerate with `for-each-ref` and drop
+    /// each. Empty namespace ⇒ no-op.
+    fn clear_west_scratch_refs(&self, repo: &Path) -> Result<(), VcsError> {
+        let repo_str = repo.to_string_lossy().into_owned();
+        let res = self.run(&[
+            "-C",
+            &repo_str,
+            "for-each-ref",
+            "--format=%(refname)",
+            WEST_SCRATCH_PATTERN,
+        ])?;
+        check_success(&res)?;
+        let stdout = std::str::from_utf8(&res.output.stdout).map_err(|e| VcsError::BadOutput {
+            client: NAME,
+            argv: res.argv.clone(),
+            detail: format!("non-UTF-8 for-each-ref output: {e}"),
+        })?;
+        for refname in stdout.lines().map(str::trim).filter(|l| !l.is_empty()) {
+            let res = self.run(&["-C", &repo_str, "update-ref", "-d", refname])?;
+            check_success(&res)?;
+        }
+        Ok(())
     }
 
     /// Run `git` with `args`. stdout/stderr are captured. The current
@@ -389,6 +458,15 @@ impl Vcs for GitClient {
             }
             if let Some(o) = spec.origin {
                 argv.extend(["--origin", o]);
+            }
+            // `git clone` fetches all tags by default, so a later
+            // `--no-tags` fetch wouldn't undo them. When tags are
+            // disabled (`--narrow` / `tool.git.fetch.tags = false`),
+            // clone with `--no-tags` too — this also configures the
+            // remote's tagOpt so future fetches stay tag-free. (Mirror
+            // clones are deliberately complete, so they keep tags.)
+            if self.no_tags() {
+                argv.push("--no-tags");
             }
         }
         // `--` to be explicit about argv boundaries.
@@ -654,31 +732,55 @@ impl Vcs for GitClient {
         let repo_str = repo.to_string_lossy().into_owned();
         let depth_arg = self.opts.fetch_depth.map(|d| format!("--depth={d}"));
 
+        // Refspec strategy:
+        //   - No revision: default refspec; resolve FETCH_HEAD.
+        //   - SHA-shaped revision, not narrow: many hosts (GitHub,
+        //     …) refuse to serve a bare SHA, so instead fetch every
+        //     branch into the scratch namespace `refs/west/*` (tags
+        //     come along via --tags) and hope the SHA is reachable;
+        //     resolve the SHA directly afterwards. `set_manifest_rev`
+        //     tears the scratch refs down once manifest-rev pins the
+        //     objects. This is the init+fetch path's substitute for
+        //     "clone brought the default branch down first".
+        //   - Otherwise (branch / tag, or narrow): fetch the revision
+        //     directly and resolve FETCH_HEAD.
+        let use_scratch = match spec.revision {
+            Some(rev) => !self.opts.fetch_narrow && looks_like_sha(rev),
+            None => false,
+        };
+
         let mut argv: Vec<&str> = vec!["-C", &repo_str, "fetch", "--progress"];
         if self.opts.fetch_force {
             argv.push("--force");
         }
         // v1 always passed `--tags` so that a manifest revision like
         // `v2.0` lands as a local tag ref, not just FETCH_HEAD. Match
-        // that as the default; `tool.git.fetch.tags = false` opts out.
-        match self.opts.fetch_tags {
-            Some(false) => argv.push("--no-tags"),
-            Some(true) | None => argv.push("--tags"),
-        }
+        // that as the default; `--narrow` / `tool.git.fetch.tags =
+        // false` opts out.
+        argv.push(if self.no_tags() { "--no-tags" } else { "--tags" });
         if let Some(d) = depth_arg.as_deref() {
             argv.push(d);
         }
         argv.push("--");
         argv.push(spec.remote);
-        if let Some(rev) = spec.revision {
+        if use_scratch {
+            argv.push(WEST_SCRATCH_REFSPEC);
+        } else if let Some(rev) = spec.revision {
             argv.push(rev);
         }
         self.run_with_output(&argv, out)?;
-        // After an active fetch with a positional ref, `FETCH_HEAD` is the
-        // just-fetched tip — that's the canonical sha for the requested
-        // revision. For a default-refspec fetch (`revision: None`),
-        // `FETCH_HEAD`'s merge-target line is what callers get.
-        self.sha(repo, RevSpec::Named("FETCH_HEAD"))
+
+        match (use_scratch, spec.revision) {
+            // Scratch fetch: FETCH_HEAD is ambiguous (one entry per
+            // branch), but the SHA is now reachable from refs/west/*,
+            // so resolve it directly.
+            (true, Some(rev)) => self.sha(repo, RevSpec::Named(rev)),
+            // After an active fetch with a positional ref, FETCH_HEAD
+            // is the just-fetched tip — the canonical sha for the
+            // requested revision. For a default-refspec fetch
+            // (revision: None) it's the merge-target line.
+            _ => self.sha(repo, RevSpec::Named("FETCH_HEAD")),
+        }
     }
 
     fn checkout(
@@ -826,7 +928,12 @@ impl Vcs for GitClient {
         }
         argv.extend([MANIFEST_REV_REF, sha]);
         let res = self.run(&argv)?;
-        check_success(&res)
+        check_success(&res)?;
+        // Tidy the scratch namespace `fetch` uses to land bare-SHA
+        // revisions. manifest-rev now pins those objects, so dropping
+        // `refs/west/*` can't lose them. No-op when the fetch took the
+        // direct refspec (the namespace is empty).
+        self.clear_west_scratch_refs(repo)
     }
 
     fn manifest_rev(&self, repo: &Path) -> Result<Option<String>, VcsError> {

@@ -1456,3 +1456,96 @@ fn read_at_ref_errors_when_repo_path_is_not_a_repo() {
         "non-repo dir must propagate as Err, not silent Ok(None); got {res:?}"
     );
 }
+
+/// Build a bare source with a commit on a *non-default* branch and
+/// return `(bare_path, side_branch_sha)`. The side commit is
+/// unreachable from the default branch, so an init+fetch consumer
+/// can only land it via the all-branches scratch refspec — exactly
+/// the case the network path will rely on once `git clone` is gone.
+fn bare_source_with_side_branch(root: &Path) -> (PathBuf, String) {
+    let work = root.join("sidework");
+    std::fs::create_dir_all(&work).unwrap();
+    git(&["init", "-q", "--initial-branch=main", "."], &work);
+    std::fs::write(work.join("README"), b"main\n").unwrap();
+    git(&["add", "README"], &work);
+    git(&["commit", "-q", "-m", "main commit"], &work);
+    git(&["checkout", "-q", "-b", "side"], &work);
+    std::fs::write(work.join("SIDE"), b"side\n").unwrap();
+    git(&["add", "SIDE"], &work);
+    git(&["commit", "-q", "-m", "side commit"], &work);
+    let side_sha = git_capture(&["rev-parse", "HEAD"], &work);
+    // Put the default branch back to `main` so the bare repo's HEAD
+    // doesn't point at the side branch (mirrors a real upstream).
+    git(&["checkout", "-q", "main"], &work);
+
+    let bare = root.join("side-source.git");
+    git(
+        &["clone", "-q", "--bare", "sidework", "side-source.git"],
+        root,
+    );
+    let _ = std::fs::remove_dir_all(&work);
+    (bare, side_sha)
+}
+
+#[test]
+fn fetch_lands_bare_sha_via_scratch_refspec_then_set_manifest_rev_tidies_it() {
+    // Core of the init+fetch network path: an empty repo, asked to
+    // fetch a bare SHA the server won't serve directly, falls back to
+    // fetching every branch into refs/west/* and resolves the SHA
+    // from there. set_manifest_rev then pins the objects and clears
+    // the scratch namespace.
+    if !git_available() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let (bare, side_sha) = bare_source_with_side_branch(tmp.path());
+
+    // Stand up an empty repo + convenience remote by hand (the `init`
+    // trait method lands in a later phase).
+    let dest = tmp.path().join("dest");
+    std::fs::create_dir_all(&dest).unwrap();
+    git(&["init", "-q", "--initial-branch=placeholder", "."], &dest);
+
+    let v = GitClient::new(GitOptions::default());
+    let bare_url = bare.to_str().unwrap();
+    let spec = FetchSpec {
+        remote: bare_url,
+        revision: Some(&side_sha),
+    };
+    let resolved = v.fetch(&dest, &spec, &mut Output::Native).unwrap();
+    assert_eq!(resolved, side_sha, "fetch should resolve the bare SHA");
+
+    // The object is present locally now.
+    let present = Command::new("git")
+        .args(["-C", dest.to_str().unwrap(), "cat-file", "-e", &side_sha])
+        .status()
+        .unwrap();
+    assert!(present.success(), "side SHA object should be present");
+
+    // Scratch refs exist after the fetch, before set_manifest_rev.
+    let scratch_before = git_capture(
+        &["for-each-ref", "--format=%(refname)", "refs/west/"],
+        &dest,
+    );
+    assert!(
+        !scratch_before.is_empty(),
+        "scratch refspec should have populated refs/west/*"
+    );
+
+    v.set_manifest_rev(&dest, &side_sha, Some("test")).unwrap();
+
+    // manifest-rev pins the SHA, and the scratch namespace is gone.
+    assert_eq!(
+        git_capture(&["rev-parse", "refs/heads/manifest-rev"], &dest),
+        side_sha,
+    );
+    let scratch_after = git_capture(
+        &["for-each-ref", "--format=%(refname)", "refs/west/"],
+        &dest,
+    );
+    assert!(
+        scratch_after.is_empty(),
+        "set_manifest_rev should clear refs/west/*; got {scratch_after:?}"
+    );
+}

@@ -661,7 +661,16 @@ fn splice_flags_into_config(args: &UpdateArgs, config: &mut Configuration) -> Re
     if args.keep_descendants {
         splice_inline(config, "update.keep-descendants", ConfigValue::Bool(true))?;
     }
-    if args.narrow {
+    // `--narrow` (CLI) OR `update.narrow` (config) suppresses tag
+    // fetching. The git layer only knows `tool.git.fetch.tags`, so
+    // translate either source into that key. The CLI flag wins when
+    // set; otherwise honor the persisted config option.
+    let narrow = args.narrow
+        || config
+            .get_bool("update.narrow")
+            .map_err(|e| e.to_string())?
+            .unwrap_or(false);
+    if narrow {
         splice_inline(config, "tool.git.fetch.tags", ConfigValue::Bool(false))?;
     }
     if let Some(f) = args.fetch {
