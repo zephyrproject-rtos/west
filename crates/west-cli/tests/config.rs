@@ -311,6 +311,98 @@ fn unset_missing_key_exits_1() {
 
 #[test]
 #[serial]
+fn unset_delete_all_removes_from_every_scope() {
+    // v1's `west config -D` semantic: delete `name` from every layer
+    // that holds it. Set in all three scopes, then verify -D wipes
+    // them all and a subsequent `get` fails with the "not set" exit.
+    let sb = Sandbox::new();
+    sb.west()
+        .args(["config", "set", "--system", "k.v", "S"])
+        .assert()
+        .success();
+    sb.west()
+        .args(["config", "set", "--global", "k.v", "G"])
+        .assert()
+        .success();
+    sb.west()
+        .args(["config", "set", "--local", "k.v", "L"])
+        .assert()
+        .success();
+
+    sb.west()
+        .args(["config", "unset", "-D", "k.v"])
+        .assert()
+        .success();
+
+    for scope in ["--system", "--global", "--local"] {
+        let res = sb
+            .west()
+            .args(["config", "get", scope, "k.v"])
+            .assert()
+            .failure();
+        assert_eq!(
+            res.get_output().status.code(),
+            Some(1),
+            "scope {scope} still held the key"
+        );
+    }
+}
+
+#[test]
+#[serial]
+fn unset_delete_all_succeeds_when_only_some_scopes_have_it() {
+    // The key is only in --global; -D should clear it and succeed
+    // even though --system / --local never held it.
+    let sb = Sandbox::new();
+    sb.west()
+        .args(["config", "set", "--global", "k.v", "G"])
+        .assert()
+        .success();
+
+    sb.west()
+        .args(["config", "unset", "--delete-all", "k.v"])
+        .assert()
+        .success();
+
+    let res = sb
+        .west()
+        .args(["config", "get", "--global", "k.v"])
+        .assert()
+        .failure();
+    assert_eq!(res.get_output().status.code(), Some(1));
+}
+
+#[test]
+#[serial]
+fn unset_delete_all_fails_when_no_scope_has_it() {
+    let sb = Sandbox::new();
+    let res = sb
+        .west()
+        .args(["config", "unset", "-D", "absent.key"])
+        .assert()
+        .failure();
+    assert_eq!(res.get_output().status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&res.get_output().stderr);
+    assert!(stderr.contains("not set"), "stderr: {stderr}");
+}
+
+#[test]
+#[serial]
+fn unset_delete_all_conflicts_with_scope_flags() {
+    // clap should reject `-D --global` (and the other scope flags)
+    // because the operation modes are mutually exclusive.
+    let sb = Sandbox::new();
+    let res = sb
+        .west()
+        .args(["config", "unset", "-D", "--global", "k.v"])
+        .assert()
+        .failure();
+    // clap parse errors exit with 2.
+    assert_eq!(res.get_output().status.code(), Some(2));
+}
+
+#[test]
+#[serial]
 fn list_shows_merged_view_with_lists_expanded() {
     let sb = Sandbox::new();
     sb.west()
