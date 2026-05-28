@@ -428,6 +428,14 @@ fn run_one_project(
         // Bright green + bold matches python v1's banner palette
         // (`colorama.Fore.LIGHTGREEN_EX`); console's auto-detect on
         // stderr strips the colour when stderr isn't a TTY.
+        //
+        // Raw `eprintln!` rather than `log::info!`: this arm runs
+        // only when the indicatif reporter wasn't chosen (serial-
+        // -j1 or `--raw`), so no bar is live on the global
+        // MultiProgress and we don't need `suspend()`. Likewise
+        // a future parallel-non-TTY path would need revisiting if
+        // it grew live output that races with these per-project
+        // banners.
         let banner_style = Style::new().green().bright().bold().for_stderr();
         eprintln!(
             "{}",

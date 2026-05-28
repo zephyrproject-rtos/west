@@ -253,6 +253,14 @@ fn run_serial(
     // goes to stderr (auto-detect colour against stderr); the
     // command's own stdout stays clean on stdout. Lets
     // `west forall -c '…' > out` capture only the command output.
+    //
+    // The banner uses raw `eprintln!` instead of `log::info!` on
+    // purpose: it's per-project chrome (the underlying command
+    // inherits stdio next), and serial mode never attaches a bar to
+    // the global MultiProgress — so there's no live bar that needs
+    // suspending, and bypassing the logger avoids two levels of
+    // formatting (env_logger prefix + multi().suspend) for a line
+    // that already carries its own visual framing.
     let bold = Style::new().green().bright().bold().for_stderr();
     let mut failed: Vec<String> = Vec::new();
     for project in projects {
