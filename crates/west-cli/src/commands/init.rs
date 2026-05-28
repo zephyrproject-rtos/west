@@ -61,8 +61,14 @@ pub struct InitArgs {
     pub url: Option<String>,
 
     /// Revision (branch or tag) to check out (bootstrap mode).
-    /// `--mr` is accepted as a short alias.
-    #[arg(long = "revision", visible_alias = "mr", conflicts_with = "local")]
+    /// `--mr` and `--manifest-rev` are kept as aliases for v1
+    /// invocations.
+    #[arg(
+        long = "revision",
+        visible_alias = "mr",
+        visible_alias = "manifest-rev",
+        conflicts_with = "local"
+    )]
     pub revision: Option<String>,
 
     /// Explicit workspace directory (the parent of the `.west/` to be
