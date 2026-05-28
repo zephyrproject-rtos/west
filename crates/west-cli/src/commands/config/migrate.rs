@@ -102,8 +102,9 @@ fn resolve_scopes(
     if args.scope.is_set() {
         let v2 = scope_to_path(&args.scope, resolved)?
             .expect("scope_to_path returns Some when ScopeArgs::is_set");
-        let v1 = scope_to_v1_path(&args.scope)
-            .ok_or_else(|| "no conventional v1 path for the chosen scope on this platform".to_owned())?;
+        let v1 = scope_to_v1_path(&args.scope).ok_or_else(|| {
+            "no conventional v1 path for the chosen scope on this platform".to_owned()
+        })?;
         return Ok(vec![(scope_label(&args.scope), v1, v2)]);
     }
     // No scope flag: walk all three conventional scopes, keep the ones whose
@@ -112,9 +113,15 @@ fn resolve_scopes(
     for (label, v1_opt, v2_opt) in [
         ("system", v1_system_path(), resolved.system.clone()),
         ("global", v1_global_path(), resolved.global.clone()),
-        ("local", local_v1_from_v2(resolved.local.as_deref()), resolved.local.clone()),
+        (
+            "local",
+            local_v1_from_v2(resolved.local.as_deref()),
+            resolved.local.clone(),
+        ),
     ] {
-        let (Some(v1), Some(v2)) = (v1_opt, v2_opt) else { continue };
+        let (Some(v1), Some(v2)) = (v1_opt, v2_opt) else {
+            continue;
+        };
         if v1.exists() {
             out.push((label.to_owned(), v1, v2));
         }
@@ -381,9 +388,10 @@ fn rewrite_v1_key(v1_key: &str) -> Rewrite {
         // v1's single boolean controlled both `git submodule sync` and
         // `git submodule update --init --recursive`. v2 separates those
         // into two knobs; both should track the v1 value.
-        "update.sync-submodules" => {
-            Rewrite::Renamed(vec!["tool.git.submodules.sync", "tool.git.submodules.recurse"])
-        }
+        "update.sync-submodules" => Rewrite::Renamed(vec![
+            "tool.git.submodules.sync",
+            "tool.git.submodules.recurse",
+        ]),
         _ => Rewrite::Same,
     }
 }
@@ -395,12 +403,24 @@ enum Typ {
     Bool,
     Int,
     ListStr,
+    /// Known-string v2 key (or `alias.*` namespace). Preserve the
+    /// value verbatim with no warning — the migration is lossless
+    /// for these.
+    String,
 }
 
 /// Expected type for known v2 keys. Sourced by grepping `get_bool` /
-/// `get_i64` / `get_list_str` callsites across `west-cli` + `west-core`.
-/// Anything not listed here gets a string + an "unknown key" warning.
+/// `get_i64` / `get_list_str` / `get_str` callsites across `west-cli`
+/// + `west-core`. Anything not listed here gets a string + an
+/// "unknown key" warning.
 fn known_type(key: &str) -> Option<Typ> {
+    // `alias.<name>` is a user-defined namespace (see
+    // `commands/help.rs::strip_prefix("alias.")`); values are
+    // always strings. Migrate silently — there's no v1 → v2 loss to
+    // flag.
+    if key.starts_with("alias.") {
+        return Some(Typ::String);
+    }
     Some(match key {
         "commands.allow_extensions"
         | "compare.ignore-branches"
@@ -415,11 +435,9 @@ fn known_type(key: &str) -> Option<Typ> {
         | "tool.git.submodules.recurse"
         | "tool.git.submodules.sync" => Typ::Bool,
 
-        "update.jobs"
-        | "forall.jobs"
-        | "diff.jobs"
-        | "grep.jobs"
-        | "tool.git.fetch.depth" => Typ::Int,
+        "update.jobs" | "forall.jobs" | "diff.jobs" | "grep.jobs" | "tool.git.fetch.depth" => {
+            Typ::Int
+        }
 
         "manifest.group-filter"
         | "manifest.project-filter"
@@ -430,6 +448,10 @@ fn known_type(key: &str) -> Option<Typ> {
         | "grep.git-grep-args"
         | "grep.ripgrep-args"
         | "grep.grep-args" => Typ::ListStr,
+
+        // String-typed v2 keys west itself reads.
+        "color.ui" | "grep.color" | "grep.tool" | "manifest.file" | "manifest.path"
+        | "update.auto-cache" | "update.name-cache" | "update.path-cache" => Typ::String,
 
         _ => return None,
     })
@@ -467,6 +489,7 @@ fn coerce(key: &str, raw: &str) -> (ConfigValue, Option<String>) {
                 .collect();
             (ConfigValue::List(items), None)
         }
+        Some(Typ::String) => (ConfigValue::String(raw.to_owned()), None),
         None => (
             ConfigValue::String(raw.to_owned()),
             Some(format!("{key}: not recognised in v2; preserved as string")),
@@ -612,7 +635,10 @@ mod tests {
     fn rewrite_unrelated_key_passes_through() {
         assert!(matches!(rewrite_v1_key("manifest.path"), Rewrite::Same));
         // Verify .targets() returns the original for the Same case.
-        assert_eq!(Rewrite::Same.targets("manifest.path"), vec!["manifest.path"]);
+        assert_eq!(
+            Rewrite::Same.targets("manifest.path"),
+            vec!["manifest.path"]
+        );
     }
 
     #[test]
@@ -623,6 +649,31 @@ mod tests {
     }
 
     #[test]
+    fn alias_keys_migrate_silently() {
+        // `alias.<name>` is a user-defined namespace whose values are
+        // always strings — flagging every alias would be noise.
+        let (v, w) = coerce("alias.run", "build && flash");
+        assert!(matches!(v, ConfigValue::String(ref s) if s == "build && flash"));
+        assert!(
+            w.is_none(),
+            "alias.* should migrate without warning, got: {w:?}"
+        );
+    }
+
+    #[test]
+    fn known_string_keys_migrate_silently() {
+        // Spot-check one west-native and one Zephyr-extension key.
+        for key in ["manifest.path", "update.auto-cache"] {
+            let (v, w) = coerce(key, "anything");
+            assert!(matches!(v, ConfigValue::String(ref s) if s == "anything"));
+            assert!(
+                w.is_none(),
+                "{key} should migrate without warning, got: {w:?}"
+            );
+        }
+    }
+
+    #[test]
     fn build_v2_emits_header_and_nested_tables() {
         let pairs = vec![
             (
@@ -630,10 +681,7 @@ mod tests {
                 ConfigValue::String("west.yml".to_owned()),
             ),
             ("update.jobs".to_owned(), ConfigValue::Integer(8)),
-            (
-                "tool.git.fetch.tags".to_owned(),
-                ConfigValue::Bool(true),
-            ),
+            ("tool.git.fetch.tags".to_owned(), ConfigValue::Bool(true)),
         ];
         let s = build_v2(&pairs, Path::new("/tmp/oldconfig"));
         assert!(s.starts_with("# Generated by `west config migrate` (west "));

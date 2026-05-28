@@ -187,11 +187,7 @@ fn rewrite_sync_submodules_splits_to_two_bools() {
 #[serial]
 fn unknown_key_preserved_as_string_with_warning() {
     let sb = Sandbox::new();
-    std::fs::write(
-        &sb.v1_local,
-        "[custom]\nlocal-only = hello\n",
-    )
-    .unwrap();
+    std::fs::write(&sb.v1_local, "[custom]\nlocal-only = hello\n").unwrap();
 
     let out = sb
         .west()
@@ -213,11 +209,7 @@ fn unknown_key_preserved_as_string_with_warning() {
 #[serial]
 fn bool_coercion_failure_falls_back_to_string() {
     let sb = Sandbox::new();
-    std::fs::write(
-        &sb.v1_local,
-        "[update]\nrebase = sometimes\n",
-    )
-    .unwrap();
+    std::fs::write(&sb.v1_local, "[update]\nrebase = sometimes\n").unwrap();
 
     let out = sb
         .west()
@@ -286,7 +278,10 @@ fn dry_run_writes_nothing_prints_body() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("would write to"));
     assert!(stdout.contains("path = \"zephyr\""));
-    assert!(!sb.v2_local.exists(), "v2 file must not exist after --dry-run");
+    assert!(
+        !sb.v2_local.exists(),
+        "v2 file must not exist after --dry-run"
+    );
 }
 
 #[test]
@@ -388,11 +383,7 @@ fn linux_global_falls_back_to_dotwestconfig_when_xdg_path_absent() {
 fn no_v1_files_anywhere_is_a_warning_not_error() {
     let sb = Sandbox::new();
     // No v1 file written.
-    let out = sb
-        .west()
-        .args(["config", "migrate"])
-        .output()
-        .unwrap();
+    let out = sb.west().args(["config", "migrate"]).output().unwrap();
     assert!(out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("no v1 config"), "stderr was: {stderr}");
