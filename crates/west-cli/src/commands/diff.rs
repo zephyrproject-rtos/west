@@ -15,10 +15,11 @@
 //!   v1 emitted both on stdout.
 //! - `--exit-code` returns 1 when any project has a non-empty diff,
 //!   for CI / scripting. v1 always exited 0.
-//! - `--color {always,never,auto}` (default `auto`) replaces the
-//!   config-only `color.ui` gate. `auto` checks the real stdout's
-//!   TTY-ness (we resolve once at command start because workers
-//!   capture into pipes and would otherwise force `never`).
+//! - `--color {always,never,auto}` chains to the shared resolver
+//!   (`--color` → `color.ui` → `auto`); unset, `color.ui` from the
+//!   workspace config supplies the default. `auto` then checks the
+//!   real stdout's TTY-ness (we resolve once at command start because
+//!   workers capture into pipes and would otherwise force `never`).
 //! - `-q/--quiet` (top-level, global) suppresses all chrome —
 //!   per-project banners AND the tail "Empty diff in N projects."
 //!   line. The diff bodies themselves are unaffected. Lives on
@@ -39,7 +40,6 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Args;
-use console::Style;
 use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
@@ -308,19 +308,10 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
     let mut empty_count: usize = 0;
     let mut had_nonempty = false;
     let mut failures: Vec<(String, String)> = Vec::new();
-    // Bright green + bold matches python v1's banner palette
-    // (`colorama.Fore.LIGHTGREEN_EX`, plus a bold modifier for
-    // extra prominence at the row-density of multi-project runs).
-    // The banner now lands on stderr, so `auto` follows stderr's
-    // TTY-ness (`for_stderr`); `--color always/never` force the
-    // choice via `force_styling`. The diff *body* colour is a
-    // separate decision (`resolved_color`, keyed off stdout) since
-    // it's what gets redirected.
-    let banner_style = match color_choice {
-        ColorArg::Always => Style::new().green().bright().bold().force_styling(true),
-        ColorArg::Never => Style::new().force_styling(false),
-        ColorArg::Auto => Style::new().green().bright().bold().for_stderr(),
-    };
+    // Banner palette + auto-vs-force decision live in `style::banner`.
+    // The *body* colour is the separate `resolved_color` above, keyed
+    // off stdout (where the body lands) rather than stderr.
+    let banner_style = super::style::banner(color_choice);
     for o in outcomes {
         match o.result {
             Ok(DiffOutcome::Empty) => empty_count += 1,

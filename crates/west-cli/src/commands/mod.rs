@@ -20,6 +20,7 @@ pub mod manifest;
 pub mod project_format;
 pub mod select;
 pub mod status;
+pub mod style;
 pub mod topdir;
 pub mod update;
 pub mod workspace;

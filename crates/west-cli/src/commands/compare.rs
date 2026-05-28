@@ -43,7 +43,6 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use clap::Args;
-use console::Style;
 use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
@@ -340,14 +339,10 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
     // is itself the result, so its lines stay on stdout.
     let mut stdout = io::stdout().lock();
     let mut stderr = io::stderr().lock();
-    // Banner lands on stderr, so `auto` follows stderr's TTY-ness;
-    // `--color always/never` force the choice. (`resolved_color`,
-    // keyed off stdout, colours the embedded git status body.)
-    let banner_style = match color_choice {
-        ColorArg::Always => Style::new().green().bright().bold().force_styling(true),
-        ColorArg::Never => Style::new().force_styling(false),
-        ColorArg::Auto => Style::new().green().bright().bold().for_stderr(),
-    };
+    // Banner palette + auto-vs-force decision live in `style::banner`.
+    // The body colour is the separate `resolved_color` above, keyed
+    // off stdout (where the embedded git status body lands).
+    let banner_style = super::style::banner(color_choice);
     let mut printed_any = false;
     let mut failures: Vec<(String, String)> = Vec::new();
     for o in outcomes {

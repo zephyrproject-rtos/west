@@ -39,7 +39,6 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Args;
-use console::Style;
 use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
@@ -293,16 +292,10 @@ fn run_inner(args: StatusArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Sta
     let mut clean_count: usize = 0;
     let mut had_dirty = false;
     let mut failures: Vec<(String, String)> = Vec::new();
-    // Bright green + bold matches python v1's banner palette
-    // (`colorama.Fore.LIGHTGREEN_EX`). The banner lands on stderr,
-    // so `auto` follows stderr's TTY-ness; `--color always/never`
-    // force the choice. (`resolved_color`, keyed off stdout, colours
-    // the long-form body git emits.)
-    let banner_style = match color_choice {
-        ColorArg::Always => Style::new().green().bright().bold().force_styling(true),
-        ColorArg::Never => Style::new().force_styling(false),
-        ColorArg::Auto => Style::new().green().bright().bold().for_stderr(),
-    };
+    // Banner palette + auto-vs-force decision live in `style::banner`.
+    // The body colour is the separate `resolved_color` above, keyed
+    // off stdout (where the long-form git body lands).
+    let banner_style = super::style::banner(color_choice);
     for o in outcomes {
         match o.result {
             Ok(StatusOutcome::Clean) if !args.long => {

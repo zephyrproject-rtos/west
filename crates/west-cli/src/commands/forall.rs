@@ -42,12 +42,12 @@ use std::process::{Command, ExitCode, ExitStatus, Stdio};
 use std::sync::Mutex;
 
 use clap::Args;
-use console::Style;
 use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
 
+use super::color::ColorArg;
 use super::config::LoadedConfig;
 use super::select;
 
@@ -84,6 +84,13 @@ pub struct ForallArgs {
     /// parallelism. Equivalent to `--config forall.jobs=N`.
     #[arg(short = 'j', long, value_name = "N")]
     pub jobs: Option<usize>,
+
+    /// Colorize the per-project banner. Unset, the resolver
+    /// consults `color.ui` before falling back to TTY-aware `auto`.
+    /// User commands handle their own colouring; this flag only
+    /// affects the `=== name (path):` chrome forall prints.
+    #[arg(long, value_enum)]
+    pub color: Option<ColorArg>,
 
     /// Project names or paths. Empty = all (subject to `--all` / `-g`).
     #[arg(value_name = "PROJECT")]
@@ -231,10 +238,23 @@ fn run_inner(args: ForallArgs, loaded: &mut LoadedConfig) -> Result<bool, Forall
     let parallel = !settings.raw && settings.jobs > 1 && projects.len() > 1;
     let jobs = if parallel { settings.jobs } else { 1 };
 
+    // Banner colour: --color → color.ui → auto. forall has no per-command
+    // colour key today (no `forall.color`), so the resolver consults the
+    // global default directly.
+    let color_choice =
+        super::color::resolve(args.color, &loaded.config, None).map_err(ForallError::Config)?;
+
     if parallel {
-        run_parallel(&args, &workspace, &projects, jobs, settings.quiet)
+        run_parallel(
+            &args,
+            &workspace,
+            &projects,
+            jobs,
+            settings.quiet,
+            color_choice,
+        )
     } else {
-        run_serial(&args, &workspace, &projects, settings.quiet)
+        run_serial(&args, &workspace, &projects, settings.quiet, color_choice)
     }
 }
 
@@ -247,12 +267,11 @@ fn run_serial(
     workspace: &Path,
     projects: &[&Project],
     quiet: bool,
+    color: ColorArg,
 ) -> Result<bool, ForallError> {
-    // Bright green + bold matches python v1's banner palette
-    // (`colorama.Fore.LIGHTGREEN_EX`). The banner is chrome, so it
-    // goes to stderr (auto-detect colour against stderr); the
-    // command's own stdout stays clean on stdout. Lets
-    // `west forall -c '…' > out` capture only the command output.
+    // The banner is chrome → stderr; the command's own stdout stays
+    // clean on stdout. Lets `west forall -c '…' > out` capture only
+    // the command output.
     //
     // The banner uses raw `eprintln!` instead of `log::info!` on
     // purpose: it's per-project chrome (the underlying command
@@ -261,7 +280,7 @@ fn run_serial(
     // suspending, and bypassing the logger avoids two levels of
     // formatting (env_logger prefix + multi().suspend) for a line
     // that already carries its own visual framing.
-    let bold = Style::new().green().bright().bold().for_stderr();
+    let banner_style = super::style::banner(color);
     let mut failed: Vec<String> = Vec::new();
     for project in projects {
         let abspath = workspace.join(&project.path);
@@ -269,7 +288,7 @@ fn run_serial(
         if !quiet {
             eprintln!(
                 "{}",
-                bold.apply_to(format!(
+                banner_style.apply_to(format!(
                     "=== running \"{}\" in {} ({}):",
                     args.command,
                     project.name,
@@ -293,6 +312,7 @@ fn run_parallel(
     projects: &[&Project],
     jobs: usize,
     quiet: bool,
+    color: ColorArg,
 ) -> Result<bool, ForallError> {
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(jobs)
@@ -347,13 +367,11 @@ fn run_parallel(
     });
 
     let outcomes = outcomes.into_inner().unwrap_or_else(|p| p.into_inner());
-    // Bright green + bold matches python v1's banner palette
-    // (`colorama.Fore.LIGHTGREEN_EX`). Banner is chrome → stderr
-    // (auto-detect colour against stderr); the child's captured
-    // stdout/stderr are demultiplexed back onto the parent's
-    // matching streams, so a redirect of `west forall` stdout
-    // captures only the commands' stdout.
-    let bold = Style::new().green().bright().bold().for_stderr();
+    // Banner is chrome → stderr; the child's captured stdout/stderr
+    // are demultiplexed back onto the parent's matching streams, so
+    // a redirect of `west forall` stdout captures only the commands'
+    // stdout.
+    let banner_style = super::style::banner(color);
     let stdout = io::stdout();
     let stderr = io::stderr();
     let mut out_lock = stdout.lock();
@@ -364,7 +382,7 @@ fn run_parallel(
             // Flush stdout so the banner heads this project's output
             // block when both streams share a terminal.
             let _ = out_lock.flush();
-            let _ = writeln!(err_lock, "{}", bold.apply_to(&outcome.banner));
+            let _ = writeln!(err_lock, "{}", banner_style.apply_to(&outcome.banner));
             let _ = err_lock.flush();
         }
         let _ = out_lock.write_all(&outcome.stdout);

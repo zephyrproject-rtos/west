@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{ArgAction, Args, Parser};
-use console::Style;
 use log::LevelFilter;
 
 pub mod alias;
@@ -156,20 +155,12 @@ pub fn run() -> ExitCode {
                 log::Level::Error => writeln!(
                     buf,
                     "{} {msg}",
-                    Style::new()
-                        .red()
-                        .bold()
-                        .for_stderr()
-                        .apply_to("west: error:")
+                    commands::style::error_prefix().apply_to("west: error:")
                 ),
                 log::Level::Warn => writeln!(
                     buf,
                     "{} {msg}",
-                    Style::new()
-                        .yellow()
-                        .bold()
-                        .for_stderr()
-                        .apply_to("west: warning:")
+                    commands::style::warning_prefix().apply_to("west: warning:")
                 ),
                 log::Level::Info | log::Level::Debug => writeln!(buf, "{msg}"),
                 log::Level::Trace => writeln!(buf, "[{}] {msg}", record.target()),

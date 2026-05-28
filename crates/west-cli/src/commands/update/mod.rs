@@ -35,7 +35,6 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Args, ValueEnum};
-use console::Style;
 use rayon::prelude::*;
 
 use west_core::config::{ConfigValue, Configuration};
@@ -46,6 +45,7 @@ use west_core::vcs::{
     SubmoduleStrategy, Vcs,
 };
 
+use super::color::ColorArg;
 use super::config::LoadedConfig;
 use error::UpdateError;
 use indicatif_reporter::IndicatifReporter;
@@ -121,6 +121,13 @@ pub struct UpdateArgs {
     /// itself. Equivalent to `--config update.auto-cache=DIR`.
     #[arg(long = "auto-cache", value_name = "DIR")]
     pub auto_cache: Option<PathBuf>,
+
+    /// Colorize the per-project banner (only emitted on the native-stdio
+    /// path — the indicatif path renders bars instead). Unset, the
+    /// resolver consults `color.ui` before falling back to TTY-aware
+    /// `auto`.
+    #[arg(long, value_enum)]
+    pub color: Option<ColorArg>,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -169,8 +176,15 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
     // main worker pool uses, so a single network transfer per
     // imported project covers both phases. Validation errors here
     // surface before any clone happens.
-    let settings = match Settings::from_config(&loaded.config) {
+    let mut settings = match Settings::from_config(&loaded.config) {
         Ok(s) => s,
+        Err(e) => {
+            log::error!("{e}");
+            return ExitCode::from(2);
+        }
+    };
+    settings.color = match super::color::resolve(args.color, &loaded.config, None) {
+        Ok(c) => c,
         Err(e) => {
             log::error!("{e}");
             return ExitCode::from(2);
@@ -361,6 +375,11 @@ pub(super) struct Settings {
     pub(super) name_cache: Option<PathBuf>,
     pub(super) path_cache: Option<PathBuf>,
     pub(super) auto_cache: Option<PathBuf>,
+    /// Resolved `--color` choice for the per-project banner on the
+    /// native-stdio path. Populated by `run()` after splice; not derived
+    /// from a config key (update has no `update.color` today), so kept
+    /// out of `from_config` and assigned post-hoc.
+    pub(super) color: ColorArg,
 }
 
 impl Settings {
@@ -398,6 +417,7 @@ impl Settings {
             name_cache,
             path_cache,
             auto_cache,
+            color: ColorArg::Auto,
         })
     }
 }
@@ -425,18 +445,14 @@ fn run_one_project(
     } else {
         // Native stdio: banner via stderr (the underlying tool's own
         // progress lands directly on the terminal that follows).
-        // Bright green + bold matches python v1's banner palette
-        // (`colorama.Fore.LIGHTGREEN_EX`); console's auto-detect on
-        // stderr strips the colour when stderr isn't a TTY.
         //
         // Raw `eprintln!` rather than `log::info!`: this arm runs
-        // only when the indicatif reporter wasn't chosen (serial-
-        // -j1 or `--raw`), so no bar is live on the global
-        // MultiProgress and we don't need `suspend()`. Likewise
-        // a future parallel-non-TTY path would need revisiting if
-        // it grew live output that races with these per-project
-        // banners.
-        let banner_style = Style::new().green().bright().bold().for_stderr();
+        // only when the indicatif reporter wasn't chosen (serial
+        // `-j1` or `--raw`), so no bar is live on the global
+        // MultiProgress and we don't need `suspend()`. A future
+        // parallel-non-TTY path would need revisiting if it grew
+        // live output that races with these per-project banners.
+        let banner_style = super::style::banner(settings.color);
         eprintln!(
             "{}",
             banner_style.apply_to(format!(
