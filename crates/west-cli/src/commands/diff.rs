@@ -46,6 +46,7 @@ use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
 use west_core::vcs::{ColorMode, DiffOutcome, DiffSpec, RevSpec, Vcs, VcsError};
 
+use crate::exit;
 use super::color::ColorArg;
 use super::config::LoadedConfig;
 use super::select;
@@ -117,7 +118,7 @@ impl From<super::workspace::WorkspaceError> for DiffError {
 pub fn run(args: DiffArgs, loaded: &mut LoadedConfig) -> ExitCode {
     if let Err(e) = splice_flags_into_config(&args, &mut loaded.config) {
         log::error!("{e}");
-        return ExitCode::from(2);
+        return exit::usage();
     }
 
     match run_inner(args, loaded) {
@@ -127,11 +128,11 @@ pub fn run(args: DiffArgs, loaded: &mut LoadedConfig) -> ExitCode {
         }) => ExitCode::SUCCESS,
         Ok(Outcome::SomeNonEmpty {
             exit_code_flag: true,
-        }) => ExitCode::from(1),
+        }) => exit::DIVERGENCE,
         Ok(Outcome::Failures) => ExitCode::FAILURE,
         Err(e @ DiffError::UnclonedPositional { .. }) => {
             log::error!("{e}");
-            ExitCode::from(2)
+            exit::usage()
         }
         Err(e) => {
             log::error!("{e}");
@@ -146,7 +147,7 @@ enum Outcome {
     AllEmpty,
     /// At least one project had a non-empty diff. `exit_code_flag`
     /// carries the user's `--exit-code` choice so the caller can
-    /// translate to ExitCode::from(1) when set.
+    /// translate to `exit::DIVERGENCE` when set.
     SomeNonEmpty { exit_code_flag: bool },
     /// At least one project's diff call failed (binary crash, repo
     /// missing, etc.). End-of-run summary already printed.

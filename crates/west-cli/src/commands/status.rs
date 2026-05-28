@@ -45,6 +45,7 @@ use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
 use west_core::vcs::{ColorMode, StatusMode, StatusOutcome, StatusSpec, Vcs, VcsError};
 
+use crate::exit;
 use super::color::ColorArg;
 use super::config::LoadedConfig;
 use super::select;
@@ -118,7 +119,7 @@ impl From<super::workspace::WorkspaceError> for StatusError {
 pub fn run(args: StatusArgs, loaded: &mut LoadedConfig) -> ExitCode {
     if let Err(e) = splice_flags_into_config(&args, &mut loaded.config) {
         log::error!("{e}");
-        return ExitCode::from(2);
+        return exit::usage();
     }
     match run_inner(args, loaded) {
         Ok(Outcome::AllClean) => ExitCode::SUCCESS,
@@ -127,11 +128,11 @@ pub fn run(args: StatusArgs, loaded: &mut LoadedConfig) -> ExitCode {
         }) => ExitCode::SUCCESS,
         Ok(Outcome::SomeDirty {
             exit_code_flag: true,
-        }) => ExitCode::from(1),
+        }) => exit::DIVERGENCE,
         Ok(Outcome::Failures) => ExitCode::FAILURE,
         Err(e @ StatusError::UnclonedPositional { .. }) => {
             log::error!("{e}");
-            ExitCode::from(2)
+            exit::usage()
         }
         Err(e) => {
             log::error!("{e}");

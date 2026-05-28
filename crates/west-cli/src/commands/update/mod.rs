@@ -45,6 +45,7 @@ use west_core::vcs::{
     SubmoduleStrategy, Vcs,
 };
 
+use crate::exit;
 use super::color::ColorArg;
 use super::config::LoadedConfig;
 use error::UpdateError;
@@ -148,7 +149,7 @@ impl FetchArg {
 pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
     if let Err(e) = splice_flags_into_config(&args, &mut loaded.config) {
         log::error!("{e}");
-        return ExitCode::from(2);
+        return exit::usage();
     }
 
     let workspace = match resolve_workspace_dir() {
@@ -180,14 +181,14 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(s) => s,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::from(2);
+            return exit::usage();
         }
     };
     settings.color = match super::color::resolve(args.color, &loaded.config, None) {
         Ok(c) => c,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::from(2);
+            return exit::usage();
         }
     };
 
@@ -262,7 +263,7 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(f) => f,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::from(2);
+            return exit::usage();
         }
     };
     // Wrap the raw Manifest with the workspace-derived filters
@@ -274,14 +275,14 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(f) => f,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::from(2);
+            return exit::usage();
         }
     };
     let project_filter = match ProjectFilter::from_config(&loaded.config) {
         Ok(f) => f,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::from(2);
+            return exit::usage();
         }
     };
     let loaded_manifest = LoadedManifest::new(manifest, config_group_filter, project_filter);

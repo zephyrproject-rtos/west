@@ -19,6 +19,7 @@ use clap::Args;
 
 use west_core::manifest::Project;
 
+use crate::exit;
 use super::config::LoadedConfig;
 use super::project_format::{self, FormatError, ProjectContext};
 use super::select;
@@ -99,7 +100,7 @@ pub fn run(args: ListArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(true) => ExitCode::FAILURE,
         Err(e @ ListError::InactiveWithPositional) => {
             log::error!("{e}");
-            ExitCode::from(2)
+            exit::usage()
         }
         Err(e) => {
             log::error!("{e}");

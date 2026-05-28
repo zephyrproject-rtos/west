@@ -32,6 +32,7 @@ use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Manifest;
 use west_core::vcs::{self, RevSpec};
 
+use crate::exit;
 use super::config::LoadedConfig;
 
 #[derive(Args, Debug)]
@@ -108,7 +109,7 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
         )
     {
         log::error!("{e}");
-        return ExitCode::from(2);
+        return exit::usage();
     }
     if let Some(f) = args.manifest_file.as_deref()
         && let Err(e) = super::config::splice_inline(
@@ -118,7 +119,7 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
         )
     {
         log::error!("{e}");
-        return ExitCode::from(2);
+        return exit::usage();
     }
     if !args.clone_opt.is_empty() {
         // Append to whatever `tool.git.clone.extra-args` already holds,
@@ -129,11 +130,11 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
             Ok(Some(ConfigValue::List(items))) => items,
             Ok(Some(other)) => {
                 log::error!("tool.git.clone.extra-args must be a list, got {other:?}");
-                return ExitCode::from(2);
+                return exit::usage();
             }
             Err(e) => {
                 log::error!("{e}");
-                return ExitCode::from(2);
+                return exit::usage();
             }
         };
         combined.extend(args.clone_opt.iter().cloned().map(ConfigValue::String));
@@ -143,7 +144,7 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
             ConfigValue::List(combined),
         ) {
             log::error!("{e}");
-            return ExitCode::from(2);
+            return exit::usage();
         }
     }
 

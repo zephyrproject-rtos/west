@@ -5,6 +5,7 @@ use clap::Args;
 
 use west_core::config::{ConfigValue, Configuration};
 
+use crate::exit;
 use super::{LoadedConfig, ScopeArgs, scope_to_path};
 
 #[derive(Args, Debug)]
@@ -26,7 +27,7 @@ pub fn run(args: GetArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::from(2);
+            return exit::usage();
         }
     };
 
@@ -66,7 +67,7 @@ fn emit(value: Result<Option<ConfigValue>, west_core::config::ConfigError>) -> E
         Ok(None) => ExitCode::FAILURE,
         Err(e) => {
             log::error!("{e}");
-            ExitCode::from(2)
+            exit::usage()
         }
     }
 }

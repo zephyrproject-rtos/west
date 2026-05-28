@@ -5,6 +5,7 @@ use clap::Args;
 
 use west_core::config::{ConfigValue, Configuration};
 
+use crate::exit;
 use super::{LoadedConfig, ScopeArgs, scope_to_path};
 
 #[derive(Args, Debug)]
@@ -22,7 +23,7 @@ pub fn run(args: ListArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::from(2);
+            return exit::usage();
         }
     };
 
@@ -31,7 +32,7 @@ pub fn run(args: ListArgs, loaded: &mut LoadedConfig) -> ExitCode {
             Ok(items) => items,
             Err(e) => {
                 log::error!("{e}");
-                return ExitCode::from(2);
+                return exit::usage();
             }
         },
         None => loaded.config.items(),
@@ -53,7 +54,7 @@ fn list_single_file(file: &Path) -> ExitCode {
         Ok(items) => items,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::from(2);
+            return exit::usage();
         }
     };
     print_items(&items);

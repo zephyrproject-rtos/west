@@ -47,6 +47,7 @@ use rayon::prelude::*;
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
 
+use crate::exit;
 use super::color::ColorArg;
 use super::config::LoadedConfig;
 use super::select;
@@ -128,7 +129,7 @@ impl From<super::workspace::WorkspaceError> for ForallError {
 pub fn run(args: ForallArgs, loaded: &mut LoadedConfig) -> ExitCode {
     if let Err(e) = splice_flags_into_config(&args, &mut loaded.config) {
         log::error!("{e}");
-        return ExitCode::from(2);
+        return exit::usage();
     }
 
     match run_inner(args, loaded) {
@@ -136,7 +137,7 @@ pub fn run(args: ForallArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(false) => ExitCode::FAILURE,
         Err(e @ ForallError::UnclonedPositional { .. }) => {
             log::error!("{e}");
-            ExitCode::from(2)
+            exit::usage()
         }
         Err(e) => {
             log::error!("{e}");

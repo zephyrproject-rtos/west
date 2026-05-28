@@ -5,6 +5,7 @@ use clap::Args;
 
 use west_core::config::{ConfigError, Configuration};
 
+use crate::exit;
 use super::{LoadedConfig, ScopeArgs, scope_to_path};
 
 #[derive(Args, Debug)]
@@ -24,7 +25,7 @@ pub fn run(args: UnsetArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::from(2);
+            return exit::usage();
         }
     };
 
@@ -56,7 +57,7 @@ fn map_unset_result(name: &str, result: Result<(), ConfigError>) -> ExitCode {
         }
         Err(e) => {
             log::error!("{e}");
-            ExitCode::from(2)
+            exit::usage()
         }
     }
 }

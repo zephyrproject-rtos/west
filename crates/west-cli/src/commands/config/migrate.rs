@@ -39,6 +39,7 @@ use toml_edit::{DocumentMut, Item, Table, Value};
 use west_core::config::ConfigValue;
 use west_core::config_paths::ResolvedConfig;
 
+use crate::exit;
 use super::{LoadedConfig, ScopeArgs, scope_to_path};
 
 #[derive(Args, Debug)]
@@ -67,7 +68,7 @@ pub fn run(args: MigrateArgs, loaded: &LoadedConfig) -> ExitCode {
         Ok(s) => s,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::from(2);
+            return exit::usage();
         }
     };
     if scopes.is_empty() {

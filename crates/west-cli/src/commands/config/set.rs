@@ -5,6 +5,7 @@ use clap::Args;
 
 use west_core::config::{ConfigValue, Configuration};
 
+use crate::exit;
 use super::{LoadedConfig, ScopeArgs, scope_to_path};
 
 #[derive(Args, Debug)]
@@ -27,7 +28,7 @@ pub fn run(args: SetArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(v) => v,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::from(2);
+            return exit::usage();
         }
     };
 
@@ -37,19 +38,29 @@ pub fn run(args: SetArgs, loaded: &mut LoadedConfig) -> ExitCode {
         return set_in_single_file(&args.name, value, file);
     }
 
+    // "Not in a workspace" routes through FAILURE (matches topdir / list /
+    // diff / status / compare / forall / grep / update — every other
+    // command that surfaces the same condition). "Scope arg invalid"
+    // routes through USAGE (matches every other command's prelude on bad
+    // flag values). The string-contains heuristic is a smell that wants
+    // `scope_to_path` to return a typed error; leaving as a TODO until we
+    // touch that helper.
     let target = match scope_to_path(&args.scope, &loaded.resolved) {
         Ok(Some(p)) => p,
         Ok(None) => match loaded.resolved.local.clone() {
             Some(p) => p,
             None => {
                 log::error!("--local: not in a workspace; use --file or run inside one");
-                return ExitCode::from(3);
+                return exit::FAILURE;
             }
         },
         Err(e) => {
             log::error!("{e}");
-            let code = if e.contains("workspace") { 3 } else { 2 };
-            return ExitCode::from(code);
+            return if e.contains("workspace") {
+                exit::FAILURE
+            } else {
+                exit::usage()
+            };
         }
     };
 

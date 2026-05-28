@@ -44,6 +44,7 @@ use rayon::prelude::*;
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
 
+use crate::exit;
 use super::color::ColorArg;
 use super::config::LoadedConfig;
 use super::select;
@@ -136,14 +137,14 @@ impl From<super::workspace::WorkspaceError> for GrepError {
 pub fn run(args: GrepArgs, loaded: &mut LoadedConfig) -> ExitCode {
     if let Err(e) = splice_flags_into_config(&args, &mut loaded.config) {
         log::error!("{e}");
-        return ExitCode::from(2);
+        return exit::usage();
     }
     match run_inner(args, loaded) {
         Ok(Outcome::Ok) => ExitCode::SUCCESS,
         Ok(Outcome::SomeFailed) => ExitCode::FAILURE,
         Err(e @ GrepError::ToolNotFound { .. }) => {
             log::error!("{e}");
-            ExitCode::from(2)
+            exit::usage()
         }
         Err(e) => {
             log::error!("{e}");

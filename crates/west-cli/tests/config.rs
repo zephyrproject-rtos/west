@@ -225,14 +225,18 @@ fn set_list_via_toml_array_syntax() {
 
 #[test]
 #[serial]
-fn set_default_local_outside_workspace_fails_with_exit_3() {
+fn set_default_local_outside_workspace_fails_with_failure_exit() {
+    // Pre-`exit` module: this returned 3 (the lone `3` in the tree).
+    // Folded to FAILURE (1) for consistency with topdir / list / diff
+    // / status / compare / forall / grep / update — every other command
+    // that reports "no workspace" returns FAILURE.
     let sb = Sandbox::new();
     let res = sb
         .west_outside_workspace()
         .args(["config", "set", "k.v", "hello"])
         .assert()
         .failure();
-    assert_eq!(res.get_output().status.code(), Some(3));
+    assert_eq!(res.get_output().status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&res.get_output().stderr);
     assert!(stderr.contains("workspace"), "stderr: {stderr}");
 }

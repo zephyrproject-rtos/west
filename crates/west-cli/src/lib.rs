@@ -7,6 +7,7 @@ use log::LevelFilter;
 
 pub mod alias;
 pub mod commands;
+pub mod exit;
 pub mod progress;
 
 // PyO3 bindings backing the python `_west_native` extension module.
