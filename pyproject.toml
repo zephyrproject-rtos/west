@@ -107,6 +107,14 @@ test = [
     "pytest-cov~=7.0",
     "pytest-xdist>=3",
     "pyyaml~=6.0",
+    # `tomllib` is stdlib (3.11+), but only handles reads; the
+    # parametric manifest_format fixture needs to write TOML too.
+    "tomli-w~=1.0",
+    # `tomllib` backport — `tomli` is the upstream code stdlib
+    # vendored as `tomllib` in 3.11+. Only installed on 3.10 where
+    # stdlib `tomllib` is unavailable; `conftest.py` aliases it on
+    # import.
+    "tomli~=2.0; python_version < '3.11'",
 ]
 types = [
     "mypy~=1.18",
@@ -149,6 +157,10 @@ extend-select = [
   "UP",  # pyupgrade
   "W",   # pycodestyle warnings
 ]
+
+[tool.ruff.lint.isort]
+# tomllib _is_ a standard library for Python 3.11+
+extra-standard-library = ["tomllib"]
 
 [tool.ruff.format]
 quote-style = "preserve"

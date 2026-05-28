@@ -7,7 +7,7 @@ import textwrap
 from pathlib import Path
 
 import yaml
-from conftest import GIT, WINDOWS, add_commit, cmd, cmd_raises, yaml_editor
+from conftest import GIT, WINDOWS, add_commit, cmd, cmd_raises, manifest_editor, yaml_editor
 
 # The west command "test-extension" comes from the "west_update_tmpdir" fixture in conftest.py
 
@@ -305,7 +305,7 @@ def test_extension_special_chars(west_update_tmpdir):
 
     # Now also rename the project's 'scripts/west-commands.yml' to something strange
     weird_cmds = r'scripts///win subdir\\\w-cmds.yml'
-    with yaml_editor('zephyr/west.yml') as _mf:
+    with manifest_editor(west_update_tmpdir) as _mf:
         _ext_p_yml = yaml_get_proj(_mf, ext_proj)
         assert _ext_p_yml["west-commands"] == 'scripts/west-commands.yml'
         _ext_p_yml["west-commands"] = weird_cmds
@@ -337,7 +337,7 @@ def test_extension_special_chars(west_update_tmpdir):
     (ext_proj_p / weird_cmds).rename(Path('zephyr', weird_cmds))
 
     # The extension is now missing from ext_proj. That's OK, it's supported.
-    with yaml_editor('zephyr/west.yml') as _mf:
+    with manifest_editor(west_update_tmpdir) as _mf:
         _mf["manifest"]["self"]["west-commands"] = weird_cmds
 
     ext_output = cmd('test-extension')

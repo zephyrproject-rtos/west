@@ -24,12 +24,23 @@ from conftest import (
     create_branch,
     create_repo,
     create_workspace,
+    manifest_editor,
     rev_parse,
-    yaml_editor,
 )
 
 from west.manifest import ImportFlag as MIF
 from west.manifest import Manifest, ManifestImportFailed, ManifestProject, Project
+
+# Apply to a test that wants end-to-end coverage of all three
+# manifest input formats. Drives the `manifest_format` fixture
+# (see conftest.py) which `repos_tmpdir` / `west_init_tmpdir` /
+# `west_update_tmpdir` consume transitively, so a single decorator
+# runs the test against `west.yml`, `west.toml`, and `west.json`.
+ALL_MANIFEST_FORMATS = pytest.mark.parametrize(
+    'manifest_format',
+    ['yaml', 'toml', 'json'],
+    indirect=True,
+)
 
 #
 # Helpers
@@ -283,7 +294,7 @@ def test_list_special_chars(west_update_tmpdir):
 
     proj_name = 'net-tools2-stress-slashes'
 
-    with yaml_editor('zephyr/west.yml') as mf:
+    with manifest_editor(west_update_tmpdir) as mf:
         mf["manifest"]["projects"].append(
             {
                 'name': proj_name,
@@ -669,6 +680,7 @@ def test_manifest_resolve_active(west_update_tmpdir):
     _match_multiline_regex(expected_res, actual)
 
 
+@ALL_MANIFEST_FORMATS
 def test_compare(west_init_tmpdir):
     # 'west compare' with no projects cloned should still work,
     # and not print anything.
@@ -859,6 +871,7 @@ def test_compare_format_errors(west_init_tmpdir):
     os.unlink(foo)
 
 
+@ALL_MANIFEST_FORMATS
 def test_diff(west_init_tmpdir):
     # FIXME: Check output
 
@@ -878,6 +891,7 @@ def test_diff(west_init_tmpdir):
     cmd('update Kconfiglib')
 
 
+@ALL_MANIFEST_FORMATS
 def test_status(west_init_tmpdir):
     # FIXME: Check output
 
@@ -895,6 +909,7 @@ def test_status(west_init_tmpdir):
     cmd('update Kconfiglib')
 
 
+@ALL_MANIFEST_FORMATS
 def test_forall(west_init_tmpdir):
     # Note that the 'echo' command is available in both Unix shells
     # and Windows .bat files.
@@ -992,6 +1007,7 @@ def test_forall_env_vars(west_init_tmpdir, test_case):
     assert f'=== running "echo {env_var}" in net-tools (net-tools):' in banners
 
 
+@ALL_MANIFEST_FORMATS
 def test_grep(west_init_tmpdir):
     # Make sure we don't find things we don't expect, and do find
     # things we do.
@@ -1014,6 +1030,7 @@ def test_grep(west_init_tmpdir):
     assert re.search('west-commands', cmd('grep -- -- -commands'))
 
 
+@ALL_MANIFEST_FORMATS
 def test_update_projects(west_init_tmpdir):
     # Test the 'west update' command. It calls through to the same backend
     # functions that are used for automatic updates and 'west init'

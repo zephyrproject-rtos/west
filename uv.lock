@@ -517,6 +517,15 @@ wheels = [
 ]
 
 [[package]]
+name = "tomli-w"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/19/75/241269d1da26b624c0d5e110e8149093c759b7a286138f4efd61a60e75fe/tomli_w-1.2.0.tar.gz", hash = "sha256:2dd14fac5a47c27be9cd4c976af5a12d87fb1f0b4512f81d69cce3b35ae25021", size = 7184, upload-time = "2025-01-15T12:07:24.262Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c7/18/c86eb8e0202e32dd3df50d43d7ff9854f8e0603945ff398974c1d91ac1ef/tomli_w-1.2.0-py3-none-any.whl", hash = "sha256:188306098d013b691fcadc011abd66727d3c414c571bb01b1a174ba8c983cf90", size = 6675, upload-time = "2025-01-15T12:07:22.074Z" },
+]
+
+[[package]]
 name = "typing-extensions"
 version = "4.15.0"
 source = { registry = "https://pypi.org/simple" }
@@ -539,6 +548,8 @@ dev = [
     { name = "pytest-xdist" },
     { name = "pyyaml" },
     { name = "ruff" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "tomli-w" },
 ]
 lint = [
     { name = "ruff" },
@@ -549,6 +560,8 @@ test = [
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
     { name = "pyyaml" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "tomli-w" },
 ]
 types = [
     { name = "mypy" },
@@ -566,6 +579,8 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3" },
     { name = "pyyaml", specifier = "~=6.0" },
     { name = "ruff", specifier = "~=0.13" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = "~=2.0" },
+    { name = "tomli-w", specifier = "~=1.0" },
 ]
 lint = [{ name = "ruff", specifier = "~=0.13" }]
 test = [
@@ -574,5 +589,7 @@ test = [
     { name = "pytest-cov", specifier = "~=7.0" },
     { name = "pytest-xdist", specifier = ">=3" },
     { name = "pyyaml", specifier = "~=6.0" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = "~=2.0" },
+    { name = "tomli-w", specifier = "~=1.0" },
 ]
 types = [{ name = "mypy", specifier = "~=1.18" }]

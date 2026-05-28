@@ -34,6 +34,7 @@ Deliberately NOT carried forward:
 
 import contextlib
 import io
+import json
 import os
 import platform
 import shlex
@@ -43,7 +44,16 @@ import sys
 import uuid
 from pathlib import Path, PurePath
 
+# stdlib on 3.11+; `tomli` is the upstream code vendored as
+# `tomllib` and ships as a 3.10 fallback (see the test deps in
+# pyproject.toml).
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    import tomli as tomllib  # type: ignore[no-redef]
+
 import pytest
+import tomli_w
 import yaml
 
 GIT = shutil.which('git')
@@ -101,7 +111,10 @@ _WEST_BIN = _locate_west_binary()
 @contextlib.contextmanager
 def yaml_editor(yaml_f):
     '''Open `yaml_f`, yield the parsed dict, write it back on
-    exit. Mutating the yielded dict mutates the file.'''
+    exit. Mutating the yielded dict mutates the file. For the
+    manifest file specifically use `manifest_editor` (which is
+    format-aware) — this helper is for genuinely YAML-only inputs
+    such as `west-commands.yml`.'''
     with open(yaml_f, 'r+'):
         pass  # fail fast if not writable
     with open(yaml_f) as f:
@@ -109,6 +122,78 @@ def yaml_editor(yaml_f):
     yield mf
     with open(yaml_f, 'w') as f:
         yaml.safe_dump(mf, f, sort_keys=False)
+
+
+# Manifest format dispatch — list of supported extensions and the
+# (load, dump) pair for each. Used by `manifest_editor` to round-trip
+# a manifest file regardless of its on-disk format, and by the
+# parametric `manifest_format` fixture machinery.
+_MANIFEST_FORMATS = {
+    'yaml': {
+        'ext': 'yml',
+        'load': yaml.safe_load,
+        # `sort_keys=False` keeps the template's hand-curated order;
+        # `default_flow_style=False` produces the readable block style
+        # the legacy template used.
+        'dump': lambda d: yaml.safe_dump(d, sort_keys=False, default_flow_style=False),
+    },
+    'json': {
+        'ext': 'json',
+        'load': json.loads,
+        'dump': lambda d: json.dumps(d, indent=2) + '\n',
+    },
+    'toml': {
+        'ext': 'toml',
+        'load': tomllib.loads,
+        'dump': tomli_w.dumps,
+    },
+}
+
+
+def _format_from_path(path):
+    '''Resolve a manifest file path to a format key (`'yaml'`/`'json'`/`'toml'`).
+    Used by `manifest_editor` to discover the on-disk format from the
+    filename alone, mirroring `west_core::manifest::parse_body_by_extension`.'''
+    suffix = Path(path).suffix.lstrip('.').lower()
+    if suffix in ('yml', 'yaml'):
+        return 'yaml'
+    if suffix == 'json':
+        return 'json'
+    if suffix == 'toml':
+        return 'toml'
+    raise ValueError(f'unsupported manifest extension: {path!r}')
+
+
+def _dump_manifest(data, fmt):
+    '''Render a manifest dict to a string in the requested format.'''
+    return _MANIFEST_FORMATS[fmt]['dump'](data)
+
+
+def _load_manifest(text, fmt):
+    '''Parse a manifest string back into a dict for the given format.'''
+    return _MANIFEST_FORMATS[fmt]['load'](text)
+
+
+@contextlib.contextmanager
+def manifest_editor(workspace_dir):
+    '''Edit the manifest file inside `workspace_dir`, regardless of its
+    on-disk format. Yields the parsed dict and writes it back on exit
+    using the same serializer the file came in with.
+
+    The fixture stack guarantees exactly one `west.{yml,toml,json}`
+    under `<workspace_dir>/zephyr/`; mismatched globs assert.'''
+    matches = sorted((Path(workspace_dir) / 'zephyr').glob('west.*'))
+    if len(matches) != 1:
+        raise AssertionError(
+            f'expected exactly one manifest file in {workspace_dir}/zephyr, got {matches!r}',
+        )
+    path = matches[0]
+    fmt = _format_from_path(path)
+    with open(path) as f:
+        data = _load_manifest(f.read(), fmt)
+    yield data
+    with open(path, 'w') as f:
+        f.write(_dump_manifest(data, fmt))
 
 
 @contextlib.contextmanager
@@ -220,39 +305,56 @@ def config_tmpdir(tmpdir):
         yield tmpdir
 
 
-# Manifest template materialised by `repos_tmpdir`. `THE_URL_BASE` is
-# substituted with `file://<tmpdir>/repos`. Mirrors the legacy
-# `tests-legacy/conftest.py` shape so migrating tests don't need to
-# re-derive what's at which path.
-_MANIFEST_TEMPLATE = '''\
-manifest:
-  defaults:
-    remote: test-local
+# Manifest template materialised by `repos_tmpdir`. The `url-base`
+# value `THE_URL_BASE` is substituted with `file://<tmpdir>/repos`
+# at fixture time; everything else is verbatim. The shape mirrors
+# the legacy `tests-legacy/conftest.py` YAML literal so migrating
+# tests don't need to re-derive what's at which path.
+#
+# Stored as a dict so `repos_tmpdir` can render it to YAML, JSON, or
+# TOML on demand via the parametric `manifest_format` fixture. All
+# three serializers round-trip the same `Manifest` per
+# `parse_yaml_toml_json_equivalent` in west-core.
+_MANIFEST_DATA = {
+    'manifest': {
+        'defaults': {'remote': 'test-local'},
+        'remotes': [
+            {'name': 'test-local', 'url-base': 'THE_URL_BASE'},
+        ],
+        'projects': [
+            {
+                'name': 'Kconfiglib',
+                'description': (
+                    'Kconfiglib is an implementation of\nthe Kconfig language written in Python.\n'
+                ),
+                'revision': 'zephyr',
+                'path': 'subdir/Kconfiglib',
+                'groups': ['Kconfiglib-group'],
+                'submodules': True,
+            },
+            {'name': 'tagged_repo', 'revision': 'v1.0'},
+            {
+                'name': 'net-tools',
+                'description': 'Networking tools.',
+                'clone-depth': 1,
+                'west-commands': 'scripts/west-commands.yml',
+            },
+        ],
+        'self': {'path': 'zephyr'},
+    },
+}
 
-  remotes:
-  - name: test-local
-    url-base: THE_URL_BASE
 
-  projects:
-  - name: Kconfiglib
-    description: |
-      Kconfiglib is an implementation of
-      the Kconfig language written in Python.
-    revision: zephyr
-    path: subdir/Kconfiglib
-    groups:
-    - Kconfiglib-group
-    submodules: true
-  - name: tagged_repo
-    revision: v1.0
-  - name: net-tools
-    description: Networking tools.
-    clone-depth: 1
-    west-commands: scripts/west-commands.yml
-
-  self:
-    path: zephyr
-'''
+@pytest.fixture
+def manifest_format(request):
+    '''Parametric fixture covering the three manifest input formats
+    west accepts. Defaults to `'yaml'`; tests opt into broader
+    coverage with `@pytest.mark.parametrize('manifest_format',
+    ['yaml', 'toml', 'json'], indirect=True)`. The `repos_tmpdir`,
+    `west_init_tmpdir`, and `west_update_tmpdir` fixtures all
+    consume this value transitively, so a single decorator runs the
+    test against all three formats end-to-end.'''
+    return getattr(request, 'param', 'yaml')
 
 
 @pytest.fixture(scope='session')
@@ -330,7 +432,7 @@ def _session_repos(tmp_path_factory):
 
 
 @pytest.fixture
-def repos_tmpdir(tmpdir, _session_repos):
+def repos_tmpdir(tmpdir, _session_repos, manifest_format):
     '''Per-test "remote" repos cloned from `_session_repos`.
 
     Layout after this fixture runs:
@@ -339,11 +441,15 @@ def repos_tmpdir(tmpdir, _session_repos):
       ├── Kconfiglib (branch: zephyr)
       ├── tagged_repo (branch: master, tag: v1.0)
       ├── net-tools (branch: master)
-      └── zephyr (branch: master) — manifest repo with `west.yml`
+      └── zephyr (branch: master) — manifest repo with
+                                    `west.{yml,toml,json}`
 
-    The `west.yml` is `_MANIFEST_TEMPLATE` with `THE_URL_BASE`
-    replaced by `file://<tmpdir>/repos`. Returns `tmpdir` (NOT
-    `tmpdir/repos`) so workspace-building fixtures can compose.
+    The manifest is `_MANIFEST_DATA` rendered to the format chosen
+    by the `manifest_format` fixture (default: `'yaml'`); the
+    `url-base` placeholder is substituted with `file://<tmpdir>/repos`
+    on the dict, *before* serialization, so the result is well-formed
+    for all three formats. Returns `tmpdir` (NOT `tmpdir/repos`) so
+    workspace-building fixtures can compose.
     '''
     kconfiglib, tagged_repo, net_tools, zephyr = (
         os.path.join(_session_repos, x)
@@ -354,23 +460,47 @@ def repos_tmpdir(tmpdir, _session_repos):
     for r in [kconfiglib, tagged_repo, net_tools, zephyr]:
         subprocess.check_call([GIT, 'clone', r])
 
-    manifest = _MANIFEST_TEMPLATE.replace('THE_URL_BASE', str(tmpdir.join('repos')))
-    add_commit(str(repos.join('zephyr')), 'add manifest', files={'west.yml': manifest})
+    # Deep-copy the template so per-test substitutions don't leak
+    # into the next test (test order is non-deterministic under
+    # pytest-xdist).
+    import copy
+
+    data = copy.deepcopy(_MANIFEST_DATA)
+    data['manifest']['remotes'][0]['url-base'] = str(tmpdir.join('repos'))
+    ext = _MANIFEST_FORMATS[manifest_format]['ext']
+    manifest_file = f'west.{ext}'
+    add_commit(
+        str(repos.join('zephyr')),
+        'add manifest',
+        files={manifest_file: _dump_manifest(data, manifest_format)},
+    )
     return tmpdir
 
 
 @pytest.fixture
-def west_init_tmpdir(repos_tmpdir):
+def west_init_tmpdir(repos_tmpdir, manifest_format):
     '''Per-test workspace initialized via `west init` against the
     `repos_tmpdir` fixture's local "remote" manifest repo.
 
     Workspace lives at `<repos_tmpdir>/workspace`; chdirs into it
     and yields the path. The workspace's projects are NOT cloned —
     use `west_update_tmpdir` if you need them on disk.
+
+    `--manifest-file west.<ext>` is passed at init time so the
+    workspace's `manifest.file` config matches the format the
+    `repos_tmpdir` fixture committed to the bare manifest repo.
     '''
     west_tmpdir = repos_tmpdir / 'workspace'
     manifest = repos_tmpdir / 'repos' / 'zephyr'
-    cmd(['init', '--url', f'file://{manifest}', str(west_tmpdir)])
+    ext = _MANIFEST_FORMATS[manifest_format]['ext']
+    cmd([
+        'init',
+        '--url',
+        f'file://{manifest}',
+        '--manifest-file',
+        f'west.{ext}',
+        str(west_tmpdir),
+    ])
     with chdir(west_tmpdir):
         yield west_tmpdir
 
