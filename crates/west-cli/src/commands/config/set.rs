@@ -19,6 +19,17 @@ pub struct SetArgs {
     #[arg(allow_hyphen_values = true)]
     pub value: String,
 
+    /// Append `value` to a list-valued key instead of replacing it.
+    /// List inputs extend the target list with all their elements;
+    /// scalar inputs append a single element. Errors if the key is
+    /// currently a scalar (string/int/bool/float) — only list and
+    /// absent-key are accepted. Reads the existing value from the
+    /// same layer it writes back to, so `--local` won't peek at
+    /// `--global` (use `west config get` then `west config set` if
+    /// you want merged semantics).
+    #[arg(short = 'a', long)]
+    pub append: bool,
+
     #[command(flatten)]
     pub scope: ScopeArgs,
 }
@@ -35,7 +46,7 @@ pub fn run(args: SetArgs, loaded: &mut LoadedConfig) -> ExitCode {
     // --file PATH: operate strictly on PATH; ignore the layered config and
     // any --config inline overrides.
     if let Some(file) = &args.scope.file {
-        return set_in_single_file(&args.name, value, file);
+        return set_in_single_file(&args.name, value, file, args.append);
     }
 
     // "Not in a workspace" routes through FAILURE (matches topdir / list /
@@ -64,14 +75,10 @@ pub fn run(args: SetArgs, loaded: &mut LoadedConfig) -> ExitCode {
         }
     };
 
-    if let Err(e) = loaded.config.set(&args.name, value, &target) {
-        log::error!("{e}");
-        return exit::FAILURE;
-    }
-    exit::SUCCESS
+    write_value(&args.name, value, &target, &mut loaded.config, args.append)
 }
 
-fn set_in_single_file(name: &str, value: ConfigValue, file: &Path) -> ExitCode {
+fn set_in_single_file(name: &str, value: ConfigValue, file: &Path, append: bool) -> ExitCode {
     let mut single = match Configuration::load([file.to_path_buf()]) {
         Ok(c) => c,
         Err(e) => {
@@ -79,9 +86,88 @@ fn set_in_single_file(name: &str, value: ConfigValue, file: &Path) -> ExitCode {
             return exit::FAILURE;
         }
     };
-    if let Err(e) = single.set(name, value, file) {
+    write_value(name, value, file, &mut single, append)
+}
+
+/// Shared replace-or-append writer. Reads + writes the same layer
+/// when `append` is true so per-scope semantics stay clean (no silent
+/// cross-layer shadowing).
+fn write_value(
+    name: &str,
+    value: ConfigValue,
+    layer: &Path,
+    config: &mut Configuration,
+    append: bool,
+) -> ExitCode {
+    let final_value = if append {
+        match build_appended_value(name, value, layer, config) {
+            Ok(v) => v,
+            Err(code) => return code,
+        }
+    } else {
+        value
+    };
+    if let Err(e) = config.set(name, final_value, layer) {
         log::error!("{e}");
         return exit::FAILURE;
     }
     exit::SUCCESS
+}
+
+/// `-a / --append`: read the current value from `layer` alone, fold
+/// `value` into it, and return the list to write back. Absent → new
+/// list; list → extend (or append if `value` is a scalar); scalar
+/// already there → reject (`-a` only operates on lists).
+fn build_appended_value(
+    name: &str,
+    value: ConfigValue,
+    layer: &Path,
+    config: &Configuration,
+) -> Result<ConfigValue, ExitCode> {
+    let current = match config.get_in(name, layer) {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!("{e}");
+            return Err(exit::FAILURE);
+        }
+    };
+    let to_add = into_elements(value);
+    let merged = match current {
+        None => to_add,
+        Some(ConfigValue::List(mut existing)) => {
+            existing.extend(to_add);
+            existing
+        }
+        Some(scalar) => {
+            log::error!(
+                "--append requires a list-valued key; {name:?} is currently a {}. \
+                 Drop --append to replace it, or `west config unset {name}` first.",
+                type_label(&scalar),
+            );
+            return Err(exit::usage());
+        }
+    };
+    Ok(ConfigValue::List(merged))
+}
+
+/// Convert the user-supplied value into the elements that should join
+/// the target list. A `List` extends (its items become elements one
+/// by one); a scalar appends as a single element. The python idiom is
+/// `list.extend([...])` vs `list.append(x)` — `--append` picks the
+/// right call based on what the user typed.
+fn into_elements(value: ConfigValue) -> Vec<ConfigValue> {
+    match value {
+        ConfigValue::List(items) => items,
+        scalar => vec![scalar],
+    }
+}
+
+fn type_label(v: &ConfigValue) -> &'static str {
+    match v {
+        ConfigValue::String(_) => "string",
+        ConfigValue::Bool(_) => "boolean",
+        ConfigValue::Integer(_) => "integer",
+        ConfigValue::Float(_) => "float",
+        ConfigValue::List(_) => "list",
+    }
 }

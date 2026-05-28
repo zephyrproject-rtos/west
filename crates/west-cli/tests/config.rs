@@ -225,6 +225,178 @@ fn set_list_via_toml_array_syntax() {
 
 #[test]
 #[serial]
+fn append_to_existing_list_grows_by_one() {
+    // Set a list, then -a a scalar — should grow by exactly one element.
+    let sb = Sandbox::new();
+    sb.west()
+        .args([
+            "config",
+            "set",
+            "manifest.project-filter",
+            r#"["+foo","-bar"]"#,
+        ])
+        .assert()
+        .success();
+
+    sb.west()
+        .args(["config", "set", "-a", "manifest.project-filter", "+baz"])
+        .assert()
+        .success();
+
+    let out = sb
+        .west()
+        .args(["config", "get", "manifest.project-filter"])
+        .assert()
+        .success();
+    assert_eq!(
+        std::str::from_utf8(&out.get_output().stdout).unwrap(),
+        "+foo\n-bar\n+baz\n"
+    );
+}
+
+#[test]
+#[serial]
+fn append_list_value_extends_not_nests() {
+    // -a with a TOML list input EXTENDS — adds each element one by
+    // one — rather than nesting a sub-list. The python analogue is
+    // `list.extend(...)`, not `list.append(...)`.
+    let sb = Sandbox::new();
+    sb.west()
+        .args(["config", "set", "manifest.project-filter", r#"["+foo"]"#])
+        .assert()
+        .success();
+
+    sb.west()
+        .args([
+            "config",
+            "set",
+            "--append",
+            "manifest.project-filter",
+            r#"["+a","+b"]"#,
+        ])
+        .assert()
+        .success();
+
+    let out = sb
+        .west()
+        .args(["config", "get", "manifest.project-filter"])
+        .assert()
+        .success();
+    assert_eq!(
+        std::str::from_utf8(&out.get_output().stdout).unwrap(),
+        "+foo\n+a\n+b\n"
+    );
+}
+
+#[test]
+#[serial]
+fn append_to_absent_creates_new_list() {
+    // Key absent at the target layer → -a creates a fresh list with
+    // just the appended elements.
+    let sb = Sandbox::new();
+    sb.west()
+        .args(["config", "set", "-a", "manifest.project-filter", "+only"])
+        .assert()
+        .success();
+
+    let out = sb
+        .west()
+        .args(["config", "get", "manifest.project-filter"])
+        .assert()
+        .success();
+    assert_eq!(
+        std::str::from_utf8(&out.get_output().stdout).unwrap(),
+        "+only\n"
+    );
+}
+
+#[test]
+#[serial]
+fn append_to_scalar_errors_cleanly() {
+    // The key holds a scalar — `-a` refuses rather than silently
+    // converting to a list.
+    let sb = Sandbox::new();
+    sb.west()
+        .args(["config", "set", "k.v", "plain"])
+        .assert()
+        .success();
+
+    let res = sb
+        .west()
+        .args(["config", "set", "-a", "k.v", "more"])
+        .assert()
+        .failure();
+    assert_eq!(res.get_output().status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&res.get_output().stderr);
+    assert!(stderr.contains("list-valued"), "stderr: {stderr}");
+    assert!(stderr.contains("string"), "stderr: {stderr}");
+
+    // The original value is preserved — append's pre-check didn't touch
+    // anything on disk.
+    let out = sb.west().args(["config", "get", "k.v"]).assert().success();
+    assert_eq!(
+        std::str::from_utf8(&out.get_output().stdout).unwrap(),
+        "plain\n"
+    );
+}
+
+#[test]
+#[serial]
+fn append_honours_scope_does_not_peek_at_other_layers() {
+    // Global has the key as a list; --local --append starts from
+    // scratch at the local layer (not from the global value). The
+    // local layer ends up holding just the new element. This is the
+    // "scope-target read, scope-target write" semantic we chose over
+    // v1's merged-read behaviour, to avoid silent layer shadowing.
+    let sb = Sandbox::new();
+    sb.west()
+        .args([
+            "config",
+            "set",
+            "--global",
+            "manifest.project-filter",
+            r#"["+global"]"#,
+        ])
+        .assert()
+        .success();
+
+    sb.west()
+        .args([
+            "config",
+            "set",
+            "--local",
+            "-a",
+            "manifest.project-filter",
+            "+local",
+        ])
+        .assert()
+        .success();
+
+    // Local layer holds just the new entry.
+    let local_only = sb
+        .west()
+        .args(["config", "get", "--local", "manifest.project-filter"])
+        .assert()
+        .success();
+    assert_eq!(
+        std::str::from_utf8(&local_only.get_output().stdout).unwrap(),
+        "+local\n"
+    );
+
+    // Global layer is untouched.
+    let global_only = sb
+        .west()
+        .args(["config", "get", "--global", "manifest.project-filter"])
+        .assert()
+        .success();
+    assert_eq!(
+        std::str::from_utf8(&global_only.get_output().stdout).unwrap(),
+        "+global\n"
+    );
+}
+
+#[test]
+#[serial]
 fn set_default_local_outside_workspace_fails_with_failure_exit() {
     // Pre-`exit` module: this returned 3 (the lone `3` in the tree).
     // Folded to FAILURE (1) for consistency with topdir / list / diff
