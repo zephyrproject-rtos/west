@@ -70,6 +70,15 @@ serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml_ng = "0.10"
 toml_edit = { version = "0.22", features = ["serde"] }
 
+# Unix-only `libc::signal` for the `SIGPIPE → SIG_DFL` reset at the
+# binary's entry point — see `src/bin/west.rs`. Already pulled in
+# transitively by dirs / rayon / indicatif, so this dep is free; it's
+# spelled out explicitly so the binary's use is greppable. Will be
+# removable once `-Zon-broken-pipe=kill` stabilises (rust-lang/rust#97889;
+# mechanism settled in rust-lang/rust#124480).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [build-dependencies]
 # Small dep, always included so the build script can call
 # `pyo3_build_config::add_extension_module_link_args()` when the

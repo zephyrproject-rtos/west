@@ -1523,6 +1523,7 @@ dependencies = [
  "dirs",
  "env_logger",
  "indicatif",
+ "libc",
  "log",
  "md-5",
  "pyo3",

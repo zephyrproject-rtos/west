@@ -195,17 +195,12 @@ fn run_inner(args: ListArgs, loaded: &mut LoadedConfig) -> Result<bool, ListErro
             vcs: vcs.as_ref(),
         };
         let line = project_format::render(template, &ctx)?;
-        // A broken pipe (head, |less q) is the natural way for users to
-        // truncate output; treat as success and return.
-        if let Err(e) = writeln!(lock, "{line}") {
-            if e.kind() == io::ErrorKind::BrokenPipe {
-                return Ok(false);
-            }
-            // Writing to stdout failed for a reason other than the
-            // user-closing-pipe case. Funnel through FormatError so
-            // we don't grow a one-shot variant for this corner.
-            return Err(FormatError::Format(e.to_string()).into());
-        }
+        // Pipe-close (head / `less q`) is handled process-wide by the
+        // `SIGPIPE → SIG_DFL` reset in `bin/west.rs`: the kernel kills
+        // the process on EPIPE with exit 141 before the next write
+        // returns. Fire-and-forget here mirrors the other per-project
+        // commands' shape.
+        let _ = writeln!(lock, "{line}");
     }
 
     // Surface any imports that were skipped because their owning project
