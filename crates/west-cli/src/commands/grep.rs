@@ -44,6 +44,7 @@ use rayon::prelude::*;
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
 
+use super::color::ColorArg;
 use super::config::LoadedConfig;
 use super::select;
 
@@ -103,23 +104,6 @@ impl Tool {
             Tool::GitGrep => "git-grep",
             Tool::Ripgrep => "ripgrep",
             Tool::Grep => "grep",
-        }
-    }
-}
-
-#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ColorArg {
-    Always,
-    Never,
-    Auto,
-}
-
-impl ColorArg {
-    fn as_str(self) -> &'static str {
-        match self {
-            ColorArg::Always => "always",
-            ColorArg::Never => "never",
-            ColorArg::Auto => "auto",
         }
     }
 }
@@ -472,7 +456,8 @@ fn build_tool_args(
     if tool == Tool::GitGrep {
         out.push("grep".into());
     }
-    let color = resolve_color(arg_color, config)?;
+    let color =
+        super::color::resolve(arg_color, config, Some("grep.color")).map_err(GrepError::Config)?;
     out.push(format!("--color={}", color.as_str()));
 
     let config_args = config
@@ -493,45 +478,6 @@ fn build_tool_args(
 
     out.extend(extras.iter().cloned());
     Ok(out)
-}
-
-fn resolve_color(
-    arg_color: Option<ColorArg>,
-    config: &Configuration,
-) -> Result<ColorArg, GrepError> {
-    if let Some(c) = arg_color {
-        return Ok(c);
-    }
-    if let Some(s) = config
-        .get_str("grep.color")
-        .map_err(|e| GrepError::Config(e.to_string()))?
-    {
-        return parse_color(&s, "grep.color");
-    }
-    if let Some(s) = config
-        .get_str("color.ui")
-        .map_err(|e| GrepError::Config(e.to_string()))?
-    {
-        // `color.ui` accepts more (e.g. `true`/`false`); map common
-        // ones, default to Auto for anything else.
-        return Ok(match s.as_str() {
-            "always" | "true" => ColorArg::Always,
-            "never" | "false" => ColorArg::Never,
-            _ => ColorArg::Auto,
-        });
-    }
-    Ok(ColorArg::Auto)
-}
-
-fn parse_color(s: &str, key: &str) -> Result<ColorArg, GrepError> {
-    match s {
-        "always" => Ok(ColorArg::Always),
-        "never" => Ok(ColorArg::Never),
-        "auto" => Ok(ColorArg::Auto),
-        other => Err(GrepError::Config(format!(
-            "{key}: unknown value {other:?} (expected always, never, or auto)"
-        ))),
-    }
 }
 
 #[derive(Debug)]

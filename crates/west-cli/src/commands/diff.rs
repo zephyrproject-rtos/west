@@ -38,7 +38,7 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{Args, ValueEnum};
+use clap::Args;
 use console::Style;
 use rayon::prelude::*;
 
@@ -46,6 +46,7 @@ use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
 use west_core::vcs::{ColorMode, DiffOutcome, DiffSpec, RevSpec, Vcs, VcsError};
 
+use super::color::ColorArg;
 use super::config::LoadedConfig;
 use super::select;
 
@@ -70,10 +71,10 @@ pub struct DiffArgs {
     #[arg(long = "exit-code")]
     pub exit_code: bool,
 
-    /// Colorize diff output. `auto` (default) emits color when
-    /// stdout is a TTY.
-    #[arg(long, value_enum, default_value_t = ColorArg::Auto)]
-    pub color: ColorArg,
+    /// Colorize diff output. Unset, the resolver consults `color.ui`
+    /// (git-style) before falling back to TTY-aware `auto`.
+    #[arg(long, value_enum)]
+    pub color: Option<ColorArg>,
 
     /// Maximum projects to diff concurrently. Twin of `diff.jobs`
     /// config key; defaults to `min(num_cpus, 8)`.
@@ -85,13 +86,6 @@ pub struct DiffArgs {
     /// (variadic) takes everything before it: `west diff -- --stat`.
     #[arg(last = true, allow_hyphen_values = true)]
     pub extra: Vec<String>,
-}
-
-#[derive(ValueEnum, Clone, Copy, Debug)]
-pub enum ColorArg {
-    Always,
-    Never,
-    Auto,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -241,10 +235,14 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
     let parallel = !settings.raw && settings.jobs > 1 && projects.len() > 1;
     let jobs = if parallel { settings.jobs } else { 1 };
 
-    // Resolve color once: workers capture into pipes, so git's own
-    // TTY heuristic would always pick "never". We force either
-    // Always or Never explicitly based on the real stdout.
-    let resolved_color = match args.color {
+    // Resolve color once: --color → color.ui → auto. Workers capture
+    // diff bodies into pipes, so git's own TTY heuristic would always
+    // pick "never". We force Always/Never explicitly based on the real
+    // stdout's TTY-ness (the body destination); the banner palette
+    // below makes the symmetric decision for stderr.
+    let color_choice =
+        super::color::resolve(args.color, &loaded.config, None).map_err(DiffError::Config)?;
+    let resolved_color = match color_choice {
         ColorArg::Always => ColorMode::Always,
         ColorArg::Never => ColorMode::Never,
         ColorArg::Auto => {
@@ -318,7 +316,7 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
     // choice via `force_styling`. The diff *body* colour is a
     // separate decision (`resolved_color`, keyed off stdout) since
     // it's what gets redirected.
-    let banner_style = match args.color {
+    let banner_style = match color_choice {
         ColorArg::Always => Style::new().green().bright().bold().force_styling(true),
         ColorArg::Never => Style::new().force_styling(false),
         ColorArg::Auto => Style::new().green().bright().bold().for_stderr(),

@@ -42,7 +42,7 @@ use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
-use clap::{Args, ValueEnum};
+use clap::Args;
 use console::Style;
 use rayon::prelude::*;
 
@@ -50,6 +50,7 @@ use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
 use west_core::vcs::{ColorMode, CommitSummary, RevSpec, StatusMode, StatusSpec, Vcs, VcsError};
 
+use super::color::ColorArg;
 use super::config::LoadedConfig;
 use super::select;
 
@@ -94,10 +95,10 @@ pub struct CompareArgs {
     )]
     pub no_ignore_branches: bool,
 
-    /// Colorize output. `auto` (default) emits color when stdout
-    /// is a TTY.
-    #[arg(long, value_enum, default_value_t = ColorArg::Auto)]
-    pub color: ColorArg,
+    /// Colorize output. Unset, the resolver consults `color.ui`
+    /// before falling back to TTY-aware `auto`.
+    #[arg(long, value_enum)]
+    pub color: Option<ColorArg>,
 
     /// Maximum projects to inspect concurrently. Twin of
     /// `compare.jobs` config key; defaults to
@@ -112,13 +113,6 @@ pub struct CompareArgs {
     /// Designed for machine-readable output.
     #[arg(short = 'f', long, value_name = "FMT")]
     pub format: Option<String>,
-}
-
-#[derive(ValueEnum, Clone, Copy, Debug)]
-pub enum ColorArg {
-    Always,
-    Never,
-    Auto,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -279,7 +273,12 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
             .unwrap_or(false)
     };
 
-    let resolved_color = match args.color {
+    // --color → color.ui → auto. The embedded git status body is
+    // captured into a pipe, so force Always/Never explicitly based on
+    // stdout's real TTY-ness.
+    let color_choice =
+        super::color::resolve(args.color, &loaded.config, None).map_err(CompareError::Config)?;
+    let resolved_color = match color_choice {
         ColorArg::Always => ColorMode::Always,
         ColorArg::Never => ColorMode::Never,
         ColorArg::Auto => {
@@ -344,7 +343,7 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
     // Banner lands on stderr, so `auto` follows stderr's TTY-ness;
     // `--color always/never` force the choice. (`resolved_color`,
     // keyed off stdout, colours the embedded git status body.)
-    let banner_style = match args.color {
+    let banner_style = match color_choice {
         ColorArg::Always => Style::new().green().bright().bold().force_styling(true),
         ColorArg::Never => Style::new().force_styling(false),
         ColorArg::Auto => Style::new().green().bright().bold().for_stderr(),

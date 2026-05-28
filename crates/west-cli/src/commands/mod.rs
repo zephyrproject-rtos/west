@@ -5,6 +5,7 @@ use clap::Subcommand;
 
 use config::LoadedConfig;
 
+pub mod color;
 pub mod compare;
 pub mod config;
 pub mod diff;

@@ -38,7 +38,7 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{Args, ValueEnum};
+use clap::Args;
 use console::Style;
 use rayon::prelude::*;
 
@@ -46,6 +46,7 @@ use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
 use west_core::vcs::{ColorMode, StatusMode, StatusOutcome, StatusSpec, Vcs, VcsError};
 
+use super::color::ColorArg;
 use super::config::LoadedConfig;
 use super::select;
 
@@ -72,11 +73,11 @@ pub struct StatusArgs {
     #[arg(long = "exit-code")]
     pub exit_code: bool,
 
-    /// Colorize output. `auto` (default) emits color when stdout
-    /// is a TTY. Only affects long-form output — porcelain v1 is
-    /// intentionally colorless.
-    #[arg(long, value_enum, default_value_t = ColorArg::Auto)]
-    pub color: ColorArg,
+    /// Colorize output. Unset, the resolver consults `color.ui`
+    /// before falling back to TTY-aware `auto`. Only affects
+    /// long-form output — porcelain v1 is intentionally colorless.
+    #[arg(long, value_enum)]
+    pub color: Option<ColorArg>,
 
     /// Maximum projects to inspect concurrently. Twin of
     /// `status.jobs` config key; defaults to `min(num_cpus, 8)`.
@@ -87,13 +88,6 @@ pub struct StatusArgs {
     /// Use `--` to separate: `west status -- -u no`.
     #[arg(last = true, allow_hyphen_values = true)]
     pub extra: Vec<String>,
-}
-
-#[derive(ValueEnum, Clone, Copy, Debug)]
-pub enum ColorArg {
-    Always,
-    Never,
-    Auto,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -229,7 +223,12 @@ fn run_inner(args: StatusArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Sta
     let parallel = !settings.raw && settings.jobs > 1 && projects.len() > 1;
     let jobs = if parallel { settings.jobs } else { 1 };
 
-    let resolved_color = match args.color {
+    // --color → color.ui → auto. The long-form body git emits is
+    // captured into a pipe, so its own TTY heuristic always picks
+    // "never"; force Always/Never here based on stdout's real TTY.
+    let color_choice =
+        super::color::resolve(args.color, &loaded.config, None).map_err(StatusError::Config)?;
+    let resolved_color = match color_choice {
         ColorArg::Always => ColorMode::Always,
         ColorArg::Never => ColorMode::Never,
         ColorArg::Auto => {
@@ -299,7 +298,7 @@ fn run_inner(args: StatusArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Sta
     // so `auto` follows stderr's TTY-ness; `--color always/never`
     // force the choice. (`resolved_color`, keyed off stdout, colours
     // the long-form body git emits.)
-    let banner_style = match args.color {
+    let banner_style = match color_choice {
         ColorArg::Always => Style::new().green().bright().bold().force_styling(true),
         ColorArg::Never => Style::new().force_styling(false),
         ColorArg::Auto => Style::new().green().bright().bold().for_stderr(),
