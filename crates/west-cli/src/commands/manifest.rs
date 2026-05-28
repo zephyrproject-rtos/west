@@ -39,6 +39,7 @@ use west_core::config::Configuration;
 use west_core::vcs::RevSpec;
 
 use super::config::LoadedConfig;
+use crate::exit;
 
 #[derive(Args, Debug)]
 #[command(group = ArgGroup::new("action")
@@ -143,10 +144,10 @@ impl From<super::workspace::WorkspaceError> for ManifestCmdError {
 
 pub fn run(args: ManifestArgs, loaded: &mut LoadedConfig) -> ExitCode {
     match run_inner(args, loaded) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => exit::SUCCESS,
         Err(e) => {
             log::error!("{e}");
-            ExitCode::FAILURE
+            exit::FAILURE
         }
     }
 }

@@ -47,10 +47,10 @@ use rayon::prelude::*;
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
 
-use crate::exit;
 use super::color::ColorArg;
 use super::config::LoadedConfig;
 use super::select;
+use crate::exit;
 
 /// Same default cap as `update`: beyond ~8 concurrent shell jobs the
 /// shared resources (disk, terminal output) drown out the gain.
@@ -133,15 +133,15 @@ pub fn run(args: ForallArgs, loaded: &mut LoadedConfig) -> ExitCode {
     }
 
     match run_inner(args, loaded) {
-        Ok(true) => ExitCode::SUCCESS,
-        Ok(false) => ExitCode::FAILURE,
+        Ok(true) => exit::SUCCESS,
+        Ok(false) => exit::FAILURE,
         Err(e @ ForallError::UnclonedPositional { .. }) => {
             log::error!("{e}");
             exit::usage()
         }
         Err(e) => {
             log::error!("{e}");
-            ExitCode::FAILURE
+            exit::FAILURE
         }
     }
 }

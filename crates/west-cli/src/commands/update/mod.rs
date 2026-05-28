@@ -45,9 +45,9 @@ use west_core::vcs::{
     SubmoduleStrategy, Vcs,
 };
 
-use crate::exit;
 use super::color::ColorArg;
 use super::config::LoadedConfig;
+use crate::exit;
 use error::UpdateError;
 use indicatif_reporter::IndicatifReporter;
 use output::{BufferingReporter, Reporter, SerialReporter};
@@ -156,7 +156,7 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
     };
 
@@ -167,7 +167,7 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(v) => v,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
     };
 
@@ -232,7 +232,7 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
             Ok(m) => m,
             Err(e) => {
                 log::error!("{e}");
-                return ExitCode::FAILURE;
+                return exit::FAILURE;
             }
         }
     } else {
@@ -244,13 +244,13 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
                     &loaded.config,
                 ) {
                     log::error!("{e}");
-                    return ExitCode::FAILURE;
+                    return exit::FAILURE;
                 }
                 m
             }
             Err(e) => {
                 log::error!("{e}");
-                return ExitCode::FAILURE;
+                return exit::FAILURE;
             }
         }
     };
@@ -295,13 +295,13 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(ps) => ps,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
     };
 
     if projects.is_empty() {
         log::warn!("no projects to update");
-        return ExitCode::SUCCESS;
+        return exit::SUCCESS;
     }
 
     // Pick the reporter (and the worker's `Output` mode) by (raw, tty,
@@ -332,7 +332,7 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         Ok(p) => p,
         Err(e) => {
             log::error!("failed to start worker pool: {e}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
     };
 
@@ -356,10 +356,10 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
 
     let summary = reporter.finish();
     if summary.is_empty() {
-        ExitCode::SUCCESS
+        exit::SUCCESS
     } else {
         log::error!("{}", summary.render());
-        ExitCode::FAILURE
+        exit::FAILURE
     }
 }
 

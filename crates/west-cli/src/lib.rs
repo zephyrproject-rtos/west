@@ -137,7 +137,7 @@ pub fn run() -> ExitCode {
     if let Some(dir) = &initial.chdir {
         if let Err(e) = std::env::set_current_dir(dir) {
             eprintln!("west: -C {}: {e}", dir.display());
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
     }
 
@@ -179,7 +179,7 @@ pub fn run() -> ExitCode {
         Ok(l) => l,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
     };
 
@@ -198,7 +198,7 @@ pub fn run() -> ExitCode {
         )
     {
         log::error!("-q: {e}");
-        return ExitCode::FAILURE;
+        return exit::FAILURE;
     }
 
     if initial.raw
@@ -209,7 +209,7 @@ pub fn run() -> ExitCode {
         )
     {
         log::error!("--raw: {e}");
-        return ExitCode::FAILURE;
+        return exit::FAILURE;
     }
 
     // Resolve aliases. Re-parses argv on each iteration; aliases never inject
@@ -219,7 +219,7 @@ pub fn run() -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
     };
 

@@ -3,6 +3,8 @@ use std::process::{Command, ExitCode};
 
 use clap::Args;
 
+use crate::exit;
+
 #[derive(Args, Debug)]
 pub struct ExecArgs {
     /// Program to run, followed by its arguments. Args starting with `-`
@@ -27,7 +29,7 @@ pub fn run(args: ExecArgs) -> ExitCode {
     match Command::new(prog).args(rest).status() {
         Ok(status) => {
             if status.success() {
-                return ExitCode::SUCCESS;
+                return exit::SUCCESS;
             }
             // Best-effort exit-code propagation. Codes outside 0..=255 and
             // signal-killed children (None) collapse to FAILURE.
@@ -36,11 +38,11 @@ pub fn run(args: ExecArgs) -> ExitCode {
                     return ExitCode::from(c);
                 }
             }
-            ExitCode::FAILURE
+            exit::FAILURE
         }
         Err(e) => {
             log::error!("exec {}: {e}", prog.to_string_lossy());
-            ExitCode::FAILURE
+            exit::FAILURE
         }
     }
 }

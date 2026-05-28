@@ -32,8 +32,8 @@ use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Manifest;
 use west_core::vcs::{self, RevSpec};
 
-use crate::exit;
 use super::config::LoadedConfig;
+use crate::exit;
 
 #[derive(Args, Debug)]
 pub struct InitArgs {
@@ -171,14 +171,14 @@ pub fn run(args: InitArgs, loaded: &mut LoadedConfig) -> ExitCode {
     };
 
     match result {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => exit::SUCCESS,
         Err(InitError::AlreadyInitialized(p)) => {
             log::error!("already initialized in {}", p.display());
-            ExitCode::FAILURE
+            exit::FAILURE
         }
         Err(e) => {
             log::error!("{e}");
-            ExitCode::FAILURE
+            exit::FAILURE
         }
     }
 }

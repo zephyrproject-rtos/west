@@ -5,8 +5,8 @@ use clap::Args;
 
 use west_core::config::{ConfigValue, Configuration};
 
-use crate::exit;
 use super::{LoadedConfig, ScopeArgs, scope_to_path};
+use crate::exit;
 
 #[derive(Args, Debug)]
 pub struct ListArgs {
@@ -39,7 +39,7 @@ pub fn run(args: ListArgs, loaded: &mut LoadedConfig) -> ExitCode {
     };
 
     print_items(&items);
-    ExitCode::SUCCESS
+    exit::SUCCESS
 }
 
 fn list_single_file(file: &Path) -> ExitCode {
@@ -47,7 +47,7 @@ fn list_single_file(file: &Path) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
     };
     let items = match single.items_in(file) {
@@ -58,7 +58,7 @@ fn list_single_file(file: &Path) -> ExitCode {
         }
     };
     print_items(&items);
-    ExitCode::SUCCESS
+    exit::SUCCESS
 }
 
 fn print_items(items: &[(String, ConfigValue)]) {

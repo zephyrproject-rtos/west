@@ -41,6 +41,7 @@ use super::config::LoadedConfig;
 use super::extension;
 use crate::Cli;
 use crate::alias;
+use crate::exit;
 use west_core::config::ConfigValue;
 
 #[derive(Args, Debug)]
@@ -97,7 +98,7 @@ fn print_top_level_help(loaded: &LoadedConfig) -> ExitCode {
 
     println!();
     println!("Run \"west help <command>\" for help on each <command>.");
-    ExitCode::SUCCESS
+    exit::SUCCESS
 }
 
 /// Format `(name, description)` pairs as a two-column block in
@@ -177,7 +178,7 @@ fn resolve(name: &str, loaded: &LoadedConfig, visited: &mut HashSet<String>) -> 
     if Cli::command().find_subcommand(name).is_some() {
         let argv = ["west", name, "--help"];
         match Cli::try_parse_from(argv) {
-            Ok(_) => return ExitCode::SUCCESS,
+            Ok(_) => return exit::SUCCESS,
             Err(e) => e.exit(),
         }
     }
@@ -187,7 +188,7 @@ fn resolve(name: &str, loaded: &LoadedConfig, visited: &mut HashSet<String>) -> 
     //    those). An empty alias also can't reach here.
     if !visited.insert(name.to_owned()) {
         log::error!("alias cycle resolving help for {name:?}");
-        return ExitCode::FAILURE;
+        return exit::FAILURE;
     }
     match alias::lookup(&loaded.config, name) {
         Ok(Some(expanded)) => {
@@ -197,7 +198,7 @@ fn resolve(name: &str, loaded: &LoadedConfig, visited: &mut HashSet<String>) -> 
         Ok(None) => {}
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
     }
 

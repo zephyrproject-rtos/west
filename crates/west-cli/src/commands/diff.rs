@@ -46,10 +46,10 @@ use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
 use west_core::vcs::{ColorMode, DiffOutcome, DiffSpec, RevSpec, Vcs, VcsError};
 
-use crate::exit;
 use super::color::ColorArg;
 use super::config::LoadedConfig;
 use super::select;
+use crate::exit;
 
 const MAX_DEFAULT_JOBS: usize = 8;
 
@@ -122,21 +122,21 @@ pub fn run(args: DiffArgs, loaded: &mut LoadedConfig) -> ExitCode {
     }
 
     match run_inner(args, loaded) {
-        Ok(Outcome::AllEmpty) => ExitCode::SUCCESS,
+        Ok(Outcome::AllEmpty) => exit::SUCCESS,
         Ok(Outcome::SomeNonEmpty {
             exit_code_flag: false,
-        }) => ExitCode::SUCCESS,
+        }) => exit::SUCCESS,
         Ok(Outcome::SomeNonEmpty {
             exit_code_flag: true,
         }) => exit::DIVERGENCE,
-        Ok(Outcome::Failures) => ExitCode::FAILURE,
+        Ok(Outcome::Failures) => exit::FAILURE,
         Err(e @ DiffError::UnclonedPositional { .. }) => {
             log::error!("{e}");
             exit::usage()
         }
         Err(e) => {
             log::error!("{e}");
-            ExitCode::FAILURE
+            exit::FAILURE
         }
     }
 }

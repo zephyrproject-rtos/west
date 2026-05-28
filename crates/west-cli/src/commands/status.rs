@@ -45,10 +45,10 @@ use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
 use west_core::vcs::{ColorMode, StatusMode, StatusOutcome, StatusSpec, Vcs, VcsError};
 
-use crate::exit;
 use super::color::ColorArg;
 use super::config::LoadedConfig;
 use super::select;
+use crate::exit;
 
 const MAX_DEFAULT_JOBS: usize = 8;
 
@@ -122,21 +122,21 @@ pub fn run(args: StatusArgs, loaded: &mut LoadedConfig) -> ExitCode {
         return exit::usage();
     }
     match run_inner(args, loaded) {
-        Ok(Outcome::AllClean) => ExitCode::SUCCESS,
+        Ok(Outcome::AllClean) => exit::SUCCESS,
         Ok(Outcome::SomeDirty {
             exit_code_flag: false,
-        }) => ExitCode::SUCCESS,
+        }) => exit::SUCCESS,
         Ok(Outcome::SomeDirty {
             exit_code_flag: true,
         }) => exit::DIVERGENCE,
-        Ok(Outcome::Failures) => ExitCode::FAILURE,
+        Ok(Outcome::Failures) => exit::FAILURE,
         Err(e @ StatusError::UnclonedPositional { .. }) => {
             log::error!("{e}");
             exit::usage()
         }
         Err(e) => {
             log::error!("{e}");
-            ExitCode::FAILURE
+            exit::FAILURE
         }
     }
 }

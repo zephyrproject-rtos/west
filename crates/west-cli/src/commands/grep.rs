@@ -44,10 +44,10 @@ use rayon::prelude::*;
 use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
 
-use crate::exit;
 use super::color::ColorArg;
 use super::config::LoadedConfig;
 use super::select;
+use crate::exit;
 
 const MAX_DEFAULT_JOBS: usize = 8;
 
@@ -140,15 +140,15 @@ pub fn run(args: GrepArgs, loaded: &mut LoadedConfig) -> ExitCode {
         return exit::usage();
     }
     match run_inner(args, loaded) {
-        Ok(Outcome::Ok) => ExitCode::SUCCESS,
-        Ok(Outcome::SomeFailed) => ExitCode::FAILURE,
+        Ok(Outcome::Ok) => exit::SUCCESS,
+        Ok(Outcome::SomeFailed) => exit::FAILURE,
         Err(e @ GrepError::ToolNotFound { .. }) => {
             log::error!("{e}");
             exit::usage()
         }
         Err(e) => {
             log::error!("{e}");
-            ExitCode::FAILURE
+            exit::FAILURE
         }
     }
 }

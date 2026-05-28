@@ -49,10 +49,10 @@ use west_core::config::{ConfigValue, Configuration};
 use west_core::manifest::Project;
 use west_core::vcs::{ColorMode, CommitSummary, RevSpec, StatusMode, StatusSpec, Vcs, VcsError};
 
-use crate::exit;
 use super::color::ColorArg;
 use super::config::LoadedConfig;
 use super::select;
+use crate::exit;
 
 const MAX_DEFAULT_JOBS: usize = 8;
 
@@ -153,21 +153,21 @@ pub fn run(args: CompareArgs, loaded: &mut LoadedConfig) -> ExitCode {
         return exit::usage();
     }
     match run_inner(args, loaded) {
-        Ok(Outcome::AllAligned) => ExitCode::SUCCESS,
+        Ok(Outcome::AllAligned) => exit::SUCCESS,
         Ok(Outcome::SomePrinted {
             exit_code_flag: false,
-        }) => ExitCode::SUCCESS,
+        }) => exit::SUCCESS,
         Ok(Outcome::SomePrinted {
             exit_code_flag: true,
         }) => exit::DIVERGENCE,
-        Ok(Outcome::Failures) => ExitCode::FAILURE,
+        Ok(Outcome::Failures) => exit::FAILURE,
         Err(e @ CompareError::UnclonedPositional { .. }) => {
             log::error!("{e}");
             exit::usage()
         }
         Err(e) => {
             log::error!("{e}");
-            ExitCode::FAILURE
+            exit::FAILURE
         }
     }
 }

@@ -37,6 +37,7 @@ use west_core::vcs::Vcs;
 use west_core::west_commands::{WestCommandsError, WestCommandsFile};
 
 use super::config::LoadedConfig;
+use crate::exit;
 
 /// Where to find one extension command's python implementation.
 #[derive(Debug, Clone)]
@@ -106,7 +107,7 @@ pub(crate) fn run(args: &[OsString], loaded: &LoadedConfig) -> ExitCode {
         Some(a) => a.to_string_lossy().into_owned(),
         None => {
             log::error!("unknown command");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
     };
     let user_argv: Vec<&OsString> = args.iter().skip(1).collect();
@@ -121,7 +122,7 @@ pub(crate) fn run(args: &[OsString], loaded: &LoadedConfig) -> ExitCode {
         Ok(w) => w,
         Err(_) => {
             log::error!("unknown command: {name}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
     };
 
@@ -143,19 +144,19 @@ pub(crate) fn run(args: &[OsString], loaded: &LoadedConfig) -> ExitCode {
         Ok(Some(s)) => s,
         Ok(None) => {
             log::error!("unknown command: {name}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
         Err(e @ ExtensionError::ParseCommandsFile { .. }) => {
             log::error!("could not load extension command(s): {e}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
         Err(e @ ExtensionError::EscapesProject { .. }) => {
             log::error!("{e}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
         Err(_) => {
             log::error!("unknown command: {name}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
     };
 
@@ -163,7 +164,7 @@ pub(crate) fn run(args: &[OsString], loaded: &LoadedConfig) -> ExitCode {
         Ok(code) => code,
         Err(e) => {
             log::error!("{e}");
-            ExitCode::FAILURE
+            exit::FAILURE
         }
     }
 }
@@ -227,7 +228,7 @@ fn spawn(
     let status = cmd.status().map_err(ExtensionError::Spawn)?;
     let code = status.code().unwrap_or(1);
     Ok(if code == 0 {
-        ExitCode::SUCCESS
+        exit::SUCCESS
     } else {
         ExitCode::from(u8::try_from(code).unwrap_or(1))
     })

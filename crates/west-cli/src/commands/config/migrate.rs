@@ -39,8 +39,8 @@ use toml_edit::{DocumentMut, Item, Table, Value};
 use west_core::config::ConfigValue;
 use west_core::config_paths::ResolvedConfig;
 
-use crate::exit;
 use super::{LoadedConfig, ScopeArgs, scope_to_path};
+use crate::exit;
 
 #[derive(Args, Debug)]
 pub struct MigrateArgs {
@@ -73,7 +73,7 @@ pub fn run(args: MigrateArgs, loaded: &LoadedConfig) -> ExitCode {
     };
     if scopes.is_empty() {
         log::warn!("no v1 config files found at any conventional scope");
-        return ExitCode::SUCCESS;
+        return exit::SUCCESS;
     }
     let mut overall_ok = true;
     for (label, v1, v2) in scopes {
@@ -82,9 +82,9 @@ pub fn run(args: MigrateArgs, loaded: &LoadedConfig) -> ExitCode {
         }
     }
     if overall_ok {
-        ExitCode::SUCCESS
+        exit::SUCCESS
     } else {
-        ExitCode::FAILURE
+        exit::FAILURE
     }
 }
 

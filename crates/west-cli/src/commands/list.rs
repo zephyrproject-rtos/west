@@ -19,10 +19,10 @@ use clap::Args;
 
 use west_core::manifest::Project;
 
-use crate::exit;
 use super::config::LoadedConfig;
 use super::project_format::{self, FormatError, ProjectContext};
 use super::select;
+use crate::exit;
 
 const DEFAULT_FORMAT: &str = "{name:12} {path:28} {revision:40} {url}";
 
@@ -93,18 +93,18 @@ impl From<super::workspace::WorkspaceError> for ListError {
 
 pub fn run(args: ListArgs, loaded: &mut LoadedConfig) -> ExitCode {
     match run_inner(args, loaded) {
-        Ok(false) => ExitCode::SUCCESS,
+        Ok(false) => exit::SUCCESS,
         // Some imports were skipped because their projects aren't
         // cloned. The warning has already been printed; signal
         // partial success with a non-zero exit so scripts notice.
-        Ok(true) => ExitCode::FAILURE,
+        Ok(true) => exit::FAILURE,
         Err(e @ ListError::InactiveWithPositional) => {
             log::error!("{e}");
             exit::usage()
         }
         Err(e) => {
             log::error!("{e}");
-            ExitCode::FAILURE
+            exit::FAILURE
         }
     }
 }

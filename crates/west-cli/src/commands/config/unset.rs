@@ -5,8 +5,8 @@ use clap::Args;
 
 use west_core::config::{ConfigError, Configuration};
 
-use crate::exit;
 use super::{LoadedConfig, ScopeArgs, scope_to_path};
+use crate::exit;
 
 #[derive(Args, Debug)]
 pub struct UnsetArgs {
@@ -42,7 +42,7 @@ fn unset_in_single_file(name: &str, file: &Path) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
     };
     map_unset_result(name, single.delete(name, file))
@@ -50,10 +50,10 @@ fn unset_in_single_file(name: &str, file: &Path) -> ExitCode {
 
 fn map_unset_result(name: &str, result: Result<(), ConfigError>) -> ExitCode {
     match result {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => exit::SUCCESS,
         Err(ConfigError::NotFound(_)) => {
             log::error!("not set: {name}");
-            ExitCode::FAILURE
+            exit::FAILURE
         }
         Err(e) => {
             log::error!("{e}");

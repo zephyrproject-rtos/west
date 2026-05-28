@@ -5,8 +5,8 @@ use clap::Args;
 
 use west_core::config::{ConfigValue, Configuration};
 
-use crate::exit;
 use super::{LoadedConfig, ScopeArgs, scope_to_path};
+use crate::exit;
 
 #[derive(Args, Debug)]
 pub struct SetArgs {
@@ -66,9 +66,9 @@ pub fn run(args: SetArgs, loaded: &mut LoadedConfig) -> ExitCode {
 
     if let Err(e) = loaded.config.set(&args.name, value, &target) {
         log::error!("{e}");
-        return ExitCode::FAILURE;
+        return exit::FAILURE;
     }
-    ExitCode::SUCCESS
+    exit::SUCCESS
 }
 
 fn set_in_single_file(name: &str, value: ConfigValue, file: &Path) -> ExitCode {
@@ -76,12 +76,12 @@ fn set_in_single_file(name: &str, value: ConfigValue, file: &Path) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
     };
     if let Err(e) = single.set(name, value, file) {
         log::error!("{e}");
-        return ExitCode::FAILURE;
+        return exit::FAILURE;
     }
-    ExitCode::SUCCESS
+    exit::SUCCESS
 }

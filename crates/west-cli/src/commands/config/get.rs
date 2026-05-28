@@ -5,8 +5,8 @@ use clap::Args;
 
 use west_core::config::{ConfigValue, Configuration};
 
-use crate::exit;
 use super::{LoadedConfig, ScopeArgs, scope_to_path};
+use crate::exit;
 
 #[derive(Args, Debug)]
 pub struct GetArgs {
@@ -44,7 +44,7 @@ fn get_from_single_file(name: &str, file: &Path) -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             log::error!("{e}");
-            return ExitCode::FAILURE;
+            return exit::FAILURE;
         }
     };
     emit(single.get_in(name, file))
@@ -58,13 +58,13 @@ fn emit(value: Result<Option<ConfigValue>, west_core::config::ConfigError>) -> E
                     println!("{s}");
                 }
             }
-            ExitCode::SUCCESS
+            exit::SUCCESS
         }
         Ok(Some(scalar)) => {
             println!("{scalar}");
-            ExitCode::SUCCESS
+            exit::SUCCESS
         }
-        Ok(None) => ExitCode::FAILURE,
+        Ok(None) => exit::FAILURE,
         Err(e) => {
             log::error!("{e}");
             exit::usage()
