@@ -27,13 +27,41 @@ import importlib.util
 import os
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
-from west.commands import CommandError
+from west.commands import CommandError, WestCommand
 from west.configuration import Configuration
 from west.manifest import Manifest
 
+# A single `--inline-config NAME=VALUE` pair, in CLI order.
+_InlineOverride = tuple[str, str]
 
-def _parse_argv(argv):
+
+class _ParsedArgv(NamedTuple):
+    '''Decoded argv shape `_parse_argv` returns. Fields:
+
+    - `module_path`: path to the extension's `.py` file.
+    - `class_name`: the `WestCommand` subclass to instantiate.
+    - `inline_overrides`: ordered `(name, value)` pairs collected
+      from `--inline-config` flags; later entries override earlier.
+    - `extra_config_files`: ordered paths from `--extra-config-file`
+      flags, appended at top file-backed precedence.
+    - `user_argv`: everything after the `--` separator — the
+      extension's own arguments.
+
+    NamedTuple so callers can keep the original positional unpack
+    (`a, b, c, d, e = _parse_argv(...)`) while the field names
+    document the shape.
+    '''
+
+    module_path: str
+    class_name: str
+    inline_overrides: list[_InlineOverride]
+    extra_config_files: list[str]
+    user_argv: list[str]
+
+
+def _parse_argv(argv: list[str]) -> _ParsedArgv:
     """Split argv into (module_path, class_name, inline_overrides,
     extra_config_files, user_argv).
 
@@ -52,7 +80,7 @@ def _parse_argv(argv):
         raise SystemExit("west._dispatch: expected at least <module-path> <class-name>")
     module_path, class_name, *rest = argv
 
-    inline_overrides: list[tuple[str, str]] = []
+    inline_overrides: list[_InlineOverride] = []
     extra_config_files: list[str] = []
     i = 0
     while i < len(rest) and rest[i] != "--":
@@ -79,10 +107,10 @@ def _parse_argv(argv):
     # `i` is either past-end or points at the `--`. Strip the
     # separator if present.
     user_argv = rest[i + 1 :] if i < len(rest) else []
-    return module_path, class_name, inline_overrides, extra_config_files, user_argv
+    return _ParsedArgv(module_path, class_name, inline_overrides, extra_config_files, user_argv)
 
 
-def _load_command_class(module_path, class_name):
+def _load_command_class(module_path: str, class_name: str) -> type[WestCommand]:
     """Load the extension's `.py` and return the named class."""
     p = Path(module_path).resolve()
     if not p.is_file():
@@ -109,7 +137,11 @@ def _load_command_class(module_path, class_name):
         raise SystemExit(f"west._dispatch: class {class_name!r} not found in {module_path}") from e
 
 
-def _build_config(topdir, inline_overrides, extra_config_files):
+def _build_config(
+    topdir: str | None,
+    inline_overrides: list[_InlineOverride],
+    extra_config_files: list[str],
+) -> Configuration | None:
     """Construct a `Configuration` matching the rust binary's view.
 
     The rust binary loads system/global/local from disk, appends any
@@ -129,7 +161,7 @@ def _build_config(topdir, inline_overrides, extra_config_files):
     return cfg
 
 
-def _build_manifest(topdir, config):
+def _build_manifest(topdir: str | None, config: Configuration | None) -> Manifest | None:
     """Construct a `Manifest` for the workspace, or `None` when
     we're outside a workspace."""
     if topdir is None:
@@ -137,7 +169,7 @@ def _build_manifest(topdir, config):
     return Manifest.from_topdir(topdir=topdir, config=config)
 
 
-def main():
+def main() -> int:
     module_path, class_name, inline_overrides, extra_config_files, user_argv = _parse_argv(
         sys.argv[1:]
     )
@@ -145,7 +177,12 @@ def main():
 
     cls = _load_command_class(module_path, class_name)
     try:
-        cmd = cls()
+        # Extension subclasses override `__init__` to provide their
+        # own `name` / `description` via `super().__init__('name', …)`,
+        # so calling the constructor with no arguments is the contract
+        # — mypy can't see that the subclass narrows the abstract
+        # `WestCommand(name=…)` signature.
+        cmd = cls()  # type: ignore[call-arg]
     except Exception as e:
         # Mirror v1's "command constructor threw an exception" wording
         # so any user docs / scripts grepping for that phrase keep

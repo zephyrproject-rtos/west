@@ -209,7 +209,10 @@ class WestCommand(ABC):
         self,
         args: argparse.Namespace,
         unknown: list[str],
-        topdir: PathType,
+        # `None` when invoked outside a workspace; the body raises via
+        # `die()` for commands that declare `requires_workspace=True`,
+        # and stores it verbatim (as `self.topdir = None`) otherwise.
+        topdir: PathType | None,
         manifest: Manifest | None = None,
         config: Configuration | None = None,
     ) -> None:
