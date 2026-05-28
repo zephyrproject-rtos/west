@@ -646,6 +646,89 @@ fn get_missing_exits_1_no_output() {
     assert!(res.get_output().stdout.is_empty());
 }
 
+#[test]
+#[serial]
+fn get_default_used_when_key_absent() {
+    // `--default VALUE` upgrades "key not set" from exit 1 to exit 0
+    // with VALUE on stdout. Mirrors `git config --get --default`.
+    let sb = Sandbox::new();
+    let res = sb
+        .west()
+        .args(["config", "get", "--default", "fallback", "nope.key"])
+        .assert()
+        .success();
+    assert_eq!(
+        std::str::from_utf8(&res.get_output().stdout).unwrap(),
+        "fallback\n"
+    );
+}
+
+#[test]
+#[serial]
+fn get_default_ignored_when_key_present() {
+    // When the key IS set, --default is ignored and the real value
+    // is printed.
+    let sb = Sandbox::new();
+    sb.west()
+        .args(["config", "set", "k.v", "real"])
+        .assert()
+        .success();
+
+    let res = sb
+        .west()
+        .args(["config", "get", "--default", "fallback", "k.v"])
+        .assert()
+        .success();
+    assert_eq!(
+        std::str::from_utf8(&res.get_output().stdout).unwrap(),
+        "real\n"
+    );
+}
+
+#[test]
+#[serial]
+fn get_default_works_with_file_flag() {
+    // `--file PATH --default VALUE` for an absent key in a specific
+    // file: same fallback semantic as the layered path.
+    let sb = Sandbox::new();
+    let empty = sb._tmp.path().join("empty.toml");
+    std::fs::write(&empty, "").unwrap();
+
+    let res = sb
+        .west()
+        .args([
+            "config",
+            "get",
+            "--file",
+            empty.to_str().unwrap(),
+            "--default",
+            "from-file-fallback",
+            "absent.key",
+        ])
+        .assert()
+        .success();
+    assert_eq!(
+        std::str::from_utf8(&res.get_output().stdout).unwrap(),
+        "from-file-fallback\n"
+    );
+}
+
+#[test]
+#[serial]
+fn get_default_does_not_mask_malformed_key_error() {
+    // `--default` only kicks in for "key not set". A malformed key
+    // (no dot) is a usage error and should still exit 2 — the
+    // fallback doesn't get printed.
+    let sb = Sandbox::new();
+    let res = sb
+        .west()
+        .args(["config", "get", "--default", "fallback", "no-dot"])
+        .assert()
+        .failure();
+    assert_eq!(res.get_output().status.code(), Some(2));
+    assert!(res.get_output().stdout.is_empty());
+}
+
 // --- top-level --config / --config-file -------------------------------------
 
 #[test]

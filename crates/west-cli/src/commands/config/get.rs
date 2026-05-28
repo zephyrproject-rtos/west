@@ -12,6 +12,14 @@ use crate::exit;
 pub struct GetArgs {
     /// Configuration option name (e.g. `manifest.path`).
     pub name: String,
+
+    /// Fallback value to print (on stdout, exit 0) when NAME is not
+    /// set, instead of the default behaviour (print nothing, exit
+    /// 1). Mirrors `git config --get --default`. Doesn't suppress
+    /// real errors — a malformed key still exits 2.
+    #[arg(long, value_name = "VALUE")]
+    pub default: Option<String>,
+
     #[command(flatten)]
     pub scope: ScopeArgs,
 }
@@ -20,7 +28,7 @@ pub fn run(args: GetArgs, loaded: &mut LoadedConfig) -> ExitCode {
     // --file PATH: operate strictly on PATH; ignore the layered config and
     // any --config inline overrides.
     if let Some(file) = &args.scope.file {
-        return get_from_single_file(&args.name, file);
+        return get_from_single_file(&args.name, file, args.default.as_deref());
     }
 
     let scope_path = match scope_to_path(&args.scope, &loaded.resolved) {
@@ -36,10 +44,10 @@ pub fn run(args: GetArgs, loaded: &mut LoadedConfig) -> ExitCode {
         None => loaded.config.get(&args.name),
     };
 
-    emit(value)
+    emit(value, args.default.as_deref())
 }
 
-fn get_from_single_file(name: &str, file: &Path) -> ExitCode {
+fn get_from_single_file(name: &str, file: &Path, default: Option<&str>) -> ExitCode {
     let single = match Configuration::load([file.to_path_buf()]) {
         Ok(c) => c,
         Err(e) => {
@@ -47,10 +55,13 @@ fn get_from_single_file(name: &str, file: &Path) -> ExitCode {
             return exit::FAILURE;
         }
     };
-    emit(single.get_in(name, file))
+    emit(single.get_in(name, file), default)
 }
 
-fn emit(value: Result<Option<ConfigValue>, west_core::config::ConfigError>) -> ExitCode {
+fn emit(
+    value: Result<Option<ConfigValue>, west_core::config::ConfigError>,
+    default: Option<&str>,
+) -> ExitCode {
     match value {
         Ok(Some(ConfigValue::List(items))) => {
             for it in items {
@@ -64,7 +75,18 @@ fn emit(value: Result<Option<ConfigValue>, west_core::config::ConfigError>) -> E
             println!("{scalar}");
             exit::SUCCESS
         }
-        Ok(None) => exit::FAILURE,
+        // Key absent. `--default VALUE` upgrades this from FAILURE to
+        // SUCCESS-with-VALUE-on-stdout, mirroring `git config --get
+        // --default`. The default isn't parsed as a TOML expression
+        // (unlike `set`'s value) — it's printed verbatim, matching the
+        // way present-key scalars are printed.
+        Ok(None) => match default {
+            Some(d) => {
+                println!("{d}");
+                exit::SUCCESS
+            }
+            None => exit::FAILURE,
+        },
         Err(e) => {
             log::error!("{e}");
             exit::usage()
