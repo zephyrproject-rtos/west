@@ -29,7 +29,7 @@ mod python;
 )]
 pub struct Cli {
     /// Run as if west was started in <DIR>.
-    #[arg(short = 'C', value_name = "DIR")]
+    #[arg(short = 'C', long = "chdir", value_name = "DIR")]
     pub chdir: Option<PathBuf>,
 
     #[command(flatten)]
@@ -37,8 +37,8 @@ pub struct Cli {
 
     /// Additional configuration options. NAME is a TOML dotted key; VALUE is
     /// a TOML expression. Bare strings (without TOML constructs) may omit
-    /// quotes. Repeatable.
-    #[arg(long = "config", value_name = "NAME=VALUE", action = ArgAction::Append)]
+    /// quotes. Repeatable. `-c` matches `git -c`'s muscle memory.
+    #[arg(short = 'c', long = "config", value_name = "NAME=VALUE", action = ArgAction::Append)]
     pub config: Vec<String>,
 
     /// Additional configuration files, appended at top file-backed precedence.
@@ -129,9 +129,9 @@ impl VerbosityArgs {
 pub fn run() -> ExitCode {
     let argv: Vec<OsString> = std::env::args_os().collect();
 
-    // Initial parse: read top-level flags (-C, -v/-q, --config, --config-file)
-    // from the user's actual argv. These are the only sources for those flags;
-    // aliases never propagate them.
+    // Initial parse: read top-level flags (-C/--chdir, -v/-q, -c/--config,
+    // --config-file) from the user's actual argv. These are the only sources
+    // for those flags; aliases never propagate them.
     let initial = Cli::parse_from(&argv);
 
     if let Some(dir) = &initial.chdir {
