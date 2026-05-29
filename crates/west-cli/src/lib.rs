@@ -83,8 +83,13 @@ impl log::Log for ProgressLogger {
 
 // `-v` / `-q` count flags driving the `log` crate's `LevelFilter`.
 //
-// Default: `Warn`. `-v` → `Info`, `-vv` → `Debug`, `-vvv` → `Trace`.
-// `-q` subtracts: `-q` → `Error`, `-qq` → `Off`.
+// Default: `Info`. `-v` → `Debug`, `-vv` → `Trace` (saturates).
+// `-q` subtracts: `-q` → `Warn`, `-qq` → `Error`, `-qqq` → `Off`.
+//
+// The default matches v1's `WestCommand.verbosity = Verbosity.INF` so
+// zephyr extensions (and any consumer that shells out to `west update`
+// / `west list` / etc.) see the same diagnostic volume they were
+// designed against.
 #[derive(Args, Debug)]
 pub struct VerbosityArgs {
     /// Increase logging verbosity. Composes with `-q`: the net is
@@ -111,17 +116,19 @@ pub struct VerbosityArgs {
 impl VerbosityArgs {
     pub fn log_level_filter(&self) -> LevelFilter {
         let net = i32::from(self.verbose) - i32::from(self.quiet);
-        // Warnings are visible by default — they're actionable, not
-        // progress (the indicatif bars are the progress UI). Info and
-        // below are opt-in via `-v`. `-q` drops to errors-only and
-        // `-qq` silences everything.
+        // Default is `Info` — matches v1's `Verbosity.INF` default so
+        // extension commands and any consumer that shells out to
+        // `west update` / `west list` / etc. see the same diagnostic
+        // volume v1 ships. `-v` cranks to Debug for per-project
+        // chatter; `-vv` to Trace for module-targeted noise. `-q`
+        // walks back through Warn → Error → Off.
         match net {
-            i32::MIN..=-2 => LevelFilter::Off, // -qq (and beyond)
-            -1 => LevelFilter::Error,          // -q
-            0 => LevelFilter::Warn,            // default
-            1 => LevelFilter::Info,            // -v
-            2 => LevelFilter::Debug,           // -vv
-            _ => LevelFilter::Trace,           // -vvv+
+            i32::MIN..=-3 => LevelFilter::Off, // -qqq (and beyond)
+            -2 => LevelFilter::Error,          // -qq
+            -1 => LevelFilter::Warn,           // -q
+            0 => LevelFilter::Info,            // default
+            1 => LevelFilter::Debug,           // -v
+            _ => LevelFilter::Trace,           // -vv (and beyond, saturates)
         }
     }
 }
