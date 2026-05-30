@@ -61,6 +61,14 @@ pub struct MigrateArgs {
     /// Overwrite the v2 target if it already exists.
     #[arg(long)]
     pub force: bool,
+
+    /// Skip the type-inference heuristic for keys not in v2's known
+    /// registry — keep their v1 values as verbatim TOML strings
+    /// instead of promoting clean `true`/`false` → bool and pure
+    /// integers → int. Off by default (inference is on); pass this
+    /// when you'd rather audit each user-defined key by hand.
+    #[arg(long = "no-infer-types")]
+    pub no_infer_types: bool,
 }
 
 pub fn run(args: MigrateArgs, loaded: &LoadedConfig) -> ExitCode {
@@ -75,9 +83,11 @@ pub fn run(args: MigrateArgs, loaded: &LoadedConfig) -> ExitCode {
         log::warn!("no v1 config files found at any conventional scope");
         return exit::SUCCESS;
     }
+    // Default-on inference; `--no-infer-types` flips off.
+    let infer = !args.no_infer_types;
     let mut overall_ok = true;
     for (label, v1, v2) in scopes {
-        if !migrate_one(&label, &v1, &v2, args.dry_run, args.force) {
+        if !migrate_one(&label, &v1, &v2, args.dry_run, args.force, infer) {
             overall_ok = false;
         }
     }
@@ -240,7 +250,7 @@ fn v1_global_path() -> Option<PathBuf> {
 
 // --- per-pair migration ------------------------------------------------------
 
-fn migrate_one(label: &str, v1: &Path, v2: &Path, dry_run: bool, force: bool) -> bool {
+fn migrate_one(label: &str, v1: &Path, v2: &Path, dry_run: bool, force: bool, infer: bool) -> bool {
     if !v1.exists() {
         log::error!("{label}: v1 source not found at {}", v1.display());
         return false;
@@ -252,19 +262,32 @@ fn migrate_one(label: &str, v1: &Path, v2: &Path, dry_run: bool, force: bool) ->
         );
         return false;
     }
-    let (pairs, warnings) = match parse_v1(v1) {
-        Ok(p) => p,
+    log::info!("{label}: migrating {}", v1.display());
+    let notes = match parse_v1(v1, infer) {
+        Ok(n) => n,
         Err(e) => {
             log::error!("{label}: {e}");
             return false;
         }
     };
-    for w in &warnings {
-        log::warn!("{label}: {w}");
-    }
+    emit_traces(label, &notes);
+
+    // Collect the (key, value) pairs for TOML emission. Stable
+    // alphabetical order independent of source-file order, for
+    // reproducible v2 output.
+    let mut pairs: Vec<(String, ConfigValue)> = notes
+        .iter()
+        .map(|n| (n.key.clone(), n.value.clone()))
+        .collect();
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+
     let body = build_v2(&pairs, v1);
     if dry_run {
         print!("# --- {label}: would write to {} ---\n{body}", v2.display());
+        log::info!(
+            "{label}: {}",
+            summary_clause(&notes, "would write", v2)
+        );
         return true;
     }
     if let Some(parent) = v2.parent()
@@ -278,23 +301,145 @@ fn migrate_one(label: &str, v1: &Path, v2: &Path, dry_run: bool, force: bool) ->
         log::error!("{label}: write {}: {e}", v2.display());
         return false;
     }
-    log::info!(
-        "{label}: migrated {} → {} ({} key{})",
-        v1.display(),
-        v2.display(),
-        pairs.len(),
-        if pairs.len() == 1 { "" } else { "s" },
-    );
+    log::info!("{label}: {}", summary_clause(&notes, "wrote", v2));
     true
+}
+
+/// One info-level log line per migrated key. The format aims at
+/// scannable left-aligned `key = value (type[, qualifier])` lines on
+/// stderr; the eventual TOML body goes to stdout (under `--dry-run`)
+/// or to disk and is separate from this trace.
+fn emit_traces(label: &str, notes: &[Note]) {
+    for n in notes {
+        let value_repr = render_value(&n.value);
+        let ty = type_name(&n.value);
+        match &n.kind {
+            NoteKind::Kept => log::info!("{label}: {key} = {value_repr} ({ty})", key = n.key),
+            NoteKind::Inferred => log::info!(
+                "{label}: {key} = {value_repr} ({ty}, inferred)",
+                key = n.key,
+            ),
+            NoteKind::Unknown => log::info!(
+                "{label}: {key} = {value_repr} ({ty}, unknown key, kept verbatim)",
+                key = n.key,
+            ),
+            NoteKind::Renamed { from } => log::info!(
+                "{label}: {from} → {key} = {value_repr} ({ty}, renamed)",
+                key = n.key,
+            ),
+            NoteKind::CoercionFailed { expected } => log::warn!(
+                "{label}: {key} = {value_repr} ({ty}, expected {expected}; preserved as string)",
+                key = n.key,
+            ),
+        }
+    }
+}
+
+/// "wrote 5 keys to /path (3 string, 1 int, 1 bool); 1 rename; 2 warnings"
+/// — the verb is parameterised so `--dry-run` can say "would write".
+fn summary_clause(notes: &[Note], verb: &str, v2: &Path) -> String {
+    let mut by_type: std::collections::BTreeMap<&'static str, usize> = Default::default();
+    let mut renames = 0usize;
+    let mut warnings = 0usize;
+    for n in notes {
+        *by_type.entry(type_name(&n.value)).or_insert(0) += 1;
+        if matches!(n.kind, NoteKind::Renamed { .. }) {
+            renames += 1;
+        }
+        if matches!(n.kind, NoteKind::CoercionFailed { .. }) {
+            warnings += 1;
+        }
+    }
+    let count = notes.len();
+    let plural = if count == 1 { "" } else { "s" };
+
+    let mut out = format!(
+        "{verb} {count} key{plural} to {} (",
+        v2.display(),
+    );
+    let parts: Vec<String> = by_type
+        .iter()
+        .map(|(ty, n)| format!("{n} {ty}{}", if *n == 1 { "" } else { "s" }))
+        .collect();
+    out.push_str(&parts.join(", "));
+    out.push(')');
+    if renames > 0 {
+        out.push_str(&format!(
+            "; {renames} rename{}",
+            if renames == 1 { "" } else { "s" }
+        ));
+    }
+    if warnings > 0 {
+        out.push_str(&format!(
+            "; {warnings} warning{}",
+            if warnings == 1 { "" } else { "s" }
+        ));
+    }
+    out
+}
+
+fn type_name(v: &ConfigValue) -> &'static str {
+    match v {
+        ConfigValue::String(_) => "string",
+        ConfigValue::Bool(_) => "bool",
+        ConfigValue::Integer(_) => "int",
+        ConfigValue::Float(_) => "float",
+        ConfigValue::List(_) => "list",
+    }
+}
+
+/// Compact TOML-ish rendering for log output. Strings are quoted so
+/// it's clear the value is textual; small lists are spelled out
+/// element-by-element; large lists collapse to `[N elements]` so a
+/// 100-project filter doesn't dump a screenful onto the log.
+fn render_value(v: &ConfigValue) -> String {
+    match v {
+        ConfigValue::String(s) => format!("{s:?}"),
+        ConfigValue::Bool(b) => format!("{b}"),
+        ConfigValue::Integer(i) => format!("{i}"),
+        ConfigValue::Float(f) => format!("{f}"),
+        ConfigValue::List(items) => {
+            if items.len() <= 3 {
+                let parts: Vec<String> = items.iter().map(render_value).collect();
+                format!("[{}]", parts.join(", "))
+            } else {
+                format!("[{} elements]", items.len())
+            }
+        }
+    }
 }
 
 // --- v1 parse ----------------------------------------------------------------
 
-#[allow(clippy::type_complexity)]
-fn parse_v1(path: &Path) -> Result<(Vec<(String, ConfigValue)>, Vec<String>), String> {
+/// One per (target v2 key) emitted by `parse_v1`. A split rename
+/// (one v1 key → two v2 keys) produces two Notes; everything else
+/// produces one. `kind` carries the per-key migration story so the
+/// caller can format each translation uniformly without re-deriving
+/// state from the value.
+struct Note {
+    key: String,
+    value: ConfigValue,
+    kind: NoteKind,
+}
+
+enum NoteKind {
+    /// Known v2 key, value coerced cleanly to its registered type.
+    Kept,
+    /// Unknown v2 key, inference picked a non-string type.
+    Inferred,
+    /// Unknown v2 key, kept verbatim as string (inference off OR
+    /// didn't match any heuristic).
+    Unknown,
+    /// Rename rule fired. `from` is the v1 source key.
+    Renamed { from: String },
+    /// Known-typed v2 key but the v1 value couldn't coerce; value
+    /// preserved as a string. User-actionable — surfaces as a warning.
+    CoercionFailed { expected: &'static str },
+}
+
+fn parse_v1(path: &Path, infer: bool) -> Result<Vec<Note>, String> {
     let conf = Ini::load_from_file(path).map_err(|e| format!("parse {}: {e}", path.display()))?;
-    let mut pairs: Vec<(String, ConfigValue)> = Vec::new();
-    let mut warnings: Vec<String> = Vec::new();
+    let mut notes: Vec<Note> = Vec::new();
     for (section, props) in conf.iter() {
         match section {
             None => {
@@ -324,29 +469,32 @@ fn parse_v1(path: &Path) -> Result<(Vec<(String, ConfigValue)>, Vec<String>), St
                 for (key, value) in props.iter() {
                     let dotted = format!("{section_name}.{key}");
                     let rewrite = rewrite_v1_key(&dotted);
-                    if let Rewrite::Renamed(new_keys) = &rewrite {
-                        // Successful translation, not a failure — flag it so
-                        // the user knows their v1 key shape moved namespace.
-                        warnings.push(format!(
-                            "{dotted} renamed to {} (v1 key removed in v2)",
-                            new_keys.join(" + ")
-                        ));
-                    }
+                    let renamed_from = match &rewrite {
+                        Rewrite::Same => None,
+                        Rewrite::Renamed(_) => Some(dotted.clone()),
+                    };
                     for target_key in rewrite.targets(&dotted) {
-                        let (cv, warn) = coerce(target_key, value);
-                        pairs.push((target_key.to_owned(), cv));
-                        if let Some(w) = warn {
-                            warnings.push(w);
-                        }
+                        let (cv, outcome) = coerce(target_key, value, infer);
+                        let kind = match (renamed_from.as_ref(), outcome) {
+                            (Some(from), _) => NoteKind::Renamed { from: from.clone() },
+                            (None, CoerceOutcome::Kept) => NoteKind::Kept,
+                            (None, CoerceOutcome::Inferred) => NoteKind::Inferred,
+                            (None, CoerceOutcome::Unknown) => NoteKind::Unknown,
+                            (None, CoerceOutcome::CoercionFailed { expected }) => {
+                                NoteKind::CoercionFailed { expected }
+                            }
+                        };
+                        notes.push(Note {
+                            key: target_key.to_owned(),
+                            value: cv,
+                            kind,
+                        });
                     }
                 }
             }
         }
     }
-    // Stable ordering by dotted key — independent of v1 INI section order,
-    // gives reproducible v2 output across migration runs.
-    pairs.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok((pairs, warnings))
+    Ok(notes)
 }
 
 // --- v1 → v2 key rewrites ----------------------------------------------------
@@ -458,27 +606,40 @@ fn known_type(key: &str) -> Option<Typ> {
     })
 }
 
-/// Coerce a v1 string value to its v2 type, falling back to string +
-/// warning if the type doesn't fit (or the key isn't in the v2
-/// registry).
-fn coerce(key: &str, raw: &str) -> (ConfigValue, Option<String>) {
+/// Per-key outcome of `coerce`. Drives the trace-line kind for each
+/// migrated pair. (For rename-rule keys, the caller overrides to
+/// `NoteKind::Renamed` regardless of this outcome — it carries the
+/// inner story but the trace presents the rename framing.)
+enum CoerceOutcome {
+    /// Known-typed key, value matched the type cleanly.
+    Kept,
+    /// Unknown key, inference picked a non-string type.
+    Inferred,
+    /// Unknown key, kept verbatim as a string.
+    Unknown,
+    /// Known-typed key but the v1 value didn't fit; value preserved
+    /// as a string and the user should investigate.
+    CoercionFailed { expected: &'static str },
+}
+
+/// Coerce a v1 string value to its v2 type. Drives by `known_type`
+/// for west's registered keys; falls back to (inferred / verbatim)
+/// string for everything else, depending on the caller's `infer`
+/// choice.
+fn coerce(key: &str, raw: &str, infer: bool) -> (ConfigValue, CoerceOutcome) {
     match known_type(key) {
         Some(Typ::Bool) => match parse_bool(raw) {
-            Some(b) => (ConfigValue::Bool(b), None),
+            Some(b) => (ConfigValue::Bool(b), CoerceOutcome::Kept),
             None => (
                 ConfigValue::String(raw.to_owned()),
-                Some(format!(
-                    "{key}: expected boolean, got {raw:?}; preserved as string"
-                )),
+                CoerceOutcome::CoercionFailed { expected: "boolean" },
             ),
         },
         Some(Typ::Int) => match raw.trim().parse::<i64>() {
-            Ok(n) => (ConfigValue::Integer(n), None),
+            Ok(n) => (ConfigValue::Integer(n), CoerceOutcome::Kept),
             Err(_) => (
                 ConfigValue::String(raw.to_owned()),
-                Some(format!(
-                    "{key}: expected integer, got {raw:?}; preserved as string"
-                )),
+                CoerceOutcome::CoercionFailed { expected: "integer" },
             ),
         },
         Some(Typ::ListStr) => {
@@ -488,14 +649,64 @@ fn coerce(key: &str, raw: &str) -> (ConfigValue, Option<String>) {
                 .filter(|s| !s.is_empty())
                 .map(|s| ConfigValue::String(s.to_owned()))
                 .collect();
-            (ConfigValue::List(items), None)
+            (ConfigValue::List(items), CoerceOutcome::Kept)
         }
-        Some(Typ::String) => (ConfigValue::String(raw.to_owned()), None),
-        None => (
-            ConfigValue::String(raw.to_owned()),
-            Some(format!("{key}: not recognised in v2; preserved as string")),
-        ),
+        Some(Typ::String) => (ConfigValue::String(raw.to_owned()), CoerceOutcome::Kept),
+        None if infer => match infer_unknown(raw) {
+            Some(v) => (v, CoerceOutcome::Inferred),
+            None => (ConfigValue::String(raw.to_owned()), CoerceOutcome::Unknown),
+        },
+        None => (ConfigValue::String(raw.to_owned()), CoerceOutcome::Unknown),
     }
+}
+
+/// Conservative type-inference heuristic for unknown keys. v1 INI
+/// was string-typed by construction, so the goal is: only promote to
+/// a non-string type when the v1 value can't plausibly have been
+/// intended as a string with that shape. Returns `None` for "stays
+/// as a string" so the caller distinguishes `Inferred` from `Unknown`.
+///
+/// Rules:
+///
+/// - `"true"` / `"false"` (case-insensitive) → bool. Skip git-style
+///   `yes`/`no`/`on`/`off`/`0`/`1` for unknowns: those are too often
+///   intended as counts or human labels. (Known-typed bool keys
+///   still accept the full git-style set — see `parse_bool`.)
+/// - Pure integer matching `^-?(0|[1-9]\d*)$` that fits in `i64` →
+///   int. Excludes leading zeros (`0123` is more often an
+///   ID/zip/version-prefix than a number) and any decimal/sign/comma.
+/// - Everything else → `None` (keep as string).
+fn infer_unknown(raw: &str) -> Option<ConfigValue> {
+    let trimmed = raw.trim();
+    match trimmed.to_ascii_lowercase().as_str() {
+        "true" => return Some(ConfigValue::Bool(true)),
+        "false" => return Some(ConfigValue::Bool(false)),
+        _ => {}
+    }
+    if looks_like_int(trimmed)
+        && let Ok(n) = trimmed.parse::<i64>()
+    {
+        return Some(ConfigValue::Integer(n));
+    }
+    None
+}
+
+fn looks_like_int(s: &str) -> bool {
+    let body = s.strip_prefix('-').unwrap_or(s);
+    if body.is_empty() {
+        return false;
+    }
+    if body == "0" {
+        return true;
+    }
+    // Reject leading zero on multi-char numbers — `0123` should stay
+    // a string (zip, ID, version prefix), not become `123`.
+    let mut chars = body.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_digit() && c != '0' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_digit())
 }
 
 /// git-config-style boolean parsing — same accepted set as v1
@@ -580,29 +791,32 @@ mod tests {
 
     #[test]
     fn coerce_bool_known_key() {
-        let (v, w) = coerce("update.rebase", "yes");
+        let (v, o) = coerce("update.rebase", "yes", true);
         assert!(matches!(v, ConfigValue::Bool(true)));
-        assert!(w.is_none());
+        assert!(matches!(o, CoerceOutcome::Kept));
     }
 
     #[test]
     fn coerce_bool_falls_back_with_warning() {
-        let (v, w) = coerce("update.rebase", "sometimes");
+        let (v, o) = coerce("update.rebase", "sometimes", true);
         assert!(matches!(v, ConfigValue::String(ref s) if s == "sometimes"));
-        let w = w.unwrap();
-        assert!(w.contains("expected boolean"));
+        assert!(matches!(
+            o,
+            CoerceOutcome::CoercionFailed { expected: "boolean" }
+        ));
     }
 
     #[test]
     fn coerce_int() {
-        let (v, _) = coerce("update.jobs", "8");
+        let (v, o) = coerce("update.jobs", "8", true);
         assert!(matches!(v, ConfigValue::Integer(8)));
+        assert!(matches!(o, CoerceOutcome::Kept));
     }
 
     #[test]
     fn coerce_list_comma_split_trims() {
-        let (v, w) = coerce("manifest.group-filter", " +a, -b , +c");
-        assert!(w.is_none());
+        let (v, o) = coerce("manifest.group-filter", " +a, -b , +c", true);
+        assert!(matches!(o, CoerceOutcome::Kept));
         let items = match v {
             ConfigValue::List(l) => l,
             _ => panic!("expected list"),
@@ -643,35 +857,98 @@ mod tests {
     }
 
     #[test]
-    fn unknown_key_preserved_with_warning() {
-        let (v, w) = coerce("custom.local-only", "hello");
+    fn unknown_key_with_text_value_kept_as_string() {
+        // Non-numeric, non-boolean value on an unknown key stays as a
+        // string regardless of `infer` — the heuristic doesn't fire,
+        // so the outcome is `Unknown` (verbatim string).
+        let (v, o) = coerce("custom.local-only", "hello", true);
         assert!(matches!(v, ConfigValue::String(ref s) if s == "hello"));
-        assert!(w.unwrap().contains("not recognised"));
+        assert!(matches!(o, CoerceOutcome::Unknown));
     }
 
     #[test]
     fn alias_keys_migrate_silently() {
         // `alias.<name>` is a user-defined namespace whose values are
-        // always strings — flagging every alias would be noise.
-        let (v, w) = coerce("alias.run", "build && flash");
+        // always strings — the known_type table has a dedicated arm
+        // so the outcome is `Kept`, not `Unknown`.
+        let (v, o) = coerce("alias.run", "build && flash", true);
         assert!(matches!(v, ConfigValue::String(ref s) if s == "build && flash"));
-        assert!(
-            w.is_none(),
-            "alias.* should migrate without warning, got: {w:?}"
-        );
+        assert!(matches!(o, CoerceOutcome::Kept));
     }
 
     #[test]
     fn known_string_keys_migrate_silently() {
-        // Spot-check one west-native and one Zephyr-extension key.
         for key in ["manifest.path", "update.auto-cache"] {
-            let (v, w) = coerce(key, "anything");
+            let (v, o) = coerce(key, "anything", true);
             assert!(matches!(v, ConfigValue::String(ref s) if s == "anything"));
-            assert!(
-                w.is_none(),
-                "{key} should migrate without warning, got: {w:?}"
-            );
+            assert!(matches!(o, CoerceOutcome::Kept));
         }
+    }
+
+    #[test]
+    fn inference_promotes_true_false_to_bool() {
+        for (raw, want) in [("true", true), ("false", false), ("TRUE", true), ("False", false)] {
+            let (v, o) = coerce("custom.flag", raw, true);
+            assert!(
+                matches!(v, ConfigValue::Bool(b) if b == want),
+                "{raw:?} → {v:?}"
+            );
+            assert!(matches!(o, CoerceOutcome::Inferred));
+        }
+    }
+
+    #[test]
+    fn inference_skips_git_style_bool_aliases() {
+        // `yes`/`no`/`on`/`off`/`0`/`1` are deliberately NOT inferred
+        // as bool for unknown keys — they're ambiguous with counts /
+        // human labels. (Known bool keys still accept them via
+        // `parse_bool` — that's the known-key path, not inference.)
+        for raw in ["yes", "no", "on", "off", "0", "1"] {
+            let (v, o) = coerce("custom.thing", raw, true);
+            assert!(
+                !matches!(v, ConfigValue::Bool(_)),
+                "{raw:?} should not infer to bool, got {v:?}"
+            );
+            // "0" / "1" infer as int instead; the others stay string.
+            match raw {
+                "0" | "1" => assert!(matches!(o, CoerceOutcome::Inferred)),
+                _ => assert!(matches!(o, CoerceOutcome::Unknown)),
+            }
+        }
+    }
+
+    #[test]
+    fn inference_promotes_pure_integer() {
+        for (raw, want) in [("42", 42), ("0", 0), ("-7", -7), ("9999", 9999)] {
+            let (v, o) = coerce("custom.count", raw, true);
+            assert!(
+                matches!(v, ConfigValue::Integer(i) if i == want),
+                "{raw:?} → {v:?}"
+            );
+            assert!(matches!(o, CoerceOutcome::Inferred));
+        }
+    }
+
+    #[test]
+    fn inference_skips_leading_zero_integers() {
+        // `0123` is much more often a zip / ID / version-prefix than
+        // an integer; leave it as a string.
+        let (v, o) = coerce("custom.id", "0123", true);
+        assert!(matches!(v, ConfigValue::String(ref s) if s == "0123"));
+        assert!(matches!(o, CoerceOutcome::Unknown));
+    }
+
+    #[test]
+    fn no_infer_keeps_unknowns_as_string() {
+        // `--no-infer-types` short-circuits the heuristic; even a clean
+        // `true` / `42` becomes a verbatim string.
+        let (v, o) = coerce("custom.flag", "true", false);
+        assert!(matches!(v, ConfigValue::String(ref s) if s == "true"));
+        assert!(matches!(o, CoerceOutcome::Unknown));
+
+        let (v, o) = coerce("custom.count", "42", false);
+        assert!(matches!(v, ConfigValue::String(ref s) if s == "42"));
+        assert!(matches!(o, CoerceOutcome::Unknown));
     }
 
     #[test]

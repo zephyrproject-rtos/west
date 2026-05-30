@@ -148,10 +148,13 @@ fn rewrite_update_fetch_to_strategy() {
         .unwrap();
     assert!(out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
+    // Trace line shows the v1 → v2 arrow + the "(…, renamed)"
+    // qualifier so the user can see the translation explicitly.
     assert!(
-        stderr.contains("update.fetch renamed to tool.git.fetch.strategy"),
+        stderr.contains("update.fetch → tool.git.fetch.strategy"),
         "stderr was: {stderr}"
     );
+    assert!(stderr.contains("renamed"), "stderr was: {stderr}");
 
     let toml = read(&sb.v2_local);
     assert!(toml.contains("strategy = \"smart\""));
@@ -172,8 +175,13 @@ fn rewrite_sync_submodules_splits_to_two_bools() {
         .unwrap();
     assert!(out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
+    // One trace line per produced v2 key — split rename shows two.
     assert!(
-        stderr.contains("tool.git.submodules.sync + tool.git.submodules.recurse"),
+        stderr.contains("update.sync-submodules → tool.git.submodules.sync"),
+        "stderr was: {stderr}"
+    );
+    assert!(
+        stderr.contains("update.sync-submodules → tool.git.submodules.recurse"),
         "stderr was: {stderr}"
     );
 
@@ -187,6 +195,10 @@ fn rewrite_sync_submodules_splits_to_two_bools() {
 #[serial]
 fn unknown_key_preserved_as_string_with_warning() {
     let sb = Sandbox::new();
+    // `--no-infer-types` keeps the verbatim-string behaviour the
+    // original test was written against; the inference-on default
+    // would otherwise leave non-{bool,int} unknowns as strings too
+    // but emit a different trace qualifier.
     std::fs::write(&sb.v1_local, "[custom]\nlocal-only = hello\n").unwrap();
 
     let out = sb
@@ -197,12 +209,105 @@ fn unknown_key_preserved_as_string_with_warning() {
     assert!(out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("custom.local-only") && stderr.contains("not recognised"),
+        stderr.contains("custom.local-only") && stderr.contains("unknown key"),
         "stderr was: {stderr}"
     );
 
     let toml = read(&sb.v2_local);
     assert!(toml.contains("local-only = \"hello\""));
+}
+
+#[test]
+#[serial]
+fn inference_promotes_true_false_and_pure_int_for_unknown_keys() {
+    // Default-on inference: an unknown key whose v1 value reads
+    // "true" / "42" should land as the native TOML type, not a
+    // verbatim string. Verifies (a) the on-disk type and (b) the
+    // trace qualifier reads "inferred" rather than "unknown key".
+    let sb = Sandbox::new();
+    std::fs::write(
+        &sb.v1_local,
+        "[custom]\nflag = true\ncount = 42\nlabel = hello\nzip = 0123\n",
+    )
+    .unwrap();
+
+    let out = sb
+        .west()
+        .args(["config", "migrate", "--local"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("custom.flag = true (bool, inferred)"), "stderr: {stderr}");
+    assert!(stderr.contains("custom.count = 42 (int, inferred)"), "stderr: {stderr}");
+    // `hello` doesn't match any heuristic; stays a string with the
+    // unknown-key trace.
+    assert!(
+        stderr.contains("custom.label = \"hello\" (string, unknown key"),
+        "stderr: {stderr}"
+    );
+    // Leading-zero number is explicitly NOT promoted — too often a
+    // zip / ID / version-prefix.
+    assert!(
+        stderr.contains("custom.zip = \"0123\" (string, unknown key"),
+        "stderr: {stderr}"
+    );
+
+    let toml = read(&sb.v2_local);
+    assert!(toml.contains("flag = true"), "got: {toml}");
+    assert!(toml.contains("count = 42"), "got: {toml}");
+    assert!(toml.contains("label = \"hello\""), "got: {toml}");
+    assert!(toml.contains("zip = \"0123\""), "got: {toml}");
+}
+
+#[test]
+#[serial]
+fn no_infer_types_keeps_unknowns_as_strings() {
+    // Opt-out: `--no-infer-types` short-circuits the heuristic;
+    // `true` / `42` become verbatim TOML strings even though they'd
+    // otherwise be inferred.
+    let sb = Sandbox::new();
+    std::fs::write(&sb.v1_local, "[custom]\nflag = true\ncount = 42\n").unwrap();
+
+    let out = sb
+        .west()
+        .args(["config", "migrate", "--local", "--no-infer-types"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+
+    let toml = read(&sb.v2_local);
+    assert!(toml.contains("flag = \"true\""), "got: {toml}");
+    assert!(toml.contains("count = \"42\""), "got: {toml}");
+}
+
+#[test]
+#[serial]
+fn summary_line_breaks_down_by_type() {
+    // The post-migration info line should show per-type counts plus
+    // a rename count when any rename rule fired.
+    let sb = Sandbox::new();
+    std::fs::write(
+        &sb.v1_local,
+        "[manifest]\npath = zephyr\nfile = west.yml\n\n[update]\njobs = 8\nrebase = yes\nfetch = smart\n",
+    )
+    .unwrap();
+
+    let out = sb
+        .west()
+        .args(["config", "migrate", "--local"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    // 5 keys total: manifest.path, manifest.file, update.jobs (int),
+    // update.rebase (bool), update.fetch → tool.git.fetch.strategy
+    // (string, renamed).
+    assert!(stderr.contains("wrote 5 keys to"), "stderr: {stderr}");
+    assert!(stderr.contains("3 strings"), "stderr: {stderr}");
+    assert!(stderr.contains("1 int"), "stderr: {stderr}");
+    assert!(stderr.contains("1 bool"), "stderr: {stderr}");
+    assert!(stderr.contains("1 rename"), "stderr: {stderr}");
 }
 
 #[test]
