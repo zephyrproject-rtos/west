@@ -276,6 +276,69 @@ impl Configuration {
         self.inner.set(option, cv, path).map_err(config_error_to_py)
     }
 
+    /// Append to a list-valued option at `configfile`. Mirrors the
+    /// CLI's `west config set -a/--append`:
+    ///
+    /// - Key absent at `configfile`: create as a new list whose
+    ///   elements come from `value`.
+    /// - Key is a list at `configfile`: extend the list by `value`'s
+    ///   elements.
+    /// - Key is a scalar (string / bool / int / float): raise
+    ///   `ValueError`; `append` only operates on lists.
+    ///
+    /// `value` element semantics match the CLI's: a python list /
+    /// tuple **extends** (each element joins the target list one by
+    /// one — mirrors `list.extend`); a scalar **appends** as a single
+    /// element. To add a list as a nested element, wrap it in another
+    /// list.
+    ///
+    /// Reads the current value from `configfile` only — so
+    /// `append(..., configfile=ConfigFile.LOCAL)` won't peek at the
+    /// global layer (avoids silently shadowing inherited list values).
+    /// `ConfigFile.ALL` is rejected; behaviour matches `set`.
+    #[pyo3(signature = (option, value, configfile=ConfigFile::LOCAL))]
+    fn append(
+        &mut self,
+        option: &str,
+        value: &Bound<'_, PyAny>,
+        configfile: ConfigFile,
+    ) -> PyResult<()> {
+        if configfile == ConfigFile::ALL {
+            return Err(PyValueError::new_err("ConfigFile.ALL"));
+        }
+        let paths: Vec<PathBuf> = self.paths_for(configfile);
+        if paths.is_empty() {
+            return Err(PyValueError::new_err(format!(
+                "{configfile:?}: file not found; retry in a workspace or set WEST_CONFIG_LOCAL"
+            )));
+        }
+        if paths.len() > 1 {
+            return Err(PyValueError::new_err(format!(
+                "Cannot append if multiple configs in use: {paths:?}"
+            )));
+        }
+        let path = &paths[0];
+        let new_value = pyany_to_config_value(value)?;
+        let current = self.inner.get_in(option, path).map_err(config_error_to_py)?;
+        let merged = match current {
+            None => into_list_elements(new_value),
+            Some(ConfigValue::List(mut existing)) => {
+                existing.extend(into_list_elements(new_value));
+                existing
+            }
+            Some(scalar) => {
+                return Err(PyValueError::new_err(format!(
+                    "append requires a list-valued key; {option:?} is currently a {}. \
+                     Drop append() to replace it, or delete() first.",
+                    config_value_type_label(&scalar),
+                )));
+            }
+        };
+        self.inner
+            .set(option, ConfigValue::List(merged), path)
+            .map_err(config_error_to_py)
+    }
+
     /// Delete an option. `configfile=None` deletes from the
     /// highest-precedence layer that has it; `configfile=ConfigFile.ALL`
     /// deletes from every layer; a specific layer scopes the delete.
@@ -466,6 +529,26 @@ fn pyany_to_config_value(value: &Bound<'_, PyAny>) -> PyResult<ConfigValue> {
         "unsupported value type for Configuration.set: {}",
         value.get_type().name()?
     )))
+}
+
+/// Turn an `append` value into the elements that join the target
+/// list: list/tuple inputs spread element-by-element (extend
+/// semantics); scalars become a single-element vec.
+fn into_list_elements(v: ConfigValue) -> Vec<ConfigValue> {
+    match v {
+        ConfigValue::List(items) => items,
+        scalar => vec![scalar],
+    }
+}
+
+fn config_value_type_label(v: &ConfigValue) -> &'static str {
+    match v {
+        ConfigValue::String(_) => "string",
+        ConfigValue::Bool(_) => "boolean",
+        ConfigValue::Integer(_) => "integer",
+        ConfigValue::Float(_) => "float",
+        ConfigValue::List(_) => "list",
+    }
 }
 
 /// Map `west_core::ConfigError` variants to python exception types.

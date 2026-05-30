@@ -177,6 +177,75 @@ def test_get_existing_paths_only_lists_written_files():
         assert existing[0].name == "config.toml"
 
 
+# --- append ---------------------------------------------------------------
+
+
+def test_append_to_existing_list_grows_by_one():
+    # Sets a list, then appends a scalar — list grows by exactly one
+    # element. Mirrors the CLI's `west config set -a` behaviour.
+    with _workspace_with_isolated_config() as ws:
+        c = Configuration(ws)
+        c.set("manifest.project-filter", ["+foo", "-bar"])
+        c.append("manifest.project-filter", "+baz")
+        assert c.get_list_str("manifest.project-filter") == ["+foo", "-bar", "+baz"]
+
+
+def test_append_python_list_value_extends_not_nests():
+    # A python list/tuple input EXTENDS the target list — each element
+    # joins one by one (mirrors list.extend), NOT list.append's
+    # nesting semantic. To nest, wrap in another list.
+    with _workspace_with_isolated_config() as ws:
+        c = Configuration(ws)
+        c.set("manifest.project-filter", ["+foo"])
+        c.append("manifest.project-filter", ["+a", "+b"])
+        assert c.get_list_str("manifest.project-filter") == ["+foo", "+a", "+b"]
+
+
+def test_append_to_absent_creates_new_list():
+    # Key absent at the target scope → append seeds a fresh list.
+    with _workspace_with_isolated_config() as ws:
+        c = Configuration(ws)
+        c.append("manifest.project-filter", "+only")
+        assert c.get_list_str("manifest.project-filter") == ["+only"]
+
+
+def test_append_to_scalar_raises_value_error():
+    # append refuses scalar-valued keys; user is told the current
+    # type and what to do instead. The on-disk value is unchanged.
+    with _workspace_with_isolated_config() as ws:
+        c = Configuration(ws)
+        c.set("k.v", "plain", ConfigFile.LOCAL)
+        with pytest.raises(ValueError, match="list-valued"):
+            c.append("k.v", "more")
+        assert c.get("k.v") == "plain"
+
+
+def test_append_honours_scope_does_not_peek_at_other_layers():
+    # The β-semantic: append reads from the same layer it writes to.
+    # Global has the key; appending at --local seeds local with just
+    # the new element, leaving global untouched. No silent layer
+    # shadowing.
+    with _workspace_with_isolated_config() as ws:
+        c = Configuration(ws)
+        c.set("manifest.project-filter", ["+global"], ConfigFile.GLOBAL)
+        c.append("manifest.project-filter", "+local", ConfigFile.LOCAL)
+        assert c.get_list_str(
+            "manifest.project-filter", configfile=ConfigFile.LOCAL
+        ) == ["+local"]
+        assert c.get_list_str(
+            "manifest.project-filter", configfile=ConfigFile.GLOBAL
+        ) == ["+global"]
+
+
+def test_append_with_configfile_all_is_rejected():
+    # `ConfigFile.ALL` makes no sense for append — same shape `set`
+    # rejects via ValueError.
+    with _workspace_with_isolated_config() as ws:
+        c = Configuration(ws)
+        with pytest.raises(ValueError):
+            c.append("k.v", "x", ConfigFile.ALL)
+
+
 def test_malformed_toml_raises_malformed_config():
     with _workspace_with_isolated_config() as ws:
         # Plant a broken local config before constructing.
