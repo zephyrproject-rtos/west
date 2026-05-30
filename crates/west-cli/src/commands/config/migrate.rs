@@ -668,19 +668,23 @@ fn coerce(key: &str, raw: &str, infer: bool) -> (ConfigValue, CoerceOutcome) {
 ///
 /// Rules:
 ///
-/// - `"true"` / `"false"` (case-insensitive) → bool. Skip git-style
-///   `yes`/`no`/`on`/`off`/`0`/`1` for unknowns: those are too often
-///   intended as counts or human labels. (Known-typed bool keys
-///   still accept the full git-style set — see `parse_bool`.)
+/// - `true`/`false`/`yes`/`no`/`on`/`off` (case-insensitive) → bool.
+///   These are exactly the tokens configparser's `getboolean()`
+///   recognises, so a v1 INI user writing `enabled = yes` was
+///   declaring a bool by the idiom of the format they were using.
+///   `0` and `1` deliberately stay out of the bool set — they're
+///   ambiguous with counts (`max-retries = 1` shouldn't quietly
+///   become `true`).
 /// - Pure integer matching `^-?(0|[1-9]\d*)$` that fits in `i64` →
 ///   int. Excludes leading zeros (`0123` is more often an
 ///   ID/zip/version-prefix than a number) and any decimal/sign/comma.
+///   `0` / `1` land here (int 0 / int 1) by definition.
 /// - Everything else → `None` (keep as string).
 fn infer_unknown(raw: &str) -> Option<ConfigValue> {
     let trimmed = raw.trim();
     match trimmed.to_ascii_lowercase().as_str() {
-        "true" => return Some(ConfigValue::Bool(true)),
-        "false" => return Some(ConfigValue::Bool(false)),
+        "true" | "yes" | "on" => return Some(ConfigValue::Bool(true)),
+        "false" | "no" | "off" => return Some(ConfigValue::Bool(false)),
         _ => {}
     }
     if looks_like_int(trimmed)
@@ -886,8 +890,23 @@ mod tests {
     }
 
     #[test]
-    fn inference_promotes_true_false_to_bool() {
-        for (raw, want) in [("true", true), ("false", false), ("TRUE", true), ("False", false)] {
+    fn inference_promotes_bool_idioms() {
+        // configparser's `getboolean()` recognises true/yes/on (+
+        // false/no/off) — a v1 INI user writing those was declaring
+        // a bool by the idiom of the format. Inference accepts the
+        // same set.
+        for (raw, want) in [
+            ("true", true),
+            ("TRUE", true),
+            ("yes", true),
+            ("YES", true),
+            ("on", true),
+            ("false", false),
+            ("False", false),
+            ("no", false),
+            ("off", false),
+            ("OFF", false),
+        ] {
             let (v, o) = coerce("custom.flag", raw, true);
             assert!(
                 matches!(v, ConfigValue::Bool(b) if b == want),
@@ -898,22 +917,17 @@ mod tests {
     }
 
     #[test]
-    fn inference_skips_git_style_bool_aliases() {
-        // `yes`/`no`/`on`/`off`/`0`/`1` are deliberately NOT inferred
-        // as bool for unknown keys — they're ambiguous with counts /
-        // human labels. (Known bool keys still accept them via
-        // `parse_bool` — that's the known-key path, not inference.)
-        for raw in ["yes", "no", "on", "off", "0", "1"] {
-            let (v, o) = coerce("custom.thing", raw, true);
+    fn inference_keeps_zero_and_one_as_int_not_bool() {
+        // `0` / `1` are deliberately NOT inferred as bool — they're
+        // too often counts (`max-retries = 1`, `errors = 0`). They
+        // land as int via the integer branch instead.
+        for (raw, want) in [("0", 0i64), ("1", 1)] {
+            let (v, o) = coerce("custom.count", raw, true);
             assert!(
-                !matches!(v, ConfigValue::Bool(_)),
-                "{raw:?} should not infer to bool, got {v:?}"
+                matches!(v, ConfigValue::Integer(i) if i == want),
+                "{raw:?} → {v:?}"
             );
-            // "0" / "1" infer as int instead; the others stay string.
-            match raw {
-                "0" | "1" => assert!(matches!(o, CoerceOutcome::Inferred)),
-                _ => assert!(matches!(o, CoerceOutcome::Unknown)),
-            }
+            assert!(matches!(o, CoerceOutcome::Inferred));
         }
     }
 
