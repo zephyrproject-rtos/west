@@ -550,6 +550,15 @@ impl Manifest {
             .collect()
     }
 
+    /// True iff the source declared any `import:` directive (self,
+    /// top-level, or per-project). Records observation, not
+    /// resolution, the flag stays true under `ImportFlag.IGNORE`
+    /// and friends.
+    #[getter]
+    fn has_imports(&self) -> bool {
+        self.inner.has_imports
+    }
+
     /// Look up a project by its manifest name. Returns `None` if no
     /// such project exists; the python wrapper raises `ValueError` /
     /// `KeyError` as it sees fit.

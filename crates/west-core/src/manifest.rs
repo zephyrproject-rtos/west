@@ -41,6 +41,22 @@ pub struct Manifest {
     pub self_: ManifestRepo,
     pub projects: Vec<Project>,
     pub group_filter: Vec<GroupFilterEntry>,
+    /// True iff the source YAML/TOML/JSON declared any `import:`
+    /// directive at any site (self / top-level / per-project) and
+    /// at any nesting depth. Records **observation**, not
+    /// resolution: still true when the parse used a policy that
+    /// skipped or ignored the directive. Matches v1's flag, which
+    /// extensions used to detect "this manifest is a multi-file
+    /// composition" without re-reading the source.
+    ///
+    /// `import: false` on a project is the benign sentinel and
+    /// does not set the flag — same rule as the rest of the
+    /// resolver.
+    ///
+    /// Not part of `to_value()` output: a re-parsed resolved
+    /// manifest has no imports and would report `false` after
+    /// round-trip, which is the correct semantic for a snapshot.
+    pub has_imports: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -893,6 +909,11 @@ struct Resolver<'a> {
     depth: usize,
     self_: Option<ManifestRepo>,
     version: Option<String>,
+    /// Sticky observation flag: flipped to true the first time any
+    /// `import:` directive is seen, regardless of whether policy
+    /// decides to resolve, skip, or warn about it. Surfaces on the
+    /// final [`Manifest::has_imports`].
+    has_imports: bool,
     /// Per-site policy applied uniformly at every nesting level. Recursive
     /// `absorb` invocations inherit it unchanged so a `PROJECTS_ONLY` root
     /// also silently drops nested filesystem imports inside a project-imported
@@ -914,6 +935,7 @@ impl<'a> Resolver<'a> {
             depth: 0,
             self_: None,
             version: None,
+            has_imports: false,
             policy,
         }
     }
@@ -1002,6 +1024,9 @@ impl<'a> Resolver<'a> {
         {
             reject_bool_import(import, "self")?;
             let imaps = flatten_imports(import);
+            if !imaps.is_empty() {
+                self.has_imports = true;
+            }
             if !imaps.is_empty()
                 && self.dispatch_resolving_policy(
                     self.policy.self_repo,
@@ -1023,6 +1048,9 @@ impl<'a> Resolver<'a> {
         if let Some(import) = &m.import {
             reject_bool_import(import, "top-level")?;
             let imaps = flatten_imports(import);
+            if !imaps.is_empty() {
+                self.has_imports = true;
+            }
             if !imaps.is_empty()
                 && self.dispatch_resolving_policy(
                     self.policy.top_level,
@@ -1090,6 +1118,9 @@ impl<'a> Resolver<'a> {
                 .import
                 .as_ref()
                 .is_some_and(|i| !matches!(i, ImportSchema::Bool(false)));
+            if has_active_import {
+                self.has_imports = true;
+            }
             if has_active_import && !ps.groups.is_empty() {
                 return Err(ManifestError::GroupsWithImport {
                     project: ps.name.clone(),
@@ -1527,6 +1558,7 @@ impl<'a> Resolver<'a> {
             self_: self.self_.unwrap_or_default(),
             projects: self.projects,
             group_filter,
+            has_imports: self.has_imports,
         })
     }
 }
@@ -4223,5 +4255,94 @@ manifest:
             Manifest::from_yaml_str_with(body, Some(&source), ImportPolicy::PROJECTS_ONLY).unwrap();
         let names: Vec<&str> = m.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["upstream", "downstream", "nested"]);
+    }
+
+    // ---- has_imports observation flag --------------------------------------
+    //
+    // Mirrors v1's `Manifest.has_imports`: true iff the source had any
+    // `import:` directive at any site, regardless of whether policy chose
+    // to resolve it. `import: false` on a project is the benign sentinel
+    // and stays out.
+
+    #[test]
+    fn has_imports_false_for_plain_manifest() {
+        let m = yaml(
+            r#"
+manifest:
+  projects:
+    - name: p
+      url: https://example.com/p
+"#,
+        )
+        .unwrap();
+        assert!(!m.has_imports);
+    }
+
+    #[test]
+    fn has_imports_true_for_self_import_even_under_ignore() {
+        // `IGNORE_ALL` skips resolution, but the flag still records
+        // observation. The directive's `file:` doesn't need to exist
+        // on disk because the policy short-circuits before any read.
+        let m = Manifest::from_yaml_str_with(
+            r#"
+manifest:
+  self:
+    import: sub.yml
+  projects: []
+"#,
+            None,
+            ImportPolicy::IGNORE_ALL,
+        )
+        .unwrap();
+        assert!(m.has_imports);
+    }
+
+    #[test]
+    fn has_imports_true_for_top_level_import_even_under_ignore() {
+        let m = Manifest::from_yaml_str_with(
+            r#"
+manifest:
+  import: sub.yml
+  projects: []
+"#,
+            None,
+            ImportPolicy::IGNORE_ALL,
+        )
+        .unwrap();
+        assert!(m.has_imports);
+    }
+
+    #[test]
+    fn has_imports_true_for_per_project_import_even_under_skip() {
+        let m = Manifest::from_yaml_str_with(
+            r#"
+manifest:
+  projects:
+    - name: p
+      url: https://example.com/p
+      import: true
+"#,
+            None,
+            ImportPolicy::SKIP_PROJECTS,
+        )
+        .unwrap();
+        assert!(m.has_imports);
+    }
+
+    #[test]
+    fn has_imports_false_for_per_project_import_bool_false() {
+        // `import: false` is the explicit no-op sentinel — matches the
+        // resolver's `has_active_import` check, matches v1.
+        let m = yaml(
+            r#"
+manifest:
+  projects:
+    - name: p
+      url: https://example.com/p
+      import: false
+"#,
+        )
+        .unwrap();
+        assert!(!m.has_imports);
     }
 }

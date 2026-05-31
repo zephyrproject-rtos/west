@@ -172,3 +172,55 @@ manifest:
     # YAML is fundamentally rejected).
     with pytest.raises((ManifestImportFailed, MalformedManifest)):
         Manifest.from_yaml_str(yaml)
+
+
+# --- has_imports observation flag ----------------------------------------
+#
+# v1 set `Manifest.has_imports = True` whenever the source YAML carried
+# any `import:` directive — self, top-level, or per-project. The flag
+# records observation, not resolution, so it survives parses that ignore
+# the directive (e.g. `ImportFlag.IGNORE`, which maps to the resolver's
+# `IGNORE_ALL` policy).
+
+# ImportFlag.IGNORE = 1 (see src/west/manifest.py).
+_IGNORE = 1
+
+
+def test_has_imports_false_when_absent():
+    m = Manifest.from_yaml_str(SIMPLE_YAML)
+    assert m.has_imports is False
+
+
+def test_has_imports_true_for_self_import_under_ignore():
+    yaml = """\
+manifest:
+  self:
+    import: sub.yml
+  projects: []
+"""
+    m = Manifest.from_yaml_str(yaml, import_flags=_IGNORE)
+    assert m.has_imports is True
+
+
+def test_has_imports_true_for_per_project_import_under_ignore():
+    yaml = """\
+manifest:
+  projects:
+    - name: p
+      url: https://example.com/p
+      import: true
+"""
+    m = Manifest.from_yaml_str(yaml, import_flags=_IGNORE)
+    assert m.has_imports is True
+
+
+def test_has_imports_false_for_per_project_import_bool_false():
+    yaml = """\
+manifest:
+  projects:
+    - name: p
+      url: https://example.com/p
+      import: false
+"""
+    m = Manifest.from_yaml_str(yaml)
+    assert m.has_imports is False

@@ -970,6 +970,7 @@ class Manifest:
         manifest_file: str | None,
     ) -> None:
         self.path_raw = native.self_.path_raw
+        self.has_imports = native.has_imports
         self.group_filter = [
             f'-{e.group}' if e.disabled else f'+{e.group}' for e in native.group_filter
         ]
