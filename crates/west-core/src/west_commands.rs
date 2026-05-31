@@ -1,12 +1,12 @@
-//! `west-commands` file parser (YAML / TOML / JSON).
+//! `west-commands` file parser, format-generic.
 //!
 //! A west-commands file lives inside a project (referenced from the
 //! manifest's per-project `west-commands:` field or the manifest's
 //! `self.west-commands:` field) and declares one or more python
-//! extension commands the project ships. The format is chosen by
-//! the file's extension (`.yml` / `.yaml` for YAML, `.toml` for
-//! TOML, `.json` for JSON); the same schema applies across all
-//! three. YAML is the canonical example:
+//! extension commands the project ships. The same schema serialises
+//! as YAML, TOML, or JSON; the [`Format`] enum (re-exported from
+//! `west_core`) drives dispatch. Example, by convention written in
+//! YAML — equivalent TOML / JSON encodings parse identically:
 //!
 //! ```yaml
 //! west-commands:
@@ -31,7 +31,11 @@ use std::path::{Path, PathBuf};
 use garde::Validate;
 use serde::Deserialize;
 
-/// A parsed `west-commands` file (YAML / TOML / JSON).
+use crate::Format;
+
+/// A parsed `west-commands` file. The on-disk format (YAML / TOML /
+/// JSON) doesn't survive parsing — the same shape comes out of every
+/// parser.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WestCommandsFile {
     /// All entries declared at top level under `west-commands:`.
@@ -55,7 +59,7 @@ pub struct WestCommand {
     /// Command name as the user types it (`west <name>`).
     pub name: String,
     /// Python class to instantiate. Defaults to `name` when absent
-    /// in the YAML — matches python's `command_desc.get('class', name)`.
+    /// in the input — matches python's `command_desc.get('class', name)`.
     pub class: String,
     /// One-line help string for `west help` / `--help` listings.
     pub help: Option<String>,
@@ -64,12 +68,17 @@ pub struct WestCommand {
 /// Errors produced by [`WestCommandsFile`] parsing.
 #[derive(Debug, thiserror::Error)]
 pub enum WestCommandsError {
-    #[error("YAML parse error: {0}")]
-    Yaml(#[source] serde_saphyr::Error),
-    #[error("TOML parse error: {0}")]
-    Toml(#[source] toml_edit::de::Error),
-    #[error("JSON parse error: {0}")]
-    Json(#[source] serde_json::Error),
+    /// Body failed serde decoding. `format` says which parser ran;
+    /// `source` is the underlying serde error, boxed because the
+    /// three formats use unrelated concrete error types and no
+    /// consumer in the tree needs to downcast (verified by grep at
+    /// authoring time).
+    #[error("{} parse error: {source}", format.name())]
+    Parse {
+        format: Format,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("unsupported west-commands format: {0:?} (expected .yaml/.yml/.toml/.json)")]
     UnsupportedFormat(String),
     #[error("validation failed: {0}")]
@@ -83,42 +92,62 @@ pub enum WestCommandsError {
 }
 
 impl WestCommandsFile {
-    /// Parse a YAML body. Use [`Self::from_path`] when reading from
-    /// disk; this entry point is handy for in-memory tests.
+    /// Parse `body` interpreted as `format`. Use [`Self::from_path`]
+    /// when reading from disk and you'd like the extension to pick
+    /// the format for you; this entry is the format-known
+    /// counterpart for in-memory tests and callers that get the
+    /// format from elsewhere.
+    pub fn from_str(format: Format, body: &str) -> Result<Self, WestCommandsError> {
+        let file: SchemaFile = match format {
+            Format::Yaml => serde_saphyr::from_str(body).map_err(|e| WestCommandsError::Parse {
+                format,
+                source: Box::new(e),
+            })?,
+            Format::Toml => toml_edit::de::from_str(body).map_err(|e| WestCommandsError::Parse {
+                format,
+                source: Box::new(e),
+            })?,
+            Format::Json => serde_json::from_str(body).map_err(|e| WestCommandsError::Parse {
+                format,
+                source: Box::new(e),
+            })?,
+        };
+        Self::validate_and_resolve(file)
+    }
+
+    /// Parse a YAML body. Convenience wrapper around
+    /// [`Self::from_str`] for callers who know the format at the
+    /// call site.
     pub fn from_yaml_str(s: &str) -> Result<Self, WestCommandsError> {
-        let file: SchemaFile = serde_saphyr::from_str(s).map_err(WestCommandsError::Yaml)?;
-        Self::validate_and_resolve(file)
+        Self::from_str(Format::Yaml, s)
     }
 
-    /// Parse a TOML body. Same schema as the YAML form.
+    /// Parse a TOML body. Convenience wrapper around
+    /// [`Self::from_str`].
     pub fn from_toml_str(s: &str) -> Result<Self, WestCommandsError> {
-        let file: SchemaFile = toml_edit::de::from_str(s).map_err(WestCommandsError::Toml)?;
-        Self::validate_and_resolve(file)
+        Self::from_str(Format::Toml, s)
     }
 
-    /// Parse a JSON body. Same schema as the YAML form.
+    /// Parse a JSON body. Convenience wrapper around
+    /// [`Self::from_str`].
     pub fn from_json_str(s: &str) -> Result<Self, WestCommandsError> {
-        let file: SchemaFile = serde_json::from_str(s).map_err(WestCommandsError::Json)?;
-        Self::validate_and_resolve(file)
+        Self::from_str(Format::Json, s)
     }
 
     /// Read + parse a `west-commands` file from disk. The format is
-    /// chosen by the file extension — `.yml` / `.yaml` (YAML, also
-    /// the default for extension-less paths), `.toml` (TOML), or
-    /// `.json` (JSON). Matches the format dispatch the manifest
-    /// loader uses, so a workspace can use the same authoring
-    /// preference for both files.
+    /// chosen by the file extension via [`Format::from_extension`]
+    /// — same dispatch the manifest loader uses, so a workspace can
+    /// pick the same authoring preference for both files.
     pub fn from_path(path: &Path) -> Result<Self, WestCommandsError> {
         let body = fs::read_to_string(path).map_err(|e| WestCommandsError::Io {
             path: path.to_owned(),
             source: e,
         })?;
-        match path.extension().and_then(OsStr::to_str) {
-            Some("yaml") | Some("yml") | None => Self::from_yaml_str(&body),
-            Some("toml") => Self::from_toml_str(&body),
-            Some("json") => Self::from_json_str(&body),
-            Some(ext) => Err(WestCommandsError::UnsupportedFormat(ext.to_owned())),
-        }
+        let ext = path.extension().and_then(OsStr::to_str);
+        let format = Format::from_extension(ext).ok_or_else(|| {
+            WestCommandsError::UnsupportedFormat(ext.unwrap_or("").to_owned())
+        })?;
+        Self::from_str(format, &body)
     }
 
     fn validate_and_resolve(file: SchemaFile) -> Result<Self, WestCommandsError> {
@@ -267,7 +296,13 @@ west-commands:
 extra: nope
 "#;
         let err = WestCommandsFile::from_yaml_str(s).unwrap_err();
-        assert!(matches!(err, WestCommandsError::Yaml(_)));
+        assert!(matches!(
+            err,
+            WestCommandsError::Parse {
+                format: Format::Yaml,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -290,7 +325,13 @@ west-commands:
       - class: X
 "#;
         let err = WestCommandsFile::from_yaml_str(s).unwrap_err();
-        assert!(matches!(err, WestCommandsError::Yaml(_)));
+        assert!(matches!(
+            err,
+            WestCommandsError::Parse {
+                format: Format::Yaml,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -405,6 +446,46 @@ name = "b"
         .unwrap();
         let f = WestCommandsFile::from_path(&json).unwrap();
         assert_eq!(f.entries[0].commands[0].name, "c");
+    }
+
+    #[test]
+    fn schema_is_format_equivalent() {
+        // The same logical shape must come out of all three parsers.
+        // If a future change adds a serde-level skew between formats
+        // (extra fields, rename casing, default handling), this test
+        // is the first thing that breaks.
+        let yaml = r#"
+west-commands:
+  - file: scripts/build.py
+    commands:
+      - name: build
+        class: Build
+        help: build a Zephyr application
+"#;
+        let toml = r#"
+[[west-commands]]
+file = "scripts/build.py"
+
+[[west-commands.commands]]
+name = "build"
+class = "Build"
+help = "build a Zephyr application"
+"#;
+        let json = r#"{
+  "west-commands": [
+    {
+      "file": "scripts/build.py",
+      "commands": [
+        {"name": "build", "class": "Build", "help": "build a Zephyr application"}
+      ]
+    }
+  ]
+}"#;
+        let y = WestCommandsFile::from_str(Format::Yaml, yaml).unwrap();
+        let t = WestCommandsFile::from_str(Format::Toml, toml).unwrap();
+        let j = WestCommandsFile::from_str(Format::Json, json).unwrap();
+        assert_eq!(y, t);
+        assert_eq!(t, j);
     }
 
     #[test]

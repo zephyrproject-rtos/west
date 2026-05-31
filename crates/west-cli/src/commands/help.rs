@@ -73,8 +73,9 @@ fn print_top_level_help(loaded: &LoadedConfig) -> ExitCode {
     // Extension commands. Only available inside a workspace with a
     // loadable manifest; outside, silently skip — `west help` from
     // a fresh shell shouldn't error just because there's no
-    // workspace nearby. Any discovery error (vcs missing, yaml
-    // parse failure) takes the same skip path.
+    // workspace nearby. Any discovery error (vcs missing,
+    // west-commands parse failure in any format) takes the same
+    // skip path.
     if let Ok(groups) = extension::list_for_help(loaded) {
         for group in groups {
             println!(

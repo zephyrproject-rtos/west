@@ -257,12 +257,16 @@ pub const MAX_IMPORT_DEPTH: usize = 32;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
-    #[error("YAML parse error: {0}")]
-    Yaml(#[source] serde_saphyr::Error),
-    #[error("TOML parse error: {0}")]
-    Toml(#[source] toml_edit::de::Error),
-    #[error("JSON parse error: {0}")]
-    Json(#[source] serde_json::Error),
+    /// Body failed serde decoding. `format` says which parser ran;
+    /// `source` is the underlying serde error, boxed because the
+    /// three formats use unrelated concrete error types and no
+    /// consumer in the tree needs to downcast.
+    #[error("{} parse error: {source}", format.name())]
+    Parse {
+        format: crate::Format,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("unsupported manifest format: {0:?} (expected .yaml/.yml/.toml/.json)")]
     UnsupportedFormat(String),
     #[error("validation failed: {0}")]
@@ -1600,15 +1604,28 @@ fn reject_bool_import(import: &ImportSchema, site: &'static str) -> Result<(), M
     Ok(())
 }
 
-fn parse_body_by_extension(path: &Path, body: &str) -> Result<ManifestFile, ManifestError> {
-    match path.extension().and_then(OsStr::to_str) {
-        Some("yaml") | Some("yml") | None => {
-            serde_saphyr::from_str(body).map_err(ManifestError::Yaml)
-        }
-        Some("toml") => toml_edit::de::from_str(body).map_err(ManifestError::Toml),
-        Some("json") => serde_json::from_str(body).map_err(ManifestError::Json),
-        Some(ext) => Err(ManifestError::UnsupportedFormat(ext.to_owned())),
+fn parse_body_with_format(format: crate::Format, body: &str) -> Result<ManifestFile, ManifestError> {
+    match format {
+        crate::Format::Yaml => serde_saphyr::from_str(body).map_err(|e| ManifestError::Parse {
+            format,
+            source: Box::new(e),
+        }),
+        crate::Format::Toml => toml_edit::de::from_str(body).map_err(|e| ManifestError::Parse {
+            format,
+            source: Box::new(e),
+        }),
+        crate::Format::Json => serde_json::from_str(body).map_err(|e| ManifestError::Parse {
+            format,
+            source: Box::new(e),
+        }),
     }
+}
+
+fn parse_body_by_extension(path: &Path, body: &str) -> Result<ManifestFile, ManifestError> {
+    let ext = path.extension().and_then(OsStr::to_str);
+    let format = crate::Format::from_extension(ext)
+        .ok_or_else(|| ManifestError::UnsupportedFormat(ext.unwrap_or("").to_owned()))?;
+    parse_body_with_format(format, body)
 }
 
 // =====================================================================
@@ -1671,13 +1688,33 @@ impl Manifest {
     // `PROJECTS_ONLY`, `RESOLVE_ALL`) cover the python `ImportFlag` values
     // plus the validation defaults.
 
+    /// Parse `s` interpreted as `format` (no imports honoured).
+    /// Convenience wrapper around [`Self::from_str_with`] for the
+    /// common "no source, strict policy" case.
+    pub fn from_str(format: crate::Format, s: &str) -> Result<Self, ManifestError> {
+        Self::from_str_with(format, s, None, ImportPolicy::STRICT)
+    }
+
+    /// Parse `s` interpreted as `format` and run the resolver.
+    /// Generic counterpart to the per-format `_with` entries; useful
+    /// when the caller already knows the format from somewhere other
+    /// than a file extension.
+    pub fn from_str_with(
+        format: crate::Format,
+        s: &str,
+        source: Option<&dyn ImportSource>,
+        policy: ImportPolicy,
+    ) -> Result<Self, ManifestError> {
+        let file = parse_body_with_format(format, s)?;
+        resolve_file(file, Path::new(""), source, policy, None)
+    }
+
     pub fn from_yaml_str_with(
         s: &str,
         source: Option<&dyn ImportSource>,
         policy: ImportPolicy,
     ) -> Result<Self, ManifestError> {
-        let file: ManifestFile = serde_saphyr::from_str(s).map_err(ManifestError::Yaml)?;
-        resolve_file(file, Path::new(""), source, policy, None)
+        Self::from_str_with(crate::Format::Yaml, s, source, policy)
     }
 
     pub fn from_toml_str_with(
@@ -1685,8 +1722,7 @@ impl Manifest {
         source: Option<&dyn ImportSource>,
         policy: ImportPolicy,
     ) -> Result<Self, ManifestError> {
-        let file: ManifestFile = toml_edit::de::from_str(s).map_err(ManifestError::Toml)?;
-        resolve_file(file, Path::new(""), source, policy, None)
+        Self::from_str_with(crate::Format::Toml, s, source, policy)
     }
 
     pub fn from_json_str_with(
@@ -1694,8 +1730,7 @@ impl Manifest {
         source: Option<&dyn ImportSource>,
         policy: ImportPolicy,
     ) -> Result<Self, ManifestError> {
-        let file: ManifestFile = serde_json::from_str(s).map_err(ManifestError::Json)?;
-        resolve_file(file, Path::new(""), source, policy, None)
+        Self::from_str_with(crate::Format::Json, s, source, policy)
     }
 
     pub fn from_value_with(
@@ -1703,7 +1738,11 @@ impl Manifest {
         source: Option<&dyn ImportSource>,
         policy: ImportPolicy,
     ) -> Result<Self, ManifestError> {
-        let file: ManifestFile = serde_json::from_value(value).map_err(ManifestError::Json)?;
+        let file: ManifestFile =
+            serde_json::from_value(value).map_err(|e| ManifestError::Parse {
+                format: crate::Format::Json,
+                source: Box::new(e),
+            })?;
         resolve_file(file, Path::new(""), source, policy, None)
     }
 
@@ -1749,26 +1788,30 @@ impl Manifest {
             path: path.to_owned(),
             source: e,
         })?;
-        match path.extension().and_then(OsStr::to_str) {
-            Some("yaml") | Some("yml") => {
-                let probe: ManifestProbeFile =
-                    serde_saphyr::from_str(&body).map_err(ManifestError::Yaml)?;
-                Ok(probe.into_self_path())
+        let ext = path.extension().and_then(OsStr::to_str);
+        let format = crate::Format::from_extension(ext)
+            .ok_or_else(|| ManifestError::UnsupportedFormat(ext.unwrap_or("").to_owned()))?;
+        let probe: ManifestProbeFile = match format {
+            crate::Format::Yaml => {
+                serde_saphyr::from_str(&body).map_err(|e| ManifestError::Parse {
+                    format,
+                    source: Box::new(e),
+                })?
             }
-            Some("toml") => {
-                let probe: ManifestProbeFile =
-                    toml_edit::de::from_str(&body).map_err(ManifestError::Toml)?;
-                Ok(probe.into_self_path())
+            crate::Format::Toml => {
+                toml_edit::de::from_str(&body).map_err(|e| ManifestError::Parse {
+                    format,
+                    source: Box::new(e),
+                })?
             }
-            Some("json") => {
-                let probe: ManifestProbeFile =
-                    serde_json::from_str(&body).map_err(ManifestError::Json)?;
-                Ok(probe.into_self_path())
+            crate::Format::Json => {
+                serde_json::from_str(&body).map_err(|e| ManifestError::Parse {
+                    format,
+                    source: Box::new(e),
+                })?
             }
-            other => Err(ManifestError::UnsupportedFormat(
-                other.unwrap_or("").to_owned(),
-            )),
-        }
+        };
+        Ok(probe.into_self_path())
     }
 
     /// Look up a project by name. O(n); switch to a HashMap if profiling demands.
@@ -2491,7 +2534,16 @@ manifest:
         let res = Manifest::from_json_str(
             r#"{"manifest": {"projects": [{"name": "p", "url": "x", "gibberish": true}]}}"#,
         );
-        assert!(matches!(res, Err(ManifestError::Json(_))), "got {res:?}");
+        assert!(
+            matches!(
+                res,
+                Err(ManifestError::Parse {
+                    format: crate::Format::Json,
+                    ..
+                })
+            ),
+            "got {res:?}"
+        );
     }
 
     #[test]
@@ -2508,7 +2560,16 @@ manifest:
       gibberish: yes
 "#,
         );
-        assert!(matches!(res, Err(ManifestError::Yaml(_))), "got {res:?}");
+        assert!(
+            matches!(
+                res,
+                Err(ManifestError::Parse {
+                    format: crate::Format::Yaml,
+                    ..
+                })
+            ),
+            "got {res:?}"
+        );
     }
 
     #[test]
@@ -2774,7 +2835,10 @@ manifest:
         std::fs::write(&p, "manifest: [not, valid").unwrap();
         assert!(matches!(
             Manifest::peek_self_path(&p),
-            Err(ManifestError::Yaml(_))
+            Err(ManifestError::Parse {
+                format: crate::Format::Yaml,
+                ..
+            })
         ));
     }
 
@@ -3014,7 +3078,16 @@ manifest:
 "#,
         )
         .unwrap_err();
-        assert!(matches!(err, ManifestError::Yaml(_)), "got {err:?}");
+        assert!(
+            matches!(
+                err,
+                ManifestError::Parse {
+                    format: crate::Format::Yaml,
+                    ..
+                }
+            ),
+            "got {err:?}"
+        );
     }
 
     #[test]
