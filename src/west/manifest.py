@@ -880,7 +880,7 @@ class Manifest:
             self._native = _west_native.Manifest.from_dict(source_data, int(import_flags))
         else:
             self._native = _west_native.Manifest.from_yaml_str(source_data, int(import_flags))
-        self._finalize_from_native(self._native, repo_relpath=None, manifest_file=None)
+        self._finalize_from_native(self._native, repo_relpath=None)
 
     def _init_from_topdir(
         self,
@@ -957,17 +957,12 @@ class Manifest:
         self.repo_path = os.fspath(repo_relpath)
         self.repo_abspath = os.fspath(manifest_repo_root)
         self.repo_posixpath = manifest_repo_root.as_posix()
-        self._finalize_from_native(
-            self._native,
-            repo_relpath=repo_relpath,
-            manifest_file=str(manifest_file),
-        )
+        self._finalize_from_native(self._native, repo_relpath=repo_relpath)
 
     def _finalize_from_native(
         self,
         native: _west_native.Manifest,
         repo_relpath: str | None,
-        manifest_file: str | None,
     ) -> None:
         self.path_raw = native.self_.path_raw
         self.has_imports = native.has_imports
