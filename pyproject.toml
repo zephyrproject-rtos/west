@@ -98,6 +98,9 @@ include = [
 locked = true
 
 [dependency-groups]
+build = [
+    "maturin>=1.7,<2.0",
+]
 lint = [
     "ruff~=0.13",
 ]
@@ -121,6 +124,7 @@ types = [
 ]
 dev = [
     "poethepoet~=0.37",
+    {include-group = "build"},
     {include-group = "lint"},
     {include-group = "test"},
     {include-group = "types"},
