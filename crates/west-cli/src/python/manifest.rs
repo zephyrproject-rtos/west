@@ -488,15 +488,19 @@ impl Manifest {
     /// Errors raised inside the callback are surfaced as
     /// `ManifestImportFailed`.
     #[staticmethod]
-    #[pyo3(signature = (path, manifest_repo_root, callback, import_flags=0))]
+    #[pyo3(signature = (topdir, path, manifest_repo_root, callback, import_flags=0))]
     fn from_path_with_imports(
+        topdir: PathBuf,
         path: PathBuf,
         manifest_repo_root: PathBuf,
         callback: Py<PyAny>,
         import_flags: u32,
     ) -> PyResult<Self> {
         let policy = flags_to_policy(import_flags, FlagSite::WorkspaceWithSource)?;
-        let source = PyImportSource { callback };
+        let source = PyImportSource {
+            topdir: Some(topdir),
+            callback,
+        };
         core::Manifest::from_path_with(&path, Some(&manifest_repo_root), Some(&source), policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
@@ -515,7 +519,10 @@ impl Manifest {
         import_flags: u32,
     ) -> PyResult<Self> {
         let policy = flags_to_policy(import_flags, FlagSite::InMemoryWithSource)?;
-        let source = PyImportSource { callback };
+        let source = PyImportSource {
+            topdir: None,
+            callback,
+        };
         core::Manifest::from_yaml_str_with(s, Some(&source), policy)
             .map(|inner| Manifest { inner })
             .map_err(manifest_error_to_py)
@@ -657,10 +664,20 @@ fn parse_cli_group_filter(items: Vec<String>) -> PyResult<Vec<GroupFilterEntry>>
 ///     as `ManifestError::ImportSourceFailed` →
 ///     `ManifestImportFailed`).
 struct PyImportSource {
+    /// Workspace topdir; `None` for the in-memory entry point
+    /// (`from_yaml_str_with_imports`) where no working tree exists.
+    /// Drives `project_root` so nested `self.import:` directives inside
+    /// a per-project-imported manifest body anchor against the importing
+    /// project's working tree, not the outer manifest repo root.
+    topdir: Option<PathBuf>,
     callback: Py<PyAny>,
 }
 
 impl ImportSource for PyImportSource {
+    fn project_root(&self, project: &core::Project) -> Option<PathBuf> {
+        self.topdir.as_ref().map(|t| t.join(&project.path))
+    }
+
     fn project_manifest(
         &self,
         project: &core::Project,

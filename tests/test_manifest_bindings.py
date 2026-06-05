@@ -174,6 +174,106 @@ manifest:
         Manifest.from_yaml_str(yaml)
 
 
+# --- PyImportSource::project_root regression -----------------------------
+#
+# Nested `self.import:` directives inside a project-imported manifest body
+# must anchor against the imported project's working tree, not the outer
+# manifest repo root. Hits the example-application + zephyr workspace
+# layout where zephyr's body declares `self.import: submanifests`.
+
+
+def test_per_project_import_anchors_self_import_in_project_root(tmp_path):
+    # Workspace layout:
+    #   <tmp>/outer/west.yml                   — the root manifest
+    #   <tmp>/inner/west.yml                   — body returned by callback
+    #   <tmp>/inner/submanifests/a.yml         — real file on disk
+    outer = tmp_path / "outer"
+    inner = tmp_path / "inner"
+    submanifests = inner / "submanifests"
+    submanifests.mkdir(parents=True)
+    outer.mkdir()
+
+    (outer / "west.yml").write_text(
+        """\
+manifest:
+  projects:
+    - name: inner
+      url: https://example.com/inner
+      import: true
+"""
+    )
+    inner_body = """\
+manifest:
+  self:
+    import: submanifests
+  projects: []
+"""
+    (submanifests / "a.yml").write_text(
+        """\
+manifest:
+  projects:
+    - name: nested
+      url: https://example.com/nested
+"""
+    )
+
+    def importer(name, project_path, relative_file):
+        # The resolver asks for inner's body. We don't care which file
+        # name it requests; there's only one importable project here.
+        assert name == "inner"
+        return inner_body
+
+    m = Manifest.from_path_with_imports(
+        str(tmp_path),  # topdir — the bug fix wires this through
+        str(outer / "west.yml"),
+        str(outer),
+        importer,
+    )
+    names = [p.name for p in m.projects]
+    # `inner` from the outer manifest; `nested` from the directory walk
+    # against <tmp>/inner/submanifests/. If project_root had returned None
+    # (the pre-fix bug), the walk would have looked at <tmp>/outer/submanifests/
+    # and the call would have raised MalformedManifest.
+    assert "nested" in names
+    assert "inner" in names
+
+
+def test_in_memory_with_imports_keeps_no_anchor():
+    # `from_yaml_str_with_imports` has no workspace anchor, so
+    # PyImportSource.topdir stays None. The in-memory FORCE_PROJECTS
+    # policy maps to PROJECTS_ONLY in the resolver, which deliberately
+    # *skips* self/top-level imports (no filesystem to anchor against).
+    # This pins "topdir=None doesn't perturb the in-memory path": the
+    # nested self.import gets silently dropped (correct) rather than
+    # erroring against a confused outer root.
+    root_body = """\
+manifest:
+  projects:
+    - name: inner
+      url: https://example.com/inner
+      import: true
+"""
+    inner_body = """\
+manifest:
+  self:
+    import: submanifests
+  projects:
+    - name: from-inner
+      url: https://example.com/from-inner
+"""
+
+    def importer(name, project_path, relative_file):
+        return inner_body
+
+    # FORCE_PROJECTS = 2 (see src/west/manifest.py ImportFlag).
+    m = Manifest.from_yaml_str_with_imports(root_body, importer, import_flags=2)
+    names = [p.name for p in m.projects]
+    # `inner` from the outer; `from-inner` from the body; `nested` (which
+    # would come from the dropped self.import) is absent.
+    assert "inner" in names
+    assert "from-inner" in names
+
+
 # --- has_imports observation flag ----------------------------------------
 #
 # v1 set `Manifest.has_imports = True` whenever the source YAML carried

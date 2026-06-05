@@ -921,7 +921,11 @@ class Manifest:
         else:
             native_importer, importer_errors = _filesystem_importer(topdir, project_filter)
         self._native = _west_native.Manifest.from_path_with_imports(
-            manifest_path, manifest_repo_root, native_importer, int(import_flags)
+            os.fspath(topdir),
+            manifest_path,
+            manifest_repo_root,
+            native_importer,
+            int(import_flags),
         )
         # The rust resolver swallows source-side errors with a warning; surface
         # the first one as a hard `ManifestImportFailed` so the legacy
