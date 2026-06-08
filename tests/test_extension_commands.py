@@ -6,7 +6,6 @@ import subprocess
 import textwrap
 from pathlib import Path
 
-import pytest
 import yaml
 from conftest import GIT, WINDOWS, add_commit, cmd, cmd_raises, yaml_editor
 
@@ -344,28 +343,28 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory(re
     assert 'imported command from subdir works' in ext_output
 
 
-@pytest.mark.skipif(
-    not WINDOWS, reason="non-posix path separators don't work reliably on non-Windows"
-)
-def test_call_imported_project_submanifest_commands_from_project_subdirectory_windows_paths(
+def test_call_imported_project_submanifest_commands_from_project_subdirectory_special_chars(
     repos_tmpdir,
 ):
-    # Same as the forward-slash test above, but use Windows-style
-    # separators in the manifest file paths.
+    # Same as the forward-slash test above, but use non-portable separators in
+    # the manifest file paths. See test_extension_special_chars() for more
+    # details.
     manifest_path = repos_tmpdir / 'repos' / 'zephyr'
     net_tools_path = repos_tmpdir / 'repos' / 'net-tools'
 
+    _WEIRD_CMDS_PATH = r'scripts/\winsubA\\\west-commands-from-subdir-windows.yml'
     MF_SUB_WEST_YML = textwrap.dedent(
-        '''\
+        f'''\
         manifest:
           self:
-            west-commands: scripts\\west-commands-from-subdir-windows.yml
+            west-commands: {_WEIRD_CMDS_PATH}
         '''
     )
+    _WEIRD_EXT_PATH = r'test\\/winsubB\\\west-commands\subdir_command_windows.py'
     MF_SUB_COMMANDS_YML = textwrap.dedent(
-        '''\
+        f'''\
         west-commands:
-          - file: test\\west-commands\\subdir_command_windows.py
+          - file: {_WEIRD_EXT_PATH}
             commands:
               - name: imported-command-from-subdir-windows
                 class: ImportedCommandFromProjectSubdirWindows
@@ -396,9 +395,9 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory_wi
         net_tools_path,
         'add imported submanifest extension command with windows paths',
         files={
-            r'mf_subdir/west.yml': MF_SUB_WEST_YML,
-            r'mf_subdir/scripts/west-commands-from-subdir-windows.yml': MF_SUB_COMMANDS_YML,
-            r'mf_subdir/test/west-commands/subdir_command_windows.py': MF_SUB_WEST_PY,
+            Path('mf_subdir') / 'west.yml': MF_SUB_WEST_YML,
+            Path('mf_subdir') / _WEIRD_CMDS_PATH: MF_SUB_COMMANDS_YML,
+            Path('mf_subdir') / _WEIRD_EXT_PATH: MF_SUB_WEST_PY,
         },
     )
 
