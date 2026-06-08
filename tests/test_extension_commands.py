@@ -428,6 +428,21 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory_sp
     ext_output = cmd('imported-command-from-subdir-windows', cwd=workspace)
     assert 'imported command from subdir with windows paths works' in ext_output
 
+    # Check how west-commands: gets printed back in `west manifest --resolve`
+    _resolved_mf = cmd(['manifest', '--resolve'], cwd=workspace)
+    resolved_mf = yaml.safe_load(_resolved_mf)
+    net_tools = _yaml_get_proj(resolved_mf, "net-tools")
+    # FIXME #961: this is inconsistent with the other _special_chars() test
+    # below which does NOT normalize as_posix() on Windows!
+    if WINDOWS:
+        # All normalized to forward slashes a/b/c/d on Windows
+        expected = r'mf_subdir/' + Path(_WEIRD_CMDS_PATH).as_posix()
+    else:
+        # Untouched on Un*x
+        expected = r'mf_subdir/' + _WEIRD_CMDS_PATH
+    print()
+    assert net_tools["west-commands"][1] == expected
+
 
 def test_extension_special_chars(west_update_tmpdir):
     # Detect any unexpected changes in the way we've been handling backslashes and other
