@@ -9,6 +9,13 @@ from pathlib import Path
 import yaml
 from conftest import GIT, WINDOWS, add_commit, cmd, cmd_raises, yaml_editor
 
+
+def _yaml_get_proj(mf: dict, projname: str):
+    _l = [p for p in mf["manifest"]['projects'] if p["name"] == projname]
+    assert len(_l) == 1
+    return _l[0]
+
+
 # The west command "test-extension" comes from the "west_update_tmpdir" fixture in conftest.py
 
 
@@ -449,15 +456,10 @@ def test_extension_special_chars(west_update_tmpdir):
     ext_output = cmd('test-extension')
     assert 'Testing test command 1' in ext_output
 
-    def yaml_get_proj(mf: dict, projname: str):
-        _l = [p for p in mf["manifest"]['projects'] if p["name"] == projname]
-        assert len(_l) == 1
-        return _l[0]
-
     # Now also rename the project's 'scripts/west-commands.yml' to something strange
     weird_cmds = r'scripts///win subdir\\\w-cmds.yml'
     with yaml_editor('zephyr/west.yml') as _mf:
-        _ext_p_yml = yaml_get_proj(_mf, ext_proj)
+        _ext_p_yml = _yaml_get_proj(_mf, ext_proj)
         assert _ext_p_yml["west-commands"] == 'scripts/west-commands.yml'
         _ext_p_yml["west-commands"] = weird_cmds
     (ext_proj_p / 'scripts' / 'west-commands.yml').rename(ext_proj_p / weird_cmds)
@@ -473,7 +475,7 @@ def test_extension_special_chars(west_update_tmpdir):
     # Test how west-commands gets printed back in `west manifest --resolve`
     resolved_mf = cmd('manifest --resolve')
     resolved_mf = yaml.safe_load(resolved_mf)
-    ext_proj_yaml = yaml_get_proj(resolved_mf, ext_proj)
+    ext_proj_yaml = _yaml_get_proj(resolved_mf, ext_proj)
     assert ext_proj_yaml["west-commands"] == weird_cmds
 
     ######  self: west-commands #####
