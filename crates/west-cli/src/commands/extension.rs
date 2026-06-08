@@ -32,7 +32,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-use west_core::manifest::{Manifest, relative_path_escapes_root};
+use west_core::manifest::{Manifest, WestCommandsRef, relative_path_escapes_root};
 use west_core::vcs::Vcs;
 use west_core::west_commands::{WestCommandsError, WestCommandsFile};
 
@@ -285,16 +285,14 @@ fn discover(
 fn absorb_commands_file(
     project_root: &Path,
     project_rel_path: &Path,
-    file_rel: &Path,
+    cmd_ref: &WestCommandsRef,
     project_name: &str,
     out: &mut HashMap<String, ExtensionSpec>,
 ) -> Result<(), ExtensionError> {
-    let file_abs = project_root.join(file_rel);
+    let file_abs = project_root.join(&cmd_ref.path);
     if !file_abs.exists() {
         // Manifest pointed at a west-commands file that isn't
-        // checked in; silently skip (matches v1's behaviour). The
-        // format dispatch happens inside `WestCommandsFile::from_path`
-        // off the extension — we don't care about it here.
+        // checked in; silently skip (matches v1's behaviour).
         return Ok(());
     }
     let file = WestCommandsFile::from_path(&file_abs).map_err(|source| {
@@ -303,19 +301,25 @@ fn absorb_commands_file(
             source: Box::new(source),
         }
     })?;
+    // `file:` paths inside the west-commands file resolve against
+    // the directory of the manifest that declared this entry. For
+    // entries declared at the project root (the common case)
+    // `base_dir` is empty and `resolution_root == project_root`.
+    let resolution_root = project_root.join(&cmd_ref.base_dir);
     for entry in file.entries {
         // Reject `file:` values whose lexical normalization traverses
         // out of the owning project (e.g. `../../zephyr/evil.py`).
-        // Matches v1's `escapes_directory` check in `commands.py`.
-        if relative_path_escapes_root(&entry.file) {
+        // Check the combined `base_dir + file` so a benign `file:`
+        // inside a base subdir can't escape via that base. Matches
+        // the v1 `escapes_directory` check in `commands.py`.
+        let combined = cmd_ref.base_dir.join(&entry.file);
+        if relative_path_escapes_root(&combined) {
             return Err(ExtensionError::EscapesProject {
                 project_path: project_rel_path.to_path_buf(),
                 file: entry.file.clone(),
             });
         }
-        // The python file path is relative to the project root,
-        // not to the west-commands file.
-        let module_path = project_root.join(&entry.file);
+        let module_path = resolution_root.join(&entry.file);
         for cmd in entry.commands {
             // First-declaration-wins (matches `commands.py`'s
             // OrderedDict pattern; later duplicates are shadowed).
@@ -405,10 +409,10 @@ pub(crate) fn list_for_help(
 
 fn collect_commands_into(
     project_root: &Path,
-    file_rel: &Path,
+    cmd_ref: &WestCommandsRef,
     out: &mut Vec<(String, String)>,
 ) -> Result<(), ExtensionError> {
-    let file_abs = project_root.join(file_rel);
+    let file_abs = project_root.join(&cmd_ref.path);
     if !file_abs.exists() {
         return Ok(());
     }

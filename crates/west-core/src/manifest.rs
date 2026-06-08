@@ -72,11 +72,45 @@ pub struct ManifestRepo {
     /// python contract uses this to populate `Manifest.path_raw` and to
     /// decide whether the synthetic `ManifestProject` has a path at all.
     pub path_raw: Option<PathBuf>,
-    /// Relative paths to west-commands YAML files inside the manifest repo.
-    pub west_commands: Vec<PathBuf>,
+    /// West-commands file references inside the manifest repo. Each entry
+    /// pairs the file's path with the directory its own `file:` entries
+    /// resolve against.
+    pub west_commands: Vec<WestCommandsRef>,
     /// Opaque payload carried verbatim from `manifest.self.userdata`. West
     /// itself does not interpret it; extensions read it via the manifest API.
     pub userdata: Option<serde_json::Value>,
+}
+
+/// One west-commands file declaration plus the base directory its own
+/// `file:` entries resolve against. The base is the directory of the
+/// manifest file that declared `self.west-commands:`; resolving each
+/// `file:` as `project_root.join(base_dir).join(file)` works uniformly
+/// across the three declaration sites: workspace-top manifest in a
+/// subdirectory, imported submanifest in a subdirectory, plain
+/// per-project `west-commands`.
+///
+/// For the common case (manifest at project root, west-commands file
+/// at project root), `base_dir` is empty and resolution coincides with
+/// "relative to project root" — matching the legacy v1 contract.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct WestCommandsRef {
+    /// Path to the west-commands file, relative to the project root.
+    pub path: PathBuf,
+    /// Directory the file's `file:` entries resolve against, relative
+    /// to the project root. Empty for project-root declarations.
+    pub base_dir: PathBuf,
+}
+
+impl WestCommandsRef {
+    /// Convenience: build an entry whose `file:` entries resolve at
+    /// the project root (no subdirectory hop). Used for plain
+    /// per-project `west-commands:` declarations.
+    pub fn at_project_root(path: impl Into<PathBuf>) -> Self {
+        WestCommandsRef {
+            path: path.into(),
+            base_dir: PathBuf::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -91,7 +125,7 @@ pub struct Project {
     pub description: Option<String>,
     pub groups: Vec<String>,
     pub clone_depth: Option<u32>,
-    pub west_commands: Vec<PathBuf>,
+    pub west_commands: Vec<WestCommandsRef>,
     /// Git remote name to set up when cloning. Resolved from `project.remote`,
     /// `defaults.remote`, or `"origin"` as a final fallback.
     pub remote_name: String,
@@ -899,6 +933,14 @@ struct Resolver<'a> {
     /// importing project, not the outer manifest repo. Restored on
     /// the way out.
     current_repo_root: PathBuf,
+    /// Directory of the manifest file currently being absorbed,
+    /// relative to its owning project's working tree. Empty when the
+    /// file sits at the project root. Swapped on every recursion
+    /// (filesystem self.import, project import) and restored on the
+    /// way out — same stack discipline as [`Self::current_repo_root`].
+    /// Used to populate [`WestCommandsRef::base_dir`] for any
+    /// `self.west-commands:` the body declares.
+    current_manifest_base: PathBuf,
     source: &'a dyn ImportSource,
     projects: Vec<Project>,
     seen_names: HashSet<String>,
@@ -925,6 +967,7 @@ impl<'a> Resolver<'a> {
     fn new(repo_root: &'a Path, source: &'a dyn ImportSource, policy: ImportPolicy) -> Self {
         Self {
             current_repo_root: repo_root.to_path_buf(),
+            current_manifest_base: PathBuf::new(),
             source,
             projects: Vec::new(),
             seen_names: HashSet::new(),
@@ -1368,9 +1411,22 @@ impl<'a> Resolver<'a> {
             .validate()
             .map_err(|r| ManifestError::Validation(r.to_string()))?;
 
+        // Swap the manifest base to this file's directory (relative
+        // to its owning project root) for the duration of its
+        // absorb. Any `self.west-commands:` the body declares is
+        // anchored here. The save/restore mirrors how
+        // `absorb_project_import` handles `current_repo_root`.
+        let saved_base = self.current_manifest_base.clone();
+        if let Ok(rel) = abs_path.strip_prefix(&self.current_repo_root)
+            && let Some(parent) = rel.parent()
+        {
+            self.current_manifest_base = parent.to_path_buf();
+        }
+
         self.depth += 1;
         let res = self.absorb(parsed, filter.clone(), prefix.to_path_buf(), parent_skip);
         self.depth -= 1;
+        self.current_manifest_base = saved_base;
         self.visited_files.remove(&canonical);
         res
     }
@@ -1424,6 +1480,12 @@ impl<'a> Resolver<'a> {
         // test sources), keep the outer root — matches the existing
         // resolver behaviour and the trait's documented fallback.
         let saved_repo_root = self.current_repo_root.clone();
+        // Project-import boundary: the imported manifest body lives
+        // in a fresh project's working tree, so the manifest base
+        // resets here. `absorb_imported_submanifest` then sets it to
+        // the dirname of the imported file's path within the new
+        // project before recursing further.
+        let saved_base = std::mem::take(&mut self.current_manifest_base);
         if let Some(root) = self.source.project_root(project) {
             self.current_repo_root = root;
         }
@@ -1455,6 +1517,7 @@ impl<'a> Resolver<'a> {
         }
 
         self.current_repo_root = saved_repo_root;
+        self.current_manifest_base = saved_base;
         self.visited_projects.remove(&project.name);
         res
     }
@@ -1475,6 +1538,17 @@ impl<'a> Resolver<'a> {
         parsed
             .validate()
             .map_err(|r| ManifestError::Validation(r.to_string()))?;
+        // The imported file lives at `name` within the importing
+        // project's working tree. Its directory anchors any
+        // `self.west-commands:` the body declares — set the
+        // manifest base before merging so `inherit_imported_west_commands`
+        // picks it up. `absorb_project_import` saved the prior base
+        // already; we just need to set it for this body.
+        if let Some(parent) = Path::new(name).parent() {
+            self.current_manifest_base = parent.to_path_buf();
+        } else {
+            self.current_manifest_base = PathBuf::new();
+        }
         self.inherit_imported_west_commands(importing_project, &parsed);
         self.depth += 1;
         // Per-project imports fire in Phase 3, after the outer Phase
@@ -1505,9 +1579,27 @@ impl<'a> Resolver<'a> {
         let Some(wc) = &self_section.west_commands else {
             return;
         };
+        // The imported body's `self.west-commands:` entries resolve
+        // their `file:` paths relative to the directory of the
+        // manifest file we're absorbing — `current_manifest_base`
+        // already names that directory (relative to the importing
+        // project's working tree). The west-commands files
+        // themselves are also located there, so prefix the recorded
+        // path with the base so the dispatch loader can find them.
+        let base = self.current_manifest_base.clone();
         if let Some(p) = self.projects.iter_mut().find(|p| p.name == into) {
-            p.west_commands
-                .extend(wc.to_vec().into_iter().map(PathBuf::from));
+            for raw in wc.to_vec() {
+                let raw = PathBuf::from(raw);
+                let path = if base.as_os_str().is_empty() {
+                    raw
+                } else {
+                    base.join(&raw)
+                };
+                p.west_commands.push(WestCommandsRef {
+                    path,
+                    base_dir: base.clone(),
+                });
+            }
         }
     }
 
@@ -1525,9 +1617,24 @@ impl<'a> Resolver<'a> {
         let Some(target) = self.self_.as_mut() else {
             return;
         };
-        target
-            .west_commands
-            .extend(wc.to_vec().into_iter().map(PathBuf::from));
+        // The current file's `self.west-commands:` entries resolve
+        // `file:` paths relative to this file's own directory —
+        // `current_manifest_base` (relative to the manifest repo
+        // root). The recorded path includes the base so the dispatch
+        // loader can read the file off disk.
+        let base = self.current_manifest_base.clone();
+        for raw in wc.to_vec() {
+            let raw = PathBuf::from(raw);
+            let path = if base.as_os_str().is_empty() {
+                raw
+            } else {
+                base.join(&raw)
+            };
+            target.west_commands.push(WestCommandsRef {
+                path,
+                base_dir: base.clone(),
+            });
+        }
     }
 
     fn into_manifest(self) -> Result<Manifest, ManifestError> {
@@ -1938,18 +2045,22 @@ impl Manifest {
             "path".into(),
             Value::String(self.self_.path.to_string_lossy().into_owned()),
         );
+        // Emit paths only — `base_dir` is a parse-time derivation
+        // that doesn't round-trip through the schema. A
+        // manifest --resolve over imported-subdir west-commands
+        // therefore loses the base; tracked separately in TODO.md.
         match self.self_.west_commands.as_slice() {
             [] => {}
             [single] => {
                 self_block.insert(
                     "west-commands".into(),
-                    Value::String(single.to_string_lossy().into_owned()),
+                    Value::String(single.path.to_string_lossy().into_owned()),
                 );
             }
             many => {
                 let arr: Vec<Value> = many
                     .iter()
-                    .map(|p| Value::String(p.to_string_lossy().into_owned()))
+                    .map(|wc| Value::String(wc.path.to_string_lossy().into_owned()))
                     .collect();
                 self_block.insert("west-commands".into(), Value::Array(arr));
             }
@@ -2001,13 +2112,13 @@ fn project_to_value(p: &Project) -> serde_json::Value {
             [single] => {
                 o.insert(
                     "west-commands".into(),
-                    Value::String(single.to_string_lossy().into_owned()),
+                    Value::String(single.path.to_string_lossy().into_owned()),
                 );
             }
             many => {
                 let arr: Vec<Value> = many
                     .iter()
-                    .map(|p| Value::String(p.to_string_lossy().into_owned()))
+                    .map(|wc| Value::String(wc.path.to_string_lossy().into_owned()))
                     .collect();
                 o.insert("west-commands".into(), Value::Array(arr));
             }
@@ -2162,6 +2273,19 @@ fn resolve_file(
     let noop = NoopImportSource;
     let src: &dyn ImportSource = source.unwrap_or(&noop);
     let mut resolver = Resolver::new(repo_root, src, policy);
+    // The root manifest's base_dir within the manifest repo. For
+    // `manifest.file = west.yml` (the common case) this is empty;
+    // for `manifest.file = app/west.yml` it's `app`. Anchors any
+    // `self.west-commands:` declared by the root body, and any
+    // nested filesystem-import recursion's base is computed from
+    // it. In-memory entry points (no real manifest path) keep the
+    // empty default — no workspace anchor available either way.
+    if let Some(path) = root_canonical_from
+        && let Ok(rel) = path.strip_prefix(repo_root)
+        && let Some(parent) = rel.parent()
+    {
+        resolver.current_manifest_base = parent.to_path_buf();
+    }
     if let Some(path) = root_canonical_from
         && let Ok(canon) = path.canonicalize()
     {
@@ -2226,7 +2350,15 @@ fn resolve_project(
         .or(url_remote_name)
         .unwrap_or_else(|| "origin".to_owned());
 
-    let west_commands: Vec<PathBuf> = ps.west_commands.map(PathBuf::from).into_iter().collect();
+    // A project's directly-declared `west-commands:` resolves at the
+    // project root (base_dir empty) — same contract as v1. The
+    // per-imported-submanifest sites populate base_dir non-trivially
+    // via inherit_imported_west_commands.
+    let west_commands: Vec<WestCommandsRef> = ps
+        .west_commands
+        .map(|p| WestCommandsRef::at_project_root(PathBuf::from(p)))
+        .into_iter()
+        .collect();
 
     let submodules = match ps.submodules {
         None => Submodules::None,
@@ -2506,7 +2638,7 @@ manifest:
         assert_eq!(m.self_.path, PathBuf::from("manifest"));
         assert_eq!(
             m.self_.west_commands,
-            vec![PathBuf::from("scripts/west-commands.yml")]
+            vec![WestCommandsRef::at_project_root("scripts/west-commands.yml")]
         );
         assert_eq!(m.projects.len(), 6);
         // v0.10 simplification: `+core` collapses (groups are enabled
@@ -3097,7 +3229,7 @@ manifest:
         .unwrap();
         assert_eq!(
             m1.projects[0].west_commands,
-            vec![PathBuf::from("single.yml")]
+            vec![WestCommandsRef::at_project_root("single.yml")]
         );
 
         let err = yaml(
@@ -4344,5 +4476,141 @@ manifest:
         )
         .unwrap();
         assert!(!m.has_imports);
+    }
+
+    // ---- WestCommandsRef base_dir tracking ---------------------------------
+    //
+    // Fix for upstream issue #725: when a manifest file lives in a
+    // subdirectory of the project, paths inside its west-commands file
+    // resolve against that subdirectory, not the project root.
+    // `WestCommandsRef::base_dir` carries the resolution anchor.
+
+    #[test]
+    fn west_commands_base_for_direct_project_declaration() {
+        // v1-compat case: per-project `west-commands:` declared
+        // directly on a project. base_dir is empty; resolution stays
+        // at the project root.
+        let m = yaml(
+            r#"
+manifest:
+  projects:
+    - name: p
+      url: https://example.com/p
+      west-commands: scripts/wc.yml
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            m.projects[0].west_commands,
+            vec![WestCommandsRef::at_project_root("scripts/wc.yml")]
+        );
+    }
+
+    #[test]
+    fn west_commands_base_when_manifest_in_subdir_of_repo() {
+        // `manifest.file = app/west.yml` shape: the root manifest
+        // lives at `<repo>/app/west.yml`. `self.west-commands:
+        // scripts/wc.yml` is declared at that file, so the
+        // west-commands file lives at `<repo>/app/scripts/wc.yml`
+        // and its `file:` entries resolve against `<repo>/app`.
+        let dir = tempfile::TempDir::new().unwrap();
+        let app = dir.path().join("app");
+        std::fs::create_dir_all(&app).unwrap();
+        let root = write_yaml(
+            &app,
+            "west.yml",
+            r#"
+manifest:
+  self:
+    west-commands: scripts/wc.yml
+  projects: []
+"#,
+        );
+        let m = Manifest::from_path_with(
+            &root,
+            Some(dir.path()),
+            None,
+            ImportPolicy::IGNORE_ALL,
+        )
+        .unwrap();
+        assert_eq!(
+            m.self_.west_commands,
+            vec![WestCommandsRef {
+                path: PathBuf::from("app/scripts/wc.yml"),
+                base_dir: PathBuf::from("app"),
+            }]
+        );
+    }
+
+    #[test]
+    fn west_commands_base_for_project_imported_subdir_manifest() {
+        // Issue #725 case: a project's `import:` names a manifest
+        // that lives in a subdir of the project (e.g.
+        // `app/west.yml`). The imported body declares
+        // `self.west-commands: scripts/wc.yml`. The west-commands
+        // path is prefixed with `app/`, and `file:` entries inside
+        // it resolve against `<project>/app`.
+        let imported = r#"
+manifest:
+  self:
+    west-commands: scripts/wc.yml
+  projects: []
+"#;
+        let source = StaticImportSource::new().with("inner", imported);
+        let m = Manifest::from_yaml_str_with(
+            r#"
+manifest:
+  projects:
+    - name: inner
+      url: https://example.com/inner
+      import: app/west.yml
+"#,
+            Some(&source),
+            ImportPolicy::PROJECTS_ONLY,
+        )
+        .unwrap();
+        assert_eq!(
+            m.projects[0].west_commands,
+            vec![WestCommandsRef {
+                path: PathBuf::from("app/scripts/wc.yml"),
+                base_dir: PathBuf::from("app"),
+            }]
+        );
+    }
+
+    #[test]
+    fn west_commands_base_carries_through_to_value() {
+        // `Manifest::to_value()` emits west-commands as paths only;
+        // the `base_dir` is a runtime-derived field that doesn't
+        // round-trip. Pin that contract so a future change to the
+        // serializer can't accidentally start leaking the field
+        // (which would break --resolve output schema for callers
+        // expecting v1-shaped YAML).
+        let imported = r#"
+manifest:
+  self:
+    west-commands: scripts/wc.yml
+  projects: []
+"#;
+        let source = StaticImportSource::new().with("inner", imported);
+        let m = Manifest::from_yaml_str_with(
+            r#"
+manifest:
+  projects:
+    - name: inner
+      url: https://example.com/inner
+      import: app/west.yml
+"#,
+            Some(&source),
+            ImportPolicy::PROJECTS_ONLY,
+        )
+        .unwrap();
+        let v = m.to_value();
+        // The project should carry `west-commands: app/scripts/wc.yml`
+        // (path with the base inlined) but NO `base_dir`/`base` key.
+        let p0 = &v["manifest"]["projects"][0];
+        assert_eq!(p0["west-commands"], "app/scripts/wc.yml");
+        assert!(p0.get("base").is_none());
+        assert!(p0.get("base_dir").is_none());
     }
 }

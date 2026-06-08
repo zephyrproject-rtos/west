@@ -313,7 +313,7 @@ impl Project {
             west_commands: p
                 .west_commands
                 .iter()
-                .map(|p| p.to_string_lossy().into_owned())
+                .map(|wc| wc.path.to_string_lossy().into_owned())
                 .collect(),
             submodules: p.submodules.clone(),
             userdata: p.userdata.clone(),
@@ -374,7 +374,7 @@ impl ManifestRepo {
             west_commands: r
                 .west_commands
                 .iter()
-                .map(|p| p.to_string_lossy().into_owned())
+                .map(|wc| wc.path.to_string_lossy().into_owned())
                 .collect(),
             userdata: r.userdata.clone(),
         }
@@ -602,7 +602,14 @@ impl Manifest {
             description: project.description.clone(),
             groups: project.groups.clone(),
             clone_depth: project.clone_depth,
-            west_commands: project.west_commands.iter().map(PathBuf::from).collect(),
+            // Reverse direction has no base info; build entries at
+            // project root. `is_active` doesn't read west_commands
+            // anyway, so this is purely shape-preserving.
+            west_commands: project
+                .west_commands
+                .iter()
+                .map(|p| core::WestCommandsRef::at_project_root(PathBuf::from(p)))
+                .collect(),
             remote_name: project.remote_name.clone(),
             submodules: project.submodules.clone(),
             userdata: project.userdata.clone(),
@@ -842,7 +849,11 @@ impl LoadedManifest {
             description: project.description.clone(),
             groups: project.groups.clone(),
             clone_depth: project.clone_depth,
-            west_commands: project.west_commands.iter().map(PathBuf::from).collect(),
+            west_commands: project
+                .west_commands
+                .iter()
+                .map(|p| core::WestCommandsRef::at_project_root(PathBuf::from(p)))
+                .collect(),
             remote_name: project.remote_name.clone(),
             submodules: project.submodules.clone(),
             userdata: project.userdata.clone(),
