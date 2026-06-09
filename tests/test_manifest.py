@@ -2211,6 +2211,89 @@ def test_import_project_submanifest_commands_from_project_subdirectory(manifest_
     assert p1_proj.west_commands == expected
 
 
+def test_import_project_submanifest_commands_resolved_yaml_roundtrip(manifest_repo):
+    # Similar scenario to
+    # test_import_project_submanifest_commands_from_project_subdirectory:
+    # a parent manifest imports a submanifest from a project subdirectory
+    # (`mf_subdir/west.yml`) which declares `self: west-commands:`.
+    #
+    # PR #920 made sure the parent project's west_commands list is
+    # adjusted to be relative to the project root (i.e. prefixed with
+    # `mf_subdir/`) and that an internal _west_commands_manifest_dirs
+    # map remembers which manifest directory each west-commands entry
+    # came from. PR ca6bb64 then used that map so file paths *inside*
+    # the west-commands YAML are resolved relative to the submanifest
+    # directory, not the project root.
+    #
+    # However, when the resolved manifest is serialized via
+    # Manifest.as_dict()/as_yaml() and re-parsed, the
+    # _west_commands_manifest_dirs association is lost: only the
+    # adjusted west-commands path survives the round-trip. That makes
+    # the resolved YAML *not* equivalent to the original manifest --
+    # re-using it as a standalone manifest would break extension
+    # commands whose `file:` entries are relative to the submanifest
+    # directory (see issue #725 / #961).
+
+    p1 = manifest_repo / '..' / 'p1'
+    create_repo(p1)
+    create_branch(p1, 'manifest-rev', checkout=True)
+    add_commit(
+        p1,
+        'add mf_subdir/west.yml with west-commands',
+        files={
+            'mf_subdir/west.yml': '''\
+                                manifest:
+                                  projects:
+                                  - name: p2
+                                    url: url-placeholder2
+                                  self:
+                                    west-commands: p2subdir/west-commands.yml
+                                ''',
+        },
+    )
+    checkout_branch(p1, 'master')
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: p1
+            url: url-placeholder
+            import: mf_subdir/west.yml
+        ''')
+
+    # Original manifest, fully loaded.
+    original = MF()
+    p1_orig = original.get_projects(['p1'])[0]
+    # Sanity: PR #920 / ca6bb64 behavior we're starting from.
+    assert p1_orig.west_commands == ['mf_subdir/p2subdir/west-commands.yml']
+    assert p1_orig._west_commands_manifest_dirs == {
+        'mf_subdir/p2subdir/west-commands.yml': 'mf_subdir',
+    }
+
+    # Round-trip: serialize the resolved manifest and parse it back.
+    # The resolved YAML should be equivalent to the original -- using
+    # it as a standalone manifest must produce the same Project state,
+    # including the _west_commands_manifest_dirs association that
+    # commands.py relies on to resolve `file:` paths inside the
+    # west-commands YAML.
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write(original.as_yaml())
+
+    roundtripped = MF()
+    p1_round = roundtripped.get_projects(['p1'])[0]
+
+    # The path to the west-commands.yml file itself survives the
+    # round-trip (this part already works after PR #920).
+    assert p1_round.west_commands == p1_orig.west_commands
+
+    # But the manifest-directory association is lost: this assertion
+    # currently fails, demonstrating that the resolved YAML output
+    # silently drops information the runtime needs to correctly
+    # resolve `file:` entries inside the imported west-commands YAML.
+    assert p1_round._west_commands_manifest_dirs == p1_orig._west_commands_manifest_dirs
+
+
 def test_import_map_error_handling():
     # Make sure we handle expected errors when loading import:
     # values that are maps.
