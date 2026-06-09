@@ -24,10 +24,8 @@ from urllib.parse import urlparse
 from west import util
 from west.commands import CommandError, Verbosity, WestCommand
 from west.configuration import Configuration
-from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
-from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
-from west.manifest import QUAL_REFS_WEST as QUAL_REFS
 from west.manifest import (
+    _WEST_YML,
     ImportFlag,
     Manifest,
     ManifestImportFailed,
@@ -35,6 +33,9 @@ from west.manifest import (
     Submodule,
     _manifest_content_at,
 )
+from west.manifest import MANIFEST_REV_BRANCH as MANIFEST_REV
+from west.manifest import QUAL_MANIFEST_REV_BRANCH as QUAL_MANIFEST_REV
+from west.manifest import QUAL_REFS_WEST as QUAL_REFS
 from west.manifest import is_group as is_project_group
 from west.util import expand_path
 
@@ -236,19 +237,82 @@ class Init(_ProjectCommand):
             'init',
             'create a west workspace',
             f'''\
-Creates a west workspace.
+Initialize a west workspace (topdir) from a west manifest (`west.yml`) by
+creating a `.west` directory in the topdir and a local configuration file
+`.west/config`.
+The West manifest can come from either a git repository (that will be cloned
+during workspace initialization) or from an already existing local directory.
 
-With -l, creates a workspace around an existing local repository;
-without -l, creates a workspace by cloning a manifest repository
-by URL.
+West only reads the manifest data from the manifest tree.
+In detail, this is the manifest file and any files it imports. Everything else
+in that tree is not used by west at all (including git history or branches).
 
-With -m, clones the repository at that URL and uses it as the
-manifest repository. If --mr is not given, the remote's default
-branch will be used, if it exists.
+Common arguments
+----------------
+In a nutshell:
 
-With neither, -m {MANIFEST_URL_DEFAULT} is assumed.
+    topdir/manifest.path/manifest.file
 
-Warning: 'west init' renames and/or deletes temporary files inside the
+Each component can have subdirectories, even the last one despite its name
+`manifest.file`.
+
+-t / --topdir WORKSPACE_DIR
+    The workspace directory; `.west` is created inside it. Defaults are
+    described per mode below.
+
+--mp / --manifest-path SUBPATH
+    Path, relative to the workspace, where the manifest tree
+    lives within the workspace (sets the `manifest.path` config option).
+    In remote mode: where the manifest repository is cloned.
+    In local mode: a newer and clearer alternative to the positional argument.
+
+--mf / --manifest-file FILE
+    Path of the manifest file inside the manifest directory (sets the
+    `manifest.file` config option); relative to `manifest.path` and may
+    include subdirectories. Defaults to '{_WEST_YML}'.
+
+
+1. Using a Manifest Repository (default)
+----------------------------------------
+West clones the given repository (provided via `-m / --manifest-url`).
+Note, that the repository must contain a west manifest.
+
+If no `-m / --manifest-url` is provided, west uses the Zephyr URL by default:
+  {MANIFEST_URL_DEFAULT}.
+
+The topdir (where `.west` is created) is determined as follows:
+- argument `-t / --topdir` if provided
+- otherwise: the positional argument `directory` if provided (deprecated;
+  prefer `-t/--topdir`)
+- otherwise: the current working directory
+
+The positional argument `directory` and `-t / --topdir` cannot be combined
+in cloning mode; use `--manifest-path SUBPATH` instead to control where
+within the workspace the manifest repository is cloned (defaults to the
+manifest's `self: path:` if declared, otherwise the manifest URL's basename,
+e.g. <topdir>/zephyr).
+
+With `--mr`, the revision (branch, tag, or sha) of the repository can be
+specified that will be used. It defaults to the repository's default branch.
+
+2. Using a Local Manifest
+-------------------------
+If `-l / --local` is given, west initializes a workspace from an already
+present manifest tree.
+
+The topdir (where `.west` is created) is determined as follows:
+- argument `-t / --topdir` if provided
+- otherwise (legacy form): `manifest_directory`'s parent, or the current
+  working directory if neither the positional nor `--manifest-path` is given
+
+The manifest tree location can be specified either as the positional
+argument `manifest_directory` (a path to the manifest directory) or via the
+newer `--manifest-path` (a subdirectory of the workspace). The two forms
+cannot be combined.
+
+Known Issues
+------------
+'west init' renames and/or deletes temporary files inside the
 workspace being created. This fails on some filesystems when some
 development tool or any other program is trying to read/index these
 temporary files at the same time. For instance, it is required to stop
@@ -273,9 +337,12 @@ below.
         parser = self._parser(
             parser_adder,
             usage='''
+  init with a repository:
+  %(prog)s [-m URL] [--mr MF_REVISION] [--mf FILE] [--mp SUBPATH]
+                [-o=GIT_CLONE_OPTION] [-t WORKSPACE_DIR] [directory]
 
-  %(prog)s [-m URL] [--mr REVISION] [--mf FILE] [-o=GIT_CLONE_OPTION] [directory]
-  %(prog)s -l [--mf FILE] directory
+  init with an existing local manifest:
+  %(prog)s -l [-t WORKSPACE_DIR] [--mf FILE] [--mp SUBPATH] [manifest_directory]
 ''',
         )
 
@@ -284,6 +351,7 @@ below.
         parser.add_argument(
             '-m',
             '--manifest-url',
+            metavar='URL',
             help='''manifest repository URL to clone;
                     cannot be combined with -l''',
         )
@@ -292,6 +360,7 @@ below.
             '--clone-opt',
             action='append',
             default=[],
+            metavar='GIT_CLONE_OPTION',
             help='''additional option to pass to 'git clone'
                     (e.g. '-o=--depth=1'); may be given more than once;
                     cannot be combined with -l''',
@@ -300,21 +369,53 @@ below.
             '--mr',
             '--manifest-rev',
             dest='manifest_rev',
+            metavar='MF_REVISION',
             help='''manifest repository branch or tag name
                     to check out first; cannot be combined with -l''',
-        )
-        parser.add_argument(
-            '--mf', '--manifest-file', dest='manifest_file', help='manifest file name to use'
         )
         parser.add_argument(
             '-l',
             '--local',
             action='store_true',
-            help='''use "directory" as an existing local
-                    manifest repository instead of cloning one from
-                    MANIFEST_URL; .west is created next to "directory"
-                    in this case, and manifest.path points at
-                    "directory"''',
+            help='''initialize workspace from an already existing local
+                    manifest instead of cloning a git repository;
+                    cannot be combined with -m''',
+        )
+        parser.add_argument(
+            '--mf',
+            '--manifest-file',
+            dest='manifest_file',
+            metavar='FILE',
+            help=f'''manifest file name (sets the manifest.file config
+                     option); the relative path of the manifest file
+                     within the manifest directory.
+                     Defaults to {_WEST_YML}.''',
+        )
+        parser.add_argument(
+            '--mp',
+            '--manifest-path',
+            dest='manifest_path',
+            metavar='SUBPATH',
+            help='''path of the manifest repository within the workspace
+                    (sets the manifest.path config option); SUBPATH must be
+                    relative and is interpreted relative to the workspace
+                    root (-t/--topdir, the positional directory in remote
+                    mode, or cwd, in that order); in remote mode this is
+                    where the manifest repository is cloned and defaults to
+                    the manifest's "self: path:" if declared, otherwise the
+                    manifest URL's basename (e.g. "zephyr"); in local mode
+                    this is an alternative to the positional argument and
+                    cannot be combined with it''',
+        )
+        parser.add_argument(
+            '-t',
+            '--topdir',
+            dest='topdir',
+            metavar='WORKSPACE_DIR',
+            help='''the workspace directory where .west directory
+                    will be created (WORKSPACE_DIR/.west);
+                    the workspace directory may already exist
+                    and WORKSPACE_DIR/.west must not exist''',
         )
         parser.add_argument(
             '--rename-delay',
@@ -330,9 +431,13 @@ below.
             'directory',
             nargs='?',
             default=None,
-            help='''with -l, the path to the local manifest repository;
-            without it, the directory to create the workspace in (defaulting
-            to the current working directory in this case)''',
+            metavar='directory',
+            help='''With --local: the path to a local directory which contains
+                    a west manifest (west.yml); cannot be combined with
+                    --manifest-path.
+                    Without --local (remote mode): the workspace directory
+                    where .west will be created. This form is deprecated;
+                    prefer -t/--topdir. It cannot be combined with -t.''',
         )
 
         return parser
@@ -364,6 +469,9 @@ below.
         if args.manifest_file is not None and Path(args.manifest_file).is_absolute():
             self.die(f'--mf {args.manifest_file} argument is not relative')
 
+        if args.manifest_path is not None and Path(args.manifest_path).is_absolute():
+            self.die(f'--mp {args.manifest_path} argument is not relative')
+
         self.die_if_no_git()
 
         if args.local:
@@ -380,41 +488,85 @@ below.
         if args.manifest_rev is not None:
             self.die('--mr cannot be used with -l')
 
-        # We need to resolve this to handle the case that args.directory
-        # is '.'. In that case, Path('.').parent is just Path('.') instead of
-        # Path('..').
-        #
-        # https://docs.python.org/3/library/pathlib.html#pathlib.PurePath.parent
-        manifest_dir = Path(args.directory or os.getcwd()).resolve()
+        if args.directory is not None and args.manifest_path is not None:
+            self.die(
+                'in local mode, the positional <directory> cannot be combined '
+                'with --manifest-path; pass one or the other'
+            )
 
-        try:
-            already = util.west_topdir(manifest_dir, fall_back=False)
-            self.die_already(already)
-        except util.WestNotFound:
-            pass
+        # Resolve the manifest directory. With --manifest-path, the manifest
+        # location is a subpath of the workspace; without it, the positional
+        # argument (or cwd) is the manifest directory directly. Note we call
+        # resolve() so that 'west init -l .' works as expected -- without it,
+        # Path('.').parent is Path('.') rather than Path('..').
+        if args.manifest_path is not None:
+            topdir = Path(args.topdir or os.getcwd()).resolve()
+            abs_manifest_path = (topdir / args.manifest_path).resolve()
+        else:
+            abs_manifest_path = Path(args.directory or os.getcwd()).resolve()
+            topdir = Path(args.topdir or abs_manifest_path.parent).resolve()
 
-        manifest_filename = args.manifest_file or 'west.yml'
-        manifest_file = manifest_dir / manifest_filename
-        topdir = manifest_dir.parent
-        rel_manifest = manifest_dir.name
+        manifest_file = args.manifest_file or _WEST_YML
+        abs_manifest_file = abs_manifest_path / manifest_file
+
+        # Re-initialization is always an error: check the workspace
+        # itself first so the error refers to topdir rather than to the
+        # manifest path.
+        for check in (topdir, abs_manifest_path):
+            try:
+                already = util.west_topdir(check, fall_back=False)
+                self.die_already(already)
+            except util.WestNotFound:
+                pass
+
+        if not abs_manifest_file.is_file():
+            self.die(f'can\'t init: no {manifest_file} found in {abs_manifest_path}')
+
+        if not abs_manifest_file.is_relative_to(topdir):
+            self.die(f'{abs_manifest_file} must be relative to west topdir {topdir}')
+
+        rel_manifest = abs_manifest_path.relative_to(topdir)
         west_dir = topdir / WEST_DIR
 
-        if not manifest_file.is_file():
-            self.die(f'can\'t init: no {manifest_filename} found in {manifest_dir}')
-
-        self.banner('Initializing from existing manifest repository', rel_manifest)
+        self.banner('Initializing with existing manifest', rel_manifest)
         self.small_banner(f'Creating {west_dir} and local configuration file')
         self.create(west_dir, exist_ok=False)
         os.chdir(topdir)
         self.config = Configuration(topdir=topdir)
         self.config.set('manifest.path', os.fspath(rel_manifest))
-        self.config.set('manifest.file', manifest_filename)
+        self.config.set('manifest.file', manifest_file)
 
         return topdir
 
     def bootstrap(self, args) -> Path:
-        topdir = Path(abspath(args.directory or os.getcwd()))
-        self.banner('Initializing in', topdir)
+        # Determine the workspace/topdir. The positional <directory> in
+        # remote mode is the legacy way to set topdir; --topdir is the
+        # canonical knob. The two cannot be combined: with -t given,
+        # --manifest-path is the way to control where within the workspace
+        # the manifest repository is cloned.
+        if args.topdir and args.directory:
+            self.die(
+                f"positional <directory> '{args.directory}' cannot be combined "
+                f"with -t/--topdir; use --manifest-path SUBPATH to control "
+                f"where the manifest repository is cloned within the workspace"
+            )
+
+        if args.topdir:
+            topdir = Path(args.topdir)
+        elif args.directory:
+            self.wrn(
+                "the positional <directory> argument in remote mode is "
+                "deprecated; use -t/--topdir instead"
+            )
+            topdir = Path(args.directory)
+        else:
+            topdir = Path('.')
+        topdir = topdir.resolve()
+
+        if args.manifest_path and util.escapes_directory(topdir / args.manifest_path, topdir):
+            self.die(f'--mp {args.manifest_path} argument escapes the workspace {topdir}')
+
+        self.banner(f'Initializing in {topdir}')
 
         manifest_url = args.manifest_url or MANIFEST_URL_DEFAULT
         if args.manifest_rev:
@@ -469,7 +621,7 @@ below.
             raise
 
         # Verify the manifest file exists.
-        temp_manifest_filename = args.manifest_file or 'west.yml'
+        temp_manifest_filename = args.manifest_file or _WEST_YML
         temp_manifest = tempdir / temp_manifest_filename
         if not temp_manifest.is_file():
             self.die(
@@ -486,14 +638,26 @@ below.
         manifest = Manifest.from_data(
             temp_manifest.read_text(encoding=Manifest.encoding), import_flags=ImportFlag.IGNORE
         )
-        if manifest.yaml_path:
-            manifest_path = manifest.yaml_path
+
+        if args.manifest_path:
+            # User-supplied --manifest-path fully overrides the default
+            # (the manifest's "self: path:" or the URL basename).
+            manifest_path = Path(args.manifest_path)
+            if manifest.yaml_path and Path(manifest.yaml_path) != manifest_path:
+                self.wrn(
+                    f'--manifest-path {manifest_path} overrides the manifest\'s '
+                    f'declared "self: path: {manifest.yaml_path}"'
+                )
         else:
-            # We use PurePath() here in case manifest_url is a
-            # windows-style path. That does the right thing in that
-            # case, without affecting POSIX platforms, where PurePath
-            # is PurePosixPath.
-            manifest_path = PurePath(urlparse(manifest_url).path).name
+            if manifest.yaml_path:
+                yaml_path = manifest.yaml_path
+            else:
+                # We use PurePath() here in case manifest_url is a
+                # windows-style path. That does the right thing in that
+                # case, without affecting POSIX platforms, where PurePath
+                # is PurePosixPath.
+                yaml_path = PurePath(urlparse(manifest_url).path).name
+            manifest_path = Path(yaml_path)
 
         manifest_abspath = topdir / manifest_path
 
@@ -531,7 +695,7 @@ below.
             self.die(e)
         self.small_banner('setting manifest.path to', manifest_path)
         self.config = Configuration(topdir=topdir)
-        self.config.set('manifest.path', manifest_path)
+        self.config.set('manifest.path', str(manifest_path))
         self.config.set('manifest.file', temp_manifest_filename)
 
         return topdir
