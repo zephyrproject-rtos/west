@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import os
+import signal
 import sys
 from pathlib import Path
 from typing import NamedTuple
@@ -235,6 +236,32 @@ WARNING: in file {module_path},
         if str(e):
             print(f"west: {e}", file=sys.stderr)
         return e.returncode
+    except KeyboardInterrupt:
+        # Mirrors v1's behavior. Catching this avoids dumping a Python
+        # stack on Ctrl+C; the spawned children (cmake / ninja / the
+        # built application) already saw SIGINT and unwound on their own.
+        #
+        # On Unix, reinstate the default SIGINT handler and re-send the
+        # signal to self. Two effects:
+        #   1. exit status becomes the conventional 128 + SIGINT = 130
+        #      that `while`/`until` loops, make, etc. recognise as "user
+        #      cancelled the whole chain";
+        #   2. the parent rust process sees the child died from SIGINT
+        #      rather than a Python-shaped non-zero exit.
+        # On Windows there's no SIGINT-resend equivalent; emit
+        # STATUS_CONTROL_C_EXIT (0xC000013A) as the conventional
+        # "interrupted" exit code. See https://bugs.python.org/issue1054041
+        # for the historical context for both branches.
+        if sys.platform == "win32":
+            CONTROL_C_EXIT_CODE = 0xC000013A - 2**32
+            sys.exit(CONTROL_C_EXIT_CODE)
+        else:
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            os.kill(os.getpid(), signal.SIGINT)
+    except BrokenPipeError:
+        # `west <ext> | head` and similar — the pipe consumer closed
+        # before we finished writing. Not an error worth a traceback.
+        pass
     return 0
 
 
