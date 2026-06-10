@@ -50,6 +50,7 @@ from west.manifest import (
     ManifestProject,
     ManifestVersionError,
     Project,
+    WestCommandsEntry,
     _ManifestImportDepth,
     is_group,
     manifest_path,
@@ -135,12 +136,12 @@ def test_project_init():
     assert p.abspath is None
     assert p.posixpath is None
     assert p.clone_depth is None
-    assert p.west_commands == []
+    assert p.west_commands_entries == []
     assert p.topdir is None
 
     p = Project('p', 'some-url', clone_depth=4, west_commands='foo', topdir=TOPDIR)
     assert p.clone_depth == 4
-    assert p.west_commands == ['foo']
+    assert p.west_commands_entries == [WestCommandsEntry(path='foo')]
     assert p.topdir == TOPDIR
     assert p.abspath == os.path.join(TOPDIR, 'p')
     assert p.posixpath == TOPDIR_POSIX + '/p'
@@ -535,7 +536,75 @@ def test_project_west_commands():
       url: https://foo.com
       west-commands: some-path/west-commands.yml
     ''')
-    assert m.projects[1].west_commands == ['some-path/west-commands.yml']
+    assert m.projects[1].west_commands_entries == [
+        WestCommandsEntry(path='some-path/west-commands.yml'),
+    ]
+
+
+def test_project_west_commands_deprecated_property():
+    p = Project('p', 'some-url', west_commands='foo.yml', topdir=TOPDIR)
+    with pytest.warns(DeprecationWarning, match='west_commands_entries'):
+        assert p.west_commands == ['foo.yml']
+
+
+def test_project_west_commands_list_and_dict_forms():
+    # The schema accepts a list whose elements are strings and/or
+    # {file, base-dir} maps. Each form maps to a WestCommandsEntry.
+
+    m = M('''\
+    projects:
+    - name: zephyr
+      url: https://foo.com
+      west-commands:
+        - plain-string.yml
+        - file: with-base.yml
+          base-dir: sub
+        - file: no-base.yml
+    ''')
+    assert m.projects[1].west_commands_entries == [
+        WestCommandsEntry(path='plain-string.yml'),
+        WestCommandsEntry(path='with-base.yml', base_dir='sub'),
+        WestCommandsEntry(path='no-base.yml'),
+    ]
+
+
+def test_project_west_commands_plain_list_roundtrip():
+    # A project with several plain-string west-commands entries (no
+    # base_dir) should serialize as a list of strings in as_yaml(),
+    # rather than collapsing to a single string or emitting maps.
+
+    m = M('''\
+    projects:
+    - name: zephyr
+      url: https://foo.com
+      west-commands:
+        - a.yml
+        - b.yml
+    ''')
+    expected = [WestCommandsEntry(path='a.yml'), WestCommandsEntry(path='b.yml')]
+    assert m.projects[1].west_commands_entries == expected
+
+    roundtripped = Manifest.from_data(m.as_yaml())
+    assert roundtripped.projects[1].west_commands_entries == expected
+
+
+def test_project_west_commands_dict_form_roundtrip():
+    # A manifest declaring a {file, base-dir} entry directly should
+    # roundtrip through as_yaml() preserving the dict form.
+
+    m = M('''\
+    projects:
+    - name: zephyr
+      url: https://foo.com
+      west-commands:
+        - file: cmd.yml
+          base-dir: sub
+    ''')
+    expected = [WestCommandsEntry(path='cmd.yml', base_dir='sub')]
+    assert m.projects[1].west_commands_entries == expected
+
+    roundtripped = Manifest.from_data(m.as_yaml())
+    assert roundtripped.projects[1].west_commands_entries == expected
 
 
 def test_project_git_methods(tmpdir):
@@ -611,7 +680,9 @@ def test_project_repr():
     assert (
         repr(m.projects[1])
         == 'Project("zephyr", "https://foo.com", revision="r", path=\'zephyr\', '
-        'clone_depth=None, west_commands=[\'some-path/west-commands.yml\'], '
+        "clone_depth=None, "
+        "west_commands_entries="
+        "[WestCommandsEntry(path='some-path/west-commands.yml', base_dir='')], "
         'topdir=None, groups=[], userdata=None)'
     )
 
@@ -777,7 +848,7 @@ def test_manifest_project():
     assert mp.name == 'manifest'
     assert mp.path == 'my-path'
     assert m.yaml_path == 'my-path'
-    assert mp.west_commands == ['cmds.yml']
+    assert mp.west_commands_entries == [WestCommandsEntry(path='cmds.yml')]
     assert mp.topdir is None
     assert mp.abspath is None
     assert mp.posixpath is None
@@ -2109,8 +2180,11 @@ def test_import_project_submanifest_commands(manifest_repo):
     assert (p1 / 'm2.yml').check(file=0, dir=0)
 
     p1 = MF().get_projects(['p1'])[0]
-    expected = ['m1-commands.yml', 'm2-commands.yml']
-    assert p1.west_commands == expected
+    expected = [
+        WestCommandsEntry(path='m1-commands.yml'),
+        WestCommandsEntry(path='m2-commands.yml'),
+    ]
+    assert p1.west_commands_entries == expected
 
 
 def test_import_project_submanifest_commands_both(manifest_repo):
@@ -2161,8 +2235,12 @@ def test_import_project_submanifest_commands_both(manifest_repo):
     assert (p1 / 'm2.yml').check(file=0, dir=0)
 
     p1 = MF().get_projects(['p1'])[0]
-    expected = ['p1-commands.yml', 'm1-commands.yml', 'm2-commands.yml']
-    assert p1.west_commands == expected
+    expected = [
+        WestCommandsEntry(path='p1-commands.yml'),
+        WestCommandsEntry(path='m1-commands.yml'),
+        WestCommandsEntry(path='m2-commands.yml'),
+    ]
+    assert p1.west_commands_entries == expected
 
 
 def test_import_project_submanifest_commands_from_project_subdirectory(manifest_repo):
@@ -2186,7 +2264,10 @@ def test_import_project_submanifest_commands_from_project_subdirectory(manifest_
                                   - name: p2
                                     url: url-placeholder2
                                   self:
-                                    west-commands: p2subdir/west-commands.yml
+                                    west-commands:
+                                    - p2subdir/west-commands.yml
+                                    - file: nested/west-commands.yml
+                                      base-dir: nested
                                 ''',
         },
     )
@@ -2205,12 +2286,24 @@ def test_import_project_submanifest_commands_from_project_subdirectory(manifest_
             import: mf_subdir/west.yml
         ''')
 
-    # The west_commands path should be 'mf_subdir/p2subdir/west-commands.yml',
-    # not 'west-commands.yml', to be resolved correctly
-    # relative to the project root. See issue #725.
+    # The entry's path should be 'mf_subdir/p2subdir/west-commands.yml',
+    # not 'west-commands.yml', to be resolved correctly relative to the
+    # project root, and base_dir should be 'mf_subdir' so the spec's
+    # `file:` paths still resolve against the submanifest directory.
+    # See issue #725. An entry that already carries a base_dir composes
+    # with the subdirectory instead of having it overwritten.
+    expected = [
+        WestCommandsEntry(
+            path='mf_subdir/p2subdir/west-commands.yml',
+            base_dir='mf_subdir',
+        ),
+        WestCommandsEntry(
+            path='mf_subdir/nested/west-commands.yml',
+            base_dir='mf_subdir/nested',
+        ),
+    ]
     p1_proj = MF().get_projects(['p1'])[0]
-    expected = ['mf_subdir/p2subdir/west-commands.yml']
-    assert p1_proj.west_commands == expected
+    assert p1_proj.west_commands_entries == expected
 
     # Case B: import using an import-map whose 'file' is a file path.
     with open(manifest_repo / 'west.yml', 'w') as f:
@@ -2223,10 +2316,8 @@ def test_import_project_submanifest_commands_from_project_subdirectory(manifest_
             file: mf_subdir/west.yml
       ''')
 
-    # Reload and check the west_commands were resolved the same way.
     p1_proj = MF().get_projects(['p1'])[0]
-    expected = ['mf_subdir/p2subdir/west-commands.yml']
-    assert p1_proj.west_commands == expected
+    assert p1_proj.west_commands_entries == expected
 
     # Case C: import as a string path to the submanifest directory.
     with open(manifest_repo / 'west.yml', 'w') as f:
@@ -2238,10 +2329,8 @@ def test_import_project_submanifest_commands_from_project_subdirectory(manifest_
           import: mf_subdir
       ''')
 
-    # Reload and check the west_commands were resolved the same way.
     p1_proj = MF().get_projects(['p1'])[0]
-    expected = ['mf_subdir/p2subdir/west-commands.yml']
-    assert p1_proj.west_commands == expected
+    assert p1_proj.west_commands_entries == expected
 
     # Case D: import using an import-map whose 'file' is a directory.
     with open(manifest_repo / 'west.yml', 'w') as f:
@@ -2254,10 +2343,78 @@ def test_import_project_submanifest_commands_from_project_subdirectory(manifest_
             file: mf_subdir
       ''')
 
-    # Reload and check the west_commands were resolved the same way.
     p1_proj = MF().get_projects(['p1'])[0]
-    expected = ['mf_subdir/p2subdir/west-commands.yml']
-    assert p1_proj.west_commands == expected
+    assert p1_proj.west_commands_entries == expected
+
+
+def test_import_project_submanifest_commands_resolved_yaml_roundtrip(manifest_repo):
+    # A parent manifest imports a submanifest from a project
+    # subdirectory (`mf_subdir/west.yml`) which declares
+    # `self: west-commands:`. After resolution the parent project
+    # carries a WestCommandsEntry whose path is project-relative
+    # ('mf_subdir/p2subdir/west-commands.yml') and whose base_dir is
+    # the submanifest directory ('mf_subdir'), so the spec's `file:`
+    # paths still resolve against the subdirectory.
+    #
+    # That base_dir information must survive a Manifest.as_yaml()
+    # roundtrip: serializing the resolved manifest and parsing it back
+    # should produce a project with the same WestCommandsEntry list.
+
+    p1 = manifest_repo / '..' / 'p1'
+    create_repo(p1)
+    create_branch(p1, 'manifest-rev', checkout=True)
+    add_commit(
+        p1,
+        'add mf_subdir/west.yml with west-commands',
+        files={
+            'mf_subdir/west.yml': '''\
+                                manifest:
+                                  projects:
+                                  - name: p2
+                                    url: url-placeholder2
+                                  self:
+                                    west-commands:
+                                    - p2subdir/west-commands.yml
+                                    - file: nested/west-commands.yml
+                                      base-dir: nested
+                                ''',
+        },
+    )
+    checkout_branch(p1, 'master')
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: p1
+            url: url-placeholder
+            import: mf_subdir/west.yml
+        ''')
+
+    expected = [
+        WestCommandsEntry(
+            path='mf_subdir/p2subdir/west-commands.yml',
+            base_dir='mf_subdir',
+        ),
+        WestCommandsEntry(
+            path='mf_subdir/nested/west-commands.yml',
+            base_dir='mf_subdir/nested',
+        ),
+    ]
+
+    original = MF()
+    p1_orig = original.get_projects(['p1'])[0]
+    assert p1_orig.west_commands_entries == expected
+
+    # Serialize the resolved manifest and parse it back: the
+    # resolved YAML should be equivalent to the original, including
+    # the per-entry base_dir.
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write(original.as_yaml())
+
+    roundtripped = MF()
+    p1_round = roundtripped.get_projects(['p1'])[0]
+    assert p1_round.west_commands_entries == expected
 
 
 def test_import_map_error_handling():
@@ -2549,7 +2706,7 @@ def test_import_self_submanifest_commands(manifest_repo):
         ''')
 
     mp = MF().projects[MANIFEST_PROJECT_INDEX]
-    assert mp.west_commands == ['sub-commands.yml']
+    assert mp.west_commands_entries == [WestCommandsEntry(path='sub-commands.yml')]
 
 
 def test_import_self_submanifest_commands_both(manifest_repo):
@@ -2581,7 +2738,10 @@ def test_import_self_submanifest_commands_both(manifest_repo):
         f.write(sub)
 
     mp = MF().projects[MANIFEST_PROJECT_INDEX]
-    assert mp.west_commands == ['sub-commands.yml', 'top-commands.yml']
+    assert mp.west_commands_entries == [
+        WestCommandsEntry(path='sub-commands.yml'),
+        WestCommandsEntry(path='top-commands.yml'),
+    ]
 
 
 def test_import_flags_ignore(tmpdir):
