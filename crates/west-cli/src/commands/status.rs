@@ -34,7 +34,7 @@
 //!   `Short` and `Long` modes). e.g. `west status -- -u no` to
 //!   suppress untracked files.
 
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -232,7 +232,7 @@ fn run_inner(args: StatusArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Sta
         ColorArg::Always => ColorMode::Always,
         ColorArg::Never => ColorMode::Never,
         ColorArg::Auto => {
-            if io::stdout().is_terminal() {
+            if super::color::want_color_stdout() {
                 ColorMode::Always
             } else {
                 ColorMode::Never

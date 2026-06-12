@@ -559,5 +559,22 @@ class WestCommand(ABC):
 
     @property
     def color_ui(self) -> bool:
-        '''Should we colorize output?'''
+        '''Should we colorize output?
+
+        Reads the universal `WEST_COLOR` env var the rust binary sets in
+        `lib.rs::run()` after resolving `color.ui` + `NO_COLOR` +
+        `CLICOLOR` once; this is the single source of truth across the
+        rust binary, its spawned extensions, and any python that runs
+        inside them. The legacy `color.ui` config fallback applies
+        only when this `WestCommand` is constructed outside the rust
+        wrapper (in-process python tests, direct `west.commands`
+        imports) where `WEST_COLOR` won't have been set.
+        '''
+        west_color = os.environ.get('WEST_COLOR')
+        if west_color == 'always':
+            return True
+        if west_color == 'never':
+            return False
+        # `auto` / unset / unknown: fall through to the v1-compat
+        # config-based check.
         return self.config.getboolean('color.ui', default=True) if self.has_config else True

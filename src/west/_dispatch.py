@@ -25,7 +25,9 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import os
+import shlex
 import signal
+import subprocess
 import sys
 from pathlib import Path
 from typing import NamedTuple
@@ -36,6 +38,31 @@ from west.manifest import Manifest
 
 # A single `--inline-config NAME=VALUE` pair, in CLI order.
 _InlineOverride = tuple[str, str]
+
+
+def _error(msg: str) -> None:
+    '''Print `west: error: <msg>` to stderr, matching the rust CLI's
+    framework-error format. Red + bold when the cached `WEST_COLOR`
+    decision (set by the rust binary in `lib.rs::run()`) is `always`,
+    or `auto`/unset with a stderr TTY. Otherwise plain.
+
+    This is the python-side mirror of the rust env_logger format
+    closure's `west: error: <msg>` so dispatcher errors and rust
+    framework errors look identical to the user.'''
+    west_color = os.environ.get('WEST_COLOR')
+    if west_color == 'always':
+        color = True
+    elif west_color == 'never':
+        color = False
+    else:
+        # `auto` / unset / unknown -> per-stream TTY check. (The rust
+        # binary normally sets WEST_COLOR before spawning us; this
+        # fallback covers in-process python use without the wrapper.)
+        color = sys.stderr.isatty()
+    prefix = 'west: error:'
+    if color:
+        prefix = f'\033[1;31m{prefix}\033[0m'
+    print(f'{prefix} {msg}', file=sys.stderr)
 
 
 class _ParsedArgv(NamedTuple):
@@ -234,8 +261,19 @@ WARNING: in file {module_path},
         cmd.run(args, unknown, topdir, manifest=manifest, config=config)
     except CommandError as e:
         if str(e):
-            print(f"west: {e}", file=sys.stderr)
+            _error(str(e))
         return e.returncode
+    except subprocess.CalledProcessError as e:
+        # Extension shelled out (cmake, ninja, ...) and got a non-zero
+        # exit. Surface the underlying command + status verbatim and
+        # forward the child's exit code so CI scripts see the real
+        # failure (cmake exit 2 stays 2, not collapsed to 1). Mirrors
+        # v1's WestApp.run() handler; without this catch the
+        # `subprocess.CalledProcessError` propagates as a Python
+        # traceback through `_dispatch.main()`.
+        argv = e.cmd if isinstance(e.cmd, list) else [str(e.cmd)]
+        _error(f"command exited with status {e.returncode}: {shlex.join(argv)}")
+        return e.returncode if e.returncode else 1
     except KeyboardInterrupt:
         # Mirrors v1's behavior. Catching this avoids dumping a Python
         # stack on Ctrl+C; the spawned children (cmake / ninja / the

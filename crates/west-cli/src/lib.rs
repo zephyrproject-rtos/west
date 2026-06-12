@@ -154,8 +154,15 @@ pub fn run() -> ExitCode {
     // bare message (milestone/diagnostic content already carries its
     // own `project:` framing); trace keeps the target for deep
     // debugging. All on stderr, so stdout stays machine-readable.
+    // `WriteStyle::Always` disables env_logger's own auto-TTY-strip of
+    // ANSI in the formatted record. We want the `WEST_COLOR`-resolved
+    // decision (consulted at format time via `commands::style`) to be
+    // authoritative -- with the default `Auto` here, env_logger would
+    // strip on a non-TTY stderr even when `force_styling(true)` told
+    // `console::Style` to emit ANSI.
     let inner = env_logger::Builder::new()
         .filter_level(initial.verbosity.log_level_filter())
+        .write_style(env_logger::WriteStyle::Always)
         .format(|buf, record| {
             use std::io::Write;
             let msg = record.args();
@@ -217,6 +224,25 @@ pub fn run() -> ExitCode {
     {
         log::error!("--raw: {e}");
         return exit::FAILURE;
+    }
+
+    // Resolve the color policy once and cache it in `WEST_COLOR`
+    // (`always` / `never` / `auto`). Every downstream emitter --
+    // env_logger format closure, `commands::style` banners, extension
+    // subprocesses spawned via `_dispatch`, the `WestCommand.err()`
+    // python wrapper -- reads this single resolved value rather than
+    // re-deriving the same `color.ui + NO_COLOR + CLICOLOR` policy
+    // independently. Env-var propagation to child processes is what
+    // hands the decision to python without explicit plumbing.
+    //
+    // SAFETY: `set_var` is unsafe in the 2024 edition because
+    // concurrent reads from other threads would race. We're still
+    // single-threaded here (no rayon pool, no subprocesses spawned
+    // yet) and the value is set exactly once before anything that
+    // could observe it concurrently exists.
+    let west_color = commands::color::resolve_universal(&loaded.config);
+    unsafe {
+        std::env::set_var(commands::color::WEST_COLOR, west_color);
     }
 
     // Resolve aliases. Re-parses argv on each iteration; aliases never inject

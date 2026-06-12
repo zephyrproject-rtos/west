@@ -35,7 +35,7 @@
 //! Iteration / cloned-only filter / synthetic-manifest-project
 //! handling all mirror `forall`'s shape.
 
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -247,7 +247,7 @@ fn run_inner(args: DiffArgs, loaded: &mut LoadedConfig) -> Result<Outcome, DiffE
         ColorArg::Always => ColorMode::Always,
         ColorArg::Never => ColorMode::Never,
         ColorArg::Auto => {
-            if io::stdout().is_terminal() {
+            if super::color::want_color_stdout() {
                 ColorMode::Always
             } else {
                 ColorMode::Never

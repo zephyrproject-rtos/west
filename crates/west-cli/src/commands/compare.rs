@@ -38,7 +38,7 @@
 //! only the comparison body (and the `-f` machine-readable lines)
 //! reach stdout, matching `diff` / `status` / `forall`.
 
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -282,7 +282,7 @@ fn run_inner(args: CompareArgs, loaded: &mut LoadedConfig) -> Result<Outcome, Co
         ColorArg::Always => ColorMode::Always,
         ColorArg::Never => ColorMode::Never,
         ColorArg::Auto => {
-            if io::stdout().is_terminal() {
+            if super::color::want_color_stdout() {
                 ColorMode::Always
             } else {
                 ColorMode::Never
