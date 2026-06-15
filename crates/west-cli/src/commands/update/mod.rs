@@ -28,6 +28,7 @@ mod cache;
 mod error;
 mod import_source;
 mod indicatif_reporter;
+mod interrupt;
 mod output;
 
 use std::io::{self, IsTerminal};
@@ -171,6 +172,14 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         }
     };
 
+    // Catch SIGINT for the rest of `run` (import resolution + the
+    // worker pool, both of which spawn git). On Ctrl+C the handler
+    // only flips a flag instead of letting the default disposition
+    // kill west mid-operation, so in-flight git children finish their
+    // own ref-lock cleanup before west's `wait()` returns. Restored to
+    // the default disposition when this guard drops at end of `run`.
+    let _interrupt = interrupt::InterruptGuard::install();
+
     // Hoisted so [`load_manifest`] can hand `Settings` to the import
     // source — the auto-cache lives in `update.auto-cache` and any
     // import-resolution clones must route through the same cache the
@@ -231,6 +240,12 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         ) {
             Ok(m) => m,
             Err(e) => {
+                // A Ctrl+C during import resolution surfaces here as a
+                // git failure. Die from the signal (130) rather than a
+                // generic FAILURE so shell loops break out.
+                if interrupt::cancelled() {
+                    interrupt::reraise();
+                }
                 log::error!("{e}");
                 return exit::FAILURE;
             }
@@ -342,6 +357,16 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
 
     pool.install(|| {
         projects.par_iter().for_each(|project| {
+            // After Ctrl+C, don't launch new project work -- no new
+            // `update-ref` may start. Projects already in flight run to
+            // completion: their git child got the terminal SIGINT and
+            // is winding down, and west (catching SIGINT, not dying)
+            // lets each `wait()` return only after that git's own lock
+            // cleanup finished. `par_iter` still visits every item, so
+            // the skipped ones simply return without spawning git.
+            if interrupt::cancelled() {
+                return;
+            }
             let outcome = run_one_project(
                 project,
                 vcs_ref,
@@ -354,7 +379,18 @@ pub fn run(args: UpdateArgs, loaded: &mut LoadedConfig) -> ExitCode {
         });
     });
 
+    // `finish` clears any live indicatif bars first, so the interrupt
+    // notice / summary below isn't drawn over a half-rendered frame.
     let summary = reporter.finish();
+
+    if interrupt::cancelled() {
+        // In-flight git children have drained (their cleanup ran while
+        // west stayed alive). Now die from the signal: status 130 +
+        // WIFSIGNALED so `while ...; do west update; done` breaks out.
+        log::warn!("update interrupted");
+        interrupt::reraise();
+    }
+
     if summary.is_empty() {
         exit::SUCCESS
     } else {
