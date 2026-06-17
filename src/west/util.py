@@ -9,6 +9,9 @@ import shlex
 import textwrap
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Optional
+
+import dotenv
 
 # What west's APIs accept for paths.
 #
@@ -66,6 +69,26 @@ def west_dir(start: PathType | None = None) -> str:
     return os.path.join(west_topdir(start), WEST_DIR)
 
 
+class WestEnvFileError(RuntimeError):
+    '''And error with the .westenv file.'''
+
+
+def _parse_westenv_file(file_path: Path) -> Optional[str]:
+    '''
+    Parses the .westenv file to extract the ZEPHYR_BASE variable.
+    Also ensures that no invalid entries exist in that file.
+
+    Returns the ZEPHYR_BASE value of the file, if it exists.
+    Raises WestEnvFileError when the file is invalid
+    '''
+    file_data = dotenv.dotenv_values(file_path)
+    unknown_keys = set(file_data.keys()).difference({'ZEPHYR_BASE'})
+    if unknown_keys:
+        raise WestEnvFileError(f'.westenv file contains invalid keys: {", ".join(unknown_keys)}')
+
+    return file_data.get('ZEPHYR_BASE')
+
+
 def west_topdir(start: PathType | None = None, fall_back: bool = True) -> str:
     '''
     Like west_dir(), but returns the path to the parent directory of the .west/
@@ -76,6 +99,16 @@ def west_topdir(start: PathType | None = None, fall_back: bool = True) -> str:
     while True:
         if (cur_dir / WEST_DIR).is_dir():
             return os.fspath(cur_dir)
+
+        if fall_back and (files := list(cur_dir.glob('.westenv'))):
+            zephyr_base_path = _parse_westenv_file(files[0])
+            if zephyr_base_path:
+                zephyr_base_path = Path(zephyr_base_path)
+
+                if not zephyr_base_path.is_absolute():
+                    zephyr_base_path = Path(cur_dir / zephyr_base_path).resolve()
+
+                return west_topdir(str(zephyr_base_path), fall_back=False)
 
         parent_dir = cur_dir.parent
         if cur_dir == parent_dir:

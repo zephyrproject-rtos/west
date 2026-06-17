@@ -23,6 +23,7 @@ dependencies = [
     "packaging~=25.0",
     "pykwalify~=1.8",
     "pyyaml~=6.0",
+    "python-dotenv~=1.2.2",
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
