@@ -348,6 +348,12 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory(re
     cmd(['init', '-m', str(manifest_path), str(workspace)])
     cmd('update', cwd=workspace)
 
+    # First, make sure extensions work fine without imports. Otherwise
+    # the next assert covers too much code at once which makes failures
+    # difficult to interpret.
+    ext_output = cmd('test-extension', cwd=workspace)
+    assert 'Testing test command 1' in ext_output, 'No-import extension failed'
+
     ext_output = cmd('imported-command-from-subdir', cwd=workspace)
     assert 'imported command from subdir works' in ext_output
 
@@ -428,6 +434,12 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory_sp
     workspace = repos_tmpdir / 'workspace'
     cmd(['init', '-m', str(manifest_path), str(workspace)])
     cmd('update', cwd=workspace)
+
+    # First, make sure extensions work fine without imports. Otherwise
+    # the next assert covers too much code at once which makes failures
+    # difficult to interpret.
+    ext_output = cmd('test-extension', cwd=workspace)
+    assert 'Testing test command 1' in ext_output, 'No-import extension failed.'
 
     ext_output = cmd('imported-command-from-subdir-windows', cwd=workspace)
     assert 'imported command from subdir with windows paths works' in ext_output
