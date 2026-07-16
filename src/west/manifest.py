@@ -1712,6 +1712,16 @@ class Manifest:
         # and Python 3.7+ guarantee.
         r: dict[str, Any] = {}
         r['manifest'] = {}
+        # Stamp the resolved/frozen output with SCHEMA_VERSION, the
+        # highest manifest schema version this west supports. The output
+        # is a synthesis of the input manifest and any imports (which
+        # may each declare their own version), so no single declared
+        # version describes it; the highest schema version we support is
+        # a safe upper bound, since west can't emit anything newer than
+        # the schema it implements. Without this, an older west silently
+        # mis-parses the output instead of failing cleanly with a
+        # ManifestVersionError.
+        r['manifest']['version'] = SCHEMA_VERSION
         if self.group_filter:
             r['manifest']['group-filter'] = self.group_filter
         r['manifest']['projects'] = project_dicts
@@ -1726,6 +1736,10 @@ class Manifest:
         projects had been defined in a single manifest without any
         import attributes.
 
+        The result is stamped with the current `SCHEMA_VERSION` (the
+        highest manifest schema version this west supports), since the
+        output may synthesize inputs that declared differing versions.
+
         :param active_only: Do not resolve inactive projects
         '''
         return self._as_dict_helper(pfilter=self.is_active if active_only else None)
@@ -1735,6 +1749,9 @@ class Manifest:
 
         The value is "frozen" in that all project revisions are the
         full SHAs pointed to by `QUAL_MANIFEST_REV_BRANCH` references.
+
+        Like `as_dict`, the result is stamped with the current
+        `SCHEMA_VERSION`.
 
         Raises ``RuntimeError`` if a project SHA can't be resolved.
 

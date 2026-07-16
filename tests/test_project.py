@@ -459,6 +459,7 @@ def test_manifest_freeze(west_update_tmpdir):
     # - there isn't any random YAML tag
     expected_res = [
         '^manifest:$',
+        '^  version: .*$',
         '^  projects:$',
         '^  - name: Kconfiglib$',
         '^    description: |',
@@ -493,6 +494,7 @@ def test_manifest_freeze_active(west_update_tmpdir):
     # Same as test_manifest_freeze but without inactive projects
     expected_res = [
         '^manifest:$',
+        '^  version: .*$',
         '^  projects:$',
         '^  - name: tagged_repo$',
         '^    url: .*$',
@@ -515,6 +517,7 @@ def test_manifest_resolve(west_update_tmpdir):
     # Similar as test_manifest_freeze but with resolved projects
     expected_res = [
         '^manifest:$',
+        '^  version: .*$',
         '^  projects:$',
         '^  - name: Kconfiglib$',
         '^    description: |',
@@ -549,6 +552,7 @@ def test_manifest_resolve_active(west_update_tmpdir):
     # Same as test_manifest_resolve but without inactive projects
     expected_res = [
         '^manifest:$',
+        '^  version: .*$',
         '^  projects:$',
         '^  - name: tagged_repo$',
         '^    url: .*$',
@@ -1263,6 +1267,7 @@ def test_update_submodules_list(repos_tmpdir):
     actual = cmd('manifest --freeze', cwd=ws).splitlines()
     expected_res = [
         '^manifest:$',
+        '^  version: .*$',
         '^  projects:$',
         '^  - name: zephyr$',
         f'^    url: {re.escape(str(zephyr))}$',
@@ -1386,6 +1391,7 @@ def test_update_all_submodules(repos_tmpdir):
     actual = cmd('manifest --freeze', cwd=ws).splitlines()
     expected_res = [
         '^manifest:$',
+        '^  version: .*$',
         '^  projects:$',
         '^  - name: zephyr$',
         f'^    url: {re.escape(str(zephyr))}$',
@@ -1478,6 +1484,7 @@ def test_update_no_submodules(repos_tmpdir):
     actual = cmd('manifest --freeze', cwd=ws).splitlines()
     expected_res = [
         '^manifest:$',
+        '^  version: .*$',
         '^  projects:$',
         '^  - name: zephyr$',
         f'^    url: {re.escape(str(zephyr))}$',
@@ -1623,6 +1630,7 @@ def test_update_submodules_strategy(repos_tmpdir):
     actual = cmd('manifest --freeze', cwd=ws).splitlines()
     expected_res = [
         '^manifest:$',
+        '^  version: .*$',
         '^  projects:$',
         '^  - name: zephyr$',
         f'^    url: {re.escape(str(zephyr))}$',

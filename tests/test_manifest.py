@@ -1240,6 +1240,8 @@ def test_as_dict_and_yaml(manifest_repo):
     '''
     content_dict = {
         'manifest': {
+            # --resolve/--freeze stamp the output with the current schema version.
+            'version': SCHEMA_VERSION,
             'projects': [
                 {'name': 'p1', 'url': 'https://example.com/p1', 'revision': 'master'},
                 {
@@ -1259,7 +1261,10 @@ def test_as_dict_and_yaml(manifest_repo):
         }
     }
 
-    expected_yaml = '''\
+    # NOTE: bare as_yaml() sorts keys (safe_dump default), so 'version'
+    # sorts last; `west manifest --resolve` passes sort_keys=False and
+    # emits it first. See test_project.py for the CLI ordering.
+    expected_yaml = f'''\
 manifest:
   group-filter:
   - -Bdisabled
@@ -1276,6 +1281,7 @@ manifest:
     west-commands: commands.yml
   self:
     path: mp
+  version: '{SCHEMA_VERSION}'
 '''
 
     with open(manifest_repo / 'west.yml', 'w') as f:
@@ -1432,6 +1438,49 @@ def test_version_check_success(ver):
         url: https://foo.com
     ''')
     assert manifest.projects[-1].name == 'foo'
+
+
+@pytest.mark.parametrize('declared', [None, '0.7', '1.0', SCHEMA_VERSION])
+def test_resolve_freeze_stamp_current_schema_version(declared):
+    # `west manifest --resolve` and `--freeze` output is a synthesis
+    # produced by this west, so it is always stamped with the current
+    # SCHEMA_VERSION -- regardless of what the source manifest declared
+    # (or didn't). This avoids under-claiming when imports declare a
+    # newer version than the top-level manifest.
+
+    lines = ['manifest:']
+    if declared is not None:
+        lines.append(f'  version: "{declared}"')
+    lines.append('  projects: []')  # empty, so as_frozen_dict() needs no clones
+    manifest = Manifest.from_data('\n'.join(lines) + '\n')
+
+    assert manifest.as_dict()['manifest']['version'] == SCHEMA_VERSION
+    assert manifest.as_frozen_dict()['manifest']['version'] == SCHEMA_VERSION
+
+
+def test_resolve_stamps_max_when_import_declares_newer():
+    # A submanifest imported from a lower-versioned top-level manifest
+    # must not cause the resolved output to under-claim: the stamp is
+    # SCHEMA_VERSION, which covers any import's (validated) version.
+
+    top = '''\
+    manifest:
+      version: "1.0"
+      projects:
+      - name: upstream
+        url: https://example.com/upstream
+        import: west.yml
+    '''
+    sub = f'''\
+    manifest:
+      version: "{SCHEMA_VERSION}"
+      projects:
+      - name: hal
+        url: https://example.com/hal
+    '''
+    importer = make_importer({('upstream', 'west.yml'): sub})
+    manifest = Manifest.from_data(top, importer=importer, import_flags=FPI)
+    assert manifest.as_dict()['manifest']['version'] == SCHEMA_VERSION
 
 
 def test_project_filter_validation(config_tmpdir):
