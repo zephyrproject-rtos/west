@@ -617,6 +617,108 @@ WARNING: in file {self.py_file},
         return cmd
 
 
+class _ExecExtensionCommand(WestCommand):
+    # An extension command backed by an executable.
+    #
+    # Unlike class-based extensions, which are Python WestCommand subclasses
+    # with access to the full west API, an executable extension is any
+    # executable (in any language) named by the 'file' key of a west-commands
+    # file, selected with the 'exec' key of a command. West does not parse its
+    # arguments: everything after the command name (including -h/--help) is
+    # forwarded verbatim, and workspace context is passed via WEST_*
+    # environment variables. The invoked command name is passed as
+    # WEST_COMMAND so that a single executable registered under several names
+    # can dispatch on the subcommand.
+    #
+    # If 'interpreter' is empty, the file is run directly; otherwise it is run
+    # as arguments to 'interpreter' (e.g. ['python3']).
+
+    def __init__(
+        self,
+        name: str,
+        help: str,
+        exec_file: str,
+        interpreter: list[str],
+        project_path: str,
+    ):
+        super().__init__(
+            name,
+            # 'help' is ignored for extensions, see
+            # https://github.com/zephyrproject-rtos/west/issues/927
+            help='',
+            description=help,
+            accepts_unknown_args=True,
+            requires_workspace=True,
+        )
+        self._exec_file = exec_file
+        self._interpreter = interpreter
+        self._project_path = project_path
+
+    def do_add_parser(self, parser_adder):
+        # add_help=False so that -h/--help is forwarded to the executable
+        # instead of being intercepted by west's argument parser.
+        return parser_adder.add_parser(
+            self.name,
+            help=self.help,
+            description=self.description,
+            add_help=False,
+        )
+
+    def do_run(self, args: argparse.Namespace, unknown: list[str]):
+        # The backing file must exist however it is run, whether directly or
+        # as an argument to an interpreter. Check this first on every platform,
+        # since os.access(..., X_OK) below returns False for a missing file
+        # too, which would otherwise be reported as the misleading "not
+        # executable".
+        if not os.path.exists(self._exec_file):
+            self.die(f'extension command executable "{self._exec_file}" not found')
+
+        # When run directly (no interpreter), the file itself must also be
+        # executable. This X_OK check is only meaningful on POSIX; on Windows
+        # it is not, so let subprocess report any such failure instead.
+        if not self._interpreter and os.name == 'posix':
+            if not os.access(self._exec_file, os.X_OK):
+                self.die(f'extension command executable "{self._exec_file}" is not executable')
+
+        env = os.environ.copy()
+        # The context "API" for executable extensions. Keep this small
+        # and stable; it is a much looser contract than the Python API.
+        env['WEST'] = sys.argv[0]
+        # The command name as invoked by the user, so a single executable
+        # registered under multiple names can dispatch on the subcommand.
+        env['WEST_COMMAND'] = self.name
+        assert self.topdir is not None  # requires_workspace is True
+        env['WEST_TOPDIR'] = self.topdir
+        if self.has_manifest and self.manifest.abspath:
+            env['WEST_MANIFEST_PATH'] = self.manifest.abspath
+        env['WEST_PROJECT_PATH'] = self._project_path
+        env['WEST_VERBOSE'] = str(int(self.verbosity))
+
+        argv = [*self._interpreter, self._exec_file, *unknown]
+        self._log_subproc(argv)
+        try:
+            proc = subprocess.run(argv, env=env)
+        except OSError as e:
+            self.die(f'could not run extension command "{self.name}": {e}')
+
+        if proc.returncode:
+            raise CommandError(proc.returncode)
+
+
+@dataclass
+class _ExecExtFactory:
+    exec_file: str
+    interpreter: list[str]
+    name: str
+    help: str
+    project_path: str
+
+    def __call__(self):
+        return _ExecExtensionCommand(
+            self.name, self.help, self.exec_file, self.interpreter, self.project_path
+        )
+
+
 @dataclass
 class WestExtCommandSpec:
     # An object which allows instantiating a west extension.
@@ -712,26 +814,54 @@ def _ext_specs(project):
 
 
 def _ext_specs_from_desc(project, commands_desc, base_dir):
-    py_file = os.path.join(base_dir, commands_desc['file'])
+    file = os.path.join(base_dir, commands_desc['file'])
 
-    # Verify the YAML's python file doesn't escape the project directory.
-    if escapes_directory(py_file, project.abspath):
+    # Verify the YAML's file doesn't escape the project directory.
+    if escapes_directory(file, project.abspath):
         raise ExtensionCommandError(
-            hint=f'extension command python file "{commands_desc["file"]}" '
+            hint=f'extension command file "{commands_desc["file"]}" '
             f'escapes project path {project.path}'
         )
 
-    # Create the command thunks.
+    # Create the command thunks. Each command is either a class-based
+    # extension, selected with 'class', or an executable extension, selected
+    # with 'exec'.
     thunks = []
     for command_desc in commands_desc['commands']:
         name = command_desc['name']
-        attr = command_desc.get('class', name)
         help = command_desc.get('help', f'(no help provided; try "west {name} -h")')
-        factory = _ExtFactory(py_file, name, attr)
+
+        if 'exec' in command_desc:
+            if 'class' in command_desc:
+                raise ExtensionCommandError(
+                    hint=f"west command '{name}' sets both 'class' and 'exec'"
+                )
+            interpreter = _exec_interpreter(name, command_desc['exec'])
+            factory = _ExecExtFactory(file, interpreter, name, help, project.path)
+        else:
+            attr = command_desc.get('class', name)
+            factory = _ExtFactory(file, name, attr)
+
         thunks.append(WestExtCommandSpec(name, project, help, factory))
 
     # Return the thunks for this project.
     return thunks
+
+
+def _exec_interpreter(name, value):
+    # Turn the 'exec' value of a command into the interpreter argument list
+    # to prefix the file with. 'true' means "run the file directly" (empty
+    # list); a string or list of strings names the interpreter.
+    if value is True:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return list(value)
+    raise ExtensionCommandError(
+        hint=f"west command '{name}' has an invalid 'exec' value; "
+        "expected true, a string, or a list of strings"
+    )
 
 
 def _commands_module_from_file(file):
