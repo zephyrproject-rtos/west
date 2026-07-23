@@ -2,12 +2,24 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+import stat
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
+import pytest
 import yaml
-from conftest import GIT, WINDOWS, add_commit, cmd, cmd_raises, yaml_editor
+from conftest import (
+    GIT,
+    WINDOWS,
+    add_commit,
+    cmd,
+    cmd_raises,
+    cmd_subprocess,
+    yaml_editor,
+)
 
 
 def _yaml_get_proj(mf: dict, projname: str):
@@ -515,3 +527,300 @@ def test_extension_special_chars(west_update_tmpdir):
     resolved_mf = cmd('manifest --resolve')
     resolved_mf = yaml.safe_load(resolved_mf)
     assert resolved_mf["manifest"]["self"]["west-commands"] == weird_cmds
+
+
+#
+# Executable (exec) extension commands
+#
+
+
+# A Python script that echoes the WEST_* context and its forwarded arguments.
+# It is run through an interpreter, so it works on every platform.
+_ENV_ECHO_PY = textwrap.dedent('''\
+    import os
+    import sys
+
+    print("hello from exec extension")
+    print("command=" + os.environ.get("WEST_COMMAND", ""))
+    print("topdir=" + os.environ.get("WEST_TOPDIR", ""))
+    print("project=" + os.environ.get("WEST_PROJECT_PATH", ""))
+    _mf = os.environ.get("WEST_MANIFEST_PATH", "")
+    print("have_manifest=" + ("yes" if os.path.isfile(_mf) else "no"))
+    print("args=" + " ".join(sys.argv[1:]))
+    ''')
+
+# YAML scalar for the interpreter that runs this test's Python. Single-quoted
+# so backslashes and spaces in the path survive on Windows.
+_PY = f"'{sys.executable}'"
+
+
+def _add_exec_extension(west_update_tmpdir, files, *, make_executable=None):
+    # Commit 'files' to the net-tools project and mark 'make_executable'
+    # (a project-relative path) as executable in the working tree.
+    net_tools_path = west_update_tmpdir / 'net-tools'
+    add_commit(net_tools_path, 'add exec extension', files=files)
+    if make_executable is not None:
+        script_path = net_tools_path / make_executable
+        mode = os.stat(script_path).st_mode
+        os.chmod(script_path, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return net_tools_path
+
+
+def test_exec_extension_interpreter(west_update_tmpdir):
+    # An interpreter-backed executable extension: the file is run as an
+    # argument to the interpreter and exposes workspace context through the
+    # WEST_* environment variables. This works on every platform.
+    _add_exec_extension(
+        west_update_tmpdir,
+        files={
+            'scripts/echo.py': _ENV_ECHO_PY,
+            'scripts/west-commands.yml': textwrap.dedent(f'''\
+                west-commands:
+                  - file: scripts/echo.py
+                    commands:
+                      - name: greet
+                        exec: {_PY}
+                        help: greet through an interpreter
+                '''),
+        },
+    )
+
+    out = cmd_subprocess(['greet', 'foo', 'bar'], cwd=west_update_tmpdir)
+    assert 'hello from exec extension' in out
+    assert f'topdir={west_update_tmpdir}' in out
+    assert 'project=net-tools' in out
+    assert 'have_manifest=yes' in out
+    # Everything after the command name is forwarded verbatim, including
+    # arguments west knows nothing about.
+    assert 'args=foo bar' in out
+
+
+def test_exec_extension_interpreter_list(west_update_tmpdir):
+    # 'exec' may be a list, e.g. to pass interpreter options.
+    _add_exec_extension(
+        west_update_tmpdir,
+        files={
+            'scripts/echo.py': _ENV_ECHO_PY,
+            'scripts/west-commands.yml': textwrap.dedent(f'''\
+                west-commands:
+                  - file: scripts/echo.py
+                    commands:
+                      - name: greet
+                        exec: [{_PY}, '-B']
+                        help: greet through an interpreter with options
+                '''),
+        },
+    )
+
+    out = cmd_subprocess(['greet'], cwd=west_update_tmpdir)
+    assert 'hello from exec extension' in out
+
+
+@pytest.mark.skipif(WINDOWS, reason='direct execution needs a real executable on Windows')
+def test_exec_extension_direct(west_update_tmpdir):
+    # 'exec: true' runs the file directly (no interpreter). On POSIX a
+    # shebang + executable bit makes a shell script directly runnable.
+    _add_exec_extension(
+        west_update_tmpdir,
+        files={
+            'scripts/greet.sh': textwrap.dedent('''\
+                #!/bin/sh
+                echo "hello from direct exec"
+                echo "command=$WEST_COMMAND"
+                echo "topdir=$WEST_TOPDIR"
+                echo "args=$*"
+                '''),
+            'scripts/west-commands.yml': textwrap.dedent('''\
+                west-commands:
+                  - file: scripts/greet.sh
+                    commands:
+                      - name: greet
+                        exec: true
+                        help: greet from a shell script
+                '''),
+        },
+        make_executable='scripts/greet.sh',
+    )
+
+    out = cmd_subprocess(['greet', 'foo', 'bar'], cwd=west_update_tmpdir)
+    assert 'hello from direct exec' in out
+    assert f'topdir={west_update_tmpdir}' in out
+    assert 'args=foo bar' in out
+
+
+def test_exec_extension_dispatch_on_command_name(west_update_tmpdir):
+    # A single file registered under multiple names can tell which
+    # subcommand was invoked through WEST_COMMAND.
+    _add_exec_extension(
+        west_update_tmpdir,
+        files={
+            'scripts/echo.py': _ENV_ECHO_PY,
+            'scripts/west-commands.yml': textwrap.dedent(f'''\
+                west-commands:
+                  - file: scripts/echo.py
+                    commands:
+                      - name: sub-one
+                        exec: {_PY}
+                        help: first subcommand
+                      - name: sub-two
+                        exec: {_PY}
+                        help: second subcommand
+                '''),
+        },
+    )
+
+    assert 'command=sub-one' in cmd_subprocess(['sub-one'], cwd=west_update_tmpdir)
+    assert 'command=sub-two' in cmd_subprocess(['sub-two'], cwd=west_update_tmpdir)
+
+
+def test_exec_extension_forwards_options(west_update_tmpdir):
+    # Options that would otherwise look like west arguments (including -h)
+    # must be forwarded to the executable, not intercepted by west.
+    _add_exec_extension(
+        west_update_tmpdir,
+        files={
+            'scripts/echo.py': _ENV_ECHO_PY,
+            'scripts/west-commands.yml': textwrap.dedent(f'''\
+                west-commands:
+                  - file: scripts/echo.py
+                    commands:
+                      - name: echo-args
+                        exec: {_PY}
+                        help: echo forwarded arguments
+                '''),
+        },
+    )
+
+    out = cmd_subprocess(['echo-args', '--help', '-v', '--unknown'], cwd=west_update_tmpdir)
+    assert 'args=--help -v --unknown' in out
+
+
+def test_exec_extension_exit_code(west_update_tmpdir):
+    # West propagates the executable's exit code.
+    _add_exec_extension(
+        west_update_tmpdir,
+        files={
+            'scripts/fail.py': 'import sys\nsys.exit(3)\n',
+            'scripts/west-commands.yml': textwrap.dedent(f'''\
+                west-commands:
+                  - file: scripts/fail.py
+                    commands:
+                      - name: fail-cmd
+                        exec: {_PY}
+                        help: always fails
+                '''),
+        },
+    )
+
+    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+        cmd_subprocess(['fail-cmd'], cwd=west_update_tmpdir)
+    assert exc_info.value.returncode == 3
+
+
+@pytest.mark.skipif(WINDOWS, reason='file executable bit is a POSIX concept')
+def test_exec_extension_not_executable(west_update_tmpdir):
+    # 'exec: true' with a non-executable file produces a clear error.
+    _add_exec_extension(
+        west_update_tmpdir,
+        files={
+            'scripts/not-exec.sh': '#!/bin/sh\necho nope\n',
+            'scripts/west-commands.yml': textwrap.dedent('''\
+                west-commands:
+                  - file: scripts/not-exec.sh
+                    commands:
+                      - name: not-exec
+                        exec: true
+                        help: not executable
+                '''),
+        },
+        # Intentionally do not mark it executable.
+    )
+
+    _, err_msg = cmd_raises('not-exec', SystemExit)
+    assert 'is not executable' in err_msg
+
+
+@pytest.mark.parametrize('exec_value', ['true', _PY])
+def test_exec_extension_file_not_found(west_update_tmpdir, exec_value):
+    # A missing backing file reports "not found" rather than the misleading
+    # "not executable", both when run directly and through an interpreter.
+    # This check is platform-independent.
+    _add_exec_extension(
+        west_update_tmpdir,
+        files={
+            'scripts/west-commands.yml': textwrap.dedent(f'''\
+                west-commands:
+                  - file: scripts/missing
+                    commands:
+                      - name: missing-cmd
+                        exec: {exec_value}
+                        help: missing file
+                '''),
+        },
+    )
+
+    _, err_msg = cmd_raises('missing-cmd', SystemExit)
+    assert 'not found' in err_msg
+
+
+def test_exec_extension_class_and_exec_conflict(west_update_tmpdir):
+    # 'class' and 'exec' are mutually exclusive on a command.
+    _add_exec_extension(
+        west_update_tmpdir,
+        files={
+            'scripts/echo.py': _ENV_ECHO_PY,
+            'scripts/west-commands.yml': textwrap.dedent(f'''\
+                west-commands:
+                  - file: scripts/echo.py
+                    commands:
+                      - name: conflict-cmd
+                        class: SomeClass
+                        exec: {_PY}
+                        help: invalid
+                '''),
+        },
+    )
+
+    _, err_msg = cmd_raises('conflict-cmd', SystemExit)
+    assert "sets both 'class' and 'exec'" in err_msg
+
+
+def test_exec_extension_invalid_exec_value(west_update_tmpdir):
+    # 'exec' must be true, a string, or a list of strings.
+    _add_exec_extension(
+        west_update_tmpdir,
+        files={
+            'scripts/echo.py': _ENV_ECHO_PY,
+            'scripts/west-commands.yml': textwrap.dedent('''\
+                west-commands:
+                  - file: scripts/echo.py
+                    commands:
+                      - name: bad-exec
+                        exec: 123
+                        help: invalid
+                '''),
+        },
+    )
+
+    _, err_msg = cmd_raises('bad-exec', SystemExit)
+    assert "invalid 'exec' value" in err_msg
+
+
+def test_exec_extension_directory_escape(west_update_tmpdir):
+    # The file must not escape the project directory.
+    _add_exec_extension(
+        west_update_tmpdir,
+        files={
+            'scripts/west-commands.yml': textwrap.dedent('''\
+                west-commands:
+                  - file: ../../zephyr/evil.sh
+                    commands:
+                      - name: evil-exec
+                        exec: true
+                        help: escape attempt
+                '''),
+        },
+    )
+
+    _, err_msg = cmd_raises('evil-exec', SystemExit)
+    assert 'escapes project path' in err_msg
