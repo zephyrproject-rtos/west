@@ -193,9 +193,8 @@ class Config(WestCommand):
                 )
         elif not args.name:
             self.parser.error('missing argument name (to list all options and values, use -l)')
-        elif args.append:
-            if args.value is None:
-                self.parser.error('-a requires both name and value')
+        elif args.append and args.value is None:
+            self.parser.error('-a requires both name and value')
 
         if args.list_paths:
             self.list_paths(args)

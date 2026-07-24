@@ -309,11 +309,10 @@ class Configuration:
         if configfile == ConfigFile.ALL:
             # We need a real configuration file; ALL doesn't make sense here.
             raise ValueError(configfile)
-        elif configfile == ConfigFile.LOCAL:
-            if not self._local_locs:
-                raise ValueError(
-                    f'{configfile}: file not found; retry in a workspace or set WEST_CONFIG_LOCAL'
-                )
+        elif configfile == ConfigFile.LOCAL and not self._local_locs:
+            raise ValueError(
+                f'{configfile}: file not found; retry in a workspace or set WEST_CONFIG_LOCAL'
+            )
 
         # ensure that only one config is in use
         configs = self.get_search_paths(configfile)

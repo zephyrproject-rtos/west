@@ -244,7 +244,7 @@ def test_list_groups(west_init_tmpdir):
     check(_list_f('{name} .{groups}. {path}') + ['baz'], ['baz .baz-group. baz'])
 
     check(
-        _list_f("{name} .{groups}. {path}") + 'foo bar baz'.split(),
+        _list_f("{name} .{groups}. {path}") + ['foo', 'bar', 'baz'],
         ['foo .foo-group-1,foo-group-2. foo', 'bar .. path-for-bar', 'baz .baz-group. baz'],
     )
 
@@ -264,7 +264,7 @@ def test_list_groups(west_init_tmpdir):
     )
 
     check(
-        _list_f("{name} .{groups}. {path} {active}") + ['--all'] + 'foo bar'.split(),
+        _list_f("{name} .{groups}. {path} {active}") + ['--all'] + ['foo', 'bar'],
         ['foo .foo-group-1,foo-group-2. foo inactive', 'bar .. path-for-bar active'],
     )
 
@@ -825,7 +825,7 @@ def test_forall(west_init_tmpdir):
     ]
 
     assert cmd_subprocess(
-        'forall --group Kconfiglib-group -c'.split() + ['echo foo']
+        ['forall', '--group', 'Kconfiglib-group', '-c'] + ['echo foo']
     ).splitlines() == [
         '=== running "echo foo" in Kconfiglib (subdir/Kconfiglib):',
         'foo',

@@ -2372,11 +2372,10 @@ class Manifest:
         # md = manifest defaults (dictionary with values parsed from
         # the manifest)
         mdrem: str | None = defaults.get('remote')
-        if mdrem:
-            # The default remote name, if provided, must refer to a
-            # well-defined remote.
-            if mdrem not in url_bases:
-                self._malformed(f'default remote {mdrem} is not defined')
+        # The default remote name, if provided, must refer to a
+        # well-defined remote.
+        if mdrem and mdrem not in url_bases:
+            self._malformed(f'default remote {mdrem} is not defined')
         return _defaults(mdrem, defaults.get('revision', _DEFAULT_REV))
 
     def _load_projects(
