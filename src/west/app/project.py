@@ -1817,7 +1817,7 @@ class Update(_ProjectCommand):
 
     def update(self, project):
         if self.args.stats:
-            stats = dict()
+            stats = {}
             update_start = perf_counter()
         else:
             stats = None

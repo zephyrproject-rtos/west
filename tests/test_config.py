@@ -885,7 +885,7 @@ def test_no_args():
 
 def test_list():
     def sorted_list(other_args=''):
-        return list(sorted(cmd('config -l ' + other_args).splitlines()))
+        return sorted(cmd('config -l ' + other_args).splitlines())
 
     _, err_msg = cmd_raises('config -l pytest.foo', SystemExit)
     assert '-l cannot be combined with name argument' in err_msg

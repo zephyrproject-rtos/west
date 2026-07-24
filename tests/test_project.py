@@ -310,7 +310,7 @@ def test_manifest_untracked(west_update_tmpdir):
     topdir = Path(west_update_tmpdir)
 
     # No untracked files yet
-    check(list())
+    check([])
 
     (topdir / "dir").mkdir()
     # Untracked dir

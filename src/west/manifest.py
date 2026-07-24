@@ -909,7 +909,7 @@ class Project:
         self.userdata: Any = userdata
 
         # Internal helpers
-        self._west_commands_manifest_dirs: dict[str, str] = dict()
+        self._west_commands_manifest_dirs: dict[str, str] = {}
 
     @property
     def path(self) -> str:
@@ -1270,7 +1270,7 @@ class ManifestProject(Project):
 
         # Extension commands.
         self.west_commands = _west_commands_list(west_commands)
-        self._west_commands_manifest_dirs: dict[str, str] = dict()
+        self._west_commands_manifest_dirs: dict[str, str] = {}
 
     @property
     def abspath(self) -> str | None:
