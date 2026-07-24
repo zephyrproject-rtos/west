@@ -231,8 +231,8 @@ def test_update_auto_cache(tmpdir):
 
     # Check that some info file was created with basic info
     # e.g. /path/to/auto/cache/foo/<hash>.info
-    foo_hash = sorted(os.listdir(auto_cache_dir / 'foo'))[0]
-    bar_hash = sorted(os.listdir(auto_cache_dir / 'bar'))[0]
+    foo_hash = min(os.listdir(auto_cache_dir / 'foo'))
+    bar_hash = min(os.listdir(auto_cache_dir / 'bar'))
     expected_foo_info = textwrap.dedent(f"""
         The following local cache directory was automatically created by west:
         - Local Cache:  {foo_hash}

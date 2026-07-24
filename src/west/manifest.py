@@ -500,8 +500,7 @@ def _update_disabled_groups(disabled_groups: set[str], group_filter: GroupFilter
             disabled_groups.add(item[1:])
         elif item.startswith('+'):
             group = item[1:]
-            if group in disabled_groups:
-                disabled_groups.remove(group)
+            disabled_groups.discard(group)
         else:
             # We should never get here. This private helper is only
             # meant to be invoked on valid data.
