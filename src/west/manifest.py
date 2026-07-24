@@ -803,8 +803,6 @@ class _MLS(str):
     then dumped into YAML using block style literals ("|").
     '''
 
-    pass
-
 
 class Project:
     '''Represents a project defined in a west manifest.
