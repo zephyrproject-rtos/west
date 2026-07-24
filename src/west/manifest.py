@@ -474,7 +474,7 @@ def _compose_imap_filters(
         # These type annotated versions silence mypy warnings.
         fn1: Callable[[Project], bool] = imap_filter1
         fn2: Callable[[Project], bool] = imap_filter2
-        return lambda project: (fn1(project) and fn2(project))
+        return lambda project: fn1(project) and fn2(project)
     else:
         return imap_filter1 or imap_filter2
 

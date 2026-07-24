@@ -39,7 +39,7 @@ west = "west.app.main:main"
 
 [dependency-groups]
 lint = [
-    "ruff~=0.13",
+    "ruff~=0.16",
 ]
 test = [
     "coverage~=7.10",
@@ -86,6 +86,7 @@ source = [
 line-length = 100
 
 [tool.ruff.lint]
+# Extend Ruff's (broad, curated) default rule set with a few extra families.
 extend-select = [
   "B",   # flake8-bugbear
   "E",   # pycodestyle errors
@@ -98,8 +99,6 @@ extend-select = [
 [tool.ruff.format]
 quote-style = "preserve"
 line-ending = "lf"
-# Enable preview mode for Github Annotations added in 0.13.3
-preview = true
 
 [tool.mypy]
 mypy_path = "src"

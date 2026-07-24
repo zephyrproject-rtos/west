@@ -425,18 +425,22 @@ def test_update_caches_priorities(tmpdir):
     create_repo(tmpdir / 'name_cache_remotes' / 'bar')
     name_cache_foo_head = rev_parse(tmpdir / 'name_cache_remotes' / 'foo', 'HEAD')
     name_cache_bar_head = rev_parse(tmpdir / 'name_cache_remotes' / 'bar', 'HEAD')
-    subprocess.check_call([
-        GIT,
-        'clone',
-        os.fspath(tmpdir / 'name_cache_remotes' / 'foo'),
-        os.fspath(name_cache_dir / "foo"),
-    ])
-    subprocess.check_call([
-        GIT,
-        'clone',
-        os.fspath(tmpdir / 'name_cache_remotes' / 'bar'),
-        os.fspath(name_cache_dir / "bar"),
-    ])
+    subprocess.check_call(
+        [
+            GIT,
+            'clone',
+            os.fspath(tmpdir / 'name_cache_remotes' / 'foo'),
+            os.fspath(name_cache_dir / "foo"),
+        ]
+    )
+    subprocess.check_call(
+        [
+            GIT,
+            'clone',
+            os.fspath(tmpdir / 'name_cache_remotes' / 'bar'),
+            os.fspath(name_cache_dir / "bar"),
+        ]
+    )
 
     # setup remote repositories and local cache for --path-cache
     # (path_cache)
@@ -447,18 +451,22 @@ def test_update_caches_priorities(tmpdir):
     create_repo(tmpdir / 'path_cache_remotes' / 'bar')
     path_cache_foo_head = rev_parse(tmpdir / 'path_cache_remotes' / 'foo', 'HEAD')
     path_cache_bar_head = rev_parse(tmpdir / 'path_cache_remotes' / 'bar', 'HEAD')
-    subprocess.check_call([
-        GIT,
-        'clone',
-        os.fspath(tmpdir / 'path_cache_remotes' / 'foo'),
-        os.fspath(path_cache_dir / "subdir" / "foo"),
-    ])
-    subprocess.check_call([
-        GIT,
-        'clone',
-        os.fspath(tmpdir / 'path_cache_remotes' / 'bar'),
-        os.fspath(path_cache_dir / "bar"),
-    ])
+    subprocess.check_call(
+        [
+            GIT,
+            'clone',
+            os.fspath(tmpdir / 'path_cache_remotes' / 'foo'),
+            os.fspath(path_cache_dir / "subdir" / "foo"),
+        ]
+    )
+    subprocess.check_call(
+        [
+            GIT,
+            'clone',
+            os.fspath(tmpdir / 'path_cache_remotes' / 'bar'),
+            os.fspath(path_cache_dir / "bar"),
+        ]
+    )
 
     # setup remote repositories for auto cache
     create_repo(tmpdir / 'auto_cache_remotes' / 'foo')
@@ -487,13 +495,15 @@ def test_update_caches_priorities(tmpdir):
         bar_head=name_cache_bar_head,
     )
     workspace1.chdir()
-    cmd([
-        'update',
-        '--name-cache',
-        os.fspath(name_cache_dir),
-        '--path-cache',
-        os.fspath(path_cache_dir),
-    ])
+    cmd(
+        [
+            'update',
+            '--name-cache',
+            os.fspath(name_cache_dir),
+            '--path-cache',
+            os.fspath(path_cache_dir),
+        ]
+    )
     assert foo.check(dir=1)
     assert bar.check(dir=1)
     assert rev_parse(foo, 'HEAD') == name_cache_foo_head
@@ -521,13 +531,15 @@ def test_update_caches_priorities(tmpdir):
         bar_head=name_cache_bar_head,
     )
     workspace2.chdir()
-    cmd([
-        'update',
-        '--name-cache',
-        os.fspath(name_cache_dir),
-        '--path-cache',
-        os.fspath(path_cache_dir),
-    ])
+    cmd(
+        [
+            'update',
+            '--name-cache',
+            os.fspath(name_cache_dir),
+            '--path-cache',
+            os.fspath(path_cache_dir),
+        ]
+    )
     assert foo.check(dir=1)
     assert bar.check(dir=1)
     assert rev_parse(foo, 'HEAD') == path_cache_foo_head
@@ -551,13 +563,15 @@ def test_update_caches_priorities(tmpdir):
         bar_head=path_cache_bar_head,
     )
     workspace3.chdir()
-    cmd([
-        'update',
-        '--path-cache',
-        os.fspath(path_cache_dir),
-        '--auto-cache',
-        os.fspath(auto_cache_dir),
-    ])
+    cmd(
+        [
+            'update',
+            '--path-cache',
+            os.fspath(path_cache_dir),
+            '--auto-cache',
+            os.fspath(auto_cache_dir),
+        ]
+    )
     assert foo.check(dir=1)
     assert bar.check(dir=1)
     assert rev_parse(foo, 'HEAD') == path_cache_foo_head
@@ -581,15 +595,17 @@ def test_update_caches_priorities(tmpdir):
 
     assert not (auto_cache_dir / 'foo').exists()
     assert not (auto_cache_dir / 'bar').exists()
-    cmd([
-        'update',
-        '--name-cache',
-        os.fspath(Path('non-existent')),
-        '--path-cache',
-        os.fspath(Path('non-existent')),
-        '--auto-cache',
-        os.fspath(auto_cache_dir),
-    ])
+    cmd(
+        [
+            'update',
+            '--name-cache',
+            os.fspath(Path('non-existent')),
+            '--path-cache',
+            os.fspath(Path('non-existent')),
+            '--auto-cache',
+            os.fspath(auto_cache_dir),
+        ]
+    )
     assert foo.check(dir=1)
     assert bar.check(dir=1)
     assert rev_parse(foo, 'HEAD') == auto_cache_foo_head

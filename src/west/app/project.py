@@ -2697,13 +2697,15 @@ def _clean_west_refspace(project):
 
 
 def _update_manifest_rev(project, new_manifest_rev):
-    project.git([
-        'update-ref',
-        '-m',
-        f'west update: moving to {new_manifest_rev}',
-        QUAL_MANIFEST_REV,
-        new_manifest_rev,
-    ])
+    project.git(
+        [
+            'update-ref',
+            '-m',
+            f'west update: moving to {new_manifest_rev}',
+            QUAL_MANIFEST_REV,
+            new_manifest_rev,
+        ]
+    )
 
 
 def _maybe_sha(rev):

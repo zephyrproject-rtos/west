@@ -204,12 +204,14 @@ def setup_teardown_test_environment(tmpdir_factory):
     # run with environment variables set
     with (
         chdir(tmp_cwd),
-        update_env({
-            'WEST_CONFIG_SYSTEM': str(system),
-            'WEST_CONFIG_GLOBAL': str(glbl),
-            'WEST_CONFIG_LOCAL': None,
-            'ZEPHYR_BASE': str(tmpdir / 'no-zephyr-here'),
-        }),
+        update_env(
+            {
+                'WEST_CONFIG_SYSTEM': str(system),
+                'WEST_CONFIG_GLOBAL': str(glbl),
+                'WEST_CONFIG_LOCAL': None,
+                'ZEPHYR_BASE': str(tmpdir / 'no-zephyr-here'),
+            }
+        ),
     ):
         yield
 

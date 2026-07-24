@@ -448,14 +448,16 @@ def test_append():
     assert cfg(f=GLOBAL)['build']['cmake-args'] == '-DCONF_FILE=foo.conf'
 
     # Use a list instead of a string to avoid one level of nested quoting
-    cmd([
-        'config',
-        '--global',
-        '-a',
-        'build.cmake-args',
-        '--',
-        ' -DEXTRA_CFLAGS=\'-Wextra -g0\' -DFOO=BAR',
-    ])
+    cmd(
+        [
+            'config',
+            '--global',
+            '-a',
+            'build.cmake-args',
+            '--',
+            ' -DEXTRA_CFLAGS=\'-Wextra -g0\' -DFOO=BAR',
+        ]
+    )
 
     assert (
         cfg(f=GLOBAL)['build']['cmake-args']

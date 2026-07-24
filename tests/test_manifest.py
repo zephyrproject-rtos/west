@@ -160,9 +160,9 @@ def test_manifest_from_data_without_topdir():
     assert manifest.projects[-1].name == 'foo'
     assert manifest.projects[-1].abspath is None
 
-    manifest = Manifest.from_data({
-        'manifest': {'projects': [{'name': 'foo', 'url': 'https:foo.com'}]}
-    })
+    manifest = Manifest.from_data(
+        {'manifest': {'projects': [{'name': 'foo', 'url': 'https:foo.com'}]}}
+    )
     assert manifest.projects[-1].name == 'foo'
     assert manifest.projects[-1].abspath is None
 
@@ -613,7 +613,7 @@ def test_project_repr():
         == 'Project("zephyr", "https://foo.com", revision="r", path=\'zephyr\', '
         'clone_depth=None, west_commands=[\'some-path/west-commands.yml\'], '
         'topdir=None, groups=[], userdata=None)'
-    )  # noqa: E501
+    )
 
 
 def test_project_sha(tmpdir):

@@ -357,55 +357,63 @@ def test_manifest_untracked(west_update_tmpdir):
     clone(topdir / "net-tools", Path('subdir/acopy'))
     clone(topdir / "net-tools", Path('tmpcopy'))
 
-    check([
-        'dir',
-        'file.txt',
-        str(Path('subdir/acopy')),
-        str(Path('subdir/new')),
-        str(Path('subdir/z.py')),
-        'tmpcopy',
-        'unt',
-    ])
+    check(
+        [
+            'dir',
+            'file.txt',
+            str(Path('subdir/acopy')),
+            str(Path('subdir/new')),
+            str(Path('subdir/z.py')),
+            'tmpcopy',
+            'unt',
+        ]
+    )
 
     # Empty a project so it's not a Git repo anymore
     (topdir / "net-tools" / ".git").rename(topdir / "net-tools" / "former-git")
     # Should make no difference
-    check([
-        'dir',
-        'file.txt',
-        str(Path('subdir/acopy')),
-        str(Path('subdir/new')),
-        str(Path('subdir/z.py')),
-        'tmpcopy',
-        'unt',
-    ])
+    check(
+        [
+            'dir',
+            'file.txt',
+            str(Path('subdir/acopy')),
+            str(Path('subdir/new')),
+            str(Path('subdir/z.py')),
+            'tmpcopy',
+            'unt',
+        ]
+    )
 
     # Same with an inactive project
     (kconfiglib / ".git").rename(kconfiglib / "former-git")
     # Should make no difference
-    check([
-        'dir',
-        'file.txt',
-        str(Path('subdir/acopy')),
-        str(Path('subdir/new')),
-        str(Path('subdir/z.py')),
-        'tmpcopy',
-        'unt',
-    ])
+    check(
+        [
+            'dir',
+            'file.txt',
+            str(Path('subdir/acopy')),
+            str(Path('subdir/new')),
+            str(Path('subdir/z.py')),
+            'tmpcopy',
+            'unt',
+        ]
+    )
 
     # Even if we make the whole inactive project disappear it should make no
     # difference at all, except that the renamed dir will show up.
     (kconfiglib).rename(topdir / "subdir" / "other")
-    check([
-        'dir',
-        'file.txt',
-        str(Path('subdir/acopy')),
-        str(Path('subdir/new')),
-        str(Path('subdir/other')),
-        str(Path('subdir/z.py')),
-        'tmpcopy',
-        'unt',
-    ])
+    check(
+        [
+            'dir',
+            'file.txt',
+            str(Path('subdir/acopy')),
+            str(Path('subdir/new')),
+            str(Path('subdir/other')),
+            str(Path('subdir/z.py')),
+            'tmpcopy',
+            'unt',
+        ]
+    )
 
 
 @pytest.mark.skipif(sys.platform.startswith("win"), reason="symbolic links not tested on Windows")
@@ -434,13 +442,15 @@ def test_manifest_untracked_with_symlinks(west_update_tmpdir):
     # File symlink tests, should all be displayed as untracked as well
     Path('filesl.yml').symlink_to(Path('zephyr/west.yml'))
     Path('subdir/afsl.py').symlink_to(Path('net-tools/scripts/test.py'))
-    check([
-        'anothersl',
-        'asl',
-        'filesl.yml',
-        str(Path('subdir/afsl.py')),
-        str(Path('subdir/yetanothersl')),
-    ])
+    check(
+        [
+            'anothersl',
+            'asl',
+            'filesl.yml',
+            str(Path('subdir/afsl.py')),
+            str(Path('subdir/yetanothersl')),
+        ]
+    )
 
 
 def test_manifest_freeze(west_update_tmpdir):
@@ -691,11 +701,13 @@ def test_compare_format_projects(config_tmpdir, west_init_tmpdir):
     assert re.match(r'^[0-9a-f]{40}$', sha)
 
     # All remaining keys.
-    out = cmd([
-        'compare',
-        '-f',
-        '{name}|{url}|{path}|{abspath}|{posixpath}|{revision}|{groups}',
-    ]).strip()
+    out = cmd(
+        [
+            'compare',
+            '-f',
+            '{name}|{url}|{path}|{abspath}|{posixpath}|{revision}|{groups}',
+        ]
+    ).strip()
     fields = out.split('|')
     assert fields[0] == 'Kconfiglib'
     assert fields[1].endswith('/Kconfiglib')  # url from test fixture's url-base
@@ -1717,17 +1729,19 @@ manifest:
     )
 
     def add_submodule(superproject, submodule_name, submodule_url, submodule_path):
-        subprocess.check_call([
-            GIT,
-            '-C',
-            os.fspath(superproject),
-            'submodule',
-            'add',
-            '--name',
-            submodule_name,
-            submodule_url,
-            submodule_path,
-        ])
+        subprocess.check_call(
+            [
+                GIT,
+                '-C',
+                os.fspath(superproject),
+                'submodule',
+                'add',
+                '--name',
+                submodule_name,
+                submodule_url,
+                submodule_path,
+            ]
+        )
         add_commit(superproject, f'add submodule {submodule_name}')
 
     add_submodule(pseudo_remotes / 'project-1', 'sub-1-1', '../submodule-1-1', 'submodule-1-1')
