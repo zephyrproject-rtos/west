@@ -704,7 +704,7 @@ below.
             self.die(f'Cannot initialize in {directory}: permission denied')
         except FileExistsError:
             self.die(f'Cannot initialize in {directory}: it already exists')
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional catch-all for a clean error message
             self.die(f"Can't create {directory}: {e}")
 
 
