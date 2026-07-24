@@ -330,7 +330,7 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory(re
     )
 
     with yaml_editor(manifest_path / 'west.yml') as mf:
-        net_tools_project = [p for p in mf['manifest']['projects'] if p['name'] == 'net-tools'][0]
+        net_tools_project = next(p for p in mf['manifest']['projects'] if p['name'] == 'net-tools')
         net_tools_project['import'] = 'mf_subdir/west.yml'
     subprocess.check_call([
         GIT,
@@ -409,7 +409,7 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory_sp
     )
 
     with yaml_editor(manifest_path / 'west.yml') as mf:
-        net_tools_project = [p for p in mf['manifest']['projects'] if p['name'] == 'net-tools'][0]
+        net_tools_project = next(p for p in mf['manifest']['projects'] if p['name'] == 'net-tools')
         net_tools_project['import'] = r'mf_subdir/west.yml'
     subprocess.check_call([
         GIT,

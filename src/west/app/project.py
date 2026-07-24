@@ -19,6 +19,7 @@ from functools import partial
 from os.path import abspath, basename, relpath
 from pathlib import Path, PurePath
 from time import perf_counter
+from typing import ClassVar
 from urllib.parse import urlparse
 
 from west import util
@@ -2503,17 +2504,17 @@ class Grep(_ProjectCommand):
     #
     # - the 'failed' handling below for proper exit codes
     # - color handling works as expected
-    TOOLS = ['git-grep', 'ripgrep', 'grep']
+    TOOLS: ClassVar[list[str]] = ['git-grep', 'ripgrep', 'grep']
 
     DEFAULT_TOOL = 'git-grep'
 
-    DEFAULT_TOOL_ARGS = {
+    DEFAULT_TOOL_ARGS: ClassVar[dict[str, list[str]]] = {
         'git-grep': [],
         'ripgrep': [],
         'grep': ['--recursive'],
     }
 
-    DEFAULT_TOOL_EXECUTABLES = {
+    DEFAULT_TOOL_EXECUTABLES: ClassVar[dict[str, list[str]]] = {
         # git-grep is intentionally omitted: use self._git
         'ripgrep': ['rg', 'ripgrep'],
         'grep': ['grep'],

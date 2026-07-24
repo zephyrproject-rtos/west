@@ -1874,7 +1874,7 @@ def test_update_narrow(tmpdir):
     # Test that 'west update --narrow' doesn't fetch tags, and that
     # 'west update' respects the 'update.narrow' config option.
 
-    remote, workspace = setup_narrow(tmpdir)
+    _remote, workspace = setup_narrow(tmpdir)
     workspace.chdir()
 
     def project_tags():
@@ -1901,7 +1901,7 @@ def test_update_narrow_depth1(tmpdir):
     # one commit, regardless of how many there are in the remote
     # repository.
 
-    remote, workspace = setup_narrow(tmpdir)
+    _remote, workspace = setup_narrow(tmpdir)
 
     cmd('update --narrow --fetch-opt=--depth=1', cwd=workspace)
 

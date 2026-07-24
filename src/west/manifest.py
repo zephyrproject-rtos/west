@@ -169,7 +169,7 @@ def _update_project_filter(project_filter: ProjectFilterType, option_value: str 
         try:
             pattern = re.compile(regexp)
         except re.error as e:
-            _err(f'invalid regular expression "{regexp}": {str(e)}')
+            _err(f'invalid regular expression "{regexp}": {e!s}')
 
         project_filter.append(ProjectFilterElt(pattern=pattern, make_active=make_active))
 
@@ -846,12 +846,12 @@ class Project:
     def __repr__(self):
         return (
             f'Project("{self.name}", "{self.url}", '
-            f'revision="{self.revision}", path={repr(self.path)}, '
+            f'revision="{self.revision}", path={self.path!r}, '
             f'clone_depth={self.clone_depth}, '
             f'west_commands={self.west_commands}, '
-            f'topdir={repr(self.topdir)}, '
-            f'groups={repr(self.groups)}, '
-            f'userdata={repr(self.userdata)})'
+            f'topdir={self.topdir!r}, '
+            f'groups={self.groups!r}, '
+            f'userdata={self.userdata!r})'
         )
 
     def __str__(self):
@@ -1221,10 +1221,10 @@ class ManifestProject(Project):
 
     def __repr__(self):
         return (
-            f'ManifestProject(path={repr(self.path)}, '
+            f'ManifestProject(path={self.path!r}, '
             f'west_commands={self.west_commands}, '
-            f'topdir={repr(self.topdir)}, '
-            f'userdata={repr(self.userdata)})'
+            f'topdir={self.topdir!r}, '
+            f'userdata={self.userdata!r})'
         )
 
     def __init__(
