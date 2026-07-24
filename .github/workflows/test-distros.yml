@@ -38,6 +38,13 @@ jobs:
     name: Run Python Tests on Linux distros
     runs-on: ubuntu-latest
     container: ${{ matrix.container }}
+    env:
+      # The point of this workflow is to test west against each distro's *own*
+      # Python and packaging. By default uv prefers (and will download) its own
+      # managed Python, which silently bypasses the distro interpreter. Force uv
+      # to use the system Python and never fetch a managed one.
+      UV_NO_MANAGED_PYTHON: "1"
+      UV_PYTHON_DOWNLOADS: "never"
     strategy:
       fail-fast: false
       matrix:
