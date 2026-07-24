@@ -445,10 +445,10 @@ def _cmd(cmd, cwd=None, env=None):
             main.main(cmd)
         except SystemExit as e:
             if e.code:
-                raise e
+                raise
         except Exception as e:
             print(f'Uncaught exception type {e}', file=sys.stderr)
-            raise e
+            raise
 
 
 def cmd(cmd: list | str, cwd=None, stderr: io.StringIO | None = None, env=None):
