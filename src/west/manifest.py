@@ -2203,7 +2203,7 @@ class Manifest:
         slf: dict[str, Any] | None = manifest_data.get('self')
 
         if not slf:
-            return None
+            return
 
         yaml_path = slf.get('path')
         if 'path' in slf and not yaml_path:
