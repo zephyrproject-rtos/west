@@ -350,7 +350,8 @@ class WestCommand(ABC):
         the call at Verbosity.DBG_MORE level.'''
 
         self._log_subproc(args, **kwargs)
-        return subprocess.run(args, errors='backslashreplace', **kwargs)
+        # check is intentionally left to the caller via kwargs
+        return subprocess.run(args, errors='backslashreplace', **kwargs)  # noqa: PLW1510
 
     def die_if_no_git(self):
         '''Abort if git is not installed on PATH.'''
