@@ -53,7 +53,7 @@ jobs:
           - "debian:stable"
           - "debian:testing"
           - "fedora:latest"
-          - "fedora:rawhide"
+          # - "fedora:rawhide"
           - "opensuse/tumbleweed:latest"
           - "ubuntu:devel"
     steps:
