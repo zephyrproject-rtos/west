@@ -2850,8 +2850,10 @@ def test_extension_command_duplicate(repos_tmpdir):
 
     expected_warns = [
         'WARNING: ignoring project Kconfiglib extension command "list"; this is a built in command',
-        'WARNING: ignoring project net-tools extension command "test-extension"; '
-        'command "test-extension" is already defined as extension command',
+        (
+            'WARNING: ignoring project net-tools extension command "test-extension"; '
+            'command "test-extension" is already defined as extension command'
+        ),
     ]
 
     # Expect output from the built-in command, not its Kconfiglib duplicate.

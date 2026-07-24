@@ -2283,7 +2283,7 @@ _IMPORT_SELF_MANIFESTS = [
           - west.d/01-libraries.yml
           - west.d/02-vendor-hals.yml
           - west.d/03-applications.yml
-    '''
+    ''',
     # as an equivalent map:
     '''\
     manifest:
@@ -2350,7 +2350,7 @@ def _setup_import_self(tmp_workspace, manifests):
             f.write(content)
 
 
-@pytest.mark.parametrize('content', _IMPORT_SELF_MANIFESTS, ids=['dir', 'files'])
+@pytest.mark.parametrize('content', _IMPORT_SELF_MANIFESTS, ids=['dir', 'files', 'map'])
 def test_import_self_directory(content, tmp_workspace):
     # Test a couple of different equivalent ways to import content
     # from the manifest repository.
