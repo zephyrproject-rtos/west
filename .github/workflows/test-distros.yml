@@ -79,14 +79,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Display Python version
-        run: python3 -c "import sys; print(sys.version); print(sys.platform)"
-
       - name: Install uv
         run: pip3 install uv --break-system-packages
 
       - name: Install Python dependencies
         run: uv sync --frozen
 
+      - name: Display Python version
+        run: uv run --frozen python -c "import sys; print(sys.version); print(sys.platform)"
+
       - name: Run tasks
-        run: uv run poe all
+        run: uv run --frozen poe all
