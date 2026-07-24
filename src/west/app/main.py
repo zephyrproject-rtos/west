@@ -1081,7 +1081,7 @@ class WestArgumentParser(argparse.ArgumentParser):
                 #
                 # This has its own wrinkle: we can't let a failed
                 # import break the built-in commands.
-                for _path, specs in self.west_app.extension_groups.items():
+                for specs in self.west_app.extension_groups.values():
                     # This may occur in case a project defines commands already
                     # defined, in which case it has been filtered out.
                     if not specs:
