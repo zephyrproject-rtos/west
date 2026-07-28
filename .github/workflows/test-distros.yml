@@ -13,22 +13,24 @@ on:
 
 # Running this workflow locally can be done using docker, with the following commands in
 # your local clone of the west repository:
-
+#
 # 1. Start a docker container with (read-only) access to the source files
 # $ docker run -it -v $(pwd):/west:ro <container>
 #
-# 2. Install, depending on the OS, git and python-pip, for example in Arch linux:
-# $ pacman -Syu --noconfirm git python-pip
+# 2. Install, depending on the OS, git, python-pip and curl, for example in Arch linux:
+# $ pacman -Syu --noconfirm git python-pip curl
 #
 # 3. Clone the repository to a temporary directory
 # $ git config --global --add safe.directory /west
-# $ git clone -q /west /west-tmp
+# $ git clone -q /west /west-tmp && cd /west-tmp
 #
-# 4. Install tox
-# $ pip3 install tox --break-system-packages
+# 4. Install uv (see https://docs.astral.sh/uv/getting-started/installation/)
+# $ curl -LsSf https://astral.sh/uv/install.sh | sh
 #
-# 5. Run tox
-# $ tox -c /west-tmp -- -W error
+# 5. Sync and run the checks against the distro's own Python
+# $ export UV_NO_MANAGED_PYTHON=1 UV_PYTHON_DOWNLOADS=never
+# $ uv sync --frozen
+# $ uv run --frozen poe all
 
 permissions:
   contents: read
@@ -45,6 +47,10 @@ jobs:
       # to use the system Python and never fetch a managed one.
       UV_NO_MANAGED_PYTHON: "1"
       UV_PYTHON_DOWNLOADS: "never"
+      # Install uv into a directory already on PATH so later steps find it without
+      # $GITHUB_PATH, which some distro container images do not extend correctly.
+      UV_INSTALL_DIR: /usr/local/bin
+      UV_NO_MODIFY_PATH: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -59,20 +65,20 @@ jobs:
     steps:
       - if: ${{ startsWith(matrix.container, 'archlinux') }}
         run: |
-          pacman -Syu --noconfirm git python-pip
+          pacman -Syu --noconfirm git python-pip curl
 
       - if: ${{ startsWith(matrix.container, 'debian') || startsWith(matrix.container, 'ubuntu') }}
         run: |
           apt-get update
-          apt-get install -y git python3-pip python3-venv
+          apt-get install -y git python3-pip python3-venv curl
 
       - if: ${{ startsWith(matrix.container, 'fedora') }}
         run: |
-          dnf install -y git python3-pip
+          dnf install -y git python3-pip curl
 
       - if: ${{ startsWith(matrix.container, 'opensuse') }}
         run: |
-          zypper -n install git python3-pip python3-sqlite3
+          zypper -n install git python3-pip python3-sqlite3 curl
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -80,7 +86,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        run: pip3 install uv --break-system-packages
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
       - name: Install Python dependencies
         run: uv sync --frozen
