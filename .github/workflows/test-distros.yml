@@ -17,8 +17,8 @@ on:
 # 1. Start a docker container with (read-only) access to the source files
 # $ docker run -it -v $(pwd):/west:ro <container>
 #
-# 2. Install, depending on the OS, git, python-pip and curl, for example in Arch linux:
-# $ pacman -Syu --noconfirm git python-pip curl
+# 2. Install, depending on the OS, git, python and curl, for example in Arch linux:
+# $ pacman -Syu --noconfirm git python curl
 #
 # 3. Clone the repository to a temporary directory
 # $ git config --global --add safe.directory /west
@@ -65,20 +65,20 @@ jobs:
     steps:
       - if: ${{ startsWith(matrix.container, 'archlinux') }}
         run: |
-          pacman -Syu --noconfirm git python-pip curl
+          pacman -Syu --noconfirm git python curl
 
       - if: ${{ startsWith(matrix.container, 'debian') || startsWith(matrix.container, 'ubuntu') }}
         run: |
           apt-get update
-          apt-get install -y git python3-pip python3-venv curl
+          apt-get install -y git python3 curl
 
       - if: ${{ startsWith(matrix.container, 'fedora') }}
         run: |
-          dnf install -y git python3-pip curl
+          dnf install -y git python3 curl
 
       - if: ${{ startsWith(matrix.container, 'opensuse') }}
         run: |
-          zypper -n install git python3-pip python3-sqlite3 curl
+          zypper -n install git python3 python3-sqlite3 curl
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
