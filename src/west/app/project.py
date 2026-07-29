@@ -120,36 +120,13 @@ class _ProjectCommand(WestCommand):
         )
 
     def _has_nonempty_status(self, project):
-        # Check if the project has any status output to print. We
-        # manually use Popen in order to try to exit as quickly as
-        # possible if 'git status' prints anything.
-
-        popen = subprocess.Popen(
-            ['git', 'status', '--porcelain'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=project.abspath,
-        )
-
-        def has_output():
-            # 'git status --porcelain' prints nothing if there
-            # are no notable changes, so any output at all
-            # means we should run 'git status' on the project.
-            stdout, stderr = None, None
-            try:
-                stdout, stderr = popen.communicate(timeout=0.1)
-            except subprocess.TimeoutExpired:
-                pass
-            return stdout or stderr
-
-        while True:
-            if has_output():
-                popen.kill()
-                return True
-            if popen.poll() is not None:
-                break
-
-        return has_output()
+        # Check if the project has any status output to print.
+        #
+        # 'git status --porcelain' prints nothing if there are no
+        # notable changes, so any output at all means we should run
+        # 'git status' on the project.
+        cp = project.git('status --porcelain', capture_stdout=True, capture_stderr=True)
+        return bool(cp.stdout or cp.stderr)
 
     def _format_project(self, project, fmt, *, manifest_path_from_yaml=False):
         # Shared between 'west list --format' and 'west compare --format'.
