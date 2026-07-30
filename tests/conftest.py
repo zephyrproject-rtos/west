@@ -186,9 +186,8 @@ def setup_teardown_test_environment(tmpdir_factory):
     used nor touched during test, as WEST_CONFIG_* env variables are set,
     whereby no config files are created at these locations.
 
-    The fixture sets ZEPHYR_BASE (to avoid complaints in subcommand stderr),
-    but to a spurious location (so that attempts to read from inside of it are
-    caught here).
+    The fixture unsets ZEPHYR_BASE so that a value present in the developer's
+    environment does not leak into tests.
 
     The fixture also ensures that any environment modifications made by a test
     do not leak into subsequent tests, as the environment is restored when the
@@ -209,7 +208,7 @@ def setup_teardown_test_environment(tmpdir_factory):
                 'WEST_CONFIG_SYSTEM': str(system),
                 'WEST_CONFIG_GLOBAL': str(glbl),
                 'WEST_CONFIG_LOCAL': None,
-                'ZEPHYR_BASE': str(tmpdir / 'no-zephyr-here'),
+                'ZEPHYR_BASE': None,
             }
         ),
     ):
