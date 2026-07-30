@@ -30,6 +30,7 @@ from conftest import (
     yaml_editor,
 )
 
+from west import util
 from west.manifest import ImportFlag as MIF
 from west.manifest import Manifest, ManifestImportFailed, ManifestProject, Project
 
@@ -2915,6 +2916,73 @@ def test_topdir_in_workspace(west_init_tmpdir):
     assert cmd('topdir', cwd=str(west_init_tmpdir / 'subdir' / 'Kconfiglib')).strip() == expected
     west_init_tmpdir.mkdir('pytest-foo')
     assert cmd('topdir', cwd=str(west_init_tmpdir / 'pytest-foo')).strip() == expected
+
+
+def test_topdir_override(west_init_tmpdir, tmp_path):
+    """
+    west -C PATH forces "west topdir" to report PATH, regardless of the
+    current working directory (even one inside another real workspace),
+    and works with both absolute and relative paths.
+    """
+
+    expected = PurePath(str(west_init_tmpdir)).as_posix()
+    other_workspace = tmp_path / 'other-workspace'
+    (other_workspace / '.west').mkdir(parents=True)
+
+    assert cmd(['-C', west_init_tmpdir, 'topdir'], cwd=other_workspace).strip() == expected
+    assert (
+        cmd(
+            ['-C', Path(west_init_tmpdir).name, 'topdir'],
+            cwd=Path(west_init_tmpdir).parent,
+        ).strip()
+        == expected
+    )
+
+
+def test_topdir_override_invalid(west_init_tmpdir, tmp_path):
+    """
+    west -C PATH must exit fatally with a clear error when PATH is not
+    itself a west workspace (no .west directory).
+    """
+
+    invalid = tmp_path / 'not-a-workspace'
+    invalid.mkdir()
+
+    exc, _ = cmd_raises(['-C', invalid, 'topdir'], SystemExit, cwd=west_init_tmpdir)
+    assert str(exc.value) == f'west: -C path is not a west workspace: {invalid}'
+
+
+def test_topdir_override_wins_over_explicit_start(west_init_tmpdir, tmp_path):
+    """
+    west_topdir() must respect the -C override even when called with an
+    explicit start directory inside a *different*, real workspace.
+    """
+
+    other_workspace = tmp_path / 'other-workspace'
+    (other_workspace / '.west').mkdir(parents=True)
+
+    util.set_topdir_override(str(west_init_tmpdir))
+    try:
+        assert util.west_topdir(start=other_workspace) == str(west_init_tmpdir)
+    finally:
+        util.set_topdir_override(None)
+
+
+def test_topdir_override_no_overwrite_bypasses_override(west_init_tmpdir, tmp_path):
+    """
+    The no_overwrite flag ignores the supplied topdir overwrite
+    """
+
+    other_workspace = tmp_path / 'other-workspace'
+    (other_workspace / '.west').mkdir(parents=True)
+
+    util.set_topdir_override(str(west_init_tmpdir))
+    try:
+        assert util.west_topdir(start=other_workspace, no_overwrite=True) == str(
+            other_workspace
+        )
+    finally:
+        util.set_topdir_override(None)
 
 
 #
