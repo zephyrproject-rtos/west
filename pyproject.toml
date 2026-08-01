@@ -20,7 +20,7 @@ classifiers = [
 requires-python = ">=3.10"
 dependencies = [
     "colorama~=0.4",
-    "packaging~=25.0",
+    "packaging>=25,<27",
     "pykwalify~=1.8",
     "pyyaml~=6.0",
 ]
@@ -48,7 +48,7 @@ test = [
     "pytest-xdist>=3",
 ]
 types = [
-    "mypy~=1.18",
+    "mypy>=1.18,<3.0",
     "types-pyyaml~=6.0",
 ]
 dev = [
