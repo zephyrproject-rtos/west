@@ -43,9 +43,9 @@ lint = [
 ]
 test = [
     "coverage~=7.10",
-    "pytest>=8.4,<10.0",
+    "pytest~=9.0",
     "pytest-cov~=7.0",
-    "pytest-xdist>=3",
+    "pytest-xdist~=3.0",
 ]
 types = [
     "mypy~=2.0",

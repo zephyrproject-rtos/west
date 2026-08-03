@@ -709,18 +709,18 @@ dev = [
     { name = "coverage", specifier = "~=7.10" },
     { name = "mypy", specifier = "~=2.0" },
     { name = "poethepoet", specifier = "~=0.37" },
-    { name = "pytest", specifier = ">=8.4,<10.0" },
+    { name = "pytest", specifier = "~=9.0" },
     { name = "pytest-cov", specifier = "~=7.0" },
-    { name = "pytest-xdist", specifier = ">=3" },
+    { name = "pytest-xdist", specifier = "~=3.0" },
     { name = "ruff", specifier = "~=0.16" },
     { name = "types-pyyaml", specifier = "~=6.0" },
 ]
 lint = [{ name = "ruff", specifier = "~=0.16" }]
 test = [
     { name = "coverage", specifier = "~=7.10" },
-    { name = "pytest", specifier = ">=8.4,<10.0" },
+    { name = "pytest", specifier = "~=9.0" },
     { name = "pytest-cov", specifier = "~=7.0" },
-    { name = "pytest-xdist", specifier = ">=3" },
+    { name = "pytest-xdist", specifier = "~=3.0" },
 ]
 types = [
     { name = "mypy", specifier = "~=2.0" },
