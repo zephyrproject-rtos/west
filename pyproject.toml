@@ -48,7 +48,7 @@ test = [
     "pytest-xdist>=3",
 ]
 types = [
-    "mypy~=1.18",
+    "mypy~=2.0",
     "types-pyyaml~=6.0",
 ]
 dev = [
