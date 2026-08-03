@@ -678,10 +678,10 @@ types = [
 
 [package.metadata]
 requires-dist = [
-    { name = "colorama", specifier = "~=0.4" },
-    { name = "packaging", specifier = "~=25.0" },
-    { name = "pykwalify", specifier = "~=1.8" },
-    { name = "pyyaml", specifier = "~=6.0" },
+    { name = "colorama", specifier = ">=0.4" },
+    { name = "packaging", specifier = ">=25.0" },
+    { name = "pykwalify", specifier = ">=1.8" },
+    { name = "pyyaml", specifier = ">=6.0" },
 ]
 
 [package.metadata.requires-dev]
