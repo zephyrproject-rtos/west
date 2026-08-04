@@ -68,7 +68,9 @@ EARLY_ARGS_DEFAULTS = {
         ([], {}),
         (['topdir'], {'command_name': 'topdir'}),
         (['-h'], {'help': True}),
+        (['--help'], {'help': True}),
         (['-h', 'topdir'], {'help': True, 'command_name': 'topdir'}),
+        (['--help', 'topdir'], {'help': True, 'command_name': 'topdir'}),
         (['-V'], {'version': True}),
         (['--version'], {'version': True}),
         (['-v', 'topdir'], {'verbosity': 1, 'command_name': 'topdir'}),
@@ -80,6 +82,8 @@ EARLY_ARGS_DEFAULTS = {
         (['-z', '/p', 'topdir'], {'zephyr_base': '/p', 'command_name': 'topdir'}),
         (['-z/p', 'topdir'], {'zephyr_base': '/p', 'command_name': 'topdir'}),
         (['-z=/p', 'topdir'], {'zephyr_base': '/p', 'command_name': 'topdir'}),
+        (['--zephyr-base', '/p', 'topdir'], {'zephyr_base': '/p', 'command_name': 'topdir'}),
+        (['--zephyr-base=/p', 'topdir'], {'zephyr_base': '/p', 'command_name': 'topdir'}),
         (['-vz', '/p', 'topdir'], {'verbosity': 1, 'zephyr_base': '/p', 'command_name': 'topdir'}),
         (['-hV', 'topdir'], {'help': True, 'version': True, 'command_name': 'topdir'}),
         # Everything after the command name belongs to the command.

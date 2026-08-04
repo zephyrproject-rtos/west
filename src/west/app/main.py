@@ -89,9 +89,9 @@ class EarlyArgs(NamedTuple):
     # - setting up log levels from the verbosity level
 
     # Expected arguments:
-    help: bool  # True if -h was given
-    version: bool  # True if -V was given
-    zephyr_base: str | None  # -z argument value
+    help: bool  # True if -h/--help was given
+    version: bool  # True if -V/--version was given
+    zephyr_base: str | None  # -z/--zephyr-base argument value
     verbosity: int  # 0 if not given, otherwise counts
     command_name: str | None
 
@@ -142,28 +142,37 @@ def parse_early_args(argv: list[str]) -> EarlyArgs:
         else:
             unexpected_arguments.append(rest)
 
+    # Keep the long options in sync with make_parsers(). Abbreviations
+    # are not handled on purpose: the top level parser is created with
+    # allow_abbrev=False, so it doesn't accept them either.
     for arg in argv:
         if expecting_zephyr_base:
             zephyr_base = arg
             expecting_zephyr_base = False
+        elif arg == '--help':
+            help = True
+        elif arg == '--version':
+            version = True
+        elif arg == '--verbose':
+            verbosity += 1
+        elif arg == '--quiet':
+            verbosity -= 1
+        elif arg == '--zephyr-base':
+            expecting_zephyr_base = True
+        elif arg.startswith('--zephyr-base='):
+            zephyr_base = arg[len('--zephyr-base=') :]
         elif arg.startswith('-h'):
             help = True
             consume_more_args(arg[2:])
         elif arg.startswith('-V'):
             version = True
             consume_more_args(arg[2:])
-        elif arg == '--version':
-            version = True
         elif arg.startswith('-v'):
             verbosity += 1
             consume_more_args(arg[2:])
         elif arg.startswith('-q'):
             verbosity -= 1
             consume_more_args(arg[2:])
-        elif arg == '--verbose':
-            verbosity += 1
-        elif arg == '--quiet':
-            verbosity -= 1
         elif arg.startswith('-z'):
             if arg == '-z':
                 expecting_zephyr_base = True

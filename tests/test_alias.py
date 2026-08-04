@@ -33,6 +33,8 @@ def test_alias_help():
 
     assert "An alias that expands to: topdir" in help_out
     assert cmd('-h test') == help_out
+    # The long option must behave like the short one.
+    assert cmd('--help test') == help_out
 
 
 def test_alias_recursive_commands():
@@ -67,6 +69,7 @@ def test_alias_early_args():
 
     # An alias with an early command argument shouldn't fail
     assert "Replacing alias test1 with ['topdir']" in cmd('-v test1')
+    assert "Replacing alias test1 with ['topdir']" in cmd('--verbose test1')
 
 
 def test_alias_early_args_with_values():
@@ -79,6 +82,8 @@ def test_alias_early_args_with_values():
     assert cmd(['-z', '/some/path', 'test1']) == topdir_out
     assert cmd(['-z/some/path', 'test1']) == topdir_out
     assert cmd(['-z=/some/path', 'test1']) == topdir_out
+    assert cmd(['--zephyr-base', '/some/path', 'test1']) == topdir_out
+    assert cmd(['--zephyr-base=/some/path', 'test1']) == topdir_out
 
 
 def test_alias_command_with_arguments():
