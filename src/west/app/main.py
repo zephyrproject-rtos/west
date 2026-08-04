@@ -602,32 +602,40 @@ class WestApp:
         # If we're running an extension, instantiate it from its
         # spec and re-parse arguments before running.
 
-        if not early_args.help and early_args.command_name != "help":
-            # Recursively replace alias command(s) if set
-            aliases = self.aliases.copy()
-            while early_args.command_name in aliases:
-                # Make sure we don't end up in an infinite loop
-                alias = aliases.pop(early_args.command_name)
+        # Recursively replace alias command(s) if set.
+        #
+        # The loop conditions are re-evaluated on every iteration on
+        # purpose: an alias can expand to early args of its own, and
+        # those must be treated like the ones the user typed. In
+        # particular "-h" stops the expansion, so that help is printed
+        # for the alias instead of for whatever it expands to.
+        aliases = self.aliases.copy()
+        while (
+            not early_args.help
+            and early_args.command_name != "help"
+            and early_args.command_name in aliases
+        ):
+            # Make sure we don't end up in an infinite loop
+            alias = aliases.pop(early_args.command_name)
 
-                self.queued_io.append(
-                    lambda cmd, alias=alias: cmd.dbg(
-                        f'Replacing alias {alias.name} with {alias.args}'
-                    )
-                )
+            self.queued_io.append(
+                lambda cmd, alias=alias: cmd.dbg(f'Replacing alias {alias.name} with {alias.args}')
+            )
 
-                if len(alias.args) == 0:
-                    # This loses the cmd.dbg() above - too bad, don't use empty aliases
-                    self.print_usage_and_exit(f'west: empty alias "{alias.name}"')
+            if len(alias.args) == 0:
+                # This loses the cmd.dbg() above - too bad, don't use empty aliases
+                self.print_usage_and_exit(f'west: empty alias "{alias.name}"')
 
-                # Replace the command name with the alias arguments. Early
-                # args before it and user arguments after it are preserved.
-                i = early_args.command_index
-                assert i is not None  # implied by command_name being set
-                argv = argv[:i] + alias.args + argv[i + 1 :]
-                # Re-parse the expanded argv so early args coming from the
-                # alias itself (e.g. "-v") are handled instead of being
-                # mistaken for the command name.
-                early_args = parse_early_args(argv)
+            # Replace the command name with the alias arguments. Early
+            # args before it and user arguments after it are preserved.
+            i = early_args.command_index
+            assert i is not None  # implied by command_name being set
+            argv = argv[:i] + alias.args + argv[i + 1 :]
+
+            # Re-parse the expanded argv so early args coming from the
+            # alias itself (e.g. "-v") are handled instead of being
+            # mistaken for the command name.
+            early_args = parse_early_args(argv)
 
         self.handle_early_arg_errors(early_args)
         args, unknown = self.west_parser.parse_known_args(args=argv)

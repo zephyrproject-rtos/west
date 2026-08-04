@@ -160,6 +160,19 @@ def test_alias_expands_to_help():
     assert cmd('test1') == cmd('help topdir')
 
 
+def test_alias_expands_to_help_stops_expansion():
+    # Once help is requested, the expansion must stop: help is about the
+    # alias, not about what it would have expanded to. This matches
+    # "west -h <alias>".
+    cmd(['config', '--', 'alias.test1', '-h test2'])
+    cmd('config alias.test2 topdir')
+
+    output = cmd('test1')
+
+    assert "An alias that expands to: topdir" in output
+    assert output == cmd('help test2')
+
+
 def test_alias_command_with_arguments():
     list_format = '{revision} TESTALIAS {name}'
     cmd(['config', 'alias.revs', f'list -f "{list_format}"'])
