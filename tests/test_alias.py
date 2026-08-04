@@ -69,6 +69,18 @@ def test_alias_early_args():
     assert "Replacing alias test1 with ['topdir']" in cmd('-v test1')
 
 
+def test_alias_early_args_with_values():
+    # Early args taking a value must not swallow the alias name, in any
+    # of the forms the top level parser accepts.
+    cmd('config alias.test1 topdir')
+
+    topdir_out = cmd('topdir')
+
+    assert cmd(['-z', '/some/path', 'test1']) == topdir_out
+    assert cmd(['-z/some/path', 'test1']) == topdir_out
+    assert cmd(['-z=/some/path', 'test1']) == topdir_out
+
+
 def test_alias_command_with_arguments():
     list_format = '{revision} TESTALIAS {name}'
     cmd(['config', 'alias.revs', f'list -f "{list_format}"'])

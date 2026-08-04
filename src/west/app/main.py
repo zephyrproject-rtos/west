@@ -145,6 +145,7 @@ def parse_early_args(argv: list[str]) -> EarlyArgs:
     for arg in argv:
         if expecting_zephyr_base:
             zephyr_base = arg
+            expecting_zephyr_base = False
         elif arg.startswith('-h'):
             help = True
             consume_more_args(arg[2:])
