@@ -637,6 +637,10 @@ class WestApp:
             # mistaken for the command name.
             early_args = parse_early_args(argv)
 
+            # The alias may have changed the verbosity; west's own log
+            # level was set up from the pre-expansion arguments.
+            self.set_west_log_level(early_args.verbosity)
+
         self.handle_early_arg_errors(early_args)
         args, unknown = self.west_parser.parse_known_args(args=argv)
 
@@ -752,6 +756,10 @@ class WestApp:
         sys.exit(message)
 
     def setup_west_logging(self, verbosity):
+        self.set_west_log_level(verbosity)
+        logging.getLogger('west.manifest').addHandler(LogHandler())
+
+    def set_west_log_level(self, verbosity):
         logger = logging.getLogger('west.manifest')
 
         if verbosity >= 2:
@@ -764,8 +772,6 @@ class WestApp:
             logger.setLevel(logging.ERROR)
         else:
             logger.setLevel(logging.CRITICAL)
-
-        logger.addHandler(LogHandler())
 
     def run_builtin(self, args, unknown):
         self.queued_io.append(

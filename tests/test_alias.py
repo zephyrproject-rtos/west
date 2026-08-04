@@ -2,6 +2,8 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
+
 import pytest
 from conftest import cmd, cmd_raises
 
@@ -171,6 +173,22 @@ def test_alias_expands_to_help_stops_expansion():
 
     assert "An alias that expands to: topdir" in output
     assert output == cmd('help test2')
+
+
+def test_alias_expands_to_verbosity_sets_west_log_level():
+    # Verbosity coming from an alias must set up west's own logging,
+    # like verbosity typed by the user does.
+    cmd(['config', 'alias.test1', '-vv topdir'])
+
+    logger = logging.getLogger('west.manifest')
+    original_level = logger.level
+    try:
+        logger.setLevel(logging.WARNING)
+        cmd('test1')
+
+        assert logger.level == logging.DEBUG
+    finally:
+        logger.setLevel(original_level)
 
 
 def test_alias_command_with_arguments():
