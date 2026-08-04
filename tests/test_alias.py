@@ -86,6 +86,72 @@ def test_alias_early_args_with_values():
     assert cmd(['--zephyr-base=/some/path', 'test1']) == topdir_out
 
 
+def test_alias_expands_to_early_arg():
+    # An alias whose expansion starts with an early/global option (e.g. -v)
+    # should apply that option to west itself instead of mistaking it for the
+    # command name.
+    cmd(['config', 'alias.test1', '-v topdir'])
+
+    output = cmd('test1')
+
+    # The '-v' from the alias enables debug output, proving it was handled as
+    # an early arg (this line is not printed without increased verbosity).
+    assert "Replacing alias test1 with ['-v', 'topdir']" in output
+    # ... and the actual command still runs.
+    assert cmd('topdir').strip() in output
+
+
+def test_alias_expands_to_early_arg_recursive():
+    # An early arg introduced by an alias must survive further alias
+    # expansion, i.e. the expanded argv is re-parsed on every iteration.
+    cmd(['config', 'alias.test1', '-v test2'])
+    cmd(['config', 'alias.test2', 'topdir'])
+
+    output = cmd('test1')
+
+    assert "Replacing alias test1 with ['-v', 'test2']" in output
+    assert "Replacing alias test2 with ['topdir']" in output
+    assert cmd('topdir').strip() in output
+
+
+def test_alias_early_arg_with_trailing_args():
+    # User arguments given after the alias are preserved and appended after
+    # the alias expansion (which itself starts with an early arg).
+    cmd(['config', 'alias.test1', '-v list'])
+
+    output = cmd(['test1', '-f', '{name}'])
+
+    assert "Replacing alias test1 with ['-v', 'list']" in output
+    assert cmd(['list', '-f', '{name}']).strip() in output
+
+
+def test_alias_expands_to_early_arg_with_value():
+    # Early args from an alias that take a value work too, and don't
+    # stop the expansion from finding the command name.
+    cmd(['config', 'alias.test1', '-z /some/path topdir'])
+    cmd(['config', 'alias.test2', '--zephyr-base /some/path topdir'])
+
+    topdir_out = cmd('topdir')
+
+    assert cmd('test1') == topdir_out
+    assert cmd('test2') == topdir_out
+
+
+def test_alias_expands_to_version():
+    # "-V" from an alias prints west's version instead of being
+    # mistaken for a command name.
+    cmd(['config', '--', 'alias.test1', '-V'])
+
+    assert 'West version:' in cmd('test1')
+
+
+def test_alias_expands_to_help():
+    # "-h" from an alias asks for help, just like a "-h" typed by the user.
+    cmd(['config', '--', 'alias.test1', '-h topdir'])
+
+    assert cmd('test1') == cmd('help topdir')
+
+
 def test_alias_command_with_arguments():
     list_format = '{revision} TESTALIAS {name}'
     cmd(['config', 'alias.revs', f'list -f "{list_format}"'])

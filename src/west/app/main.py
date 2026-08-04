@@ -619,7 +619,10 @@ class WestApp:
                     if arg == early_args.command_name:
                         argv = argv[:i] + alias.args + argv[i + 1 :]
                         break
-                early_args = early_args._replace(command_name=alias.args[0])
+                # Re-parse the expanded argv so early args coming from the
+                # alias itself (e.g. "-v") are handled instead of being
+                # mistaken for the command name.
+                early_args = parse_early_args(argv)
 
         self.handle_early_arg_errors(early_args)
         args, unknown = self.west_parser.parse_known_args(args=argv)
