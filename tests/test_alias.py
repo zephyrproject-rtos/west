@@ -86,6 +86,14 @@ def test_alias_early_args_with_values():
     assert cmd(['--zephyr-base=/some/path', 'test1']) == topdir_out
 
 
+def test_alias_name_matching_early_arg_value():
+    # Only the command name is replaced by the alias expansion, even if
+    # an earlier early arg happens to have the same value.
+    cmd('config alias.test1 topdir')
+
+    assert cmd(['-z', 'test1', 'test1']) == cmd('topdir')
+
+
 def test_alias_expands_to_early_arg():
     # An alias whose expansion starts with an early/global option (e.g. -v)
     # should apply that option to west itself instead of mistaking it for the

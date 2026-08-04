@@ -94,6 +94,7 @@ class EarlyArgs(NamedTuple):
     zephyr_base: str | None  # -z/--zephyr-base argument value
     verbosity: int  # 0 if not given, otherwise counts
     command_name: str | None
+    command_index: int | None  # index of command_name in argv
 
     # Other arguments are appended here.
     unexpected_arguments: list[str]
@@ -107,6 +108,7 @@ def parse_early_args(argv: list[str]) -> EarlyArgs:
     zephyr_base = None
     verbosity = 0
     command_name = None
+    command_index = None
     unexpected_arguments = []
 
     expecting_zephyr_base = False
@@ -145,7 +147,7 @@ def parse_early_args(argv: list[str]) -> EarlyArgs:
     # Keep the long options in sync with make_parsers(). Abbreviations
     # are not handled on purpose: the top level parser is created with
     # allow_abbrev=False, so it doesn't accept them either.
-    for arg in argv:
+    for i, arg in enumerate(argv):
         if expecting_zephyr_base:
             zephyr_base = arg
             expecting_zephyr_base = False
@@ -184,9 +186,12 @@ def parse_early_args(argv: list[str]) -> EarlyArgs:
             unexpected_arguments.append(arg)
         else:
             command_name = arg
+            command_index = i
             break
 
-    return EarlyArgs(help, version, zephyr_base, verbosity, command_name, unexpected_arguments)
+    return EarlyArgs(
+        help, version, zephyr_base, verbosity, command_name, command_index, unexpected_arguments
+    )
 
 
 class LogFormatter(logging.Formatter):
@@ -614,11 +619,11 @@ class WestApp:
                     # This loses the cmd.dbg() above - too bad, don't use empty aliases
                     self.print_usage_and_exit(f'west: empty alias "{alias.name}"')
 
-                # Find and replace the command name. Must skip any other early args like -v
-                for i, arg in enumerate(argv):
-                    if arg == early_args.command_name:
-                        argv = argv[:i] + alias.args + argv[i + 1 :]
-                        break
+                # Replace the command name with the alias arguments. Early
+                # args before it and user arguments after it are preserved.
+                i = early_args.command_index
+                assert i is not None  # implied by command_name being set
+                argv = argv[:i] + alias.args + argv[i + 1 :]
                 # Re-parse the expanded argv so early args coming from the
                 # alias itself (e.g. "-v") are handled instead of being
                 # mistaken for the command name.

@@ -58,6 +58,7 @@ EARLY_ARGS_DEFAULTS = {
     'zephyr_base': None,
     'verbosity': 0,
     'command_name': None,
+    'command_index': None,
     'unexpected_arguments': [],
 }
 
@@ -66,30 +67,48 @@ EARLY_ARGS_DEFAULTS = {
     ('argv', 'expected'),
     [
         ([], {}),
-        (['topdir'], {'command_name': 'topdir'}),
+        (['topdir'], {'command_name': 'topdir', 'command_index': 0}),
         (['-h'], {'help': True}),
         (['--help'], {'help': True}),
-        (['-h', 'topdir'], {'help': True, 'command_name': 'topdir'}),
-        (['--help', 'topdir'], {'help': True, 'command_name': 'topdir'}),
+        (['-h', 'topdir'], {'help': True, 'command_name': 'topdir', 'command_index': 1}),
+        (['--help', 'topdir'], {'help': True, 'command_name': 'topdir', 'command_index': 1}),
         (['-V'], {'version': True}),
         (['--version'], {'version': True}),
-        (['-v', 'topdir'], {'verbosity': 1, 'command_name': 'topdir'}),
-        (['--verbose', 'topdir'], {'verbosity': 1, 'command_name': 'topdir'}),
-        (['-q', 'topdir'], {'verbosity': -1, 'command_name': 'topdir'}),
-        (['--quiet', 'topdir'], {'verbosity': -1, 'command_name': 'topdir'}),
-        (['-vvv', 'topdir'], {'verbosity': 3, 'command_name': 'topdir'}),
+        (['-v', 'topdir'], {'verbosity': 1, 'command_name': 'topdir', 'command_index': 1}),
+        (['--verbose', 'topdir'], {'verbosity': 1, 'command_name': 'topdir', 'command_index': 1}),
+        (['-q', 'topdir'], {'verbosity': -1, 'command_name': 'topdir', 'command_index': 1}),
+        (['--quiet', 'topdir'], {'verbosity': -1, 'command_name': 'topdir', 'command_index': 1}),
+        (['-vvv', 'topdir'], {'verbosity': 3, 'command_name': 'topdir', 'command_index': 1}),
         # An option taking a value must not swallow the command name.
-        (['-z', '/p', 'topdir'], {'zephyr_base': '/p', 'command_name': 'topdir'}),
-        (['-z/p', 'topdir'], {'zephyr_base': '/p', 'command_name': 'topdir'}),
-        (['-z=/p', 'topdir'], {'zephyr_base': '/p', 'command_name': 'topdir'}),
-        (['--zephyr-base', '/p', 'topdir'], {'zephyr_base': '/p', 'command_name': 'topdir'}),
-        (['--zephyr-base=/p', 'topdir'], {'zephyr_base': '/p', 'command_name': 'topdir'}),
-        (['-vz', '/p', 'topdir'], {'verbosity': 1, 'zephyr_base': '/p', 'command_name': 'topdir'}),
-        (['-hV', 'topdir'], {'help': True, 'version': True, 'command_name': 'topdir'}),
+        (
+            ['-z', '/p', 'topdir'],
+            {'zephyr_base': '/p', 'command_name': 'topdir', 'command_index': 2},
+        ),
+        (['-z/p', 'topdir'], {'zephyr_base': '/p', 'command_name': 'topdir', 'command_index': 1}),
+        (['-z=/p', 'topdir'], {'zephyr_base': '/p', 'command_name': 'topdir', 'command_index': 1}),
+        (
+            ['--zephyr-base', '/p', 'topdir'],
+            {'zephyr_base': '/p', 'command_name': 'topdir', 'command_index': 2},
+        ),
+        (
+            ['--zephyr-base=/p', 'topdir'],
+            {'zephyr_base': '/p', 'command_name': 'topdir', 'command_index': 1},
+        ),
+        (
+            ['-vz', '/p', 'topdir'],
+            {'verbosity': 1, 'zephyr_base': '/p', 'command_name': 'topdir', 'command_index': 2},
+        ),
+        (
+            ['-hV', 'topdir'],
+            {'help': True, 'version': True, 'command_name': 'topdir', 'command_index': 1},
+        ),
         # Everything after the command name belongs to the command.
-        (['topdir', '-h', '-z', '/p'], {'command_name': 'topdir'}),
+        (['topdir', '-h', '-z', '/p'], {'command_name': 'topdir', 'command_index': 0}),
         # Unknown options are collected, not treated as the command name.
-        (['--nope', 'topdir'], {'command_name': 'topdir', 'unexpected_arguments': ['--nope']}),
+        (
+            ['--nope', 'topdir'],
+            {'command_name': 'topdir', 'command_index': 1, 'unexpected_arguments': ['--nope']},
+        ),
     ],
 )
 def test_parse_early_args(argv, expected):
