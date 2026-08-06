@@ -976,6 +976,18 @@ def test_update_projects_local_branch_commits(west_init_tmpdir):
     assert kconfiglib_prev == head_subject('subdir/Kconfiglib')
     assert tagged_repo_prev == head_subject('tagged_repo')
 
+    # Provide test coverage for 'update --stats --keep-descendants' with
+    # a local branch that descends from manifest-rev: the update must
+    # leave the branch checked out and gather statistics.
+    checkout_branch('net-tools', 'manifest-rev')
+    checkout_branch('net-tools', 'descendant_branch', create=True)
+    add_commit('net-tools', 'net-tools descendant commit', reconfigure=True)
+
+    out = cmd('update --stats --keep-descendants net-tools')
+    assert 'left descendant branch "descendant_branch" checked out' in out
+    assert 'get current status' in out
+    assert head_subject('net-tools') == 'net-tools descendant commit'
+
 
 def test_update_tag_to_tag(west_init_tmpdir):
     # Verify we can update the tagged_repo repo to a new tag.
