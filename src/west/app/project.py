@@ -1841,7 +1841,7 @@ class Update(_ProjectCommand):
                 start = perf_counter()
             project.git('status')
             if take_stats:
-                stats['get current status'] = perf_counter - start
+                stats['get current status'] = perf_counter() - start
         elif try_rebase:
             # Attempt a rebase.
             self.inf(f'west update: rebasing to {MANIFEST_REV} {sha}')
