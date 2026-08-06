@@ -7,7 +7,6 @@
 
 import argparse
 import hashlib
-import logging
 import os
 import shlex
 import shutil
@@ -2849,36 +2848,3 @@ class DelayFormat:
             else:
                 self.as_str = str(self.obj)
         return ('{:' + format_spec + '}').format(self.as_str)
-
-
-#
-# Logging helpers
-#
-
-
-class ProjectCommandLogFormatter(logging.Formatter):
-    def __init__(self):
-        super().__init__(fmt='%(name)s: %(message)s')
-
-
-class ProjectCommandLogHandler(logging.Handler):
-    def __init__(self, command):
-        super().__init__()
-        self.command = command
-        self.setFormatter(ProjectCommandLogFormatter())
-
-    def emit(self, record):
-        fmt = self.format(record)
-        lvl = record.levelno
-        if lvl > logging.CRITICAL:
-            self.command.die(fmt)
-        elif lvl >= logging.ERROR:
-            self.command.err(fmt)
-        elif lvl >= logging.WARNING:
-            self.command.wrn(fmt)
-        elif lvl >= logging.INFO:
-            self.command.inf(fmt)
-        elif lvl >= logging.DEBUG:
-            self.command.dbg(fmt)
-        else:
-            self.command.dbg(fmt, level=Verbosity.DBG_EXTREME)
