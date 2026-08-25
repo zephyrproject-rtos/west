@@ -1981,6 +1981,71 @@ class Update(_ProjectCommand):
             self.dbg(f'{project.name}: update auto-cache ({cache_dir}) with remote')
             project.git(['remote', 'update', '--prune'], cwd=cache_dir, check=False)
 
+    def init_project_in_place(self, project):
+        # init_project() helper. Create the project's repository at
+        # project.abspath and set up the convenience remote, without
+        # fetching anything.
+
+        init_cmd = ['init', project.abspath]
+        # Silence the very verbose and repetitive init.defaultBranch
+        # warning (10 lines per new git clone). The branch
+        # 'placeholder' will never have any commit so it will never
+        # actually exist.
+        if self.git_version_info >= (2, 28, 0):
+            init_cmd.insert(1, '--initial-branch=init_placeholder')
+
+        project.git(init_cmd, cwd=self.topdir)
+
+        # This remote is added as a convenience for the user.
+        # However, west always fetches project data by URL, not name.
+        # The user is therefore free to change the URL of this remote.
+        project.git(['remote', 'add', '--', project.remote_name, project.url])
+
+    def init_project_from_cache(self, project, cache_dir):
+        # Initialize a project in a non-empty directory and seed it from cache.
+        #
+        # The fetch below runs inside the project, so a relative cache path
+        # would resolve against the wrong directory.
+        cache_dir = abspath(cache_dir)
+        refspecs = [f'+refs/heads/*:refs/remotes/{project.remote_name}/*']
+
+        # That refspec only brings the cache's branch tips, but a manifest
+        # usually pins a SHA that is an ancestor of one rather than a tip
+        # itself. Naming the object in the fetch is what brings it along, and
+        # that needs protocol v2: under v0 upload-pack rejects requests for
+        # unadvertised objects and fails the whole fetch. Protocol v2 appeared
+        # in Git 2.18 and is the default since 2.26. Request it explicitly even
+        # on newer Git because configuration can select v0. Older Git seeds
+        # branch tips only, leaving west to fetch the revision from the network
+        # as it would without a cache.
+        config = []
+        if self.git_version_info >= (2, 18, 0):
+            config = ['-c', 'protocol.version=2']
+            if _maybe_sha(project.revision):
+                cp = project.git(
+                    ['rev-parse', '--verify', f'{project.revision}^{{object}}'],
+                    cwd=cache_dir,
+                    check=False,
+                    capture_stdout=True,
+                    capture_stderr=True,
+                )
+                if cp.returncode == 0:
+                    refspecs.append(cp.stdout.decode('ascii').strip())
+
+        git_dir = Path(project.abspath) / '.git'
+        remove_git_dir = not os.path.lexists(git_dir)
+        seeded = False
+        try:
+            self.init_project_in_place(project)
+            project.git([*config, 'fetch', '--tags', '--', cache_dir, *refspecs])
+            seeded = True
+        finally:
+            if remove_git_dir and not seeded and os.path.lexists(git_dir):
+                try:
+                    shutil.rmtree(git_dir)
+                except OSError as e:
+                    self.err(f'failed to remove incomplete repository {git_dir}: {e}')
+
     def init_project(self, project):
         # update() helper. Initialize an uncloned project repository.
         # If there's a local clone available, it uses that. Otherwise,
@@ -1993,21 +2058,10 @@ class Update(_ProjectCommand):
 
         if cache_dir is None:
             self.small_banner(f'{project.name}: initializing')
-
-            init_cmd = ['init', project.abspath]
-            # Silence the very verbose and repetitive init.defaultBranch
-            # warning (10 lines per new git clone). The branch
-            # 'placeholder' will never have any commit so it will never
-            # actually exist.
-            if self.git_version_info >= (2, 28, 0):
-                init_cmd.insert(1, '--initial-branch=init_placeholder')
-
-            project.git(init_cmd, cwd=self.topdir)
-
-            # This remote is added as a convenience for the user.
-            # However, west always fetches project data by URL, not name.
-            # The user is therefore free to change the URL of this remote.
-            project.git(['remote', 'add', '--', project.remote_name, project.url])
+            self.init_project_in_place(project)
+        elif os.path.isdir(project.abspath) and os.listdir(project.abspath):
+            self.small_banner(f'{project.name}: initializing, seeding from {cache_dir}')
+            self.init_project_from_cache(project, cache_dir)
         else:
             self.small_banner(f'{project.name}: cloning from {cache_dir}')
             # Clone the project from a local cache repository. Set the
