@@ -910,3 +910,33 @@ def test_list():
 def test_round_trip():
     cmd('config pytest.foo bar,baz')
     assert cmd('config pytest.foo').strip() == 'bar,baz'
+
+
+def test_round_trip_percent():
+    # A '%' is an ordinary character in a value: it is not escaped on the
+    # way in, and not interpolated on the way out.
+    url = 'https://example.com/some%20path'
+
+    cmd(['config', 'pytest.url', url])
+
+    assert cmd('config pytest.url').strip() == url
+    assert url in pathlib.Path(os.environ[west_env[LOCAL]]).read_text()
+
+
+def test_percent_in_hand_written_config():
+    # Same for a file west did not write itself. Every west command reads
+    # all configuration files and iterates over all of their options
+    # before running, so a '%' anywhere in any of them used to be fatal
+    # for every command, not just for the one using the option.
+    pathlib.Path(os.environ[west_env[LOCAL]]).write_text(
+        textwrap.dedent('''\
+        [pytest]
+        percent = 100%
+        doubled = 100%%
+        ''')
+    )
+
+    assert sorted(cmd('config -l').splitlines()) == [
+        'pytest.doubled=100%%',
+        'pytest.percent=100%',
+    ]
