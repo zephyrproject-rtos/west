@@ -33,6 +33,9 @@ You can override these files' locations with the ``WEST_CONFIG_SYSTEM``,
 Configuration values from later configuration files override configuration
 from earlier ones. Local values have highest precedence, and system values
 lowest.
+
+Values are stored and returned verbatim: no variable interpolation is
+performed, and no character needs escaping.
 '''
 
 import configparser
@@ -52,7 +55,9 @@ class MalformedConfig(Exception):
 
 
 def _configparser():  # for internal use
-    return configparser.ConfigParser(allow_no_value=True)
+    # Interpolation is disabled: configuration values are stored and
+    # returned verbatim, so that '%' is an ordinary character.
+    return configparser.ConfigParser(allow_no_value=True, interpolation=None)
 
 
 class _InternalCF:
