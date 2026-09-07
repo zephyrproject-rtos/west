@@ -33,6 +33,18 @@ You can override these files' locations with the ``WEST_CONFIG_SYSTEM``,
 Configuration values from later configuration files override configuration
 from earlier ones. Local values have highest precedence, and system values
 lowest.
+
+Values are interpolated when they are read, by configparser from the
+Python standard library: a literal ``%`` must be written as ``%%``, and
+``%(other-option)s`` expands to the value of another option in the same
+section. The exact rules, which depend on the Python version in use, are
+documented at
+https://docs.python.org/3/library/configparser.html#interpolation-of-values
+
+``west config`` and ``Configuration.set()`` escape what they write, so a
+literal ``%`` needs no care there, and an interpolation reference can only
+be added by editing a configuration file. The deprecated
+``update_config()`` function does not escape and is the exception to both.
 '''
 
 import configparser
@@ -53,6 +65,13 @@ class MalformedConfig(Exception):
 
 def _configparser():  # for internal use
     return configparser.ConfigParser(allow_no_value=True)
+
+
+def _escape_percent(value):  # for internal use
+    # Configuration values are interpolated when they are read, so a
+    # literal '%' has to be doubled on the way in. Non-string values are
+    # left alone; configparser rejects them on its own.
+    return value.replace('%', '%%') if isinstance(value, str) else value
 
 
 class _InternalCF:
@@ -112,6 +131,20 @@ class _InternalCF:
     def getfloat(self, option: str):
         return self._get(option, self.cp.getfloat)
 
+    def _malformed_value(self, section: str, key: str) -> MalformedConfig:
+        readable = [str(p) for p in self.paths]
+        return MalformedConfig(
+            f"invalid value for '{section}.{key}' in one of '{readable}': "
+            "a literal '%' must be written as '%%'"
+        )
+
+    def value(self, section: str, key: str):
+        # The interpolated value of an option, by section and key.
+        try:
+            return self.cp.get(section, key)
+        except configparser.InterpolationError as err:
+            raise self._malformed_value(section, key) from err
+
     def _get(self, option, getter):
         section, key = _InternalCF.parse_key(option)
 
@@ -119,6 +152,8 @@ class _InternalCF:
             return getter(section, key)
         except (configparser.NoOptionError, configparser.NoSectionError) as err:
             raise KeyError(option) from err
+        except configparser.InterpolationError as err:
+            raise self._malformed_value(section, key) from err
 
     def set(self, option: str, value: Any):
         self._check_single_config()
@@ -127,7 +162,7 @@ class _InternalCF:
         if section not in self.cp:
             self.cp[section] = {}
 
-        self.cp[section][key] = value
+        self.cp[section][key] = _escape_percent(value)
 
         self._write()
 
@@ -398,8 +433,10 @@ class Configuration:
                     continue
                 if section not in cp:
                     cp.add_section(section)
-                for key, value in contents.items():
-                    cp[section][key] = value
+                for key in contents:
+                    # 'cp' interpolates when it is read from, so the
+                    # value must be re-escaped.
+                    cp[section][key] = _escape_percent(cf.value(section, key))
 
         if self._system:
             load(self._system)
@@ -448,8 +485,8 @@ class Configuration:
         for section, contents in cf.cp.items():
             if section == 'DEFAULT':
                 continue
-            for key, value in contents.items():
-                ret[f'{section}.{key}'] = value
+            for key in contents:
+                ret[f'{section}.{key}'] = cf.value(section, key)
         return ret
 
 
