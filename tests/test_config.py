@@ -20,13 +20,17 @@ GLOBAL = wconfig.ConfigFile.GLOBAL
 LOCAL = wconfig.ConfigFile.LOCAL
 ALL = wconfig.ConfigFile.ALL
 
-west_env = {
+# An auto fixture in conftest.py provides default values located in a
+# temporary, test-specific directory. The files are not created by
+# default. Individual tests can point these elsewhere as long as the
+# paths are unique and don't clash with concurrent test execution.
+CONFIG_ENV_NAMES = {
     SYSTEM: 'WEST_CONFIG_SYSTEM',
     GLOBAL: 'WEST_CONFIG_GLOBAL',
     LOCAL: 'WEST_CONFIG_LOCAL',
 }
 
-west_flag = {
+LOCATION_FLAGS = {
     SYSTEM: '--system',
     GLOBAL: '--global',
     LOCAL: '--local',
@@ -109,8 +113,8 @@ def test_config_global():
 @pytest.mark.parametrize("location", [LOCAL, GLOBAL, SYSTEM])
 def test_config_list_paths_env(location):
     '''Test that --list-paths considers the env variables'''
-    flag = west_flag[location]
-    env_var = west_env[location]
+    flag = LOCATION_FLAGS[location]
+    env_var = CONFIG_ENV_NAMES[location]
 
     # create the config
     cmd(f'config {flag} pytest.key val')
@@ -259,8 +263,8 @@ def test_config_list_search_paths_all():
 
 @pytest.mark.parametrize("location", [LOCAL, GLOBAL, SYSTEM])
 def test_config_list_search_paths(location):
-    flag = '' if location == ALL else west_flag[location]
-    env_var = west_env[location] if flag else None
+    flag = '' if location == ALL else LOCATION_FLAGS[location]
+    env_var = CONFIG_ENV_NAMES[location] if flag else None
 
     west_topdir = pathlib.Path('.')
     config1 = (west_topdir / 'some' / 'config 1').resolve()
@@ -804,23 +808,23 @@ def test_config_multiple(config_tmpdir):
 def test_config_multiple_write(location):
     # write to a config with a single config file must work, even if other
     # locations have multiple configs in use
-    flag = west_flag[location]
-    env_var = west_env[location]
+    flag = LOCATION_FLAGS[location]
+    env_var = CONFIG_ENV_NAMES[location]
 
     configs_dir = pathlib.Path("configs")
     config1 = (configs_dir / 'config 1').resolve()
     config2 = (configs_dir / 'config 2').resolve()
     config3 = (configs_dir / 'config 3').resolve()
 
-    env = {west_env[location]: f'{config1}'}
+    env = {CONFIG_ENV_NAMES[location]: f'{config1}'}
     other_locations = [c for c in [LOCAL, GLOBAL, SYSTEM] if c != location]
     for loc in other_locations:
-        env[west_env[loc]] = f'{config2}{os.pathsep}{config3}'
+        env[CONFIG_ENV_NAMES[loc]] = f'{config2}{os.pathsep}{config3}'
 
     with update_env(env):
-        cmd(f'config {flag} key.value {env_var}')
+        cmd(f'config {flag} key.value test_{env_var}')
         stdout = cmd(f'config {flag} key.value')
-        assert [env_var] == stdout.rstrip().splitlines()
+        assert [f"test_{env_var}"] == stdout.rstrip().splitlines()
 
 
 @pytest.mark.parametrize("location", [LOCAL, GLOBAL, SYSTEM])
@@ -829,8 +833,8 @@ def test_config_multiple_relative(location):
     # The paths may be relative relative paths, which are always anchored to
     # west topdir. For the test, the cwd is changed to another cwd to ensure
     # that relative paths are anchored correctly.
-    flag = west_flag[location]
-    env_var = west_env[location]
+    flag = LOCATION_FLAGS[location]
+    env_var = CONFIG_ENV_NAMES[location]
 
     msg = "'{file}' is relative but 'west topdir' is not defined"
 
