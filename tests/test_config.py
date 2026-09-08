@@ -914,3 +914,89 @@ def test_list():
 def test_round_trip():
     cmd('config pytest.foo bar,baz')
     assert cmd('config pytest.foo').strip() == 'bar,baz'
+
+
+PERCENT_VALUES = ['100%', '100%%', '100%%%', 'https://example.com/some%20path']
+
+
+def local_config() -> pathlib.Path:
+    return pathlib.Path(os.environ[west_env[LOCAL]])
+
+
+@pytest.mark.parametrize('value', PERCENT_VALUES)
+def test_round_trip_percent(value):
+    # A '%' does not have to be manually escaped on the command line: it is automatically
+    # escaped on the way into the file and read back verbatim.
+    cmd(['config', 'pytest.v', value])
+
+    assert cmd('config pytest.v').strip() == value
+    escaped = value.replace('%', '%%')
+    assert f'v = {escaped}\n' in local_config().read_text()
+
+
+@pytest.mark.parametrize('value', PERCENT_VALUES)
+def test_round_trip_percent_api(value):
+    # Same through the west API, which is what extension commands use.
+    update_testcfg('pytest', 'v', value)
+
+    assert wconfig.Configuration().get('pytest.v') == value
+
+
+@pytest.mark.parametrize(
+    ('stored', 'expected'),
+    [
+        ('100%%', '100%'),
+        ('100%%%%', '100%%'),
+        ('%%(not-a-ref)s', '%(not-a-ref)s'),
+    ],
+)
+def test_percent_escaped_in_hand_written_config(stored, expected):
+    # Each '%%' in a file west did not write itself stands for one
+    # literal '%'.
+    local_config().write_text(f'[pytest]\nv = {stored}\n')
+
+    assert cmd('config pytest.v').strip() == expected
+
+
+def test_percent_interpolation_in_hand_written_config():
+    # '%(other-option)s' still expands to another value from the section.
+    local_config().write_text('[pytest]\nbase = /opt/west\nsub = %(base)s/cache\n')
+
+    assert sorted(cmd('config -l').splitlines()) == [
+        'pytest.base=/opt/west',
+        'pytest.sub=/opt/west/cache',
+    ]
+
+
+@pytest.mark.parametrize('stored', ['100%', '100%%%', '100%%%%%'])
+def test_percent_unescaped_in_hand_written_config(stored):
+    # An odd number of them leaves one '%' that cannot be interpolated.
+    # Every west command reads all configuration files before running, so
+    # this is fatal for all of them; the error has to say which option is
+    # wrong and how to fix it.
+    local_config().write_text(f'[pytest]\nv = {stored}\n')
+
+    exc_info, _ = cmd_raises('config pytest.v', MalformedConfig)
+
+    assert "'pytest.v'" in str(exc_info.value)
+    assert "'%%'" in str(exc_info.value)
+
+
+def test_percent_in_deprecated_config_object():
+    # The object west populates at startup for extensions still using the
+    # deprecated API interpolates as well, so values have to reach it
+    # escaped. This is what used to break the '%%' escape.
+    local_config().write_text('[pytest]\nv = 100%%\n')
+
+    cmd('config -l')
+
+    assert wconfig.config.get('pytest', 'v') == '100%'
+
+
+def test_append_percent():
+    # 'west config -a' reads the value back before writing it again, so
+    # it must not escape what is already escaped.
+    cmd(['config', 'pytest.v', '50%'])
+    cmd(['config', '-a', 'pytest.v', '+25%'])
+
+    assert cmd('config pytest.v').strip() == '50%+25%'
