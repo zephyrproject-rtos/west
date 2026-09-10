@@ -70,6 +70,10 @@ def west_topdir(start: PathType | None = None, fall_back: bool = True) -> str:
     '''
     Like west_dir(), but returns the path to the parent directory of the .west/
     directory instead, where project repositories are stored
+
+    The *fall_back* argument is deprecated and ignored. It used to enable a
+    fall back to the ZEPHYR_BASE environment variable, which relied on Zephyr
+    internals and is no longer supported.
     '''
     cur_dir = Path(start or os.getcwd())
 
@@ -79,13 +83,8 @@ def west_topdir(start: PathType | None = None, fall_back: bool = True) -> str:
 
         parent_dir = cur_dir.parent
         if cur_dir == parent_dir:
-            # At the root. Should we fall back?
-            if fall_back and os.environ.get('ZEPHYR_BASE'):
-                return west_topdir(os.environ['ZEPHYR_BASE'], fall_back=False)
-            else:
-                raise WestNotFound(
-                    'Could not find a west workspace in this or any parent directory'
-                )
+            # At the root.
+            raise WestNotFound('Could not find a west workspace in this or any parent directory')
         cur_dir = parent_dir
 
 
