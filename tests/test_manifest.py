@@ -44,6 +44,7 @@ from west.manifest import (
     MANIFEST_PROJECT_INDEX,
     SCHEMA_VERSION,
     ImportFlag,
+    ImportRemapping,
     MalformedManifest,
     Manifest,
     ManifestImportFailed,
@@ -144,6 +145,40 @@ def test_project_init():
     assert p.topdir == TOPDIR
     assert p.abspath == os.path.join(TOPDIR, 'p')
     assert p.posixpath == TOPDIR_POSIX + '/p'
+
+
+def test_import_remapping():
+    # Basic tests of the ImportRemapping helper class used to implement
+    # the 'remapping' manifest section.
+
+    empty = ImportRemapping()
+    assert empty.url_replaces == []
+
+    r1 = ImportRemapping({'remapping': {'url': [{'old': 'foo', 'new': 'bar'}]}})
+    assert r1.url_replaces == [('foo', 'bar')]
+
+    # append() adds to the existing list instead of replacing it.
+    r1.append({'remapping': {'url': [{'old': 'baz', 'new': 'qux'}]}})
+    assert r1.url_replaces == [('foo', 'bar'), ('baz', 'qux')]
+
+    # merge() concatenates another instance's url_replaces onto this one.
+    r2 = ImportRemapping({'remapping': {'url': [{'old': 'a', 'new': 'b'}]}})
+    r1.merge(r2)
+    assert r1.url_replaces == [
+        ('foo', 'bar'),
+        ('baz', 'qux'),
+        ('a', 'b'),
+    ]
+
+    # merge() rejects anything that isn't an ImportRemapping.
+    with pytest.raises(TypeError):
+        r1.merge(object())
+
+    # copy() returns an independent deep copy.
+    r3 = r1.copy()
+    assert r3.url_replaces == r1.url_replaces
+    r3.url_replaces.append(('another', 'pair'))
+    assert r3.url_replaces != r1.url_replaces
 
 
 def test_manifest_from_data_without_topdir():
