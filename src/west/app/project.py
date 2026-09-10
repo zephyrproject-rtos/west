@@ -489,7 +489,7 @@ below.
         # manifest path.
         for check in (topdir, abs_manifest_path):
             try:
-                already = util.west_topdir(check, fall_back=False)
+                already = util.west_topdir(check, fall_back=False, no_overwrite=True)
                 self.die_already(already)
             except util.WestNotFound:
                 pass
@@ -552,7 +552,7 @@ below.
         west_dir = topdir / WEST_DIR
 
         try:
-            already = util.west_topdir(topdir, fall_back=False)
+            already = util.west_topdir(topdir, fall_back=False, no_overwrite=True)
             self.die_already(already)
         except util.WestNotFound:
             pass
@@ -642,7 +642,7 @@ below.
         # level somewhere between the new topdir and the new manifest_path. This check will be
         # especially useful once the new --topdir feature is available, see
         # https://github.com/zephyrproject-rtos/west/issues/774
-        already = util.west_topdir(manifest_abspath, fall_back=False)
+        already = util.west_topdir(manifest_abspath, fall_back=False, no_overwrite=True)
         if not topdir.samefile(already):
             self.die_already(already)
 
