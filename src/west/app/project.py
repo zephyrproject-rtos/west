@@ -1616,7 +1616,7 @@ class Update(_ProjectCommand):
     def update_importer(self, project, path):
         if isinstance(project, ManifestProject):
             if not project.is_cloned():
-                self.die("manifest repository {project.abspath} was deleted")
+                self.die(f"manifest repository {project.abspath} was deleted")
         else:
             # There's no need to call self.project_is_active(),
             # because the Manifest API guarantees that 'groups' cannot
