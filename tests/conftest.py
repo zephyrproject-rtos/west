@@ -666,7 +666,7 @@ def check_proj_consistency(actual, expected):
     )
     assert actual.clone_depth == expected.clone_depth
     assert actual.revision == expected.revision
-    assert actual.west_commands == expected.west_commands
+    assert actual.west_commands_entries == expected.west_commands_entries
 
 
 def tree(path: Path, prefix="") -> str:
