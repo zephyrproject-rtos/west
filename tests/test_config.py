@@ -920,7 +920,7 @@ PERCENT_VALUES = ['100%', '100%%', '100%%%', 'https://example.com/some%20path']
 
 
 def local_config() -> pathlib.Path:
-    return pathlib.Path(os.environ[west_env[LOCAL]])
+    return pathlib.Path(os.environ[CONFIG_ENV_NAMES[LOCAL]])
 
 
 @pytest.mark.parametrize('value', PERCENT_VALUES)
