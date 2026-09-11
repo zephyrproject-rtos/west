@@ -18,6 +18,9 @@ mapping:
     sequence:
       - type: map
         mapping:
+          # The file backing the commands below. For "class" commands it is
+          # imported as a Python module; for "exec" commands it is run as an
+          # executable.
           file:
             required: true
             type: str
@@ -30,9 +33,23 @@ mapping:
                   name:
                     required: false
                     type: str
+                  # "class" (class-based extension): the file is imported as
+                  # a Python module and this WestCommand subclass is used.
+                  # Defaults to "name". Mutually exclusive with "exec".
                   class:
                     required: false
                     type: str
+                  # "exec" (executable extension): the file is run as a
+                  # program instead of imported. Its value is either:
+                  #   - true: run the file directly, or
+                  #   - an interpreter command (string, e.g. "python3", or a
+                  #     list, e.g. ["/usr/bin/env", "python3"]) to run it with.
+                  # The type (bool/str/seq) can't be expressed in pykwalify,
+                  # so it is checked in west.commands. Mutually exclusive with
+                  # "class".
+                  exec:
+                    required: false
+                    type: any
                   help:
                     required: false
                     type: str
