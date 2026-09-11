@@ -7,6 +7,14 @@
 
 import importlib.metadata
 
+# The package metadata required can be missing when running pytest directly.  One
+# possible workaround is:
+#
+#   cd west && pipx install -e . && pipx uninstall west
+#
+# This cycle leaves behind a `west/src/west.egg-info/PKG-INFO` file which is enough.
+# `pip install --break-system-packages ...` can achieve the same result but with more
+# disruption than pipx.
 __version__ = importlib.metadata.version("west")
 #
 # MAINTAINERS:
