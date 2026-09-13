@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import cmd, cmd_subprocess
+from conftest import cmd, cmd_raises, cmd_subprocess
 
 import west.version
 
@@ -48,3 +48,10 @@ def test_module_run(tmp_path, monkeypatch):
     # check that that the sys.path was correctly inserted
     expected_path = Path(__file__).parents[1] / 'src'
     assert actual_path == [f'{expected_path}', 'initial-path']
+
+
+def test_unknown_command_suggests_closest_match():
+    exc_info, _ = cmd_raises('updat', SystemExit)
+
+    assert 'unknown command "updat"' in str(exc_info.value)
+    assert 'Did you mean "update"?' in str(exc_info.value)
