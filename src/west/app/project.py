@@ -419,22 +419,12 @@ below.
 
     def do_run(self, args, _):
         if self.topdir:
-            zb = os.environ.get('ZEPHYR_BASE')
-            if zb:
-                msg = textwrap.dedent(f'''
-                Note:
-                    In your environment, ZEPHYR_BASE is set to:
-                    {zb}
-
-                    This forces west to search for a workspace there.
-                    Try unsetting ZEPHYR_BASE and re-running this command.''')
-            else:
-                west_dir = Path(self.topdir) / WEST_DIR
-                msg = (
-                    "\n  Hint: if you do not want a workspace there, \n"
-                    "  remove this directory and re-run this command:\n\n"
-                    f"  {west_dir}"
-                )
+            west_dir = Path(self.topdir) / WEST_DIR
+            msg = (
+                "\n  Hint: if you do not want a workspace there, \n"
+                "  remove this directory and re-run this command:\n\n"
+                f"  {west_dir}"
+            )
 
             self.die_already(self.topdir, msg)
 
@@ -489,7 +479,7 @@ below.
         # manifest path.
         for check in (topdir, abs_manifest_path):
             try:
-                already = util.west_topdir(check, fall_back=False)
+                already = util.west_topdir(check)
                 self.die_already(already)
             except util.WestNotFound:
                 pass
@@ -552,7 +542,7 @@ below.
         west_dir = topdir / WEST_DIR
 
         try:
-            already = util.west_topdir(topdir, fall_back=False)
+            already = util.west_topdir(topdir)
             self.die_already(already)
         except util.WestNotFound:
             pass
@@ -642,7 +632,7 @@ below.
         # level somewhere between the new topdir and the new manifest_path. This check will be
         # especially useful once the new --topdir feature is available, see
         # https://github.com/zephyrproject-rtos/west/issues/774
-        already = util.west_topdir(manifest_abspath, fall_back=False)
+        already = util.west_topdir(manifest_abspath)
         if not topdir.samefile(already):
             self.die_already(already)
 
