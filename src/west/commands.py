@@ -662,7 +662,7 @@ def extension_commands(config: Configuration, manifest: Manifest | None = None):
 
     specs = OrderedDict()
     for project in manifest.projects:
-        if project.west_commands:
+        if project.west_commands_entries:
             specs[project.path] = _ext_specs(project)
     return specs
 
@@ -673,10 +673,11 @@ def _ext_specs(project):
 
     ret = []
 
-    for cmd in project.west_commands:
+    for entry in project.west_commands_entries:
+        cmd = entry.path
         spec_file = os.path.join(project.abspath, cmd)
 
-        # Verify project.west_commands isn't trying a directory traversal
+        # Verify the entry's path isn't trying a directory traversal
         # outside of the project.
         if escapes_directory(spec_file, project.abspath):
             raise ExtensionCommandError(
@@ -702,10 +703,9 @@ def _ext_specs(project):
         except pykwalify.errors.SchemaError as e:
             raise ExtensionCommandError from e
 
-        # Resolve west command extensions relative to the manifest root for
-        # import-derived west-commands entries, otherwise project root.
-        mfst_dir = project._west_commands_manifest_dirs.get(cmd)
-        base_dir = os.path.join(project.abspath, mfst_dir) if mfst_dir else project.abspath
+        # We must resolve the paths to west commands relative to the
+        # west manifest's path from the project root.
+        base_dir = os.path.join(project.abspath, entry.base_dir)
 
         for commands_desc in commands_spec['west-commands']:
             ret.extend(_ext_specs_from_desc(project, commands_desc, base_dir))

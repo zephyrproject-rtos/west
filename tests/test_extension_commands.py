@@ -7,7 +7,7 @@ import textwrap
 from pathlib import Path
 
 import yaml
-from conftest import GIT, WINDOWS, add_commit, cmd, cmd_raises, yaml_editor
+from conftest import GIT, WINDOWS, add_commit, cmd, cmd_raises, create_repo, yaml_editor
 
 
 def _yaml_get_proj(mf: dict, projname: str):
@@ -279,6 +279,11 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory(re
     # west-commands YAML are resolved relative to the imported manifest root.
     # The same paths must work whether a project is imported or initialized directly;
     # importing must never break anything.
+    #
+    # The submanifest also declares an entry that already carries a
+    # base-dir: the entry's base_dir must compose with the submanifest
+    # subdirectory (mf_subdir/nested), so the spec's `file:` paths
+    # resolve against that composed directory when the command runs.
     manifest_path = repos_tmpdir / 'repos' / 'zephyr'
     net_tools_path = repos_tmpdir / 'repos' / 'net-tools'
 
@@ -286,7 +291,10 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory(re
         '''\
         manifest:
           self:
-            west-commands: scripts/west-commands-from-subdir.yml
+            west-commands:
+            - scripts/west-commands-from-subdir.yml
+            - file: nested/west-commands-nested.yml
+              base-dir: nested
         '''
     )
     MF_SUB_COMMANDS_YML = textwrap.dedent(
@@ -318,6 +326,35 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory(re
                 print('imported command from subdir works')
         '''
     )
+    MF_NESTED_COMMANDS_YML = textwrap.dedent(
+        '''\
+        west-commands:
+          - file: cmds/nested_command.py
+            commands:
+              - name: imported-command-from-nested-base-dir
+                class: ImportedCommandFromNestedBaseDir
+                help: nested base-dir extension help
+        '''
+    )
+    MF_NESTED_WEST_PY = textwrap.dedent(
+        '''\
+        from west.commands import WestCommand
+
+        class ImportedCommandFromNestedBaseDir(WestCommand):
+            def __init__(self):
+                super().__init__(
+                    'imported-command-from-nested-base-dir',
+                    'nested base-dir command help',
+                    'nested base-dir command description',
+                )
+
+            def do_add_parser(self, parser_adder):
+                return parser_adder.add_parser(self.name)
+
+            def do_run(self, args, unknown):
+                print('imported command from nested base-dir works')
+        '''
+    )
 
     add_commit(
         net_tools_path,
@@ -326,6 +363,8 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory(re
             'mf_subdir/west.yml': MF_SUB_WEST_YML,
             'mf_subdir/scripts/west-commands-from-subdir.yml': MF_SUB_COMMANDS_YML,
             'mf_subdir/test/west-commands/subdir_command.py': MF_SUB_WEST_PY,
+            'mf_subdir/nested/west-commands-nested.yml': MF_NESTED_COMMANDS_YML,
+            'mf_subdir/nested/cmds/nested_command.py': MF_NESTED_WEST_PY,
         },
     )
 
@@ -356,6 +395,9 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory(re
 
     ext_output = cmd('imported-command-from-subdir', cwd=workspace)
     assert 'imported command from subdir works' in ext_output
+
+    ext_output = cmd('imported-command-from-nested-base-dir', cwd=workspace)
+    assert 'imported command from nested base-dir works' in ext_output
 
 
 def test_call_imported_project_submanifest_commands_from_project_subdirectory_special_chars(
@@ -457,7 +499,140 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory_sp
         # Untouched on Un*x
         expected = r'mf_subdir/' + _WEIRD_CMDS_PATH
     print()
-    assert net_tools["west-commands"][1] == expected
+    assert net_tools["west-commands"][1]["file"] == expected
+
+
+def test_call_resolved_manifest_commands_from_project_subdirectory(repos_tmpdir):
+    # 'west manifest --resolve' records west-commands promoted from a
+    # project subdirectory submanifest as {file, base-dir} maps on that
+    # project. Committing the resolved manifest into a *subdirectory*
+    # of another project and importing it from there must leave those
+    # entries alone: they resolve against the checkout of the project
+    # declaring them (net-tools), so the importing subdirectory ('subA')
+    # must not be composed into their base-dir. The extension command
+    # must keep working, and re-resolving must reproduce the same
+    # {file, base-dir} entry: the round trip is idempotent.
+    repos = repos_tmpdir / 'repos'
+    manifest_path = repos / 'zephyr'
+    net_tools_path = repos / 'net-tools'
+
+    MF_SUB_WEST_YML = textwrap.dedent(
+        '''\
+        manifest:
+          self:
+            west-commands: scripts/cmds.yml
+        '''
+    )
+    MF_SUB_COMMANDS_YML = textwrap.dedent(
+        '''\
+        west-commands:
+          - file: py/resolved_command.py
+            commands:
+              - name: resolved-command
+                class: ResolvedCommand
+                help: resolved manifest extension help
+        '''
+    )
+    MF_SUB_WEST_PY = textwrap.dedent(
+        '''\
+        from west.commands import WestCommand
+
+        class ResolvedCommand(WestCommand):
+            def __init__(self):
+                super().__init__(
+                    'resolved-command',
+                    'resolved manifest command help',
+                    'resolved manifest command description',
+                )
+
+            def do_add_parser(self, parser_adder):
+                return parser_adder.add_parser(self.name)
+
+            def do_run(self, args, unknown):
+                print('resolved command from subB works')
+        '''
+    )
+
+    add_commit(
+        net_tools_path,
+        'add subB submanifest with extension command',
+        files={
+            'subB/west.yml': MF_SUB_WEST_YML,
+            'subB/scripts/cmds.yml': MF_SUB_COMMANDS_YML,
+            'subB/py/resolved_command.py': MF_SUB_WEST_PY,
+        },
+    )
+
+    with yaml_editor(manifest_path / 'west.yml') as mf:
+        net_tools_project = _yaml_get_proj(mf, 'net-tools')
+        net_tools_project['import'] = 'subB/west.yml'
+    subprocess.check_call(
+        [
+            GIT,
+            '-C',
+            str(manifest_path),
+            'commit',
+            '-m',
+            'import subB/west.yml',
+            'west.yml',
+        ]
+    )
+
+    ws1 = repos_tmpdir / 'ws1'
+    cmd(['init', '-m', str(manifest_path), str(ws1)])
+    cmd('update', cwd=ws1)
+    assert 'resolved command from subB works' in cmd('resolved-command', cwd=ws1)
+
+    # The resolved manifest records the promoted entry as a
+    # {file, base-dir} map on the net-tools project.
+    expected_entry = {'file': 'subB/scripts/cmds.yml', 'base-dir': 'subB'}
+    resolved = cmd(['manifest', '--resolve'], cwd=ws1)
+    net_tools = _yaml_get_proj(yaml.safe_load(resolved), 'net-tools')
+    assert expected_entry in net_tools['west-commands']
+
+    # Commit the resolved manifest into a subdirectory of a new
+    # 'container' project, and import it from there.
+    container_path = repos / 'container'
+    create_repo(container_path)
+    add_commit(
+        container_path,
+        'add resolved manifest in a subdirectory',
+        files={'subA/west.yml': resolved},
+    )
+
+    with open(manifest_path / 'west.yml', 'w') as f:
+        f.write(
+            textwrap.dedent(
+                f'''\
+                manifest:
+                  projects:
+                  - name: container
+                    url: file://{container_path}
+                    import: subA/west.yml
+                '''
+            )
+        )
+    subprocess.check_call(
+        [
+            GIT,
+            '-C',
+            str(manifest_path),
+            'commit',
+            '-m',
+            'import resolved manifest from container subdirectory',
+            'west.yml',
+        ]
+    )
+
+    ws2 = repos_tmpdir / 'ws2'
+    cmd(['init', '-m', str(manifest_path), str(ws2)])
+    cmd('update', cwd=ws2)
+    assert 'resolved command from subB works' in cmd('resolved-command', cwd=ws2)
+
+    # net-tools' entry passed through the import unchanged: its
+    # base-dir is still 'subB', not 'subA/subB'.
+    net_tools = _yaml_get_proj(yaml.safe_load(cmd(['manifest', '--resolve'], cwd=ws2)), 'net-tools')
+    assert expected_entry in net_tools['west-commands']
 
 
 def test_extension_special_chars(west_update_tmpdir):

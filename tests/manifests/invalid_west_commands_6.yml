@@ -8,5 +8,4 @@ manifest:
       remote: testremote
       west-commands:
         - file: cmd.yml
-          base-dir: sub
-          bogus: oops
+          base-dir: 42
