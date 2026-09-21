@@ -6,6 +6,7 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+import pytest
 import yaml
 from conftest import GIT, WINDOWS, add_commit, cmd, cmd_raises, yaml_editor
 
@@ -22,7 +23,38 @@ def _yaml_get_proj(mf: dict, projname: str):
 def test_extension_commands_basic(west_update_tmpdir):
     # Test basic extension command loading and structure
     ext_output = cmd('test-extension')
-    assert 'Testing test command 1' in ext_output
+    assert _EXPECTED_OUTPUT[0] == ext_output.strip()
+
+
+_EXPECTED_OUTPUT = [
+    'Testing test command 1',
+    'ERROR: ext1 err log',
+    'WARNING: ext1 wrn log',
+    'ext1 inf log',  # inconsistency, see #999
+    'ext1 dbg log',
+    'ext1 dbg_more log',
+    'ext1 dbg_extreme log',
+]
+_EXPECTED_OUTPUT_LEN = {
+    '-q': 3,
+    '': 4,
+    '-v': 5,
+    '-vv': 6,
+    '-vvv': 7,
+}
+
+
+@pytest.mark.parametrize("level_arg", _EXPECTED_OUTPUT_LEN)
+def test_extension_commands_logs(west_update_tmpdir, level_arg):
+    ext_output = cmd(f'{level_arg} test-extension --test-logs')
+
+    output_len = _EXPECTED_OUTPUT_LEN[level_arg]
+    expected = "\n".join(_EXPECTED_OUTPUT[0:output_len] + [''])
+
+    if output_len < 6:
+        assert expected == ext_output
+    else:  # west prints a lot more at these high levels
+        assert expected in ext_output
 
 
 def test_extension_commands_disabled(west_update_tmpdir):
