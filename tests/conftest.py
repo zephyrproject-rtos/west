@@ -276,17 +276,31 @@ def _session_repos(tmp_path_factory):
                     class: TestExtension
                     help: test-extension-help
                 '''),
+            # Move test.py to a separate file when it gets too big
             'scripts/test.py': textwrap.dedent('''\
                 from west.commands import WestCommand
+                from west.commands import Verbosity as WV
+                import argparse
                 class TestExtension(WestCommand):
                     def __init__(self):
                         super().__init__('test-extension',
                                          description='description of test extension')
                     def do_add_parser(self, parser_adder):
                         parser = parser_adder.add_parser(self.name)
+                        parser.add_argument('--test-logs',
+                                            action=argparse.BooleanOptionalAction, default=False)
                         return parser
                     def do_run(self, args, ignored):
                         print('Testing test command 1')
+                        if args.test_logs:
+                            self.logs()
+                    def logs(self):
+                        self.err('ext1 err log')
+                        self.wrn('ext1 wrn log')
+                        self.inf('ext1 inf log')
+                        self.dbg('ext1 dbg log')
+                        self.dbg('ext1 dbg_more log', level=WV.DBG_MORE)
+                        self.dbg('ext1 dbg_extreme log', level=WV.DBG_EXTREME)
                 '''),
         },
     )

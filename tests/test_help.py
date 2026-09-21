@@ -32,21 +32,23 @@ def test_extension_help_and_dash_h(west_init_tmpdir):
 
     expected = EXTENSION_EXPECTED
     assert ext1out == ext2out
-    assert ext1out in expected
+    assert expected[0] == ext1out or expected[1] == ext1out
 
 
-# argparse changed its behavior at some point; patch over that here.
+# argparse changed its output at some point; patch over that here.
 EXTENSION_EXPECTED = [
     '''\
-usage: west test-extension [-h]
+usage: west test-extension [-h] [--test-logs | --no-test-logs]
 
 optional arguments:
-  -h, --help  show this help message and exit
+  -h, --help            show this help message and exit
+  --test-logs, --no-test-logs
 ''',
     '''\
-usage: west test-extension [-h]
+usage: west test-extension [-h] [--test-logs | --no-test-logs]
 
 options:
-  -h, --help  show this help message and exit
+  -h, --help            show this help message and exit
+  --test-logs, --no-test-logs
 ''',
 ]
