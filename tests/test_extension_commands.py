@@ -31,9 +31,9 @@ _EXPECTED_OUTPUT = [
     'ERROR: ext1 err log',
     'WARNING: ext1 wrn log',
     'ext1 inf log',  # inconsistency, see #999
-    'ext1 dbg log',
-    'ext1 dbg_more log',
-    'ext1 dbg_extreme log',
+    'DEBUG: ext1 dbg log',
+    'TRACE: ext1 dbg_more log',
+    'TRACE: ext1 dbg_extreme log',
 ]
 _EXPECTED_OUTPUT_LEN = {
     '-q': 3,

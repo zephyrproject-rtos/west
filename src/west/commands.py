@@ -120,13 +120,21 @@ class Verbosity(IntEnum):
 
 
 _VERBOSITY_PREFIXES = {
+    Verbosity.QUIET: "",
     Verbosity.ERR: "ERROR",
     Verbosity.WRN: "WARNING",
+    # Ignored by inf() for legacy reasons, see #999. Printed by the awkward dbg(..., level=INFO)
+    Verbosity.INF: "INFO",
+    Verbosity.DBG: "DEBUG",
+    Verbosity.DBG_MORE: "TRACE",
+    Verbosity.DBG_EXTREME: "TRACE",
 }
 
 # Append colon+space.
 for lvl, prefix in _VERBOSITY_PREFIXES.items():
     lvl._line_prefix = prefix + ': '
+Verbosity.QUIET._line_prefix = ''
+
 
 #: Color used (when applicable) for printing with inf()
 INF_COLOR = colorama.Fore.LIGHTGREEN_EX
@@ -453,6 +461,7 @@ class WestCommand(ABC):
         '''
         if self.verbosity < level:
             return
+        print(level._line_prefix, end='')
         print(*args, end=end)
 
     def inf(self, *args, colorize: bool = False, end: str = '\n'):
@@ -478,6 +487,7 @@ class WestCommand(ABC):
         if colorize:
             print(INF_COLOR, end='')
 
+        # Do not prefix with "INFO: " for legacy reasons, see #999
         print(*args, end=end)
 
         if colorize:

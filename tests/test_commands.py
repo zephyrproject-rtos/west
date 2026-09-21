@@ -31,6 +31,7 @@ COL_RED = "\x1b[91m"
 COL_YELLOW = "\x1b[93m"
 COL_OFF = "\x1b[0m"
 
+EXPECTED_LOG_DEBUG = f'DEBUG: {TEST_STR}\n'
 EXPECTED_LOG_DEFAULT = f'{TEST_STR}\n'
 EXPECTED_LOG_WARNING = f'{COL_YELLOW}WARNING: {TEST_STR}\n{COL_OFF}'
 EXPECTED_LOG_ERROR = f'{COL_RED}ERROR: {TEST_STR}\n{COL_OFF}'
@@ -38,15 +39,15 @@ EXPECTED_LOG_FATAL_ERROR = f'{COL_RED}FATAL ERROR: {TEST_STR}\n{COL_OFF}'
 
 TEST_CASES_LOG = [
     # max_log_level, log_cmd, expected_stdout, expected_stderr
-    (Verbosity.DBG_EXTREME, cmd.dbg, EXPECTED_LOG_DEFAULT, ''),
+    (Verbosity.DBG_EXTREME, cmd.dbg, EXPECTED_LOG_DEBUG, ''),
     (Verbosity.DBG_EXTREME, cmd.inf, EXPECTED_LOG_DEFAULT, ''),
     (Verbosity.DBG_EXTREME, cmd.wrn, '', EXPECTED_LOG_WARNING),
     (Verbosity.DBG_EXTREME, cmd.err, '', EXPECTED_LOG_ERROR),
-    (Verbosity.DBG_MORE, cmd.dbg, EXPECTED_LOG_DEFAULT, ''),
+    (Verbosity.DBG_MORE, cmd.dbg, EXPECTED_LOG_DEBUG, ''),
     (Verbosity.DBG_MORE, cmd.inf, EXPECTED_LOG_DEFAULT, ''),
     (Verbosity.DBG_MORE, cmd.wrn, '', EXPECTED_LOG_WARNING),
     (Verbosity.DBG_MORE, cmd.err, '', EXPECTED_LOG_ERROR),
-    (Verbosity.DBG, cmd.dbg, EXPECTED_LOG_DEFAULT, ''),
+    (Verbosity.DBG, cmd.dbg, EXPECTED_LOG_DEBUG, ''),
     (Verbosity.DBG, cmd.inf, EXPECTED_LOG_DEFAULT, ''),
     (Verbosity.DBG, cmd.wrn, '', EXPECTED_LOG_WARNING),
     (Verbosity.DBG, cmd.err, '', EXPECTED_LOG_ERROR),
@@ -96,7 +97,8 @@ def test_dbg_log(capsys):
             if logs_vrb < stmt_vrb:
                 assert stdout == ''
             else:
-                assert log_msg in stdout
+                expected = stmt_vrb._line_prefix + log_msg + '\n'
+                assert expected == stdout
 
 
 TEST_CASES_DIE = [
