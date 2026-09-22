@@ -81,6 +81,24 @@ def test_log(capsys, test_case):
     assert stdout == exp_out
 
 
+def test_dbg_log(capsys):
+    # Yes, you can call: dbg(..., level=ERR). But please don't?
+    for logs_vrb in Verbosity:
+        cmd.verbosity = logs_vrb
+        for stmt_vrb in Verbosity:
+            log_msg = f"L_V={logs_vrb}, S_V={stmt_vrb}"
+            cmd.dbg(log_msg, level=stmt_vrb)
+            captured = capsys.readouterr()
+            stdout = captured.out
+            stderr = captured.err
+
+            assert stderr == ''  # dbg(..., level=ERR) is not err(...)
+            if logs_vrb < stmt_vrb:
+                assert stdout == ''
+            else:
+                assert log_msg in stdout
+
+
 TEST_CASES_DIE = [
     # max_log_level, exp_out, exp_err, exp_exit, exp_exc
     (
