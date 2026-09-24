@@ -54,7 +54,22 @@ class WestNotFound(RuntimeError):
     '''Neither the current directory nor any parent has a west workspace.'''
 
 
-def west_dir(start: PathType | None = None) -> str:
+_topdir_override: str | None = None
+
+
+def set_topdir_override(path: PathType | None) -> None:
+    '''Force west_topdir() to always return *path* instead of searching.
+
+    Implements the ``west -C`` option: once set, every west_topdir() call
+    in the process (unless it passes ``no_overwrite=True``) returns this
+    directory instead of searching from a start directory, cwd, or
+    ZEPHYR_BASE. Pass None to clear the override.
+    '''
+    global _topdir_override
+    _topdir_override = os.fspath(path) if path is not None else None
+
+
+def west_dir(start: PathType | None = None, no_overwrite: bool = False) -> str:
     '''Returns the absolute path of the workspace's .west directory.
 
     Starts the search from the start directory, and goes to its
@@ -63,14 +78,22 @@ def west_dir(start: PathType | None = None) -> str:
 
     Raises WestNotFound if no .west directory is found.
     '''
-    return os.path.join(west_topdir(start), WEST_DIR)
+    return os.path.join(west_topdir(start, no_overwrite=no_overwrite), WEST_DIR)
 
 
-def west_topdir(start: PathType | None = None, fall_back: bool = True) -> str:
+def west_topdir(
+    start: PathType | None = None, fall_back: bool = True, no_overwrite: bool = False
+) -> str:
     '''
     Like west_dir(), but returns the path to the parent directory of the .west/
     directory instead, where project repositories are stored
     '''
+    if not no_overwrite and _topdir_override is not None:
+        override_dir = Path(_topdir_override)
+        if (override_dir / WEST_DIR).is_dir():
+            return os.fspath(override_dir)
+        raise WestNotFound(f'-C path is not a west workspace: {override_dir}')
+
     cur_dir = Path(start or os.getcwd())
 
     while True:
@@ -81,7 +104,9 @@ def west_topdir(start: PathType | None = None, fall_back: bool = True) -> str:
         if cur_dir == parent_dir:
             # At the root. Should we fall back?
             if fall_back and os.environ.get('ZEPHYR_BASE'):
-                return west_topdir(os.environ['ZEPHYR_BASE'], fall_back=False)
+                return west_topdir(
+                    os.environ['ZEPHYR_BASE'], fall_back=False, no_overwrite=no_overwrite
+                )
             else:
                 raise WestNotFound(
                     'Could not find a west workspace in this or any parent directory'
