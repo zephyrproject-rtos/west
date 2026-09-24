@@ -7,6 +7,4 @@ manifest:
     - name: testproject
       remote: testremote
       west-commands:
-        - file: cmd.yml
-          base-dir: sub
-          bogus: oops
+        - 42
