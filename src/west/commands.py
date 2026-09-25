@@ -727,7 +727,7 @@ def _ext_specs(project):
 
         # Resolve west command extensions relative to the manifest root for
         # import-derived west-commands entries, otherwise project root.
-        mfst_dir = project._west_commands_manifest_dirs.get(cmd)
+        mfst_dir = project.west_commands.manifest_dirs.get(cmd)
         base_dir = os.path.join(project.abspath, mfst_dir) if mfst_dir else project.abspath
 
         for commands_desc in commands_spec['west-commands']:
