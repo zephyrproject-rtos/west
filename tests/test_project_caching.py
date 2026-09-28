@@ -6,11 +6,13 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+import pytest
 from conftest import (
     GIT,
     add_commit,
     chdir,
     cmd,
+    cmd_raises,
     create_branch,
     create_repo,
     create_workspace,
@@ -18,6 +20,8 @@ from conftest import (
     rev_list,
     rev_parse,
 )
+
+from west.commands import WestCommand
 
 #
 # Helpers
@@ -49,6 +53,58 @@ def setup_cache_workspace(workspace, foo_remote, foo_head, bar_remote, bar_head)
             url: file://{bar_remote}
             revision: {bar_head}
         ''')
+
+
+def setup_nested_cache_workspace(workspace, outer_remote, outer_head, inner_remote, inner_head):
+    # Shared helper code that sets up a workspace in which one
+    # project's path contains another project's path.
+
+    create_workspace(workspace)
+
+    # The directory tree of the workspace looks like following:
+    # (workspace)
+    # └── outer
+    #     └── nested
+    #         └── inner
+    #
+    # 'inner' is listed first on purpose: 'west update' visits projects
+    # in manifest order, so 'outer' is initialized after its own
+    # directory has already been created for 'inner'.
+
+    manifest_project = workspace / 'mp'
+    with open(manifest_project / 'west.yml', 'w') as f:
+        f.write(f'''
+        manifest:
+          projects:
+          - name: inner
+            path: outer/nested/inner
+            url: file://{inner_remote}
+            revision: {inner_head}
+          - name: outer
+            path: outer
+            url: file://{outer_remote}
+            revision: {outer_head}
+        ''')
+
+
+def setup_nested_path_cache(tmpdir):
+    path_cache_dir = tmpdir / 'path_cache_dir'
+    outer_cache = path_cache_dir / 'outer'
+    inner_cache = outer_cache / 'nested' / 'inner'
+    create_repo(outer_cache)
+    create_repo(inner_cache)
+
+    outer_head = rev_parse(outer_cache, 'HEAD')
+    inner_head = rev_parse(inner_cache, 'HEAD')
+    workspace = tmpdir / 'workspace'
+    setup_nested_cache_workspace(
+        workspace,
+        outer_remote=(Path('non-existent') / 'outer'),
+        outer_head=outer_head,
+        inner_remote=(Path('non-existent') / 'inner'),
+        inner_head=inner_head,
+    )
+    return path_cache_dir, workspace, outer_head, inner_head
 
 
 #
@@ -180,6 +236,174 @@ def test_update_path_cache(tmpdir):
     assert rev_parse(bar, 'HEAD') == bar_head
     assert remote_get_url(foo) == "file://" + os.fspath(Path('non-existent') / 'here')
     assert remote_get_url(bar) == "file://" + os.fspath(Path('non-existent') / 'there')
+
+
+def test_update_cache_nested_projects(tmpdir):
+    # Test that a cached 'west update' can initialize a project whose
+    # path contains another project that was updated first.
+    #
+    # 'git clone' refuses to write into a directory that already exists
+    # and is not empty, so west cannot clone such a project from the
+    # cache. Without a cache the same layout works, because 'git init'
+    # has no such restriction.
+    #
+    # Note: the remote URLs are non-existent, so this can only pass if
+    # every object still comes from the cache.
+
+    # The directory tree of the path cache looks like following:
+    # (path cache)
+    # └── outer
+    #     └── nested
+    #         └── inner
+
+    path_cache_dir, workspace, outer_head, inner_head = setup_nested_path_cache(tmpdir)
+    workspace.chdir()
+    outer = workspace / 'outer'
+    inner = workspace / 'outer' / 'nested' / 'inner'
+
+    # A relative cache path must keep the same meaning when the outer
+    # project's in-place initialization runs Git from inside the project.
+    path_cache_arg = os.path.relpath(path_cache_dir, workspace)
+    cmd(['update', '--path-cache', path_cache_arg])
+
+    assert outer.check(dir=1)
+    assert inner.check(dir=1)
+    assert rev_parse(outer, 'HEAD') == outer_head
+    assert rev_parse(inner, 'HEAD') == inner_head
+    assert remote_get_url(outer) == "file://" + os.fspath(Path('non-existent') / 'outer')
+    assert remote_get_url(inner) == "file://" + os.fspath(Path('non-existent') / 'inner')
+
+
+def test_update_cache_nested_project_sha_from_remote_ref(tmpdir):
+    # A local clone copies non-tip objects reachable only through remote-tracking
+    # refs. In-place cache seeding must make the same objects available.
+    #
+    # Naming such an object in a fetch needs protocol v2, so west only asks
+    # for it from git v2.18 on. Below that the seed copies branch tips only
+    # and the revision comes from the remote instead, which this test's
+    # deliberately non-existent URL cannot serve.
+    git_version = WestCommand._parse_git_version(subprocess.check_output([GIT, '--version']))
+    if git_version is None or git_version < (2, 18, 0):
+        pytest.skip('seeding an unadvertised object requires fetch protocol v2 (git v2.18)')
+
+    outer_remote = tmpdir / 'outer_remote'
+    create_repo(outer_remote)
+    create_branch(outer_remote, 'side', checkout=True)
+    add_commit(outer_remote, 'side commit')
+    outer_head = rev_parse(outer_remote, 'HEAD')
+    add_commit(outer_remote, 'later side commit')
+    subprocess.check_call([GIT, 'checkout', 'master'], cwd=outer_remote)
+
+    path_cache_dir = tmpdir / 'path_cache_dir'
+    outer_cache = path_cache_dir / 'outer'
+    subprocess.check_call([GIT, 'clone', '--', outer_remote, outer_cache])
+    create_repo(outer_cache / 'nested' / 'inner')
+    inner_head = rev_parse(outer_cache / 'nested' / 'inner', 'HEAD')
+
+    workspace = tmpdir / 'workspace'
+    setup_nested_cache_workspace(
+        workspace,
+        outer_remote=(Path('non-existent') / 'outer'),
+        outer_head=outer_head,
+        inner_remote=(Path('non-existent') / 'inner'),
+        inner_head=inner_head,
+    )
+    workspace.chdir()
+
+    env = {
+        'GIT_CONFIG_COUNT': '1',
+        'GIT_CONFIG_KEY_0': 'protocol.version',
+        'GIT_CONFIG_VALUE_0': '0',
+    }
+    cmd(['update', '--path-cache', path_cache_dir], env=env)
+
+    assert rev_parse(workspace / 'outer', 'HEAD') == outer_head
+
+
+def test_update_cache_nested_project_sha_from_remote_if_cache_stale(tmpdir):
+    outer_remote = tmpdir / 'outer_remote'
+    create_repo(outer_remote)
+
+    path_cache_dir = tmpdir / 'path_cache_dir'
+    outer_cache = path_cache_dir / 'outer'
+    subprocess.check_call([GIT, 'clone', '--', outer_remote, outer_cache])
+    add_commit(outer_remote, 'uncached commit')
+    outer_head = rev_parse(outer_remote, 'HEAD')
+
+    create_repo(outer_cache / 'nested' / 'inner')
+    inner_head = rev_parse(outer_cache / 'nested' / 'inner', 'HEAD')
+
+    workspace = tmpdir / 'workspace'
+    setup_nested_cache_workspace(
+        workspace,
+        outer_remote=outer_remote,
+        outer_head=outer_head,
+        inner_remote=(Path('non-existent') / 'inner'),
+        inner_head=inner_head,
+    )
+    workspace.chdir()
+
+    cmd(['update', '--path-cache', path_cache_dir])
+
+    assert rev_parse(workspace / 'outer', 'HEAD') == outer_head
+    assert rev_parse(workspace / 'outer' / 'nested' / 'inner', 'HEAD') == inner_head
+
+
+def test_update_cache_nested_project_retries_failed_seed(tmpdir):
+    path_cache_dir, workspace, outer_head, inner_head = setup_nested_path_cache(tmpdir)
+    outer_cache = path_cache_dir / 'outer'
+    workspace.chdir()
+
+    # Make the outer cache invalid for one update attempt, then restore it.
+    # A retry must seed the newly initialized outer repository again instead
+    # of treating the failed initialization as a complete clone.
+    saved_git_dir = tmpdir / 'outer.git'
+    shutil.move(os.fspath(outer_cache / '.git'), saved_git_dir)
+    cmd_raises(['update', '--path-cache', path_cache_dir], SystemExit)
+    assert rev_parse(workspace / 'outer' / 'nested' / 'inner', 'HEAD') == inner_head
+    assert not (workspace / 'outer' / '.git').exists()
+    shutil.move(saved_git_dir, os.fspath(outer_cache / '.git'))
+
+    cmd(['update', '--path-cache', path_cache_dir])
+
+    assert rev_parse(workspace / 'outer', 'HEAD') == outer_head
+    assert rev_parse(workspace / 'outer' / 'nested' / 'inner', 'HEAD') == inner_head
+
+
+def test_update_cache_nested_project_preserves_preexisting_git_dir(tmpdir):
+    path_cache_dir, workspace, _, _ = setup_nested_path_cache(tmpdir)
+    outer_cache = path_cache_dir / 'outer'
+    outer_git_dir = workspace / 'outer' / '.git'
+    outer_git_dir.ensure(dir=True)
+    sentinel = outer_git_dir / 'keep-me'
+    sentinel.write('user data')
+    workspace.chdir()
+
+    saved_git_dir = tmpdir / 'outer.git'
+    shutil.move(os.fspath(outer_cache / '.git'), saved_git_dir)
+    cmd_raises(['update', '--path-cache', path_cache_dir], SystemExit)
+
+    assert sentinel.read() == 'user data'
+
+
+def test_update_cache_nested_project_reports_failed_cleanup(tmpdir, monkeypatch):
+    path_cache_dir, workspace, _, _ = setup_nested_path_cache(tmpdir)
+    outer_cache = path_cache_dir / 'outer'
+    workspace.chdir()
+
+    # Force cache seeding and its cleanup to fail. The cleanup error must be
+    # reported without replacing the original update failure.
+    shutil.move(os.fspath(outer_cache / '.git'), tmpdir / 'outer.git')
+
+    def fail_cleanup(_):
+        raise OSError('cleanup failed')
+
+    monkeypatch.setattr(shutil, 'rmtree', fail_cleanup)
+    _, stderr = cmd_raises(['update', '--path-cache', path_cache_dir], SystemExit)
+
+    cleanup_error = f'failed to remove incomplete repository {workspace / "outer" / ".git"}'
+    assert f'{cleanup_error}: cleanup failed' in stderr
+    assert 'update failed for project outer' in stderr
 
 
 def test_update_auto_cache(tmpdir):
