@@ -19,6 +19,8 @@ from conftest import (
     rev_parse,
 )
 
+from west.app.project import Update
+
 #
 # Helpers
 #
@@ -614,3 +616,48 @@ def test_update_caches_priorities(tmpdir):
     assert remote_get_url(bar) == "file://" + os.fspath(tmpdir / 'auto_cache_remotes' / 'bar')
     assert (auto_cache_dir / 'foo').exists()
     assert (auto_cache_dir / 'bar').exists()
+
+
+def test_update_cache_clone_no_checkout(tmpdir, monkeypatch):
+    # Test that cloning from a cache does not check out the cache's
+    # HEAD. Basic cache coverage is in test_update_name_cache().
+    # Here the manifest revision is older than the cache's HEAD.
+    name_cache_dir = tmpdir / 'name_cache'
+    create_repo(name_cache_dir / 'foo')
+    create_repo(name_cache_dir / 'bar')
+    add_commit(name_cache_dir / 'foo', 'add old.txt', files={'old.txt': 'old'})
+    foo_head = rev_parse(name_cache_dir / 'foo', 'HEAD')
+    add_commit(name_cache_dir / 'foo', 'add new.txt', files={'new.txt': 'new'})
+    bar_head = rev_parse(name_cache_dir / 'bar', 'HEAD')
+
+    workspace = tmpdir / 'workspace'
+    setup_cache_workspace(
+        workspace,
+        foo_remote=(Path('ignored') / 'here'),
+        foo_head=foo_head,
+        bar_remote=(Path('ignored') / 'there'),
+        bar_head=bar_head,
+    )
+    workspace.chdir()
+    foo = workspace / 'subdir' / 'foo'
+
+    # Ensure that the cache's HEAD files are not written on clone; the checkout deletes
+    # them again, so we cannot check after the update but we must check during update.
+    # Therefore use monkeypatch to check right after init_project() that no file has been written.
+    def checked_init_project(self, project, orig=Update.init_project):
+        orig(self, project)
+        assert os.listdir(project.abspath) == ['.git']
+
+    monkeypatch.setattr(Update, 'init_project', checked_init_project)
+
+    cmd(['update', '--name-cache', name_cache_dir])
+    assert rev_parse(foo, 'HEAD') == foo_head
+    assert (foo / 'old.txt').check(file=1)
+    assert not (foo / 'new.txt').exists()
+    status = subprocess.check_output([GIT, 'status', '--porcelain'], cwd=foo)
+    assert status.decode().strip() == ''
+    # only west's own branch is left
+    local_branches = subprocess.check_output(
+        [GIT, 'for-each-ref', '--format=%(refname)', 'refs/heads'], cwd=foo
+    )
+    assert local_branches.decode().split() == ['refs/heads/manifest-rev']
