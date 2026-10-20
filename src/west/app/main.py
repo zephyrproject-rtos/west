@@ -70,7 +70,7 @@ from west.manifest import (
     ManifestVersionError,
     _ManifestImportDepth,
 )
-from west.util import WestNotFound, quote_sh_list, west_topdir
+from west.util import WestNotFound, quote_sh_list, set_topdir_override, west_topdir
 from west.version import __version__
 
 
@@ -92,6 +92,7 @@ class EarlyArgs(NamedTuple):
     help: bool  # True if -h was given
     version: bool  # True if -V was given
     zephyr_base: str | None  # -z argument value
+    topdir: str | None  # -C argument value
     verbosity: int  # 0 if not given, otherwise counts
     command_name: str | None
 
@@ -105,11 +106,13 @@ def parse_early_args(argv: list[str]) -> EarlyArgs:
     help = False
     version = False
     zephyr_base = None
+    topdir = None
     verbosity = 0
     command_name = None
     unexpected_arguments = []
 
     expecting_zephyr_base = False
+    expecting_topdir = False
 
     def consume_more_args(rest):
         # Handle the 'Vv' portion of 'west -hVv'.
@@ -143,8 +146,12 @@ def parse_early_args(argv: list[str]) -> EarlyArgs:
             unexpected_arguments.append(rest)
 
     for arg in argv:
-        if expecting_zephyr_base:
+        if expecting_topdir:
+            topdir = arg
+            expecting_topdir = False
+        elif expecting_zephyr_base:
             zephyr_base = arg
+            expecting_zephyr_base = False
         elif arg.startswith('-h'):
             help = True
             consume_more_args(arg[2:])
@@ -163,6 +170,12 @@ def parse_early_args(argv: list[str]) -> EarlyArgs:
             verbosity += 1
         elif arg == '--quiet':
             verbosity -= 1
+        elif arg == '-C':
+            expecting_topdir = True
+        elif arg.startswith('-C='):
+            topdir = arg[3:]
+        elif arg.startswith('-C'):
+            topdir = arg[2:]
         elif arg.startswith('-z'):
             if arg == '-z':
                 expecting_zephyr_base = True
@@ -176,7 +189,9 @@ def parse_early_args(argv: list[str]) -> EarlyArgs:
             command_name = arg
             break
 
-    return EarlyArgs(help, version, zephyr_base, verbosity, command_name, unexpected_arguments)
+    return EarlyArgs(
+        help, version, zephyr_base, topdir, verbosity, command_name, unexpected_arguments
+    )
 
 
 class LogFormatter(logging.Formatter):
@@ -259,13 +274,21 @@ class WestApp:
         # stdout/stderr isn't a terminal
         colorama.init()
 
+        set_topdir_override(
+            os.fspath(Path(early_args.topdir).resolve()) if early_args.topdir is not None else None
+        )
+
         # See if we're in a workspace. It's fine if we're not.
         # Note that this falls back on searching from ZEPHYR_BASE
-        # if the current directory isn't inside a west workspace.
+        # if the current directory isn't inside a west workspace, unless
+        # -C was given, in which case it's forced to that directory.
         try:
             self.topdir = west_topdir()
-        except WestNotFound:
-            pass
+        except WestNotFound as e:
+            if early_args.topdir is not None:
+                # -C was given and is invalid; that's fatal, unlike the
+                # "no workspace found at all" case.
+                sys.exit(f'west: {e}')
 
         # Read the configuration files. We need this to get
         # manifest.path to parse the manifest, etc.
@@ -550,6 +573,13 @@ class WestApp:
             help='''Override the Zephyr base directory. The
                     default is the manifest project with path
                     "zephyr".''',
+        )
+
+        parser.add_argument(
+            '-C',
+            dest='west_topdir',
+            metavar='PATH',
+            help='override the west workspace top directory',
         )
 
         parser.add_argument(
