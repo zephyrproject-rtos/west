@@ -2584,6 +2584,114 @@ def test_import_self_submanifest_commands_both(manifest_repo):
     assert mp.west_commands == ['sub-commands.yml', 'top-commands.yml']
 
 
+def test_import_self_submanifest_userdata(manifest_repo):
+    # The manifest project's self_userdata has the user data of the
+    # top-level file and its 'self: import:' files. userdata only has
+    # the value of the top-level file.
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: p1
+            url: u1
+          self:
+            import: sub-manifest.yml
+            userdata: top
+        ''')
+
+    with open(manifest_repo / 'sub-manifest.yml', 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: p2
+            url: u2
+          self:
+            userdata:
+              key: sub
+        ''')
+
+    m = MF()
+    mp = m.projects[MANIFEST_PROJECT_INDEX]
+    assert m.userdata == 'top'
+    assert mp.userdata == 'top'
+    assert mp.self_userdata == [{'key': 'sub'}, 'top']
+    p1, p2 = m.get_projects(['p1', 'p2'])
+    assert p1.self_userdata == []
+    assert p2.self_userdata == []
+    assert 'self_userdata' not in mp.as_dict()
+
+
+def test_import_project_self_userdata(manifest_repo):
+    # A project's self_userdata has the user data of all files
+    # imported from it, also nested imports and 'self: import:' files.
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: p1
+            url: p1-url
+            import: true
+          - name: no-import
+            url: no-import-url
+            userdata: not-imported
+        ''')
+
+    topdir = manifest_repo.topdir
+    p1 = topdir / 'p1'
+    create_repo(p1)
+    add_commit(
+        p1,
+        'add manifests',
+        files={
+            'west.yml': '''\
+                manifest:
+                  projects:
+                  - name: p2
+                    url: p2-url
+                    import: p2.yml
+                  self:
+                    import: sub.yml
+                    userdata: p1-top
+                ''',
+            'sub.yml': '''\
+                manifest:
+                  self:
+                    userdata: p1-sub
+                ''',
+        },
+    )
+    create_branch(p1, 'manifest-rev', checkout=False)
+
+    p2 = topdir / 'p2'
+    create_repo(p2)
+    add_commit(
+        p2,
+        'add manifest',
+        files={
+            'p2.yml': '''\
+                manifest:
+                  self:
+                    userdata:
+                      zephyr-extra-modules: [foo]
+                ''',
+        },
+    )
+    create_branch(p2, 'manifest-rev', checkout=False)
+
+    m = MF()
+    mp, p1, p2, no_import = m.get_projects(['manifest', 'p1', 'p2', 'no-import'])
+    assert mp.self_userdata == []
+    assert p1.self_userdata == ['p1-sub', 'p1-top']
+    assert p2.self_userdata == [{'zephyr-extra-modules': ['foo']}]
+    assert no_import.self_userdata == []
+    assert no_import.userdata == 'not-imported'
+    # It does not change the project's own userdata.
+    assert p1.userdata is None
+    assert 'userdata' not in p1.as_dict()
+
+
 def test_import_flags_ignore(tmpdir):
     # Test the IGNORE flag by verifying we can create manifest
     # instances that should error out if the import was not ignored.

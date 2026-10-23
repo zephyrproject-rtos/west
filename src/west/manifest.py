@@ -416,6 +416,11 @@ class _import_ctx(NamedTuple):
     # higher precedence here as usual.
     manifest_west_commands: list[str]
 
+    # The 'self: userdata:' values found so far in the manifest
+    # files of the current repository. Shared and mutable, like
+    # 'manifest_west_commands'.
+    manifest_self_userdata: list[Any]
+
     # The current restrictions on which projects the importing
     # manifest is interested in.
     #
@@ -835,6 +840,9 @@ class Project:
     - ``submodules``: the project's submodules configuration; either
       a list of Submodule objects, or a boolean.
     - ``userdata``: the parsed 'userdata' field in the manifest, or None
+    - ``self_userdata``: list of 'self: userdata:' values from the
+      manifest files imported from this project, in import order.
+      Empty if there are none.
     '''
 
     def __eq__(self, other):
@@ -904,6 +912,7 @@ class Project:
         self.remote_name = remote_name or 'origin'
         self.groups: GroupsType = groups or []
         self.userdata: Any = userdata
+        self.self_userdata: list[Any] = []
 
         # Internal helpers
         self._west_commands_manifest_dirs: dict[str, str] = {}
@@ -1205,6 +1214,9 @@ class ManifestProject(Project):
       ``self:`` map. This may be a list of such if the self
       section imports multiple additional files with west commands.
     - ``userdata``: the parsed 'userdata' field under self in the manifest file
+    - ``self_userdata``: list of 'self: userdata:' values from the
+      manifest file and the files it imports with 'self: import:',
+      in import order
 
     Other readable attributes included for Project compatibility:
 
@@ -1230,6 +1242,7 @@ class ManifestProject(Project):
         west_commands: WestCommandsType | None = None,
         topdir: PathType | None = None,
         userdata: Any | None = None,
+        self_userdata: list[Any] | None = None,
     ):
         '''
         :param path: Relative path to the manifest repository in the
@@ -1241,6 +1254,8 @@ class ManifestProject(Project):
             project is inside. If not given, all absolute path
             attributes (abspath and posixpath) will be None.
         :param userdata: User data specified under self in manifest file
+        :param self_userdata: 'self: userdata:' values from the
+            manifest file and its 'self: import:' files
         '''
         self.name: str = 'manifest'
 
@@ -1253,6 +1268,7 @@ class ManifestProject(Project):
         self.clone_depth: int | None = None
         self.groups = []
         self.userdata: Any | None = userdata
+        self.self_userdata: list[Any] = list(self_userdata or [])
 
         # The following type: ignore is necessary since every Project
         # actually has a non-None _path attribute, so the parent class
@@ -2062,6 +2078,7 @@ class Manifest:
             project_filter=project_filter,
             group_filter_q=deque(),
             manifest_west_commands=[],
+            manifest_self_userdata=[],
             imap_filter=None,
             path_prefix=Path('.'),
             current_abspath=current_abspath,
@@ -2127,6 +2144,7 @@ class Manifest:
                 west_commands=self._ctx.manifest_west_commands,
                 topdir=self.topdir,
                 userdata=self.userdata,
+                self_userdata=self._ctx.manifest_self_userdata,
             )
 
             # Save the resulting projects and initialize lookup tables
@@ -2232,6 +2250,10 @@ class Manifest:
 
         userdata = slf.get('userdata')
         self.userdata = userdata
+        # Self imports were loaded above, so their user data comes
+        # first. This matches west-commands below.
+        if userdata is not None:
+            self._ctx.manifest_self_userdata.append(userdata)
 
         # The current manifest data's west-comands comes first because
         # we treat imports from self as if they are defined "before"
@@ -2724,6 +2746,8 @@ class Manifest:
             # We therefore use a separate list for tracking them
             # from our current list.
             manifest_west_commands=[],
+            # The same goes for 'self: userdata:'.
+            manifest_self_userdata=[],
         )
         try:
             submanifest = Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
@@ -2749,6 +2773,10 @@ class Manifest:
             project._west_commands_manifest_dirs.setdefault(adjusted_cmd, str(mfst_dir))
 
         project.west_commands = _west_commands_merge(project.west_commands, west_commands_to_merge)
+
+        # Give the 'self: userdata:' values of the imported files
+        # to the project.
+        project.self_userdata.extend(submanifest._ctx.manifest_self_userdata)
 
     def _import_content_from_project(self, project: Project, path: str) -> ImportedContentType:
         if not (self._ctx.import_flags & ImportFlag.FORCE_PROJECTS) and project.is_cloned():
