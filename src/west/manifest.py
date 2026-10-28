@@ -2839,6 +2839,7 @@ class Manifest:
         if _INVALID_PROJECT_NAME_RE.search(name):
             self._malformed(f'Invalid project name: {name}')
         if _RESERVED_PROJECT_NAME_RE.search(name):
+            context = ''
             if self._ctx.current_abspath:
                 context = f' (defined in {self._ctx.current_abspath})'
             elif self._ctx.current_repo_abspath:
