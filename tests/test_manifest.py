@@ -1693,6 +1693,24 @@ def test_project_filter_warnings_and_errors(config_tmpdir, caplog):
     assert 'contains comma (",") or whitespace' in err
 
 
+def test_project_name_warning_from_data(caplog):
+    # A manifest loaded from data has no file or repository to name,
+    # but the warning must still be logged.
+
+    m = M('''\
+    projects:
+      - name: foo bar
+        url: u
+    ''')
+    assert m.projects[1].name == 'foo bar'
+    assert any(
+        source == 'west.manifest'
+        and level == logging.WARNING
+        and message.startswith('project "foo bar" contains comma')
+        for source, level, message in caplog.record_tuples
+    ), caplog.record_tuples
+
+
 #########################################
 # Manifest import tests
 
