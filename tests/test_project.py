@@ -986,6 +986,7 @@ def test_update_projects_local_branch_commits(west_init_tmpdir):
     out = cmd('update --stats --keep-descendants net-tools')
     assert 'left descendant branch "descendant_branch" checked out' in out
     assert 'get current status' in out
+    assert 'get new manifest-rev SHA' in out
     assert head_subject('net-tools') == 'net-tools descendant commit'
 
 

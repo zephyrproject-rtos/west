@@ -2245,9 +2245,10 @@ class Update(_ProjectCommand):
         try:
             if take_stats:
                 start = perf_counter()
-            return project.sha(QUAL_MANIFEST_REV)
+            sha = project.sha(QUAL_MANIFEST_REV)
             if take_stats:
                 stats['get new manifest-rev SHA'] = perf_counter() - start
+            return sha
         except subprocess.CalledProcessError:
             # This is a sign something's really wrong. Add more help.
             self.err(
