@@ -4,6 +4,7 @@
 
 import contextlib
 import io
+import logging
 import os
 import platform
 import shutil
@@ -219,6 +220,47 @@ def setup_teardown_test_environment(tmpdir_factory):
 #
 # Test fixtures
 #
+
+
+@pytest.fixture(params=[None, 1, 2], ids=['serial-default', 'jobs-1', 'jobs-2'])
+def update_jobs(request, monkeypatch):
+    if request.param is None:
+        return
+    real_cmd = _cmd
+
+    def command_with_jobs(command, cwd=None, env=None):
+        argv = command.split() if isinstance(command, str) else list(command)
+        argv = [str(arg) for arg in argv]
+        if main.parse_early_args(argv).command_name == 'update':
+            position = argv.index('update') + 1
+            argv[position:position] = ['-j', str(request.param)]
+        return real_cmd(argv, cwd=cwd, env=env)
+
+    monkeypatch.setitem(globals(), '_cmd', command_with_jobs)
+
+
+@pytest.fixture
+def directory_alias():
+    def create(alias, target):
+        if WINDOWS:
+            subprocess.run(
+                [
+                    os.environ['COMSPEC'],
+                    '/d',
+                    '/c',
+                    'mklink',
+                    '/J',
+                    os.fspath(alias),
+                    os.fspath(target),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+        else:
+            alias.symlink_to(target, target_is_directory=True)
+
+    return create
 
 
 @pytest.fixture(scope='session')
@@ -457,6 +499,8 @@ def _cmd(cmd, cwd=None, env=None):
         chdir(cwd or Path.cwd()),
         update_env(env or {}),
     ):
+        logger = logging.getLogger('west.manifest')
+        level, handlers = logger.level, list(logger.handlers)
         try:
             main.main(cmd)
         except SystemExit as e:
@@ -465,6 +509,12 @@ def _cmd(cmd, cwd=None, env=None):
         except Exception as e:
             print(f'Uncaught exception type {e}', file=sys.stderr)
             raise
+        finally:
+            logger.setLevel(level)
+            for handler in list(logger.handlers):
+                if handler not in handlers:
+                    logger.removeHandler(handler)
+                    handler.close()
 
 
 def cmd(cmd: list | str, cwd=None, stderr: io.StringIO | None = None, env=None):
