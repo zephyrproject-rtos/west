@@ -38,7 +38,7 @@ if __name__ == "__main__":
     sys.path.insert(0, os.fspath(src_dir))
 
 import west.configuration
-from west import log
+from west import _execution, log
 from west.app.config import Config
 from west.app.project import (
     Compare,
@@ -191,10 +191,7 @@ class LogHandler(logging.Handler):
 
     def emit(self, record):
         formatted = self.format(record)
-        if record.levelno >= logging.WARNING:
-            print(formatted, file=sys.stderr)
-        else:
-            print(formatted)
+        print(formatted, file=_execution.output_stream(stderr=record.levelno >= logging.WARNING))
 
 
 class WestApp:
