@@ -7,6 +7,7 @@ import os
 import shlex
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import CancelledError, ThreadPoolExecutor
@@ -16,9 +17,10 @@ from unittest.mock import Mock, call
 
 import pytest
 from colorama.ansitowin32 import AnsiToWin32
-from conftest import create_repo
+from conftest import cmd, create_repo
 
 from west.app.main import LogHandler
+from west.app.project import Update
 from west.commands import Verbosity, WestCommand
 from west.manifest import Project
 
@@ -86,6 +88,16 @@ def process_active(pid):
         except FileNotFoundError:
             return False
     return True
+
+
+def test_cli_helper_restores_manifest_logging(caplog):
+    logger = logging.getLogger('west.manifest')
+    level, handlers = logger.level, list(logger.handlers)
+    cmd(['-q', 'config', '--global', 'test.execution-isolation', 'true'])
+    assert logger.level == level
+    assert logger.handlers == handlers
+    logger.warning('manifest logging remains available to the next test')
+    assert 'manifest logging remains available to the next test' in caplog.text
 
 
 def test_buffered_producers_keep_stream_ownership(tmp_path, monkeypatch):
@@ -261,6 +273,83 @@ def test_unbuffered_context_has_no_spools_and_keeps_git_capture(tmp_path, monkey
         controller.cancel()
         scope.close()
         controller.close()
+
+
+@pytest.mark.parametrize('failure', ['create', 'replay'])
+def test_output_io_failure_propagates_and_closes_owned_spools(tmp_path, monkeypatch, failure):
+    from west import _execution
+
+    command = Update()
+    command.args = SimpleNamespace(jobs=2, unbuffered=False)
+    command.updated = set()
+    command.auto_cache = command.name_cache = command.path_cache = None
+    command._topdir = os.fspath(tmp_path)
+    command._git_ver = (2, 40, 0)
+    projects = [Project(name, 'unused', topdir=tmp_path) for name in ['a', 'b', 'queued']]
+    files, starts = [], []
+    real_tempfile = tempfile.TemporaryFile
+
+    def temporary_file(*args, **kwargs):
+        if failure == 'create' and len(files) == 2:
+            raise OSError('injected output create failure')
+        file = real_tempfile(*args, **kwargs)
+        files.append(file)
+        return file
+
+    class Destination(io.StringIO):
+        def write(self, text):
+            if failure == 'replay' and 'work::' in text:
+                raise OSError('injected output replay failure')
+            return super().write(text)
+
+    def update(project):
+        starts.append(project.name)
+        command.inf(f'work::{project.name}')
+
+    monkeypatch.setattr(tempfile, 'TemporaryFile', temporary_file)
+    monkeypatch.setattr(command, 'update', update)
+    monkeypatch.setattr(sys, 'stdout', Destination())
+    original = sys.stdout, sys.stderr, Path.cwd(), dict(os.environ)
+    with pytest.raises(OSError, match=f'injected output {failure} failure'):
+        command._update_projects(projects)
+    assert files and all(file.closed for file in files)
+    assert 'queued' not in starts
+    assert _execution.current_context() is None
+    assert not any(t.name.startswith('west-update') for t in threading.enumerate())
+    assert (sys.stdout, sys.stderr, Path.cwd(), dict(os.environ)) == original
+
+
+def test_cleanup_reporting_preserves_primary_fatal_error(tmp_path, monkeypatch):
+    command = Update()
+    command.args = SimpleNamespace(jobs=2, unbuffered=False)
+    command.updated = set()
+    command.auto_cache = command.name_cache = command.path_cache = None
+    command._topdir = os.fspath(tmp_path)
+    command._git_ver = (2, 40, 0)
+    projects = [Project(name, 'unused', topdir=tmp_path) for name in ['a', 'b']]
+
+    class Output(io.StringIO):
+        def write(self, text):
+            if 'work::' in text:
+                raise OSError('injected cleanup replay failure')
+            return super().write(text)
+
+    class Error(io.StringIO):
+        def write(self, text):
+            raise BrokenPipeError('injected closed error stream')
+
+    def update(project):
+        command.inf(f'work::{project.name}')
+        raise SystemExit(7)
+
+    monkeypatch.setattr(command, 'update', update)
+    monkeypatch.setattr(sys, 'stdout', Output())
+    monkeypatch.setattr(sys, 'stderr', Error())
+    with pytest.raises(SystemExit) as raised:
+        command._update_projects(projects)
+    assert raised.value.code == 7
+    assert not command.updated
+    assert not any(t.name.startswith('west-update') for t in threading.enumerate())
 
 
 @pytest.mark.parametrize('producer', ['python', 'git'])
