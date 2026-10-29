@@ -50,6 +50,7 @@ from west.manifest import (
     ManifestProject,
     ManifestVersionError,
     Project,
+    WestCommands,
     _ManifestImportDepth,
     is_group,
     manifest_path,
@@ -536,6 +537,96 @@ def test_project_west_commands():
       west-commands: some-path/west-commands.yml
     ''')
     assert m.projects[1].west_commands == ['some-path/west-commands.yml']
+
+
+def test_west_commands_init():
+    assert WestCommands() == []
+    assert WestCommands(None) == []
+    assert WestCommands([]) == []
+    assert WestCommands('a.yml') == ['a.yml']
+    assert WestCommands(['a.yml', 'b.yml']) == ['a.yml', 'b.yml']
+    assert WestCommands('a.yml').manifest_dirs == {}
+
+
+def test_west_commands_init_from_west_commands():
+    # Only the entries are copied, not the manifest directories: commands
+    # which belong to a project's own manifest are resolved relative to the
+    # project root, so they have no manifest directory to remember.
+    original = WestCommands()
+    original.add('a.yml', 'subdir')
+    copy = WestCommands(original)
+    assert copy == ['a.yml']
+    assert copy.manifest_dirs == {}
+
+
+def test_west_commands_falsey_value_in_self_is_ignored():
+    # Regression test: a falsey 'west-commands:' in the manifest repository's
+    # own manifest must not add an empty entry. See Manifest._load_self().
+    m = M('''\
+    self:
+      west-commands: ''
+    projects:
+    - name: p
+      url: https://foo.com
+    ''')
+    assert m.projects[0].west_commands == []
+
+
+def test_west_commands_add():
+    wc = WestCommands()
+    wc.add('a.yml')
+    wc.add('a.yml', 'subdir')  # already there: no duplicate, but the directory is kept
+    wc.add('b.yml', 'subdir')
+    wc.add('b.yml', 'other')  # the first directory wins
+    assert wc == ['a.yml', 'b.yml']
+    assert wc.manifest_dirs == {'a.yml': 'subdir', 'b.yml': 'subdir'}
+
+
+def test_west_commands_merge():
+    wc = WestCommands('a.yml')
+    wc.add('a.yml', 'one')
+
+    other = WestCommands(['a.yml', 'b.yml'])
+    other.add('a.yml', 'two')
+    other.add('b.yml', 'two')
+    wc.merge(other)
+
+    assert wc == ['a.yml', 'b.yml']
+    # Entries which were already there keep their manifest directory.
+    assert wc.manifest_dirs == {'a.yml': 'one', 'b.yml': 'two'}
+
+
+def test_west_commands_merge_accepts_raw_values():
+    wc = WestCommands()
+    wc.merge('a.yml')
+    wc.merge(['a.yml', 'b.yml'])
+    assert wc == ['a.yml', 'b.yml']
+    assert wc.manifest_dirs == {}
+
+
+def test_west_commands_merge_keeps_order_of_self_first():
+    # Entries which are already there keep their position: they are never
+    # moved to the end, and they are never duplicated.
+    wc = WestCommands(['b.yml', 'a.yml'])
+    wc.merge(['a.yml', 'c.yml', 'b.yml'])
+    assert wc == ['b.yml', 'a.yml', 'c.yml']
+
+
+def test_west_commands_as_manifest_value():
+    assert WestCommands().as_manifest_value() == []
+    assert WestCommands('a.yml').as_manifest_value() == 'a.yml'
+    value = WestCommands(['a.yml', 'b.yml']).as_manifest_value()
+    assert value == ['a.yml', 'b.yml']
+    # Must be a plain list: yaml.safe_dump() cannot represent a list subclass.
+    assert type(value) is list
+
+
+def test_west_commands_as_manifest_value_is_yaml_serializable():
+    for value in (
+        WestCommands('a.yml').as_manifest_value(),
+        WestCommands(['a.yml', 'b.yml']).as_manifest_value(),
+    ):
+        assert yaml.safe_dump({'west-commands': value})
 
 
 def test_project_git_methods(tmpdir):
