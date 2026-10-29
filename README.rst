@@ -60,6 +60,21 @@ Use ``west init -m`` to specify another manifest repository. Use ``--mr`` to
 use a revision to initialize from; if not given, the remote's default branch is used.
 Use ``--mf`` to use a manifest file other than ``west.yml``.
 
+Parallel Project Updates
+------------------------
+
+Updates use one job by default. Configure a default or override it::
+
+  west config --global update.jobs 4
+  west update -j 0                    # automatic job count, capped at 8
+  west update -j 4                    # complete buffered project blocks
+  west update -j 4 --no-buffered      # live output, possibly interleaved
+
+Use ``--no-buffered`` for credential/passphrase prompts and ``-j 1``
+when multiple simultaneous prompts or other interactive helpers would be
+confusing. See ``west update --help`` for details about parallel output,
+conflict protection and interruption.
+
 Additional Commands
 -------------------
 
