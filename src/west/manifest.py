@@ -30,7 +30,7 @@ except ImportError:
 
 from packaging.version import parse as parse_version
 
-from west import util
+from west import _execution, util
 from west.configuration import ConfigFile, Configuration, MalformedConfig
 from west.util import PathType
 
@@ -1021,14 +1021,19 @@ class Project:
         cmd_str = util.quote_sh_list(args)
 
         _logger.debug(f"running '{cmd_str}' in {cwd}")
-        popen = subprocess.Popen(
-            args,
-            cwd=cwd,
-            stdout=subprocess.PIPE if capture_stdout else None,
-            stderr=subprocess.PIPE if capture_stderr else None,
-        )
-
-        stdout, stderr = popen.communicate()
+        stdout: bytes | None
+        stderr: bytes | None
+        context = _execution.current_context()
+        if context is None:
+            popen = subprocess.Popen(
+                args,
+                cwd=cwd,
+                stdout=subprocess.PIPE if capture_stdout else None,
+                stderr=subprocess.PIPE if capture_stderr else None,
+            )
+            stdout, stderr = popen.communicate()
+        else:
+            popen, stdout, stderr = context.git(args, cwd, capture_stdout, capture_stderr)
 
         # We use logger style % formatting here to avoid the
         # potentially expensive overhead of formatting long

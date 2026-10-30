@@ -60,6 +60,40 @@ Use ``west init -m`` to specify another manifest repository. Use ``--mr`` to
 use a revision to initialize from; if not given, the remote's default branch is used.
 Use ``--mf`` to use a manifest file other than ``west.yml``.
 
+Parallel Project Updates
+------------------------
+
+Updates remain serial by default. Opt in with a positive job count::
+
+  west update                         # unchanged live, serial execution
+  west update -j 4                    # complete buffered project blocks
+  west update -j 4 --unbuffered       # live output, possibly interleaved
+
+``-j`` / ``--jobs`` requires a positive integer; ``-j 1`` uses the serial
+path. Import providers are always updated synchronously with live output
+before the remaining ordinary projects can run concurrently.
+
+Buffered mode displays each completed project's stdout and stderr without
+waiting for earlier projects in the manifest. Ordering between the two
+streams is not preserved. Git sees a non-terminal output sink, so its
+automatic colors and progress may differ; explicit Git color settings and
+West's ``color.ui`` setting remain effective. Use ``--unbuffered`` for live
+terminal output, not to enable concurrent interactive input.
+
+Parallel operations must not need coordinated credential prompts, rebase
+editors, signing/pinentry, hooks or other interactive helpers. Use the serial
+default for these workflows. Interruption stops pending work and cleans up
+this invocation's owned Git children and output buffers; completed updates
+are not rolled back. Detached external helpers are not a process-lifecycle API.
+
+Before ordinary parallel work, West checks selected project paths and existing
+Git common directories. Overlapping paths or shared Git metadata produce a
+warning and serialize the entire ordinary list, preserving the requested output
+mode. A failed safety inspection aborts before ordinary updates; import providers
+may already have been updated. Projects sharing an auto-cache entry are also
+serialized across their dependent operations. These protections are local to
+one invocation, not locks against other West or Git processes.
+
 Additional Commands
 -------------------
 
@@ -136,6 +170,22 @@ To install the wheel::
 
 You can ``pip3 uninstall west`` to remove this wheel before re-installing the
 version from PyPI, etc.
+
+Measuring Parallel Updates
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Freeze the manifest, imported providers and project revisions before comparing
+``west update -j 1``, ``-j 2`` and ``-j 4``. Use separate disposable workspaces
+and equivalent cache/fetch/network settings, with at least three samples for
+each reported condition. Measure initial population separately from incremental
+updates and report raw times, medians, job-count order, source revision,
+Python/Git/OS versions and filesystem-cache limitations.
+
+After every run, compare the selected project names/paths, HEADs,
+``refs/heads/manifest-rev`` and submodule revisions against the serial result.
+Timing does not prove correctness. Synchronous imports, shared caches,
+serialized conflicts, a large critical-path project and disk/network contention
+can limit the benefit; no fixed speedup is promised.
 
 Running the Tests
 ~~~~~~~~~~~~~~~~~
