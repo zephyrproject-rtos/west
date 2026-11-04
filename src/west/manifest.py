@@ -14,7 +14,6 @@ import os
 import re
 import shlex
 import subprocess
-import sys
 from collections import deque
 from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
@@ -1009,13 +1008,6 @@ class Project:
                 cwd = self.abspath
             else:
                 raise ValueError('no abspath; cwd must be given')
-        elif sys.version_info < (3, 6, 1) and not isinstance(cwd, str):
-            # Popen didn't accept a PathLike cwd on Windows until
-            # python v3.7; this was backported onto cpython v3.6.1,
-            # though. West currently supports "python 3.6", though, so
-            # in the unlikely event someone is running 3.6.0 on
-            # Windows, do the right thing.
-            cwd = os.fspath(cwd)
 
         args = ['git'] + cmd_list + extra_args
         cmd_str = util.quote_sh_list(args)
