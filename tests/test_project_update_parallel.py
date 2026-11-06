@@ -549,15 +549,7 @@ def test_output_readiness(tmp_path, monkeypatch, update_command, unbuffered):
             assert text.index(f'bravo:{channel}:end') < text.index(f'alpha:{channel}:begin')
 
 
-@pytest.mark.parametrize(
-    'conflict, unbuffered',
-    [('equal', False), ('ancestor', True), ('common-dir', False), ('alias', False)],
-    ids=['equal', 'ancestor', 'common-dir', 'alias'],
-)
-def test_conflicting_projects_fall_back_serial(
-    tmp_path, monkeypatch, update_command, conflict, unbuffered, directory_alias
-):
-    update_projects = update_command._update_projects
+def _conflicting_projects(tmp_path, conflict, directory_alias):
     paths = ['shared', 'shared', 'unrelated']
     if conflict == 'ancestor':
         paths[1] = str(Path('shared') / 'nested')
@@ -574,10 +566,21 @@ def test_conflicting_projects_fall_back_serial(
             check=True,
             timeout=GIT_TIMEOUT,
         )
-    projects = [
+    return [
         Project(name, (tmp_path / 'remote').as_uri(), path=path, topdir=tmp_path)
         for name, path in zip(('alpha', 'bravo', 'charlie'), paths, strict=True)
     ]
+
+
+@pytest.mark.parametrize(
+    'conflict, unbuffered',
+    [('equal', False), ('ancestor', True), ('common-dir', False), ('alias', False)],
+    ids=['equal', 'ancestor', 'common-dir', 'alias'],
+)
+def test_single_conflict_group_stays_serial(
+    tmp_path, monkeypatch, update_command, conflict, unbuffered, directory_alias
+):
+    projects = _conflicting_projects(tmp_path, conflict, directory_alias)[:2]
     output = io.StringIO()
     errors = io.StringIO()
     seen = []
@@ -597,14 +600,167 @@ def test_conflicting_projects_fall_back_serial(
         seen.append(project.name)
 
     monkeypatch.setattr(update_command, 'update', update)
-    assert update_projects(projects) == []
-    assert seen == ['alpha', 'bravo', 'charlie']
+    assert update_command._update_projects(projects) == []
+    assert seen == ['alpha', 'bravo']
     assert update_command.updated == set(seen)
     warning = errors.getvalue()
     assert warning.count('WARNING:') == 1
     assert 'alpha' in warning and 'bravo' in warning
     assert 'serial' in warning.lower()
     assert all(f'FALLBACK:{name}' in output.getvalue() for name in seen)
+
+
+def _assert_mixed_group_dispatch(projects, monkeypatch, update_command):
+    group = [project.name for project in projects[:-1]]
+    independent = projects[-1].name
+    barrier = threading.Barrier(2)
+    output = _ObservedStream('unused')
+    errors = io.StringIO()
+    lock = threading.Lock()
+    active = group_active = peak = 0
+    seen = []
+
+    def update(project):
+        nonlocal active, group_active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+            if project.name in group:
+                group_active += 1
+                assert group_active == 1
+            seen.append(project.name)
+        try:
+            update_command.inf(f'GROUP:{project.name}')
+            if project.name in (group[0], independent):
+                barrier.wait(timeout=WAIT)
+            elif project.name in group:
+                previous = group[group.index(project.name) - 1]
+                assert f'GROUP:{previous}' in output.getvalue()
+        finally:
+            with lock:
+                active -= 1
+                if project.name in group:
+                    group_active -= 1
+
+    monkeypatch.setattr(sys, 'stdout', output)
+    monkeypatch.setattr(sys, 'stderr', errors)
+    monkeypatch.setattr(update_command, 'update', update)
+    try:
+        assert update_command._update_projects(projects) == []
+    finally:
+        barrier.abort()
+    assert peak == 2
+    assert [name for name in seen if name in group] == group
+    assert sorted(seen) == sorted(p.name for p in projects)
+    assert update_command.updated == set(seen)
+    assert errors.getvalue().count('WARNING:') == 1
+    assert all(name in errors.getvalue() for name in group)
+    assert all(output.getvalue().count(f'GROUP:{name}') == 1 for name in seen)
+
+
+@pytest.mark.parametrize('conflict', ['equal', 'ancestor', 'common-dir', 'alias'])
+def test_mixed_conflict_groups_overlap_independent_work(
+    tmp_path, monkeypatch, update_command, directory_alias, conflict
+):
+    projects = _conflicting_projects(tmp_path, conflict, directory_alias)
+    _assert_mixed_group_dispatch(projects, monkeypatch, update_command)
+
+
+def test_conflict_groups_merge_path_and_git_metadata_transitively(
+    tmp_path, monkeypatch, update_command
+):
+    outer = tmp_path / 'outer'
+    outer.mkdir()
+    create_repo(outer / 'repo')
+    subprocess.run(
+        [GIT, 'worktree', 'add', '--detach', str(tmp_path / 'linked'), 'HEAD'],
+        cwd=outer / 'repo',
+        check=True,
+        timeout=GIT_TIMEOUT,
+    )
+    projects = [
+        Project(name, 'unused', path=path, topdir=tmp_path)
+        for name, path in [
+            ('alpha', 'outer'),
+            ('bravo', 'outer/repo'),
+            ('charlie', 'linked'),
+            ('delta', 'independent'),
+        ]
+    ]
+    _assert_mixed_group_dispatch(projects, monkeypatch, update_command)
+
+
+@pytest.mark.parametrize('failure', ['failed', 'empty'])
+def test_conflict_groups_do_not_skip_later_metadata_errors(
+    tmp_path, monkeypatch, update_command, failure
+):
+    create_repo(tmp_path / 'bad')
+    projects = [
+        Project(name, 'unused', path=path, topdir=tmp_path)
+        for name, path in [('alpha', 'outer'), ('bravo', 'outer/inner'), ('charlie', 'bad')]
+    ]
+    original_git = Project.git
+
+    def git(project, args, *git_args, **kwargs):
+        if project.name == 'charlie' and '--git-common-dir' in args:
+            if failure == 'failed':
+                raise subprocess.CalledProcessError(128, args, stderr=b'bad common directory')
+            return subprocess.CompletedProcess(args, 0, stdout=b'', stderr=b'')
+        return original_git(project, args, *git_args, **kwargs)
+
+    def unexpected_update(project):
+        pytest.fail('a known path conflict must not bypass remaining preflight')
+
+    monkeypatch.setattr(Project, 'git', git)
+    monkeypatch.setattr(update_command, 'update', unexpected_update)
+    monkeypatch.setattr(concurrent.futures, 'ThreadPoolExecutor', _no_executor)
+    with pytest.raises(SystemExit) as raised:
+        update_command._update_projects(projects)
+    assert raised.value.code == 1
+    assert not update_command.updated
+
+
+@pytest.mark.parametrize('fatal', [False, True])
+def test_conflict_group_failures_preserve_order_and_cancel_pending(
+    tmp_path, monkeypatch, update_command, fatal
+):
+    projects = [
+        Project(name, 'unused', path=path, topdir=tmp_path)
+        for name, path in [
+            ('alpha', 'first'),
+            ('bravo', 'first/child'),
+            ('charlie', 'other'),
+            ('delta', 'other/child'),
+        ]
+    ]
+    ready = threading.Event()
+    seen = []
+    primary = RuntimeError('fatal group failure')
+
+    def update(project):
+        seen.append(project.name)
+        if project.name == 'alpha':
+            assert ready.wait(WAIT)
+            if fatal:
+                raise primary
+            raise subprocess.CalledProcessError(1, ['git', 'fetch'])
+        if project.name == 'charlie':
+            ready.set()
+            if fatal:
+                assert _current_context()._controller._cancelled.wait(WAIT)
+
+    monkeypatch.setattr(update_command, 'update', update)
+    if fatal:
+        with pytest.raises(RuntimeError) as raised:
+            update_command._update_projects(projects)
+        assert raised.value is primary
+        assert sorted(seen) == ['alpha', 'charlie']
+    else:
+        assert update_command._update_projects(projects) == [projects[0]]
+        assert seen.index('alpha') < seen.index('bravo')
+        assert seen.index('charlie') < seen.index('delta')
+        assert update_command.updated == {'bravo', 'charlie', 'delta'}
+    assert not any(thread.name.startswith('west-update') for thread in threading.enumerate())
 
 
 @pytest.mark.parametrize('existing', [False, True], ids=['missing', 'existing'])
@@ -618,7 +774,7 @@ def test_conflicting_projects_fall_back_serial(
     ],
     ids=['case', 'unicode', 'case-ancestor', 'unicode-ancestor'],
 )
-def test_filesystem_aliases_fall_back_serial(
+def test_filesystem_aliases_form_conflict_groups(
     tmp_path, monkeypatch, update_command, existing, first, second
 ):
     probe = tmp_path / 'probe'
@@ -634,21 +790,7 @@ def test_filesystem_aliases_fall_back_serial(
         Project(name, 'unused', path=path, topdir=workspace)
         for name, path in [('alpha', first), ('bravo', second), ('charlie', 'independent')]
     ]
-    owner = threading.get_ident()
-    seen = []
-    errors = io.StringIO()
-
-    def update(project):
-        assert threading.get_ident() == owner
-        seen.append(project.name)
-
-    monkeypatch.setattr(sys, 'stderr', errors)
-    monkeypatch.setattr(concurrent.futures, 'ThreadPoolExecutor', _no_executor)
-    monkeypatch.setattr(update_command, 'update', update)
-    assert update_command._update_projects(projects) == []
-    assert seen == ['alpha', 'bravo', 'charlie']
-    assert update_command.updated == set(seen)
-    assert 'overlapping project paths: alpha and bravo' in errors.getvalue()
+    _assert_mixed_group_dispatch(projects, monkeypatch, update_command)
 
 
 @pytest.mark.parametrize('case_sensitive', [False, True])
@@ -740,6 +882,49 @@ def test_cli_filesystem_aliases_match_serial(tmp_path, first, second, unbuffered
         )
     if not manifest_paths_collide:
         assert snapshots[0] == snapshots[1] == [(second_revision, second_revision)] * 2
+
+
+def test_cli_grouped_worktrees_match_serial(tmp_path):
+    remote = tmp_path / 'remote'
+    create_repo(remote)
+    first = rev_parse(remote, 'HEAD')
+    add_commit(remote, 'second revision', files={'second.txt': 'second'})
+    second = rev_parse(remote, 'HEAD')
+    entries = [
+        {'name': name, 'url': remote.as_uri(), 'revision': revision}
+        for name, revision in [('alpha', first), ('bravo', second), ('charlie', second)]
+    ]
+    snapshots = []
+    for jobs in (1, 2):
+        root = tmp_path / str(jobs)
+        root.mkdir()
+        workspace = _workspace(root, entries)
+        subprocess.run(
+            [GIT, 'clone', '--', str(remote), str(workspace / 'alpha')],
+            check=True,
+            timeout=GIT_TIMEOUT,
+        )
+        subprocess.run(
+            [GIT, 'worktree', 'add', '--detach', str(workspace / 'bravo'), 'HEAD'],
+            cwd=workspace / 'alpha',
+            check=True,
+            timeout=GIT_TIMEOUT,
+        )
+        errors = io.StringIO()
+        cmd(['update', '-j', str(jobs)], cwd=workspace, stderr=errors)
+        snapshots.append(
+            [
+                (
+                    rev_parse(workspace / name, 'HEAD'),
+                    rev_parse(workspace / name, QUAL_MANIFEST_REV_BRANCH),
+                )
+                for name in ('alpha', 'bravo', 'charlie')
+            ]
+        )
+        if jobs == 2:
+            assert 'shared Git common directory: alpha and bravo' in errors.getvalue()
+            assert 'independent groups in parallel' in errors.getvalue()
+    assert snapshots[0] == snapshots[1] == [(first, second), (second, second), (second, second)]
 
 
 @pytest.mark.parametrize('failure', ['failed', 'returned-failure', 'empty', 'unusable'])
@@ -875,14 +1060,14 @@ def test_preflight_filesystem_errors_prevent_dispatch(
     assert not update_command.updated
 
 
-@pytest.mark.parametrize('jobs', [1, 2], ids=['direct', 'conflict-fallback'])
+@pytest.mark.parametrize('jobs', [1, 2], ids=['direct', 'single-group'])
 @pytest.mark.parametrize('unbuffered', [False, True], ids=['buffered', 'live'])
 def test_serial_failures_keep_order_and_allow_siblings(
     tmp_path, monkeypatch, update_command, jobs, unbuffered
 ):
     projects = [
         Project(name, 'unused', path=path, topdir=tmp_path)
-        for name, path in [('alpha', 'shared'), ('bravo', 'shared'), ('charlie', 'independent')]
+        for name, path in [('alpha', 'shared'), ('bravo', 'shared'), ('charlie', 'shared/child')]
     ]
     update_command.args.jobs = jobs
     update_command.args.unbuffered = unbuffered

@@ -95,12 +95,16 @@ repository before manually removing a confirmed stale lock. West never removes
 Git lock files automatically.
 
 Before ordinary parallel work, West checks selected project paths and existing
-Git common directories. Overlapping paths or shared Git metadata produce a
-warning and serialize the entire ordinary list, preserving the requested output
-mode. A failed safety inspection aborts before ordinary updates; import providers
+Git common directories. Projects connected by overlapping paths or shared Git
+metadata form a conflict group. A warning identifies these conflicts; members
+of each group run in their original order while independent groups can run
+concurrently. Output is still replayed after each project, not after the entire
+group. If all projects belong to one group, the update remains serial.
+A failed safety inspection aborts before ordinary updates; import providers
 may already have been updated. Projects sharing an auto-cache entry are also
 serialized across their dependent operations. These protections are local to
-one invocation, not locks against other West or Git processes.
+one invocation, not locks against other West or Git processes, and do not give
+linked worktrees independent shared refs.
 
 Additional Commands
 -------------------
