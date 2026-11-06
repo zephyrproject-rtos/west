@@ -30,6 +30,7 @@ from typing import ClassVar
 from urllib.parse import urlparse
 
 from west import _execution, util
+from west.app import _progress
 from west.commands import CommandError, Verbosity, WestCommand
 from west.configuration import Configuration
 from west.manifest import (
@@ -1373,7 +1374,9 @@ class Update(_ProjectCommand):
                 A failed safety inspection stops ordinary parallel work;
                 import providers may already have been updated. These checks
                 apply only to this invocation, not other West or Git processes.
-                A single group uses live serial output.''',
+                Buffered updates show a status line on terminal stderr unless
+                quieted. A single group uses live serial output without that
+                status line.''',
         )
         group.add_argument(
             '-j',
@@ -1957,6 +1960,8 @@ class Update(_ProjectCommand):
         ] = {}
         open_scopes: list[tuple[Project, _execution.ProjectContext]] = []
         failed_names: set[str] = set()
+        status: _progress.StatusLineReporter | None = None
+        completed = 0
         complete = False
 
         def run_project(project: Project, scope: _execution.ProjectContext) -> None:
@@ -1977,6 +1982,8 @@ class Update(_ProjectCommand):
             return scope
 
         def finish_project(project: Project, scope: _execution.ProjectContext) -> None:
+            if status is not None:
+                status.clear()
             scope.replay()
             scope.close()
             open_scopes.remove((project, scope))
@@ -1984,6 +1991,12 @@ class Update(_ProjectCommand):
                 self.updated.add(project.name)
 
         try:
+            if (
+                buffered
+                and self.verbosity >= Verbosity.INF
+                and getattr(sys.stderr, 'isatty', lambda: False)()
+            ):
+                status = _progress.StatusLineReporter(sys.stderr)
             executor = concurrent.futures.ThreadPoolExecutor(
                 max_workers=jobs, thread_name_prefix='west-update'
             )
@@ -2002,6 +2015,16 @@ class Update(_ProjectCommand):
             for _ in range(jobs):
                 submit_one()
             while running:
+                if status is not None:
+                    status.progress(
+                        completed,
+                        len(selected),
+                        (
+                            project.name
+                            for future, (project, _, _) in running.items()
+                            if future.running()
+                        ),
+                    )
                 # Timed waits also let Windows Python <=3.13 deliver Ctrl-C.
                 ready, _ = concurrent.futures.wait(
                     running, timeout=0.25, return_when=concurrent.futures.FIRST_COMPLETED
@@ -2013,6 +2036,7 @@ class Update(_ProjectCommand):
                     except subprocess.CalledProcessError:
                         failed_names.add(project.name)
                     finish_project(project, scope)
+                    completed += 1
                     del running[future]
                     if group:
                         remaining.append(group)
@@ -2023,6 +2047,11 @@ class Update(_ProjectCommand):
             original_error = sys.exc_info()[1]
             replacement_error: BaseException | None = None
             cleanup_errors: list[tuple[str, OSError | ValueError]] = []
+            if status is not None:
+                try:
+                    status.close()
+                except (OSError, ValueError) as error:
+                    cleanup_errors.append(('clearing update status', error))
             if not complete:
                 cancelled.set()
                 for future in running:
