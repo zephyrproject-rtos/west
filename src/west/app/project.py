@@ -30,6 +30,7 @@ from typing import ClassVar
 from urllib.parse import urlparse
 
 from west import _execution, util
+from west.app import _progress
 from west.commands import CommandError, Verbosity, WestCommand
 from west.configuration import Configuration
 from west.manifest import (
@@ -1365,7 +1366,9 @@ class Update(_ProjectCommand):
                 Buffered Git output is not a terminal: automatic color and
                 progress may differ; explicit Git color settings are retained.
                 Overlapping paths or shared Git metadata warn and run serially
-                within each conflicting group; independent groups can overlap.''',
+                within each conflicting group; independent groups can overlap.
+                Buffered updates show a status line on terminal stderr unless
+                quieted. A single group runs serially without that status line.''',
         )
         group.add_argument(
             '-j',
@@ -1903,6 +1906,8 @@ class Update(_ProjectCommand):
         ] = {}
         open_scopes: list[tuple[Project, _execution.ProjectContext]] = []
         failed_names: set[str] = set()
+        status: _progress.StatusLineReporter | None = None
+        completed = 0
         complete = False
 
         def run_project(project: Project, scope: _execution.ProjectContext) -> None:
@@ -1921,6 +1926,8 @@ class Update(_ProjectCommand):
             return scope
 
         def finish_project(project: Project, scope: _execution.ProjectContext) -> None:
+            if status is not None:
+                status.clear()
             scope.replay()
             scope.close()
             open_scopes.remove((project, scope))
@@ -1929,6 +1936,12 @@ class Update(_ProjectCommand):
 
         try:
             if parallel:
+                if (
+                    buffered
+                    and self.verbosity >= Verbosity.INF
+                    and getattr(sys.stderr, 'isatty', lambda: False)()
+                ):
+                    status = _progress.StatusLineReporter(sys.stderr)
                 executor = concurrent.futures.ThreadPoolExecutor(
                     max_workers=jobs, thread_name_prefix='west-update'
                 )
@@ -1947,6 +1960,16 @@ class Update(_ProjectCommand):
                 for _ in range(jobs):
                     submit_one()
                 while running:
+                    if status is not None:
+                        status.progress(
+                            completed,
+                            len(selected),
+                            (
+                                project.name
+                                for future, (project, _, _) in running.items()
+                                if future.running()
+                            ),
+                        )
                     # Timed waits also let Windows Python <=3.13 deliver Ctrl-C.
                     ready, _ = concurrent.futures.wait(
                         running, timeout=0.1, return_when=concurrent.futures.FIRST_COMPLETED
@@ -1958,6 +1981,7 @@ class Update(_ProjectCommand):
                         except subprocess.CalledProcessError:
                             failed_names.add(project.name)
                         finish_project(project, scope)
+                        completed += 1
                         del running[future]
                         if group:
                             remaining.append(group)
@@ -1975,6 +1999,11 @@ class Update(_ProjectCommand):
         finally:
             original_error = sys.exc_info()[1]
             cleanup_errors: list[tuple[str, OSError | ValueError]] = []
+            if status is not None:
+                try:
+                    status.close()
+                except (OSError, ValueError) as error:
+                    cleanup_errors.append(('clearing update status', error))
             if not complete:
                 for future in running:
                     future.cancel()

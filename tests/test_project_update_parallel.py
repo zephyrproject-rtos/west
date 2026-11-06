@@ -20,7 +20,7 @@ from conftest import GIT, add_commit, cmd, cmd_subprocess, create_repo, create_w
 from west.app import project as project_commands
 from west.app.main import LogHandler
 from west.app.project import Update
-from west.commands import CommandError
+from west.commands import CommandError, Verbosity
 from west.manifest import QUAL_MANIFEST_REV_BRANCH, Project
 
 WAIT = 10
@@ -391,6 +391,175 @@ def test_jobs_bound_threads_and_coordinator_success(tmp_path, monkeypatch, updat
     assert all(out is streams[0][0] and err is streams[0][1] for out, err in streams)
     assert sys.stdout is before[0] and sys.stderr is before[1]
     assert os.getcwd() == before[2] and dict(os.environ) == before[3]
+
+
+@pytest.mark.parametrize('failed', [False, True])
+def test_terminal_progress_is_visible_before_projects_finish(
+    tmp_path, monkeypatch, update_command, failed
+):
+    owner = threading.get_ident()
+    initial, advanced, started = (threading.Event() for _ in range(3))
+    release = {name: threading.Event() for name in ('alpha', 'bravo')}
+    seen = set()
+    lock = threading.Lock()
+    observations = []
+
+    class Terminal(_ObservedStream):
+        def isatty(self):
+            return True
+
+        def write(self, text):
+            assert threading.get_ident() == owner
+            result = super().write(text)
+            if '[0/2]' in text:
+                initial.set()
+            if '[1/2]' in text:
+                advanced.set()
+            return result
+
+    errors = Terminal('')
+    monkeypatch.setattr(sys, 'stderr', errors)
+    monkeypatch.setattr(Update, 'color_ui', False)
+    update_command.verbosity = Verbosity.INF
+
+    def update(project):
+        with lock:
+            seen.add(project.name)
+            if len(seen) == 2:
+                started.set()
+        assert release[project.name].wait(WAIT)
+        update_command.err(f'{project.name}: project output')
+        if failed and project.name == 'bravo':
+            raise subprocess.CalledProcessError(1, ['git', 'fetch'])
+
+    def observe():
+        try:
+            observations.append(started.wait(WAIT))
+            observations.append(initial.wait(2))
+            release['bravo'].set()
+            observations.append(advanced.wait(2))
+        finally:
+            for event in release.values():
+                event.set()
+
+    monkeypatch.setattr(update_command, 'update', update)
+    observer = threading.Thread(target=observe)
+    observer.start()
+    projects = _projects(tmp_path, ('alpha', 'bravo'))
+    try:
+        assert update_command._update_projects(projects) == ([projects[1]] if failed else [])
+    finally:
+        for event in release.values():
+            event.set()
+        observer.join(WAIT)
+    assert not observer.is_alive()
+    assert observations == [True, True, True]
+    text = errors.getvalue()
+    assert '\rERROR: bravo: project output\n' in text
+    assert '\rERROR: alpha: project output\n' in text
+    assert text.index('[0/2]') < text.index('bravo: project output') < text.index('[1/2]')
+    assert not any(thread.name.startswith('west-update') for thread in threading.enumerate())
+
+
+@pytest.mark.parametrize('mode', ['serial', 'live', 'quiet', 'redirected', 'one', 'one-group'])
+def test_terminal_progress_is_not_allocated_in_excluded_modes(
+    tmp_path, monkeypatch, update_command, mode
+):
+    from west.app import _progress
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return mode != 'redirected'
+
+    def unexpected_renderer(*args, **kwargs):
+        pytest.fail(f'{mode} must not allocate terminal status or inspect its width')
+
+    projects = _projects(tmp_path, ('alpha', 'bravo'))
+    if mode == 'serial':
+        update_command.args.jobs = 1
+    elif mode == 'live':
+        update_command.args.unbuffered = True
+    elif mode == 'quiet':
+        update_command.verbosity = Verbosity.WRN
+    elif mode == 'one':
+        projects = projects[:1]
+    elif mode == 'one-group':
+        projects[1].path = projects[0].path
+    monkeypatch.setattr(sys, 'stderr', Terminal())
+    monkeypatch.setattr(_progress, 'StatusLineReporter', unexpected_renderer)
+    monkeypatch.setattr(_progress.shutil, 'get_terminal_size', unexpected_renderer)
+    monkeypatch.setattr(update_command, 'update', lambda project: None)
+    assert update_command._update_projects(projects) == []
+
+
+@pytest.mark.parametrize('failure', ['write', 'flush'])
+def test_terminal_progress_failure_cancels_workers(tmp_path, monkeypatch, update_command, failure):
+    primary = OSError(f'status {failure} failed')
+
+    class Terminal(io.StringIO):
+        status_written = False
+
+        def isatty(self):
+            return True
+
+        def write(self, text):
+            if text.startswith('\r'):
+                self.status_written = True
+                if failure == 'write':
+                    raise primary
+            return super().write(text)
+
+        def flush(self):
+            if self.status_written and failure == 'flush':
+                raise primary
+            return super().flush()
+
+    def update(project):
+        context = _current_context()
+        assert context is not None
+        assert context._controller._cancelled.wait(WAIT)
+
+    monkeypatch.setattr(sys, 'stderr', Terminal())
+    monkeypatch.setattr(update_command, 'update', update)
+    with pytest.raises(OSError) as raised:
+        update_command._update_projects(_projects(tmp_path))
+    assert raised.value is primary
+    assert _current_context() is None
+    assert not any(thread.name.startswith('west-update') for thread in threading.enumerate())
+
+
+@pytest.mark.parametrize('clear_error', [BrokenPipeError, ValueError])
+def test_terminal_progress_clear_preserves_primary_error(
+    tmp_path, monkeypatch, update_command, clear_error
+):
+    shown = threading.Event()
+    primary = RuntimeError('primary update failure')
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+        def write(self, text):
+            if text.startswith('\r'):
+                if 'updating:' not in text:
+                    raise clear_error('status clear failed')
+                shown.set()
+            return super().write(text)
+
+    def update(project):
+        assert shown.wait(WAIT)
+        raise primary
+
+    errors = Terminal()
+    monkeypatch.setattr(sys, 'stderr', errors)
+    monkeypatch.setattr(update_command, 'update', update)
+    with pytest.raises(RuntimeError) as raised:
+        update_command._update_projects(_projects(tmp_path, ('alpha', 'bravo')))
+    assert raised.value is primary
+    assert isinstance(primary.__cause__, OSError)
+    assert 'clearing update status' in str(primary.__cause__)
+    assert 'status clear failed' in str(primary.__cause__)
+    assert not any(thread.name.startswith('west-update') for thread in threading.enumerate())
 
 
 def test_helper_failures_keep_identity_and_order(tmp_path, monkeypatch, update_command):

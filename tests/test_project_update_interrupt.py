@@ -1,5 +1,6 @@
 # Copyright (c) 2026 NXP
 
+import errno
 import json
 import os
 import shlex
@@ -338,3 +339,130 @@ def test_cli_terminal_interrupt_cleans_owned_resources(tmp_path, monkeypatch, bu
     finally:
         os.close(master)
         os.close(slave)
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX pseudoterminal progress')
+@pytest.mark.parametrize('mode', ['buffered', 'live', 'quiet', 'serial', 'one-group'])
+def test_cli_progress_on_pty(tmp_path, mode):
+    import fcntl
+    import pty
+    import select
+    import struct
+    import termios
+
+    workspace = tmp_path / 'workspace'
+    create_workspace(workspace)
+    paths = ['outer', 'outer/child'] if mode == 'one-group' else ['a', 'b']
+    manifest = {
+        'manifest': {
+            'projects': [
+                {'name': name, 'path': path, 'url': (tmp_path / 'unused').as_uri()}
+                for name, path in zip(['a', 'b'], paths, strict=True)
+            ]
+        }
+    }
+    (workspace / 'mp' / 'west.yml').write_text(yaml.safe_dump(manifest), encoding='utf-8')
+    ready = tmp_path / 'ready'
+    ready.mkdir()
+    release = tmp_path / 'release'
+    driver = tmp_path / 'progress driver.py'
+    driver.write_text(
+        'import sys, time\n'
+        'from pathlib import Path\n'
+        'from west.app.main import main\n'
+        'from west.app.project import Update\n'
+        'assert sys.stderr.isatty()\n'
+        'def update(self, project):\n'
+        f'    Path({str(ready)!r}, project.name).touch()\n'
+        f'    while not Path({str(release)!r}).exists():\n'
+        '        time.sleep(0.02)\n'
+        '    self.inf("PROJECT-DONE:" + project.name)\n'
+        'Update.update = update\n'
+        'main(sys.argv[1:])\n',
+        encoding='utf-8',
+    )
+    env = dict(os.environ)
+    env.update(
+        PYTHONPATH=os.pathsep.join(
+            [
+                os.fspath(Path(west_main.__file__).parents[2]),
+                sysconfig.get_path('purelib'),
+            ]
+        ),
+        COLUMNS='50',
+        PYTHONUNBUFFERED='1',
+    )
+    argv = [sys.executable, os.fspath(driver)]
+    if mode == 'quiet':
+        argv.append('-q')
+    argv += ['update', '-j', '1' if mode == 'serial' else '2']
+    if mode == 'live':
+        argv.append('--unbuffered')
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 50, 0, 0))
+    process = None
+    output = bytearray()
+
+    def read_output(timeout=0.05):
+        if select.select([master], [], [], timeout)[0]:
+            try:
+                data = os.read(master, 65536)
+            except OSError as error:
+                if error.errno == errno.EIO and process.poll() is not None:
+                    return
+                raise
+            output.extend(data)
+
+    try:
+        process = subprocess.Popen(
+            argv,
+            cwd=workspace,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=slave,
+            stderr=slave,
+            start_new_session=True,
+        )
+        os.close(slave)
+        slave = None
+        expected_ready = 1 if mode in ('serial', 'one-group') else 2
+
+        def updates_ready():
+            read_output()
+            if process.poll() is not None:
+                pytest.fail(f'CLI exited before progress readiness: {bytes(output)!r}')
+            return len(list(ready.iterdir())) == expected_ready
+
+        wait_until(updates_ready, timeout=30)
+        if mode == 'buffered':
+
+            def progress_visible():
+                read_output()
+                return b'[0/2] updating:' in output
+
+            wait_until(progress_visible, timeout=10)
+            assert b'PROJECT-DONE:' not in output
+        release.touch()
+        deadline = time.monotonic() + 10
+        while process.poll() is None:
+            read_output()
+            assert time.monotonic() < deadline, 'CLI did not finish after fixture release'
+        read_output(0)
+        assert process.returncode == 0
+        if mode == 'buffered':
+            assert b'\rPROJECT-DONE:' in output
+        else:
+            assert b'] updating:' not in output
+        if mode != 'quiet':
+            assert output.count(b'PROJECT-DONE:a') == output.count(b'PROJECT-DONE:b') == 1
+    finally:
+        release.touch()
+        if process is not None:
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        if slave is not None:
+            os.close(slave)
+        os.close(master)

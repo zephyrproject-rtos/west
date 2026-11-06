@@ -80,6 +80,14 @@ automatic colors and progress may differ; explicit Git color settings and
 West's ``color.ui`` setting remain effective. Use ``--unbuffered`` for live
 terminal output, not to enable concurrent interactive input.
 
+When buffered updates can run concurrently and stderr is a terminal, a
+temporary status line shows the completed project count and currently running
+projects. It is cleared before each project's output and when the command
+exits. Quiet mode, ``--unbuffered``, redirected stderr and serial execution
+keep plain output without status redraws.
+Only the transient display normalizes combining characters for terminal
+compatibility; project names and replayed logs are unchanged.
+
 Parallel operations must not need coordinated credential prompts, rebase
 editors, signing/pinentry, hooks or other interactive helpers. Use the serial
 default for these workflows. Interruption stops pending work and cleans up
