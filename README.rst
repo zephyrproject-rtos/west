@@ -73,7 +73,11 @@ Updates use one job by default. Configure a default or override it::
 Use ``--no-buffered`` for credential/passphrase prompts and ``-j 1``
 when multiple simultaneous prompts or other interactive helpers would be
 confusing. See ``west update --help`` for details about parallel output,
-conflict protection and interruption.
+conflict grouping and interruption.
+If a resource-conflict warning appears, use ``west -v update -j 4``
+to show the conflicting projects and reasons.
+The warning identifies each group by its first project name; long name lists
+are abbreviated.
 
 Additional Commands
 -------------------

@@ -19,6 +19,7 @@ import threading
 import time
 import unicodedata
 from _thread import LockType
+from collections import deque
 from collections.abc import Iterable
 from contextlib import nullcontext
 from functools import partial
@@ -1366,12 +1367,13 @@ class Update(_ProjectCommand):
                 for coordinated prompts, editors or interactive hooks.
                 Buffered Git output is not a terminal: automatic color and
                 progress may differ; explicit Git color settings are retained.
-                Overlapping paths or shared Git metadata warn and run all
-                selected ordinary projects serially.
+                Overlapping paths or shared Git metadata warn and run serially
+                within each conflicting group; independent groups can overlap.
+                Use -v for conflict details.
                 A failed safety inspection stops ordinary parallel work;
                 import providers may already have been updated. These checks
                 apply only to this invocation, not other West or Git processes.
-                A single selected project uses live serial output.''',
+                A single group uses live serial output.''',
         )
         group.add_argument(
             '-j',
@@ -1770,10 +1772,25 @@ class Update(_ProjectCommand):
         )
         self._handle_failed(self.args, failed)
 
-    def _parallel_conflict(self, projects: list[Project]) -> str | None:
-        paths: list[tuple[Path, Project]] = []
-        path_keys: dict[tuple[int, int, tuple[str, ...]], Project] = {}
-        for project in projects:
+    def _parallel_groups(self, projects: list[Project]) -> tuple[list[list[Project]], list[str]]:
+        parents = list(range(len(projects)))
+        conflicts: list[str] = []
+
+        def root(index: int) -> int:
+            while parents[index] != index:
+                parents[index] = parents[parents[index]]
+                index = parents[index]
+            return index
+
+        def connect(first: int, second: int, reason: str) -> None:
+            left, right = root(first), root(second)
+            if left != right:
+                parents[right] = left
+                conflicts.append(f'{reason}: {projects[first].name} and {projects[second].name}')
+
+        paths: list[Path] = []
+        path_keys: dict[tuple[int, int, tuple[str, ...]], int] = {}
+        for index, project in enumerate(projects):
             if project.abspath is None:
                 self.die(f'{project.name}: cannot inspect a project without a workspace path')
             try:
@@ -1782,19 +1799,20 @@ class Update(_ProjectCommand):
             except (OSError, ValueError, RuntimeError) as error:
                 self.die(f'{project.name}: cannot inspect project path {project.abspath}: {error}')
             if key in path_keys:
-                return f'overlapping project paths: {path_keys[key].name} and {project.name}'
-            path_keys[key] = project
-            paths.append((path, project))
-        for path, project in paths:
+                connect(path_keys[key], index, 'overlapping project paths')
+            else:
+                path_keys[key] = index
+            paths.append(path)
+        for index, (path, project) in enumerate(zip(paths, projects, strict=True)):
             try:
                 for parent in path.parents:
                     if (ancestor := path_keys.get(self._path_key(parent))) is not None:
-                        return f'overlapping project paths: {ancestor.name} and {project.name}'
+                        connect(ancestor, index, 'overlapping project paths')
             except (OSError, ValueError, RuntimeError) as error:
                 self.die(f'{project.name}: cannot inspect project path {path}: {error}')
 
-        common_dirs: dict[tuple[int, int], Project] = {}
-        for path, project in paths:
+        common_dirs: dict[tuple[int, int], int] = {}
+        for index, (path, project) in enumerate(zip(paths, projects, strict=True)):
             try:
                 directory = path.stat()
             except FileNotFoundError:
@@ -1812,46 +1830,67 @@ class Update(_ProjectCommand):
                 self.die(f'{project.name}: cannot inspect Git metadata in {path}: {error}')
 
             try:
-                result = project.git(
-                    ['rev-parse', '--git-common-dir'],
-                    cwd=project.abspath,
-                    capture_stdout=True,
-                    capture_stderr=True,
-                )
+                common = self._git_common_dir(path)
+                if common is None:
+                    result = project.git(
+                        ['rev-parse', '--git-common-dir'],
+                        cwd=project.abspath,
+                        capture_stdout=True,
+                        capture_stderr=True,
+                    )
+                    if result.returncode:
+                        raise ValueError(
+                            f'Git common-directory inspection failed: {result.stderr!r}'
+                        )
+                    answer = result.stdout
+                    if not isinstance(answer, bytes) or not answer.rstrip(b'\r\n'):
+                        raise ValueError('Git common-directory inspection returned empty output')
+                    common = Path(os.fsdecode(answer.rstrip(b'\r\n')))
+                    if not common.is_absolute():
+                        common = path / common
+                common = self._normalized_path(common)
+                info = common.stat()
+                if not stat.S_ISDIR(info.st_mode):
+                    raise ValueError(f'{common} is not a directory')
             except subprocess.CalledProcessError as error:
                 detail = (error.stderr or b'').decode(Manifest.encoding, errors='backslashreplace')
                 self.die(
                     f'{project.name}: Git common-directory inspection failed in {path}: '
                     f'{detail or error}'
                 )
-            if result.returncode:
-                self.die(
-                    f'{project.name}: Git common-directory inspection failed in {path}: '
-                    f'{result.stderr!r}'
-                )
-            answer = result.stdout
-            if not isinstance(answer, bytes) or not answer.rstrip(b'\r\n'):
-                self.die(
-                    f'{project.name}: Git common-directory inspection returned empty output '
-                    f'in {path}'
-                )
-            try:
-                common = Path(os.fsdecode(answer.rstrip(b'\r\n')))
-                if not common.is_absolute():
-                    common = path / common
-                common = self._normalized_path(common)
-                info = common.stat()
-                if not stat.S_ISDIR(info.st_mode):
-                    raise ValueError(f'{common} is not a directory')
             except (OSError, ValueError, RuntimeError) as error:
                 self.die(f'{project.name}: unusable Git common directory in {path}: {error}')
             identity = info.st_dev, info.st_ino
             if identity in common_dirs:
-                return (
-                    f'shared Git common directory: {common_dirs[identity].name} and {project.name}'
-                )
-            common_dirs[identity] = project
-        return None
+                connect(common_dirs[identity], index, 'shared Git common directory')
+            else:
+                common_dirs[identity] = index
+        groups: dict[int, list[Project]] = {}
+        for index, project in enumerate(projects):
+            groups.setdefault(root(index), []).append(project)
+        return list(groups.values()), conflicts
+
+    @staticmethod
+    def _git_common_dir(path: Path) -> Path | None:
+        # Let Git resolve overrides and nonstandard metadata layouts.
+        if any(
+            name in os.environ
+            for name in ('GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_CEILING_DIRECTORIES')
+        ):
+            return None
+        gitdir = path / '.git'
+        if gitdir.is_file():
+            content = gitdir.read_bytes().rstrip(b'\r\n')
+            if not content.startswith(b'gitdir: '):
+                return None
+            gitdir = path / os.fsdecode(content[len(b'gitdir: ') :])
+        if not gitdir.is_dir():
+            return None
+        try:
+            common = (gitdir / 'commondir').read_bytes().rstrip(b'\r\n')
+        except FileNotFoundError:
+            return gitdir
+        return gitdir / os.fsdecode(common) if common else None
 
     def _update_projects_serial(self, projects: Iterable[Project]) -> list[Project]:
         failed = []
@@ -1869,13 +1908,27 @@ class Update(_ProjectCommand):
         selected = list(projects)
         if not selected:
             return []
-        if len(selected) == 1:
+        groups, conflicts = self._parallel_groups(selected)
+        jobs = min(self.args.jobs, len(groups))
+        if conflicts:
+            conflict_groups = [group for group in groups if len(group) > 1]
+            affected = sum(len(group) for group in conflict_groups)
+            group_names = ', '.join(group[0].name for group in conflict_groups)
+            if len(group_names) > 60:
+                group_names = group_names[:57] + '...'
+            policy = (
+                'updating conflicting groups serially and independent groups in parallel'
+                if jobs > 1
+                else 'updating all selected ordinary projects serially'
+            )
+            self.wrn(
+                f'resource conflicts detected (projects: {affected}, '
+                f'groups: {len(conflict_groups)} [{group_names}]); {policy}. Use -v for details.'
+            )
+            for conflict in conflicts:
+                self.dbg(conflict)
+        if jobs == 1:
             return self._update_projects_serial(selected)
-        conflict = self._parallel_conflict(selected)
-        if conflict is not None:
-            self.wrn(f'{conflict}; updating all selected ordinary projects serially.')
-            return self._update_projects_serial(selected)
-        jobs = min(self.args.jobs, len(selected))
         cache_keys: dict[str, tuple[int, int, tuple[str, ...]]] = {}
         cache_locks: dict[tuple[int, int, tuple[str, ...]], LockType] = {}
         for project in selected:
@@ -1900,7 +1953,7 @@ class Update(_ProjectCommand):
         executor: concurrent.futures.ThreadPoolExecutor | None = None
         running: dict[
             concurrent.futures.Future[None],
-            tuple[Project, _execution.ProjectContext],
+            tuple[Project, _execution.ProjectContext, deque[Project]],
         ] = {}
         open_scopes: list[tuple[Project, _execution.ProjectContext]] = []
         failed_names: set[str] = set()
@@ -1934,16 +1987,16 @@ class Update(_ProjectCommand):
             executor = concurrent.futures.ThreadPoolExecutor(
                 max_workers=jobs, thread_name_prefix='west-update'
             )
-            remaining = iter(selected)
+            remaining = deque(deque(group) for group in groups)
 
             def submit_one() -> bool:
                 assert executor is not None
-                try:
-                    project = next(remaining)
-                except StopIteration:
+                if not remaining:
                     return False
+                group = remaining.popleft()
+                project = group.popleft()
                 scope = new_scope(project)
-                running[executor.submit(run_project, project, scope)] = project, scope
+                running[executor.submit(run_project, project, scope)] = project, scope, group
                 return True
 
             for _ in range(jobs):
@@ -1954,13 +2007,15 @@ class Update(_ProjectCommand):
                     running, timeout=0.25, return_when=concurrent.futures.FIRST_COMPLETED
                 )
                 for future in ready:
-                    project, scope = running[future]
+                    project, scope, group = running[future]
                     try:
                         future.result()
                     except subprocess.CalledProcessError:
                         failed_names.add(project.name)
                     finish_project(project, scope)
                     del running[future]
+                    if group:
+                        remaining.append(group)
                 while len(running) < jobs and submit_one():
                     pass
             complete = True
