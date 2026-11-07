@@ -251,7 +251,9 @@ class ProcessController:
                     except ProcessLookupError:
                         groups.discard(pid)
                     except OSError as error:
-                        errors.append(error)
+                        # A denied null signal still means the group exists.
+                        if sig != 0 or not isinstance(error, PermissionError):
+                            errors.append(error)
                         active = True
                 return active
 

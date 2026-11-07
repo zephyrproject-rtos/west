@@ -529,12 +529,23 @@ def test_cancel_preserves_git_reference_lock_recovery(tmp_path, buffered, cooper
     project = project_at(tmp_path / 'transaction')
     repo = Path(project.abspath)
     hook = repo / '.git' / 'hooks' / 'reference-transaction'
+    hook_driver = hook.with_suffix('.py')
+    # Poll in one helper instead of repeatedly spawning sleep children.
+    hook_driver.write_text(
+        'import time\n'
+        'from pathlib import Path\n'
+        'Path("transaction.ready").touch()\n'
+        'while not Path("transaction.release").exists():\n'
+        '    time.sleep(0.02)\n',
+        encoding='utf-8',
+    )
     hook.write_bytes(
-        b'#!/bin/sh\n'
-        b'if test "$1" = prepared; then\n'
-        b'  echo ready > transaction.ready\n'
-        b'  while test ! -f transaction.release; do sleep 0.02; done\n'
-        b'fi\n'
+        (
+            '#!/bin/sh\n'
+            'if test "$1" = prepared; then\n'
+            f'  exec {shlex.join([sys.executable, os.fspath(hook_driver)])}\n'
+            'fi\n'
+        ).encode()
     )
     hook.chmod(0o755)
     lock = repo / '.git' / 'refs' / 'heads' / 'cancel-probe.lock'
@@ -558,7 +569,8 @@ def test_cancel_preserves_git_reference_lock_recovery(tmp_path, buffered, cooper
             )
 
     def release_during_grace():
-        if controller._cancelled.wait(10) and cooperative and not stop.wait(0.4):
+        controller._cancelled.wait()
+        if cooperative and not stop.wait(0.4):
             release.touch()
 
     releaser = threading.Thread(target=release_during_grace)
@@ -587,8 +599,8 @@ def test_cancel_preserves_git_reference_lock_recovery(tmp_path, buffered, cooper
         assert controller.forced_termination is (not cooperative)
     finally:
         stop.set()
-        release.touch()
         controller._cancelled.set()
+        release.touch()
         releaser.join(timeout=5)
         try:
             controller.cancel()
@@ -626,7 +638,8 @@ def test_windows_cancel_waits_for_helper_after_git_exits(tmp_path, cooperative):
     stop = threading.Event()
 
     def release_during_grace():
-        if controller._cancelled.wait(10) and cooperative and not stop.wait(0.4):
+        controller._cancelled.wait()
+        if cooperative and not stop.wait(0.4):
             release.touch()
 
     releaser = threading.Thread(target=release_during_grace)
@@ -645,8 +658,8 @@ def test_windows_cancel_waits_for_helper_after_git_exits(tmp_path, cooperative):
         assert controller.forced_termination is (not cooperative)
     finally:
         stop.set()
-        release.touch()
         controller._cancelled.set()
+        release.touch()
         releaser.join(timeout=5)
         try:
             controller.cancel()
@@ -922,16 +935,66 @@ def test_cancel_shares_grace_and_does_not_resignal_exited_groups(monkeypatch):
     controller.close()
 
 
-@pytest.mark.parametrize('failure', ['signal', 'grace-timeout', 'reap'])
+@pytest.mark.parametrize('denied_probes', [1, 3])
+def test_posix_probe_permission_error_preserves_grace(monkeypatch, denied_probes):
+    from west import _execution
+
+    signals = []
+    probes = 0
+
+    def killpg(pid, signum):
+        nonlocal probes
+        signals.append((pid, signum))
+        if signum == 0:
+            probes += 1
+            if probes <= denied_probes:
+                raise PermissionError('owned process group still exists')
+            raise ProcessLookupError()
+        if signum == 9:
+            raise PermissionError('group was force-signalled before grace expired')
+
+    sleep = Mock()
+    clock = iter([0, 0.1, 0.2, 0.3, 0.4])
+    monkeypatch.setattr(_execution, 'sys', SimpleNamespace(platform='linux'))
+    monkeypatch.setattr(_execution, 'os', SimpleNamespace(killpg=killpg))
+    monkeypatch.setattr(_execution, 'signal', SimpleNamespace(SIGTERM=15, SIGKILL=9))
+    monkeypatch.setattr(
+        _execution, 'time', SimpleNamespace(monotonic=lambda: next(clock), sleep=sleep)
+    )
+    controller = _execution.ProcessController()
+    child = Mock(pid=42)
+    controller._children.add(child)
+    controller.cancel()
+    assert signals == [(42, 15)] + [(42, 0)] * (denied_probes + 1)
+    assert sleep.call_args_list == [call(0.02)] * denied_probes
+    assert child.wait.call_count == 2
+    assert not controller.forced_termination
+    assert not controller._children
+    with pytest.raises(CancelledError):
+        controller.check()
+    controller.close()
+
+
+@pytest.mark.parametrize(
+    'failure',
+    ['signal', 'force-signal', 'probe-error', 'probe-permission', 'grace-timeout', 'reap'],
+)
 def test_posix_cancellation_escalation_and_errors(monkeypatch, failure):
     from west import _execution
 
     signals = []
+    force_error = PermissionError('owned process group force signal failed')
 
     def killpg(pid, signum):
         signals.append((pid, signum))
         if failure == 'signal' and signum == 15:
             raise PermissionError('owned process group signal failed')
+        if failure == 'probe-error' and signum == 0:
+            raise OSError('owned process group probe failed')
+        if failure == 'probe-permission' and signum == 0:
+            raise PermissionError('owned process group probe denied')
+        if failure in ('force-signal', 'probe-permission') and signum == 9:
+            raise force_error
 
     monkeypatch.setattr(_execution, 'sys', SimpleNamespace(platform='linux'))
     monkeypatch.setattr(_execution, 'os', SimpleNamespace(killpg=killpg))
@@ -952,8 +1015,11 @@ def test_posix_cancellation_escalation_and_errors(monkeypatch, failure):
         if failure == 'grace-timeout':
             controller.cancel()
         else:
-            with pytest.raises(OSError, match='could not stop owned Git children'):
+            with pytest.raises(OSError, match='could not stop owned Git children') as raised:
                 controller.cancel()
+            if failure == 'probe-permission':
+                assert raised.value.__cause__ is force_error
+                assert 'probe denied' not in str(raised.value)
         assert signals == [(42, 15), (42, 0), (42, 9)]
         assert controller.forced_termination
         assert child.wait.call_count == 2
