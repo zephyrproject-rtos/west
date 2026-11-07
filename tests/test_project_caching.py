@@ -1,16 +1,24 @@
 # Copyright (c) 2020, Nordic Semiconductor ASA
 
+import io
 import os
 import shutil
 import subprocess
 import textwrap
+import threading
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+import yaml
 from conftest import (
     GIT,
     add_commit,
     chdir,
     cmd,
+    cmd_raises,
     create_branch,
     create_repo,
     create_workspace,
@@ -20,6 +28,7 @@ from conftest import (
 )
 
 from west.app.project import Update
+from west.manifest import Project
 
 #
 # Helpers
@@ -58,7 +67,254 @@ def setup_cache_workspace(workspace, foo_remote, foo_head, bar_remote, bar_head)
 #
 
 
-def test_update_name_cache(tmpdir):
+def cache_command(root, jobs=3):
+    command = Update()
+    command.args = SimpleNamespace(jobs=jobs, unbuffered=False)
+    command.updated = set()
+    command.auto_cache = os.fspath(root / 'auto-cache')
+    command.name_cache = command.path_cache = None
+    command._topdir = os.fspath(root)
+    command._git_ver = (2, 40, 0)
+    return command
+
+
+@pytest.mark.parametrize(
+    'state',
+    [
+        'empty',
+        'populated',
+        'alias',
+        'real-path-alias',
+        'name-cache',
+        'missing-case-alias',
+        'missing-unicode-alias',
+    ],
+)
+def test_parallel_auto_cache_transaction_lock(tmp_path, monkeypatch, state, directory_alias):
+    command = cache_command(tmp_path)
+    missing_alias = state in ('missing-case-alias', 'missing-unicode-alias')
+    if missing_alias:
+        command.auto_cache = os.fspath(tmp_path / 'Cache caf\u00e9')
+    projects = [
+        Project(name, url, path=f'projects/{name}', topdir=tmp_path)
+        for name, url in [('a', 'shared'), ('b', 'shared'), ('c', 'independent')]
+    ]
+    real_auto_cache = command.project_auto_cache
+    cache = Path(real_auto_cache(projects[0]))
+    alias = None
+    if state != 'empty' and not missing_alias:
+        cache.mkdir(parents=True)
+    if state == 'name-cache':
+        command.name_cache = os.fspath(tmp_path / 'readonly')
+        (Path(command.name_cache) / 'a').mkdir(parents=True)
+    if state == 'alias' and os.name == 'nt':
+        alias = os.fspath(cache).upper()
+    elif state in ('alias', 'real-path-alias'):
+        link = tmp_path / 'cache-alias'
+        directory_alias(link, cache)
+        alias = os.fspath(link)
+    elif missing_alias:
+        original = 'Cache caf\u00e9'
+        other = 'cache caf\u00e9' if state == 'missing-case-alias' else 'Cache cafe\u0301'
+        probe = tmp_path / 'cache-probe'
+        (probe / original).mkdir(parents=True)
+        if not (probe / other).exists() or not (probe / original).samefile(probe / other):
+            pytest.skip('filesystem does not alias these cache names')
+        alias = os.fspath(tmp_path / other / cache.relative_to(command.auto_cache))
+
+    shared_entered, c_entered, attempted, release = [threading.Event() for _ in range(4)]
+    first_thread = []
+    blocked_owners = set()
+    real_lock = threading.Lock
+    state_lock = real_lock()
+    active = Counter()
+    maximum = Counter()
+
+    class ObservedLock:
+        def __init__(self):
+            self.lock = real_lock()
+            self.owner = None
+
+        def acquire(self, blocking=True, timeout=-1):
+            who = threading.get_ident()
+            if blocking and self.owner is not None and who != self.owner:
+                with state_lock:
+                    blocked_owners.add(self.owner)
+                    if first_thread and self.owner == first_thread[0]:
+                        attempted.set()
+            acquired = self.lock.acquire(blocking, timeout)
+            if acquired:
+                self.owner = who
+            return acquired
+
+        def release(self):
+            self.owner = None
+            self.lock.release()
+
+        def __enter__(self):
+            self.acquire()
+            return self
+
+        def __exit__(self, *exc):
+            self.release()
+
+        def __getattr__(self, name):
+            return getattr(self.lock, name)
+
+    def auto_cache(project):
+        if alias is not None and project.name == 'b':
+            return alias
+        return real_auto_cache(project)
+
+    def update(project):
+        with state_lock:
+            active[project.url] += 1
+            maximum[project.url] = max(maximum[project.url], active[project.url])
+            if project.url == 'shared':
+                if not first_thread:
+                    first_thread.append(threading.get_ident())
+                    shared_entered.set()
+                    if first_thread[0] in blocked_owners:
+                        attempted.set()
+                else:
+                    attempted.set()
+        if project.name == 'c':
+            c_entered.set()
+        try:
+            assert release.wait(45)
+        finally:
+            with state_lock:
+                active[project.url] -= 1
+
+    monkeypatch.setattr(command, 'project_auto_cache', auto_cache)
+    monkeypatch.setattr(command, 'update', update)
+    with ThreadPoolExecutor(max_workers=1) as coordinator:
+        monkeypatch.setattr(threading, 'Lock', ObservedLock)
+        future = coordinator.submit(command._update_projects, projects)
+        try:
+            assert shared_entered.wait(15)
+            assert c_entered.wait(15)
+            assert attempted.wait(15)
+        finally:
+            release.set()
+        assert future.result(timeout=15) == []
+    assert maximum['shared'] == 1
+    assert maximum['independent'] == 1
+    assert command.updated == {'a', 'b', 'c'}
+
+
+@pytest.mark.parametrize('kind', ['name', 'path'])
+def test_parallel_readonly_cache_preserves_priority(tmp_path, monkeypatch, kind):
+    command = cache_command(tmp_path, jobs=2)
+    projects = [
+        Project(name, 'shared', path=f'projects/{name}', topdir=tmp_path) for name in ['a', 'b']
+    ]
+    readonly = tmp_path / 'readonly'
+    setattr(command, f'{kind}_cache', os.fspath(readonly))
+    for project in projects:
+        (readonly / (project.name if kind == 'name' else project.path)).mkdir(parents=True)
+    chosen = []
+    monkeypatch.setattr(
+        command, 'update', lambda project: chosen.append(command.project_cache(project))
+    )
+    assert command._update_projects(projects) == []
+    assert command.updated == {'a', 'b'}
+    assert set(chosen) == {
+        os.fspath(readonly / (p.name if kind == 'name' else p.path)) for p in projects
+    }
+    assert not Path(command.auto_cache).exists()
+
+
+def shared_cache_workspace(root, *, broken=False):
+    shared, independent = root / 'shared', root / 'independent'
+    if not broken:
+        create_repo(shared)
+    create_repo(independent)
+    workspace = root / 'workspace'
+    create_workspace(workspace)
+    projects = [
+        Project(
+            name,
+            remote.as_uri(),
+            path=f'projects/{name}',
+            topdir=workspace,
+            revision='master' if broken and name != 'c' else rev_parse(remote, 'HEAD'),
+        )
+        for name, remote in [('a', shared), ('b', shared), ('c', independent)]
+    ]
+    manifest = {
+        'manifest': {
+            'projects': [
+                {'name': p.name, 'path': p.path, 'url': p.url, 'revision': p.revision}
+                for p in projects
+            ]
+        }
+    }
+    (workspace / 'mp' / 'west.yml').write_text(yaml.safe_dump(manifest), encoding='utf-8')
+    cache = root / 'cache \u96ea'
+    command = cache_command(root)
+    command.auto_cache = os.fspath(cache)
+    return workspace, projects, command
+
+
+@pytest.mark.parametrize('populated,refresh_fails', [(False, False), (True, False), (True, True)])
+def test_parallel_shared_auto_cache_git_results(tmp_path, monkeypatch, populated, refresh_fails):
+    workspace, projects, command = shared_cache_workspace(tmp_path)
+    shared_cache = Path(command.project_auto_cache(projects[0]))
+    if populated:
+        shared_cache.parent.mkdir(parents=True)
+        subprocess.check_call([GIT, 'clone', '--mirror', '--', projects[0].url, shared_cache])
+        command.create_auto_cache_info(projects[0], os.fspath(shared_cache))
+    mirror_clones = Counter()
+    refreshes = []
+    lock = threading.Lock()
+    real_git = Project.git
+
+    def git(project, args, **kwargs):
+        argv = args.split() if isinstance(args, str) else list(args)
+        if argv[:2] == ['clone', '--mirror']:
+            with lock:
+                mirror_clones[project.url] += 1
+        if refresh_fails and project.url == projects[0].url and argv[:2] == ['remote', 'update']:
+            assert kwargs.get('check') is False
+            with lock:
+                refreshes.append(project.name)
+            return real_git(
+                project,
+                ['-c', "alias.fail=!printf 'injected refresh failure\\n' >&2; exit 1", 'fail'],
+                **kwargs,
+            )
+        return real_git(project, args, **kwargs)
+
+    monkeypatch.setattr(Project, 'git', git)
+    stderr = io.StringIO()
+    args = ['update', '-j', '3', '--auto-cache', command.auto_cache]
+    if refresh_fails:
+        args += ['--fetch', 'always']
+    cmd(args, cwd=workspace, stderr=stderr)
+    assert mirror_clones[projects[0].url] == (0 if populated else 1)
+    assert mirror_clones[projects[2].url] == 1
+    for project in projects:
+        assert rev_parse(project.abspath, 'HEAD') == project.revision
+        assert rev_parse(project.abspath, 'refs/heads/manifest-rev') == project.revision
+    assert Path(os.fspath(shared_cache) + '.info').is_file()
+    if refresh_fails:
+        assert set(refreshes) == {'a', 'b'}
+        assert 'injected refresh failure' in stderr.getvalue()
+
+
+def test_parallel_failed_auto_cache_clone_preserves_failure(tmp_path):
+    workspace, projects, command = shared_cache_workspace(tmp_path, broken=True)
+    raised, stderr = cmd_raises(
+        ['update', '-j', '3', '--auto-cache', command.auto_cache], SystemExit, cwd=workspace
+    )
+    assert raised.value.code == 1
+    assert 'update failed for projects: a, b' in stderr
+    assert rev_parse(projects[2].abspath, 'HEAD') == projects[2].revision
+    assert not Path(command.project_auto_cache(projects[0]) + '.info').exists()
+
+
+def test_update_name_cache(tmpdir, update_jobs):
     # Test that 'west update --name-cache' works and doesn't hit the
     # network if it doesn't have to.
 
@@ -120,7 +376,7 @@ def test_update_name_cache(tmpdir):
     assert remote_get_url(bar) == "file://" + os.fspath(Path('non-existent') / 'there')
 
 
-def test_update_path_cache(tmpdir):
+def test_update_path_cache(tmpdir, update_jobs):
     # Test that 'west update --path-cache' works and doesn't hit the
     # network if it doesn't have to.
     # Note: Remote url can be non-existent since it will clone from local cache
@@ -184,7 +440,7 @@ def test_update_path_cache(tmpdir):
     assert remote_get_url(bar) == "file://" + os.fspath(Path('non-existent') / 'there')
 
 
-def test_update_auto_cache(tmpdir):
+def test_update_auto_cache(tmpdir, update_jobs):
     # Test that 'west update --auto-cache' works and does set up the local
     # cache correctly.
 
@@ -317,7 +573,7 @@ def test_update_auto_cache(tmpdir):
     assert bar_head_newer in rev_list(auto_cache_dir / "bar" / bar_hash)
 
 
-def test_update_auto_cache_skipped_remote_update(tmpdir):
+def test_update_auto_cache_skipped_remote_update(tmpdir, update_jobs):
     foo_remote = Path(tmpdir / 'remotes' / 'foo')
     bar_remote = Path(tmpdir / 'remotes' / 'bar')
     auto_cache_dir = Path(tmpdir / 'auto_cache_dir')
@@ -411,7 +667,7 @@ def test_update_auto_cache_skipped_remote_update(tmpdir):
         assert msg in stdout
 
 
-def test_update_caches_priorities(tmpdir):
+def test_update_caches_priorities(tmpdir, update_jobs):
     # Test that the correct cache is used if multiple caches are specified
     # e.g. if 'west update --name-cache X --path-cache Y --auto-cache Z'
 

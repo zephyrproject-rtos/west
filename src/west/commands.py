@@ -31,6 +31,7 @@ except ImportError:
 
 import yaml
 
+from west import _execution
 from west.configuration import Configuration
 from west.manifest import Manifest, Project
 from west.util import PathType, escapes_directory, quote_sh_list
@@ -461,8 +462,9 @@ class WestCommand(ABC):
         '''
         if self.verbosity < level:
             return
-        print(level._line_prefix, end='')
-        print(*args, end=end)
+        stdout = _execution.output_stream()
+        print(level._line_prefix, end='', file=stdout)
+        print(*args, end=end, file=stdout)
 
     def inf(self, *args, colorize: bool = False, end: str = '\n'):
         '''Print an informational message.
@@ -480,18 +482,19 @@ class WestCommand(ABC):
         if not self.color_ui:
             colorize = False
 
+        stdout = _execution.output_stream()
         # This approach colorizes any sep= and end= text too, as expected.
         #
         # colorama automatically strips the ANSI escapes when stdout isn't a
         # terminal (by wrapping sys.stdout).
         if colorize:
-            print(INF_COLOR, end='')
+            print(INF_COLOR, end='', file=stdout)
 
         # Do not prefix with "INFO: " for legacy reasons, see #999
-        print(*args, end=end)
+        print(*args, end=end, file=stdout)
 
         if colorize:
-            self._reset_colors(sys.stdout)
+            self._reset_colors(stdout)
 
     def banner(self, *args):
         '''Prints args as a "banner" using inf().
@@ -519,14 +522,15 @@ class WestCommand(ABC):
         if self.verbosity < Verbosity.WRN:
             return
 
+        stderr = _execution.output_stream(stderr=True)
         if self.color_ui:
-            print(WRN_COLOR, end='', file=sys.stderr)
+            print(WRN_COLOR, end='', file=stderr)
 
-        print(Verbosity.WRN._line_prefix, end='', file=sys.stderr)
-        print(*args, end=end, file=sys.stderr)
+        print(Verbosity.WRN._line_prefix, end='', file=stderr)
+        print(*args, end=end, file=stderr)
 
         if self.color_ui:
-            self._reset_colors(sys.stderr)
+            self._reset_colors(stderr)
 
     def err(self, *args, fatal: bool = False, end: str = '\n'):
         '''Print an error.
@@ -546,14 +550,15 @@ class WestCommand(ABC):
         if self.verbosity < Verbosity.ERR:
             return
 
+        stderr = _execution.output_stream(stderr=True)
         if self.color_ui:
-            print(ERR_COLOR, end='', file=sys.stderr)
+            print(ERR_COLOR, end='', file=stderr)
 
-        print(('FATAL ' if fatal else '') + Verbosity.ERR._line_prefix, end='', file=sys.stderr)
-        print(*args, end=end, file=sys.stderr)
+        print(('FATAL ' if fatal else '') + Verbosity.ERR._line_prefix, end='', file=stderr)
+        print(*args, end=end, file=stderr)
 
         if self.color_ui:
-            self._reset_colors(sys.stderr)
+            self._reset_colors(stderr)
 
     def die(self, *args, exit_code: int = 1) -> NoReturn:
         '''Print a fatal error using err(), and abort the program.
