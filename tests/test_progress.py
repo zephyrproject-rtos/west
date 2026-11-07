@@ -145,17 +145,16 @@ def test_status_line_handles_terminal_shrinking(monkeypatch):
     from west.app import _progress
 
     width = 80
-    monkeypatch.setattr(
-        _progress.shutil, 'get_terminal_size', lambda: os.terminal_size((width, 24))
-    )
-    stream = io.StringIO()
-    status = reporter(stream)
-    status.progress(0, 2, ['a-long-running-project'])
-    stream.seek(0)
-    stream.truncate()
-    width = 10
-    status.progress(1, 2, ['beta'])
-    status.close()
+    with monkeypatch.context() as scoped:
+        scoped.setattr(_progress.shutil, 'get_terminal_size', lambda: os.terminal_size((width, 24)))
+        stream = io.StringIO()
+        status = reporter(stream)
+        status.progress(0, 2, ['a-long-running-project'])
+        stream.seek(0)
+        stream.truncate()
+        width = 10
+        status.progress(1, 2, ['beta'])
+        status.close()
     assert all(len(part) <= 9 for part in stream.getvalue().split('\r'))
 
 
@@ -170,12 +169,13 @@ def test_status_line_uses_its_own_terminal_width(monkeypatch):
         assert fd == 123
         return os.terminal_size((10, 24))
 
-    monkeypatch.setattr(os, 'get_terminal_size', terminal_size)
-    monkeypatch.setattr(_progress.shutil, 'get_terminal_size', lambda: os.terminal_size((120, 24)))
-    stream = Terminal()
-    status = reporter(stream)
-    status.progress(0, 2, ['a-long-project-name'])
-    status.close()
+    with monkeypatch.context() as scoped:
+        scoped.setattr(os, 'get_terminal_size', terminal_size)
+        scoped.setattr(_progress.shutil, 'get_terminal_size', lambda: os.terminal_size((120, 24)))
+        stream = Terminal()
+        status = reporter(stream)
+        status.progress(0, 2, ['a-long-project-name'])
+        status.close()
     assert all(len(part) <= 9 for part in stream.getvalue().split('\r'))
 
 

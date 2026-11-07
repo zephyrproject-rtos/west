@@ -342,7 +342,9 @@ def test_cli_terminal_interrupt_cleans_owned_resources(tmp_path, monkeypatch, bu
 
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='POSIX pseudoterminal progress')
-@pytest.mark.parametrize('mode', ['buffered', 'live', 'quiet', 'serial', 'one-group'])
+@pytest.mark.parametrize(
+    'mode', ['buffered', 'live', 'quiet', 'serial', 'one-group', 'serial-early-eof']
+)
 def test_cli_progress_on_pty(tmp_path, mode):
     import fcntl
     import pty
@@ -350,6 +352,8 @@ def test_cli_progress_on_pty(tmp_path, mode):
     import struct
     import termios
 
+    serial = mode in ('serial', 'serial-early-eof')
+    early_eof = mode == 'serial-early-eof'
     workspace = tmp_path / 'workspace'
     create_workspace(workspace)
     paths = ['outer', 'outer/child'] if mode == 'one-group' else ['a', 'b']
@@ -365,9 +369,10 @@ def test_cli_progress_on_pty(tmp_path, mode):
     ready = tmp_path / 'ready'
     ready.mkdir()
     release = tmp_path / 'release'
+    exit_release = tmp_path / 'exit release'
     driver = tmp_path / 'progress driver.py'
     driver.write_text(
-        'import sys, time\n'
+        'import os, sys, time\n'
         'from pathlib import Path\n'
         'from west.app.main import main\n'
         'from west.app.project import Update\n'
@@ -378,7 +383,17 @@ def test_cli_progress_on_pty(tmp_path, mode):
         '        time.sleep(0.02)\n'
         '    self.inf("PROJECT-DONE:" + project.name)\n'
         'Update.update = update\n'
-        'main(sys.argv[1:])\n',
+        'try:\n'
+        '    main(sys.argv[1:])\n'
+        'finally:\n'
+        f'    if {early_eof!r}:\n'
+        '        stdout_fd, stderr_fd = sys.stdout.fileno(), sys.stderr.fileno()\n'
+        '        sys.stdout.close()\n'
+        '        sys.stderr.close()\n'
+        '        os.close(stdout_fd)\n'
+        '        os.close(stderr_fd)\n'
+        f'        while not Path({str(exit_release)!r}).exists():\n'
+        '            time.sleep(0.02)\n',
         encoding='utf-8',
     )
     env = dict(os.environ)
@@ -395,7 +410,7 @@ def test_cli_progress_on_pty(tmp_path, mode):
     argv = [sys.executable, os.fspath(driver)]
     if mode == 'quiet':
         argv.append('-q')
-    argv += ['update', '-j', '1' if mode == 'serial' else '2']
+    argv += ['update', '-j', '1' if serial else '2']
     if mode == 'live':
         argv.append('--unbuffered')
     master, slave = pty.openpty()
@@ -408,10 +423,12 @@ def test_cli_progress_on_pty(tmp_path, mode):
             try:
                 data = os.read(master, 65536)
             except OSError as error:
-                if error.errno == errno.EIO and process.poll() is not None:
-                    return
+                if error.errno == errno.EIO:
+                    return True
                 raise
             output.extend(data)
+            return not data
+        return False
 
     try:
         process = subprocess.Popen(
@@ -425,7 +442,7 @@ def test_cli_progress_on_pty(tmp_path, mode):
         )
         os.close(slave)
         slave = None
-        expected_ready = 1 if mode in ('serial', 'one-group') else 2
+        expected_ready = 1 if serial or mode == 'one-group' else 2
 
         def updates_ready():
             read_output()
@@ -443,6 +460,10 @@ def test_cli_progress_on_pty(tmp_path, mode):
             wait_until(progress_visible, timeout=10)
             assert b'PROJECT-DONE:' not in output
         release.touch()
+        if early_eof:
+            wait_until(read_output, timeout=10)
+            assert process.poll() is None
+            exit_release.touch()
         deadline = time.monotonic() + 10
         while process.poll() is None:
             read_output()
@@ -457,6 +478,7 @@ def test_cli_progress_on_pty(tmp_path, mode):
             assert output.count(b'PROJECT-DONE:a') == output.count(b'PROJECT-DONE:b') == 1
     finally:
         release.touch()
+        exit_release.touch()
         if process is not None:
             try:
                 process.wait(timeout=10)

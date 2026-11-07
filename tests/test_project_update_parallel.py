@@ -485,11 +485,12 @@ def test_terminal_progress_is_not_allocated_in_excluded_modes(
         projects = projects[:1]
     elif mode == 'one-group':
         projects[1].path = projects[0].path
-    monkeypatch.setattr(sys, 'stderr', Terminal())
-    monkeypatch.setattr(_progress, 'StatusLineReporter', unexpected_renderer)
-    monkeypatch.setattr(_progress.shutil, 'get_terminal_size', unexpected_renderer)
-    monkeypatch.setattr(update_command, 'update', lambda project: None)
-    assert update_command._update_projects(projects) == []
+    with monkeypatch.context() as scoped:
+        scoped.setattr(sys, 'stderr', Terminal())
+        scoped.setattr(_progress, 'StatusLineReporter', unexpected_renderer)
+        scoped.setattr(_progress.shutil, 'get_terminal_size', unexpected_renderer)
+        scoped.setattr(update_command, 'update', lambda project: None)
+        assert update_command._update_projects(projects) == []
 
 
 @pytest.mark.parametrize('failure', ['write', 'flush'])
