@@ -32,7 +32,7 @@ from packaging.version import parse as parse_version
 
 from west import util
 from west.configuration import ConfigFile, Configuration, MalformedConfig
-from west.util import PathType
+from west.util import PathType, is_posix_style_path
 
 #
 # Public constants
@@ -1988,6 +1988,25 @@ class Manifest:
 
         return ret
 
+    def _check_non_posix_path(self, path: str, source: str) -> None:
+        # Check that a manifest path field's value is a POSIX-style
+        # path; see is_posix_style_path() for the definition.
+        #
+        # Windows-only syntax is rejected because it can never refer
+        # to git content: git only understands POSIX-style paths.
+        # Content which merely cannot be checked out on Windows
+        # (such as control characters) is accepted, since it means
+        # the same thing on every operating system. See:
+        # https://github.com/zephyrproject-rtos/west/issues/961
+
+        if is_posix_style_path(path):
+            return
+
+        self._malformed(
+            f'{source}: "{path}" is not a POSIX-style path: it contains '
+            'syntax which is only meaningful on Windows'
+        )
+
     def _malformed(self, complaint: str, parent: Exception | None = None) -> NoReturn:
         context = f'file: {self._ctx.current_abspath} ' if self._ctx.current_abspath else 'data'
         args = [f'Malformed manifest {context}', f'Schema file: {_SCHEMA_PATH}']
@@ -2227,6 +2246,8 @@ class Manifest:
         yaml_path = slf.get('path')
         if 'path' in slf and not yaml_path:
             self._malformed(f'self: path: is {yaml_path}; this value must be nonempty if present')
+        if yaml_path:
+            self._check_non_posix_path(yaml_path, 'self: "path"')
         self.yaml_path = yaml_path
 
         imp = slf.get('import')
@@ -2246,6 +2267,8 @@ class Manifest:
         if west_commands:
             assert isinstance(west_commands, str)
             west_commands = [west_commands]
+            for cmd in west_commands:
+                self._check_non_posix_path(cmd, 'self: "west-commands"')
         else:
             west_commands = []
         self._ctx.manifest_west_commands[:] = _west_commands_merge(
@@ -2311,6 +2334,7 @@ class Manifest:
             self._malformed(f'"self: import: {imp}" has invalid type {imptype}')
 
     def _import_path_from_self(self, imp: str) -> None:
+        self._check_non_posix_path(imp, 'self: "import"')
         pathobj = Path(imp)
         if pathobj.is_absolute():
             self._malformed(f'{imp} is an absolute path')
@@ -2486,9 +2510,10 @@ class Manifest:
 
         # Manifest path data is operating system independent, so it
         # must be joined with POSIX semantics on every host: the
-        # result is a POSIX-style path, and '\' is kept as a literal
-        # character everywhere. See #961.
-        path = str(self._ctx.path_prefix / pfx / pd.get('path', name))
+        # result is a POSIX-style path. See #961.
+        raw_path = pd.get('path', name)
+        self._check_non_posix_path(raw_path, f'project {name}: "path"')
+        path = str(self._ctx.path_prefix / pfx / raw_path)
 
         raw_groups = pd.get('groups')
         if raw_groups:
@@ -2505,6 +2530,9 @@ class Manifest:
             self._malformed(f'project {name}: "groups" cannot be combined with "import"')
 
         userdata = pd.get('userdata')
+
+        for cmd in _west_commands_list(pd.get('west-commands')):
+            self._check_non_posix_path(cmd, f'project {name}: "west-commands"')
 
         ret = Project(
             name,
@@ -2605,6 +2633,7 @@ class Manifest:
             ret = []
             for index, value in enumerate(submodules):
                 if _is_submodule_dict_ok(value):
+                    self._check_non_posix_path(value['path'], f'{src}: submodule "path"')
                     ret.append(Submodule(**value))
                 else:
                     self._malformed(f'{src}: invalid submodule element {value} at index {index}')
@@ -2639,6 +2668,7 @@ class Manifest:
             assert imp
             self._import_path_from_project(project, _WEST_YML)
         elif imptype is str:
+            self._check_non_posix_path(imp, f'project {project.name}: "import"')
             self._import_path_from_project(project, imp)
         elif imptype is list:
             for subimp in imp:
@@ -2815,6 +2845,9 @@ class Manifest:
                 f'{ret.path_prefix}; expected str, not '
                 f'{type(ret.path_prefix)}'
             )
+
+        self._check_non_posix_path(ret.file, f'{src}: import "file"')
+        self._check_non_posix_path(ret.path_prefix, f'{src}: import "path-prefix"')
 
         return ret
 

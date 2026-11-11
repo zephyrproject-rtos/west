@@ -390,6 +390,13 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory(re
     assert 'imported command from subdir works' in ext_output
 
 
+# The raw paths used in this test contain backslashes, so they are not
+# POSIX-style paths. West rejects such paths by default; this test is
+# re-enabled in the commit which adds the opt-in for allowing them.
+@pytest.mark.skip(
+    reason='temporarily skipped: non-POSIX paths are rejected by default; '
+    're-enabled with the manifest.allow-non-posix-paths option'
+)
 def test_call_imported_project_submanifest_commands_from_project_subdirectory_special_chars(
     repos_tmpdir,
 ):
@@ -486,11 +493,18 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory_sp
     assert net_tools["west-commands"][1] == r'mf_subdir/' + _WEIRD_CMDS_PATH
 
 
+# The raw paths used in this test contain backslashes, so they are not
+# POSIX-style paths. West rejects such paths by default; this test is
+# re-enabled in the commit which adds the opt-in for allowing them.
+@pytest.mark.skip(
+    reason='temporarily skipped: non-POSIX paths are rejected by default; '
+    're-enabled with the manifest.allow-non-posix-paths option'
+)
 def test_extension_special_chars(west_update_tmpdir):
-    # Detect any unexpected changes in the way we've been handling backslashes and other
-    # special characters. Changes in how we handle such edge cases may or may not be desired
-    # (and this test may be updated accordingly), but we never want these changes to come as
-    # a surprise and we want to keep control over them.
+    # Test the handling of backslashes and duplicate separators in
+    # west-commands path data: it must round-trip identically
+    # through 'west manifest --resolve' on every operating system.
+    # See #961.
 
     ext_proj = 'net-tools'
     ext_proj_p = Path(ext_proj)
@@ -557,3 +571,43 @@ def test_extension_special_chars(west_update_tmpdir):
     resolved_mf = cmd('manifest --resolve')
     resolved_mf = yaml.safe_load(resolved_mf)
     assert resolved_mf["manifest"]["self"]["west-commands"] == weird_cmds
+
+
+def test_extension_non_posix_paths(west_update_tmpdir):
+    # west-commands.yml "file:" values, which map extension commands to
+    # the python files they are defined in, are subject to the same
+    # non-POSIX path rules as manifest path data. See #961.
+
+    net_tools_path = west_update_tmpdir / 'net-tools'
+    add_commit(
+        net_tools_path,
+        'move extension command python file to a non-POSIX path',
+        files={
+            r'weird\name.py': textwrap.dedent('''\
+                from west.commands import WestCommand
+
+                class TestExtension(WestCommand):
+                    def __init__(self):
+                        super().__init__('test-extension',
+                                         description='description of test extension')
+
+                    def do_add_parser(self, parser_adder):
+                        return parser_adder.add_parser(self.name)
+
+                    def do_run(self, args, ignored):
+                        print('Testing test command 1')
+                '''),
+            'scripts/west-commands.yml': textwrap.dedent('''\
+                west-commands:
+                - file: weird\\name.py
+                  commands:
+                  - name: test-extension
+                    class: TestExtension
+                    help: test-extension-help
+                '''),
+        },
+    )
+
+    # Loading the extension commands fails.
+    _, err_msg = cmd_raises('help', SystemExit)
+    assert 'is not a POSIX-style path' in err_msg

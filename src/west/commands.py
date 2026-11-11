@@ -33,7 +33,7 @@ import yaml
 
 from west.configuration import Configuration
 from west.manifest import Manifest, Project
-from west.util import PathType, escapes_directory, quote_sh_list
+from west.util import PathType, escapes_directory, is_posix_style_path, quote_sh_list
 
 '''\
 This package provides WestCommand, which is the common abstraction all
@@ -736,7 +736,19 @@ def _ext_specs(project):
 
 
 def _ext_specs_from_desc(project, commands_desc, base_dir):
-    py_file = os.path.join(base_dir, commands_desc['file'])
+    cmd_file = commands_desc['file']
+
+    # The "file:" value maps a west extension command to the python
+    # file it is defined in, so the same non-POSIX path rules apply
+    # here as to manifest path data.
+    if not is_posix_style_path(cmd_file):
+        raise ExtensionCommandError(
+            hint=f'extension command python file "{cmd_file}" in project '
+            f'{project.path} is not a POSIX-style path: it contains '
+            'syntax which is only meaningful on Windows'
+        )
+
+    py_file = os.path.join(base_dir, cmd_file)
 
     # Verify the YAML's python file doesn't escape the project directory.
     if escapes_directory(py_file, project.abspath):

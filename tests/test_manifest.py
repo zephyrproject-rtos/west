@@ -494,6 +494,91 @@ def test_project_paths_with_repo_path():
     check_proj_consistency(m.projects[2], expected2)
 
 
+def test_non_posix_paths_rejected():
+    # Manifest paths that would be parsed differently on Windows than
+    # on POSIX ("non-POSIX" paths) are rejected: west never normalizes
+    # manifest path data, so it cannot "fix" them. See:
+    # https://github.com/zephyrproject-rtos/west/issues/961
+
+    def check(content):
+        with pytest.raises(MalformedManifest) as e:
+            M(content)
+        assert 'is not a POSIX-style path' in str(e.value)
+
+    # Backslashes are path separators on Windows only.
+    check('''\
+    projects:
+    - name: p
+      url: u
+      path: sub\\dir
+    ''')
+    # So are Windows drive letters, in several flavors.
+    check('''\
+    projects:
+    - name: p
+      url: u
+      path: "C:foo"
+    ''')
+    check('''\
+    projects:
+    - name: p
+      url: u
+      path: "C:"
+    ''')
+    # project "west-commands:"
+    check('''\
+    projects:
+    - name: p
+      url: u
+      west-commands: scripts\\foo.yml
+    ''')
+    # "self:" paths
+    check('''\
+    projects:
+    - name: p
+      url: u
+    self:
+      path: sub\\dir
+    ''')
+    check('''\
+    projects:
+    - name: p
+      url: u
+    self:
+      west-commands: scripts\\foo.yml
+    ''')
+    # "import:" paths
+    check('''\
+    projects:
+    - name: p
+      url: u
+      import:
+        file: sub\\west.yml
+    ''')
+    check('''\
+    projects:
+    - name: p
+      url: u
+      import:
+        path-prefix: sub\\dir
+    ''')
+    check('''\
+    projects:
+    - name: p
+      url: u
+      import: sub\\west.yml
+    ''')
+    # Submodule paths.
+    check('''\
+    projects:
+    - name: p
+      url: u
+      submodules:
+      - name: sub
+        path: sub\\dir
+    ''')
+
+
 # Officially _not_ supported! Was actually broken from 1.3 to 1.5
 # See #910 and zephyr commit 7d40091fbfedfc
 # If this gets in the way of some great new feature then feel free to remove this test.

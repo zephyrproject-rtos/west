@@ -171,6 +171,13 @@ def test_list_manifest(west_update_tmpdir):
     assert posixpath == Path(west_update_tmpdir).as_posix() + '/zephyr'
 
 
+# The raw path used in this test contains backslashes, so it is not a
+# POSIX-style path. West rejects such paths by default; this test is
+# re-enabled in the commit which adds the opt-in for allowing them.
+@pytest.mark.skip(
+    reason='temporarily skipped: non-POSIX paths are rejected by default; '
+    're-enabled with the manifest.allow-non-posix-paths option'
+)
 def test_list_special_chars(west_update_tmpdir):
     # Test the handling of backslashes and duplicate separators in
     # manifest paths: the canonical path data must round-trip
