@@ -462,6 +462,12 @@ class _import_ctx(NamedTuple):
     # Bit vector of flags that modify import behavior.
     import_flags: 'ImportFlag'
 
+    # Whether non-POSIX paths (i.e. paths which are parsed differently
+    # on Windows than on POSIX) are accepted as-is, with a warning,
+    # instead of being rejected. This is inherited from the importing
+    # manifest's context when resolving imports recursively.
+    allow_non_posix_paths: bool
+
 
 def _imap_filter_allows(imap_filter: ImapFilterFnType, project: 'Project') -> bool:
     # imap_filter(project) if imap_filter is not None; True otherwise.
@@ -1305,6 +1311,7 @@ class Manifest:
         config: Configuration | None = None,
         importer: ImporterType | None = None,
         import_flags: ImportFlag = ImportFlag.DEFAULT,
+        allow_non_posix_paths: bool | None = None,
     ) -> 'Manifest':
         '''Manifest object factory given a workspace topdir.
 
@@ -1316,16 +1323,24 @@ class Manifest:
         :param config: passed to Manifest()
         :param importer: passed to Manifest()
         :param import_flags: passed to Manifest()
+        :param allow_non_posix_paths: passed to Manifest()
         '''
         if topdir is None:
             topdir = Path(util.west_topdir(start=Path.cwd(), fall_back=False)).resolve()
-        return Manifest(topdir=topdir, config=config, importer=importer, import_flags=import_flags)
+        return Manifest(
+            topdir=topdir,
+            config=config,
+            importer=importer,
+            import_flags=import_flags,
+            allow_non_posix_paths=allow_non_posix_paths,
+        )
 
     @staticmethod
     def from_file(
         source_file: PathType | None = None,
         importer: ImporterType | None = None,
         import_flags: ImportFlag = ImportFlag.DEFAULT,
+        allow_non_posix_paths: bool | None = None,
     ) -> 'Manifest':
         '''Manifest object factory given a source YAML file.
 
@@ -1357,6 +1372,7 @@ class Manifest:
         :param source_file: source file to load
         :param importer: passed to Manifest()
         :param import_flags: passed to Manifest()
+        :param allow_non_posix_paths: passed to Manifest()
         '''
         if source_file is None:
             start = Path.cwd()
@@ -1390,13 +1406,20 @@ class Manifest:
             # source_file was the manifest file, as a special case.
             config = _PatchedConfiguration(patch_dict, topdir=topdir)
 
-        return Manifest(topdir=topdir, config=config, importer=importer, import_flags=import_flags)
+        return Manifest(
+            topdir=topdir,
+            config=config,
+            importer=importer,
+            import_flags=import_flags,
+            allow_non_posix_paths=allow_non_posix_paths,
+        )
 
     @staticmethod
     def from_data(
         source_data: ManifestDataType,
         importer: ImporterType | None = None,
         import_flags: ImportFlag = ImportFlag.DEFAULT,
+        allow_non_posix_paths: bool | None = None,
     ) -> 'Manifest':
         '''Manifest object factory given parsed YAML data.
 
@@ -1412,10 +1435,16 @@ class Manifest:
             string with unparsed YAML data
         :param importer: passed to Manifest
         :param import_flags: passed to Manifest
+        :param allow_non_posix_paths: passed to Manifest
         '''
         if not source_data:
             raise MalformedManifest('manifest contains no data')
-        return Manifest(source_data=source_data, importer=importer, import_flags=import_flags)
+        return Manifest(
+            source_data=source_data,
+            importer=importer,
+            import_flags=import_flags,
+            allow_non_posix_paths=allow_non_posix_paths,
+        )
 
     def __init__(
         self,
@@ -1425,6 +1454,7 @@ class Manifest:
         config: Configuration | None = None,
         importer: ImporterType | None = None,
         import_flags: ImportFlag = ImportFlag.DEFAULT,
+        allow_non_posix_paths: bool | None = None,
         internal_import_ctx: _import_ctx | None = None,
     ):
         '''Using one of the factory methods may be easier than direct
@@ -1539,6 +1569,15 @@ class Manifest:
         :param config: optional pre-loaded configuration from topdir
         :param importer: provides missing manifest import data
         :param import_flags: bit mask, controls import resolution
+        :param allow_non_posix_paths: if true, manifest paths which
+            are parsed differently on Windows than on POSIX (paths
+            containing backslashes, Windows drive letters, etc.) are
+            accepted as-is, with a warning. If false, such paths are
+            rejected with MalformedManifest. If None (the default),
+            the manifest.allow-non-posix-paths configuration option
+            is consulted when a workspace is available. West never
+            normalizes manifest path data, so "pathological" paths
+            which merely look unusual are always stored unchanged.
         :param internal_import_ctx: for internal use only; do not use
         '''
 
@@ -1604,6 +1643,7 @@ class Manifest:
                 config,
                 importer or _default_importer,
                 import_flags,
+                allow_non_posix_paths,
             )
         else:
             self._top_level = False
@@ -1831,6 +1871,13 @@ class Manifest:
         '''
         return self._projects
 
+    @property
+    def allow_non_posix_paths(self) -> bool:
+        '''Whether non-POSIX manifest paths are accepted as-is, with
+        a warning, instead of being rejected with MalformedManifest.
+        '''
+        return self._ctx.allow_non_posix_paths
+
     def is_active(self, project: Project, extra_filter: Iterable[str] | None = None) -> bool:
         '''Is a project active?
 
@@ -1992,20 +2039,31 @@ class Manifest:
         # Check that a manifest path field's value is a POSIX-style
         # path; see is_posix_style_path() for the definition.
         #
-        # Windows-only syntax is rejected because it can never refer
-        # to git content: git only understands POSIX-style paths.
-        # Content which merely cannot be checked out on Windows
-        # (such as control characters) is accepted, since it means
-        # the same thing on every operating system. See:
+        # Windows-only syntax is rejected unless explicitly allowed,
+        # because it can never refer to git content: git only
+        # understands POSIX-style paths. Content which merely cannot
+        # be checked out on Windows (such as control characters) is
+        # accepted, since it means the same thing on every operating
+        # system. See:
         # https://github.com/zephyrproject-rtos/west/issues/961
 
         if is_posix_style_path(path):
             return
 
-        self._malformed(
-            f'{source}: "{path}" is not a POSIX-style path: it contains '
-            'syntax which is only meaningful on Windows'
-        )
+        if self.allow_non_posix_paths:
+            _logger.warning(
+                f'{source}: "{path}" is not a POSIX-style path; it contains '
+                'syntax which is only meaningful on Windows. Accepting it '
+                'because non-POSIX paths are allowed, but it may not work '
+                'on every operating system'
+            )
+        else:
+            self._malformed(
+                f'{source}: "{path}" is not a POSIX-style path: it contains '
+                'syntax which is only meaningful on Windows. Set the '
+                '"manifest.allow-non-posix-paths" configuration option '
+                'to accept it unchanged.'
+            )
 
     def _malformed(self, complaint: str, parent: Exception | None = None) -> NoReturn:
         context = f'file: {self._ctx.current_abspath} ' if self._ctx.current_abspath else 'data'
@@ -2019,7 +2077,14 @@ class Manifest:
             raise exc
 
     def _top_level_init(
-        self, source_data, topdir, topdir_abspath, config, project_importer, import_flags
+        self,
+        source_data,
+        topdir,
+        topdir_abspath,
+        config,
+        project_importer,
+        import_flags,
+        allow_non_posix_paths,
     ) -> _import_ctx:
         # Validate the top-level arguments, perform some
         # top-level-only early initialization, and set up the initial
@@ -2081,6 +2146,25 @@ class Manifest:
             self._config_path = manifest_path
             _update_project_filter(project_filter, config.get('manifest.project-filter'))
 
+        # Whether non-POSIX paths are allowed is resolved from these
+        # sources, in decreasing order of precedence:
+        #
+        # 1. the allow_non_posix_paths constructor argument, if given
+        # 2. the manifest.allow-non-posix-paths configuration option,
+        #    if we have a configuration available
+        # 3. False
+        if allow_non_posix_paths is None:
+            allow_non_posix_paths = False
+            if topdir_abspath:
+                try:
+                    allow_opt = config.getboolean('manifest.allow-non-posix-paths')
+                except ValueError as e:
+                    raise MalformedConfig(
+                        'invalid "manifest.allow-non-posix-paths" option value'
+                    ) from e
+                if allow_opt is not None:
+                    allow_non_posix_paths = allow_opt
+
         return _import_ctx(
             projects={},
             project_filter=project_filter,
@@ -2094,6 +2178,7 @@ class Manifest:
             current_repo_abspath=current_repo_abspath,
             project_importer=project_importer,
             import_flags=import_flags,
+            allow_non_posix_paths=allow_non_posix_paths,
         )
 
     def _recursive_init(self, ctx: _import_ctx):
@@ -2509,8 +2594,7 @@ class Manifest:
             pfx = ''
 
         # Manifest path data is operating system independent, so it
-        # must be joined with POSIX semantics on every host: the
-        # result is a POSIX-style path. See #961.
+        # must be joined with POSIX semantics on every host. See #961.
         raw_path = pd.get('path', name)
         self._check_non_posix_path(raw_path, f'project {name}: "path"')
         path = str(self._ctx.path_prefix / pfx / raw_path)

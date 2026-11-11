@@ -496,8 +496,8 @@ def test_project_paths_with_repo_path():
 
 def test_non_posix_paths_rejected():
     # Manifest paths that would be parsed differently on Windows than
-    # on POSIX ("non-POSIX" paths) are rejected: west never normalizes
-    # manifest path data, so it cannot "fix" them. See:
+    # on POSIX ("non-POSIX" paths) are rejected by default: west never
+    # normalizes manifest path data, so it cannot "fix" them. See:
     # https://github.com/zephyrproject-rtos/west/issues/961
 
     def check(content):
@@ -577,6 +577,54 @@ def test_non_posix_paths_rejected():
       - name: sub
         path: sub\\dir
     ''')
+
+
+def test_non_posix_paths_allowed(caplog):
+    # With an explicit opt-in, non-POSIX paths are accepted unchanged,
+    # with a warning; west never normalizes them.
+
+    m = M(
+        '''\
+    projects:
+    - name: p
+      url: u
+      path: sub\\dir
+    ''',
+        allow_non_posix_paths=True,
+    )
+    assert m.get_projects(['p'])[0].path == 'sub\\dir'
+    # The raw path round-trips through as_dict() unchanged.
+    assert m.as_dict()['manifest']['projects'][0]['path'] == 'sub\\dir'
+    assert 'is not a POSIX-style path' in caplog.text
+
+
+def test_allow_non_posix_paths_config_option(manifest_repo):
+    # The "manifest.allow-non-posix-paths" configuration option is a
+    # workspace-wide alternative to the allow_non_posix_paths() API.
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: p
+            url: u
+            path: sub\\dir
+        ''')
+
+    with pytest.raises(MalformedManifest) as e:
+        MT(topdir=manifest_repo.topdir)
+    assert 'is not a POSIX-style path' in str(e.value)
+
+    config = Configuration(topdir=Path(manifest_repo.topdir))
+    config.set('manifest.allow-non-posix-paths', 'true', configfile=ConfigFile.LOCAL)
+    m = MT(topdir=manifest_repo.topdir)
+    assert m.get_projects(['p'])[0].path == 'sub\\dir'
+
+    # An invalid boolean value is a configuration error.
+    config.set('manifest.allow-non-posix-paths', 'not-a-bool', configfile=ConfigFile.LOCAL)
+    with pytest.raises(MalformedConfig) as e:
+        MT(topdir=manifest_repo.topdir)
+    assert 'manifest.allow-non-posix-paths' in str(e.value)
 
 
 # Officially _not_ supported! Was actually broken from 1.3 to 1.5

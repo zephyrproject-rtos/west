@@ -171,13 +171,6 @@ def test_list_manifest(west_update_tmpdir):
     assert posixpath == Path(west_update_tmpdir).as_posix() + '/zephyr'
 
 
-# The raw path used in this test contains backslashes, so it is not a
-# POSIX-style path. West rejects such paths by default; this test is
-# re-enabled in the commit which adds the opt-in for allowing them.
-@pytest.mark.skip(
-    reason='temporarily skipped: non-POSIX paths are rejected by default; '
-    're-enabled with the manifest.allow-non-posix-paths option'
-)
 def test_list_special_chars(west_update_tmpdir):
     # Test the handling of backslashes and duplicate separators in
     # manifest paths: the canonical path data must round-trip
@@ -196,13 +189,19 @@ def test_list_special_chars(west_update_tmpdir):
                 'description': 'Test special chars in paths',
             },
         )
+
+    # The raw path above contains backslashes, so it is not a
+    # POSIX-style path. West rejects such paths unless they are
+    # explicitly allowed. See #961.
+    cmd('config manifest.allow-non-posix-paths true')
+
     print(cmd('diff'))  # just logging
 
     # {path} is the canonical path data: west joins manifest paths
     # with POSIX semantics on every operating system, so duplicate
     # separators are collapsed and '\' is kept as a literal character
     # everywhere.
-    path = cmd('list -f {path} ' + proj_name).strip()
+    path = cmd('list -f {path} ' + proj_name, stderr=io.StringIO()).strip()
     stored_path = r'subdir/sub dir2\\\net-tools2'
     assert path == stored_path
 
@@ -211,17 +210,18 @@ def test_list_special_chars(west_update_tmpdir):
         assert len(_l) == 1
         return _l[0]
 
-    resolved_mf = cmd('manifest --resolve')
+    resolved_mf = cmd('manifest --resolve', stderr=io.StringIO())
     resolved_mf = yaml.safe_load(resolved_mf)
     proj_yaml = yaml_get_proj(resolved_mf, proj_name)
+    # The stored path round-trips through --resolve as well.
     assert proj_yaml["path"] == stored_path
 
     # {abspath} and {posixpath} are how the host interprets the
     # canonical path above: they are derived from it using the host
     # operating system's path semantics, where '\' separates
     # directories on Windows and is a regular character elsewhere.
-    abspath = cmd('list -f {abspath} ' + proj_name).strip()
-    posixpath = cmd('list -f {posixpath} ' + proj_name).strip()
+    abspath = cmd('list -f {abspath} ' + proj_name, stderr=io.StringIO()).strip()
+    posixpath = cmd('list -f {posixpath} ' + proj_name, stderr=io.StringIO()).strip()
 
     native_rel_path = r'subdir\sub dir2\net-tools2' if WINDOWS else stored_path
     forward_rel_path = r'subdir/sub dir2/net-tools2' if WINDOWS else stored_path
