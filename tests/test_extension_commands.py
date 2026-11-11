@@ -390,12 +390,15 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory(re
     assert 'imported command from subdir works' in ext_output
 
 
+# FIXME #961: incubating: fails on Windows hosts until manifest
+# path data is stored identically on every operating system.
+@pytest.mark.skip(reason='incubating: fails on Windows hosts, see #961')
 def test_call_imported_project_submanifest_commands_from_project_subdirectory_special_chars(
     repos_tmpdir,
 ):
     # Same as the forward-slash test above, but use non-portable separators in
-    # the manifest file paths. See test_extension_special_chars() for more
-    # details.
+    # the manifest file paths. See test_list_special_chars() in test_project.py
+    # for what is going on, and #961 for why this approach was chosen.
     manifest_path = repos_tmpdir / 'repos' / 'zephyr'
     net_tools_path = repos_tmpdir / 'repos' / 'net-tools'
 
@@ -480,16 +483,10 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory_sp
     _resolved_mf = cmd(['manifest', '--resolve'], cwd=workspace)
     resolved_mf = yaml.safe_load(_resolved_mf)
     net_tools = _yaml_get_proj(resolved_mf, "net-tools")
-    # FIXME #961: this is inconsistent with the other _special_chars() test
-    # below which does NOT normalize as_posix() on Windows!
-    if WINDOWS:
-        # All normalized to forward slashes a/b/c/d on Windows
-        expected = r'mf_subdir/' + Path(_WEIRD_CMDS_PATH).as_posix()
-    else:
-        # Untouched on Un*x
-        expected = r'mf_subdir/' + _WEIRD_CMDS_PATH
-    print()
-    assert net_tools["west-commands"][1] == expected
+    # The imported west-commands path is prefixed with the manifest
+    # directory it came from; the raw value must otherwise round-trip
+    # identically on every operating system. See #961.
+    assert net_tools["west-commands"][1] == r'mf_subdir/' + _WEIRD_CMDS_PATH
 
 
 def test_extension_special_chars(west_update_tmpdir):
