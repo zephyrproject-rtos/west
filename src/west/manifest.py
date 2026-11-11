@@ -426,7 +426,12 @@ class _import_ctx(NamedTuple):
     # The current prefix which should be added to any project paths
     # as defined by all the importing manifests up to this point.
     # These accumulate as we pick up 'import: path-prefix: ...' values.
-    path_prefix: Path
+    #
+    # This is a PurePosixPath, not a host flavor Path: manifest path
+    # data is operating system independent and must be joined with
+    # POSIX semantics on every host, so that e.g. a Windows host
+    # does not treat '\' in path data as a directory separator.
+    path_prefix: PurePosixPath
 
     # The absolute path to the manifest file we are currently loading.
     # One of the following things:
@@ -2063,7 +2068,7 @@ class Manifest:
             group_filter_q=deque(),
             manifest_west_commands=[],
             imap_filter=None,
-            path_prefix=Path('.'),
+            path_prefix=PurePosixPath('.'),
             current_abspath=current_abspath,
             current_relpath=current_relpath,
             current_data=current_data,
@@ -2479,17 +2484,11 @@ class Manifest:
         else:
             pfx = ''
 
-        # Historically, path attributes came directly from the manifest data
-        # itself and were passed along to the Project constructor unmodified.
-        # When we added path-prefix support, we needed to introduce pathlib
-        # wrappers around the pd['path'] value as is done here.
-        #
-        # Since west is a git wrapper and git prefers to work with
-        # POSIX paths in general, we've decided for now to force paths
-        # to POSIX style in all circumstances. If this breaks
-        # anything, we can always revisit, maybe adding a 'nativepath'
-        # attribute or something like that.
-        path = (self._ctx.path_prefix / pfx / pd.get('path', name)).as_posix()
+        # Manifest path data is operating system independent, so it
+        # must be joined with POSIX semantics on every host: the
+        # result is a POSIX-style path, and '\' is kept as a literal
+        # character everywhere. See #961.
+        path = str(self._ctx.path_prefix / pfx / pd.get('path', name))
 
         raw_groups = pd.get('groups')
         if raw_groups:
@@ -2737,9 +2736,13 @@ class Manifest:
         # (manifest_path is a relative path within the project),
         # we need to adjust the west_commands paths to be relative
         # to the project root, not to the manifest subdirectory.
-        mfst_dir = Path(mfst_path) if directory_import else Path(mfst_path).parent
+        #
+        # As above, the pathlib flavor is PurePosixPath: manifest
+        # west-commands paths must be adjusted with POSIX semantics
+        # on every host.
+        mfst_dir = PurePosixPath(mfst_path) if directory_import else PurePosixPath(mfst_path).parent
         west_commands_to_merge = [
-            (mfst_dir / cmd).as_posix() for cmd in submanifest._ctx.manifest_west_commands
+            str(mfst_dir / cmd) for cmd in submanifest._ctx.manifest_west_commands
         ]
 
         # Keep track of which imported manifest directory each adjusted

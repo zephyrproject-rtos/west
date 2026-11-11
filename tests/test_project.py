@@ -171,9 +171,6 @@ def test_list_manifest(west_update_tmpdir):
     assert posixpath == Path(west_update_tmpdir).as_posix() + '/zephyr'
 
 
-# FIXME #961: incubating: fails on Windows hosts until manifest
-# path data is stored identically on every operating system.
-@pytest.mark.skip(reason='incubating: fails on Windows hosts, see #961')
 def test_list_special_chars(west_update_tmpdir):
     # Test the handling of backslashes and duplicate separators in
     # manifest paths: the canonical path data must round-trip

@@ -390,9 +390,6 @@ def test_call_imported_project_submanifest_commands_from_project_subdirectory(re
     assert 'imported command from subdir works' in ext_output
 
 
-# FIXME #961: incubating: fails on Windows hosts until manifest
-# path data is stored identically on every operating system.
-@pytest.mark.skip(reason='incubating: fails on Windows hosts, see #961')
 def test_call_imported_project_submanifest_commands_from_project_subdirectory_special_chars(
     repos_tmpdir,
 ):
