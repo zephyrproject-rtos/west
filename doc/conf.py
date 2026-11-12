@@ -8,9 +8,7 @@ from pathlib import Path
 WEST_BASE = Path(__file__).resolve().parents[1]
 
 project = 'West'
-copyright = (
-    f'{datetime.datetime.now(tz=datetime.timezone.utc).year}, The Zephyr Project Contributors'
-)
+copyright = f'{datetime.datetime.now(tz=datetime.UTC).year}, The Zephyr Project Contributors'
 author = 'The Zephyr Project Contributors'
 version = importlib.metadata.version("west")
 
