@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="785.2" height="215.4" viewBox="0 0 785.2 215.4">
+  <defs>
+    <style>
+      /* Letter paths carry no class; render them white for the dark sidebar background. */
+      path:not([class]) {
+        fill: #fff;
+      }
+
+      .st0 {
+        fill: url(#linear-gradient2);
+      }
+
+      .st1 {
+        fill: url(#linear-gradient1);
+      }
+
+      .st2 {
+        fill: url(#linear-gradient9);
+      }
+
+      .st3 {
+        fill: #7929d2;
+      }
+
+      .st4 {
+        fill: #af7fe4;
+      }
+
+      .st5 {
+        fill: url(#linear-gradient8);
+      }
+
+      .st6 {
+        fill: url(#linear-gradient7);
+      }
+
+      .st7 {
+        fill: url(#linear-gradient4);
+      }
+
+      .st8 {
+        fill: url(#linear-gradient5);
+      }
+
+      .st9 {
+        fill: url(#linear-gradient3);
+      }
+
+      .st10 {
+        fill: url(#linear-gradient6);
+      }
+
+      .st11 {
+        fill: url(#linear-gradient);
+      }
+
+      .st12 {
+        fill: #9454db;
+      }
+    </style>
+    <linearGradient id="linear-gradient" x1="76.5" y1="-29.3" x2="348.1" y2="242.2" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00aeff"/>
+      <stop offset="1" stop-color="#9454db"/>
+    </linearGradient>
+    <linearGradient id="linear-gradient1" x1="28.4" y1="18.9" x2="299.9" y2="290.4" xlink:href="#linear-gradient"/>
+    <linearGradient id="linear-gradient2" x1="77.9" y1="-30.6" x2="349.4" y2="240.9" xlink:href="#linear-gradient"/>
+    <linearGradient id="linear-gradient3" x1="-2.8" y1="50.1" x2="268.7" y2="321.6" xlink:href="#linear-gradient"/>
+    <linearGradient id="linear-gradient4" x1="44.9" y1="2.4" x2="316.4" y2="273.9" xlink:href="#linear-gradient"/>
+    <linearGradient id="linear-gradient5" x1="-12.3" y1="59.6" x2="259.2" y2="331.1" xlink:href="#linear-gradient"/>
+    <linearGradient id="linear-gradient6" x1="70.2" y1="1249" x2="111.3" y2="1249" gradientTransform="translate(0 1286) scale(1 -1)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7929d2"/>
+      <stop offset="1" stop-color="#0070c5"/>
+    </linearGradient>
+    <linearGradient id="linear-gradient7" x1="73" y1="1285.2" x2="72.6" y2="1244.5" gradientTransform="translate(0 1286) scale(1 -1)" xlink:href="#linear-gradient"/>
+    <linearGradient id="linear-gradient8" x1="95.6" y1="1268.3" x2="86.8" y2="1283.5" gradientTransform="translate(0 1286) scale(1 -1)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#66a9dc"/>
+      <stop offset="1" stop-color="#b1e4fa"/>
+    </linearGradient>
+    <linearGradient id="linear-gradient9" x1="97.6" y1="1280.3" x2="102.6" y2="1245.7" gradientTransform="translate(0 1286) scale(1 -1)" xlink:href="#linear-gradient"/>
+  </defs>
+  <g>
+    <g>
+      <path d="M333.4,37l19.4-28.4v-1.2h-19.4V1.4h27.7v6.6l-19.5,28.4v1.2h19.5v6h-27.7v-6.5Z"/>
+      <path d="M365.7,28.5c0-11.3,4.9-16.4,13.4-16.4s12.9,4.5,12.9,14.1l-.4,4.8h-19c0,4.9,1.8,7.3,7,7.3s8.6-.3,11.4-.6v5c-2.9.6-8.4,1.4-12.4,1.4-9.2,0-12.8-4.9-12.8-15.8ZM385.4,25.8c0-6.1-1.8-8.2-6.3-8.2s-6.5,2.3-6.6,8.2h12.9Z"/>
+      <path d="M398.5,12.8h6.7v1.9c1.8-1.1,5.2-2.6,7.9-2.6,8,0,11.8,4.6,11.8,15.8s-4.3,16.4-13.7,16.4-4.6-.4-5.9-.6v13.1h-6.7V12.8ZM418,27.9c0-7.1-2.3-9.7-6.1-9.7s-5.2.9-6.7,1.7v18c1.2.2,3.7.5,5.4.5,5.7,0,7.4-3,7.4-10.5Z"/>
+      <path d="M431.5,0h6.7v14.4c2-1,5.6-2.3,8.4-2.3,8.6,0,10.6,4.9,10.6,15v16.5h-6.7v-16.3c0-6.1-.7-9.1-5.5-9.1s-5.4.7-6.9,1.4v24.1h-6.7V0Z"/>
+      <path d="M475.3,43.6h-5.3l-8.1-30.8h6.6l6.5,25h1.7l6.5-25h6.6l-11.6,44h-6.6l3.7-13.2Z"/>
+      <path d="M495.1,12.8h6.7v3.6c2.2-1.4,6.6-3.6,10.4-4.3v6.8c-4.1.7-8.3,2.3-10.4,3.2v21.5h-6.7V12.8Z"/>
+    </g>
+    <g>
+      <path d="M512.3,71.4l-27.9,141.8h-37.3l-24.2-113.8-24.2,113.8h-37.5l-27.7-141.8h24.2l20.3,121.7h4.3l26.9-121.3h27.1l26.9,121.3h4.3l20.3-121.7h24.4Z"/>
+      <path d="M521.6,162.4c0-37.9,16.3-55.1,44.9-55.1s43.5,15.1,43.5,47.4l-1.4,16.1h-64c0,16.6,6.2,24.6,23.4,24.6s29-1,38.3-1.9l.4,17c-10.1,2.1-28.6,4.8-42,4.8-31,0-43-16.6-43-53ZM587.6,153.5c0-20.5-6-27.5-21.1-27.5s-21.9,7.9-22.1,27.5h43.3Z"/>
+      <path d="M627.7,210.9l.8-19c10.8,1.4,27.7,3.3,35.4,3.3,14.9,0,20.7-3.1,20.7-12s-3.5-9.5-24-12.8c-22.8-3.7-34.4-8.7-34.4-30.6s18.2-32.1,38.7-32.1,28.8,2.5,39.1,4.6l-.4,18.8c-10.6-1.4-27.9-3.3-37-3.3s-17.8,3.1-17.8,11.4,4.3,8.7,24.4,12.2c24.8,4.3,33.9,10.6,33.9,31.3s-15.5,32.9-41.2,32.9-27.9-2.5-38.3-4.6Z"/>
+      <path d="M733.5,176.9v-48h-13.2v-19.2h13.2v-30h22.6v30h28.4v19.2h-28.4v45.5c0,15.5.4,20.9,11.2,20.9s12-.4,17-.8l1,18.2c-6,1.2-15.7,2.7-21.1,2.7-23.4,0-30.6-8.7-30.6-38.5Z"/>
+    </g>
+  </g>
+  <g id="Wind_icon">
+    <path class="st11" d="M133.6,91.6h43.4c19.9,0,36.2-16.2,36.2-36.2s-16.2-36.2-36.2-36.2-36.2,16.2-36.2,36.2,3.2,7.2,7.2,7.2,7.2-3.2,7.2-7.2c0-12,9.7-21.7,21.7-21.7s21.7,9.7,21.7,21.7-9.7,21.7-21.7,21.7h-43.4c-4,0-7.2,3.2-7.2,7.2s3.2,7.2,7.2,7.2Z"/>
+    <path class="st1" d="M83,91.6h21.7c4,0,7.2-3.2,7.2-7.2s-3.2-7.2-7.2-7.2h-21.7c-4,0-7.2,3.2-7.2,7.2s3.2,7.2,7.2,7.2Z"/>
+    <path class="st0" d="M263.7,49.1c-19.9,0-36.2,16.2-36.2,36.2s3.2,7.2,7.2,7.2,7.2-3.2,7.2-7.2c0-12,9.7-21.7,21.7-21.7s21.7,9.7,21.7,21.7-9.7,21.7-21.7,21.7H111.9c-4,0-7.2,3.2-7.2,7.2s3.2,7.2,7.2,7.2h151.8c19.9,0,36.2-16.2,36.2-36.2s-16.2-36.2-36.2-36.2Z"/>
+    <path class="st9" d="M90.2,114.2c0-4-3.2-7.2-7.2-7.2h-43.4c-4,0-7.2,3.2-7.2,7.2s3.2,7.2,7.2,7.2h43.4c4,0,7.2-3.2,7.2-7.2Z"/>
+    <path class="st7" d="M249.3,140.4H119.1c-4,0-7.2,3.2-7.2,7.2s3.2,7.2,7.2,7.2h130.2c12,0,21.7,9.7,21.7,21.7s-9.7,21.7-21.7,21.7-21.7-9.7-21.7-21.7-3.2-7.2-7.2-7.2-7.2,3.2-7.2,7.2c0,19.9,16.2,36.2,36.2,36.2s36.2-16.2,36.2-36.2-16.2-36.2-36.2-36.2Z"/>
+    <path class="st8" d="M90.2,140.4h-28.9c-4,0-7.2,3.2-7.2,7.2s3.2,7.2,7.2,7.2h28.9c4,0,7.2-3.2,7.2-7.2s-3.2-7.2-7.2-7.2Z"/>
+  </g>
+  <g>
+    <polygon class="st3" points="54.8 53.5 41.2 59.2 52.8 65.1 54.8 53.5"/>
+    <polygon class="st12" points="25.4 61.1 11 55.7 14.3 67.1 25.4 61.1"/>
+    <polygon class="st4" points="32.3 50.9 41.2 59.2 25.4 61.1 32.3 50.9"/>
+    <polygon class="st4" points="12.7 43.1 11 55.7 0 44.7 12.7 43.1"/>
+    <polygon class="st10" points="54.8 53.5 90.6 20.6 106.6 41.9 54.8 53.5"/>
+    <polygon class="st6" points="54.8 53.5 70.1 5.1 90.6 20.6 54.8 53.5"/>
+    <polygon class="st5" points="70.1 5.1 106.6 5.1 90.6 20.6 70.1 5.1"/>
+    <polygon class="st2" points="106.6 41.9 106.6 5.1 90.6 20.6 106.6 41.9"/>
+  </g>
+</svg>
