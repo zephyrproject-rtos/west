@@ -1522,3 +1522,29 @@ li>a.code-sample-link.reference.internal.current {
     color: var(--svc-accent-soft, var(--link-color));
     font-weight: 500;
 }
+
+/* ------------------------------------------------------------------------- */
+/* West-specific overrides. Everything above is a verbatim copy of Zephyr's  */
+/* custom.css; keep local changes below so the file stays easy to sync.      */
+/* See doc/README.rst.                                                         */
+/* ------------------------------------------------------------------------- */
+
+/* The West logo is wider than Zephyr's: scale it to the sidebar width instead of a fixed
+   210x105 box. The aspect ratio reserves the space before the image loads. */
+.wy-side-nav-search > a img.logo {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 785.2 / 215.4;
+}
+
+/* A flex container drops the whitespace around inline code in sidebar entries, so a title
+   like ``west update`` fetching failures renders without the space. Nothing in these docs
+   needs the flex behavior (it was meant for very long class names in the sidebar). */
+.wy-menu-vertical li.current a {
+    display: block;
+}
+
+/* Keep inline code in sidebar entries visually distinct, as in the body text. */
+.wy-menu-vertical a code.literal {
+    color: var(--code-literal-color);
+}
