@@ -28,6 +28,9 @@ Deliberate differences
   containing inline code). The rest of the file is a verbatim copy.
 - ``_templates/layout.html``: no ``zversions.html`` include (no version
   switcher yet) and no kapa.ai widget.
+- ``_templates/footer.html``: no "Last source update" line, which needs
+  the ``git_info`` Jinja filter from Zephyr's ``gh_utils`` Sphinx
+  extension.
 - ``_templates/breadcrumbs.html``: the "Open on GitHub" link uses the
   ``gh_blob_url`` page context variable set in ``conf.py``, instead of
   the Jinja filters provided by Zephyr's ``gh_utils`` Sphinx extension.
