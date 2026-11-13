@@ -13,7 +13,7 @@
 #
 #  DO NOT CHANGE THIS FILE WITHOUT:
 #
-#  - updating west.manifest.SCHEMA_VERSION and 
+#  - updating west.manifest.SCHEMA_VERSION and
 #    west.manifest._VALID_SCHEMA_VERS
 #  - reviewing and updating sphinx documentation
 #
@@ -120,10 +120,14 @@ mapping:
           clone-depth:
             required: false
             type: int
-          # Path to a west-commands.yml inside the project.
+          # West commands declared by this project. May be a string
+          # (path to a west-commands.yml inside the project), a list of
+          # such strings, or a list of {file, base-dir} maps where
+          # base-dir is the project-relative root the spec's `file:`
+          # entries are resolved against. Validated in Python.
           west-commands:
             required: false
-            type: str
+            type: any
           # Additional manifest data to import from the project.
           import:
             required: false
@@ -155,7 +159,7 @@ mapping:
       # commands. See the above comment for details.
       west-commands:
         required: false
-        type: str
+        type: any
       # Additional manifest data to import from the manifest
       # repository.
       import:

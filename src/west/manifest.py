@@ -15,8 +15,10 @@ import re
 import shlex
 import subprocess
 import sys
+import warnings
 from collections import deque
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn
 
@@ -59,7 +61,7 @@ QUAL_REFS_WEST = 'refs/west/'
 #: v1.0.x, so that users can say "I want schema version 1" instead of
 #: having to keep using '0.13', which was the previous version this
 #: changed.)
-SCHEMA_VERSION = '1.2'
+SCHEMA_VERSION = '1.6'
 # MAINTAINERS:
 #
 # - Make sure to update _VALID_SCHEMA_VERS if you change this.
@@ -73,11 +75,25 @@ SCHEMA_VERSION = '1.2'
 # Internal helpers
 #
 
-# The value of a west-commands as passed around during manifest
-# resolution. It can become a list due to resolving imports, even
-# though it's just a str in each individual file right now.
-# TODO: WestCommands should be promoted to a Python class, see issue #959
-WestCommandsType = str | list[str]
+
+@dataclass(frozen=True)
+class WestCommandsEntry:
+    '''A single west-commands spec declared in a West project.
+
+    ``path`` is the spec YAML location, relative to the project root.
+
+    ``base_dir`` is the directory that the spec's ``file:`` entries
+    (paths to the Python files implementing the commands) are resolved
+    against, also relative to the project root. The common case is an
+    empty ``base_dir``, meaning the project root; a non-empty
+    ``base_dir`` is set when the entry was promoted from a submanifest
+    imported from a project subdirectory (so the Python files inside
+    the spec are relative to that subdirectory, not the project root).
+    '''
+
+    path: str
+    base_dir: str = ''
+
 
 # Type for the importer callback passed to the manifest constructor.
 # (ImportedContentType is just an alias for what it gives back.)
@@ -216,6 +232,7 @@ _VALID_SCHEMA_VERS = [
     '0.12',
     '0.13',
     '1.0',
+    '1.2',
     SCHEMA_VERSION,
 ]
 
@@ -231,36 +248,93 @@ def _load(data: str) -> Any:
         raise MalformedManifest(data) from e
 
 
-def _west_commands_list(west_commands: WestCommandsType | None) -> list[str]:
-    # Convert the raw data from a manifest file to a list of
-    # west_commands locations. (If it's already a list, make a
-    # defensive copy.)
+def _parse_west_commands(raw: Any) -> list[WestCommandsEntry]:
+    # Normalize raw west-commands YAML data into a list of
+    # WestCommandsEntry. Accepts:
+    #
+    #   - None or empty                    -> []
+    #   - str                              -> [WestCommandsEntry(str)]
+    #   - list of (str | dict | Entry)     -> mixed list, dicts must
+    #                                         have a 'file' key and may
+    #                                         have a 'base-dir' key
+    #   - already-parsed list[Entry]       -> defensive copy
+    #
+    # Raises MalformedManifest on any other shape.
 
-    if west_commands is None:
+    if not raw:
         return []
-    elif isinstance(west_commands, str):
-        return [west_commands]
-    else:
-        return list(west_commands)
+    if isinstance(raw, str):
+        return [WestCommandsEntry(path=raw)]
+    if not isinstance(raw, list):
+        raise MalformedManifest(
+            f'invalid west-commands value {raw!r}: '
+            'expected a string, a list of strings, or a list of '
+            "{file, base-dir} maps"
+        )
+
+    ret: list[WestCommandsEntry] = []
+    for item in raw:
+        match item:
+            case WestCommandsEntry():
+                ret.append(item)
+            case str():
+                ret.append(WestCommandsEntry(path=item))
+            case dict():
+                file = item.get('file')
+                if not isinstance(file, str) or not file:
+                    raise MalformedManifest(
+                        f'invalid west-commands entry {item!r}: missing or non-string \'file\' key'
+                    )
+                base_dir = item.get('base-dir', '')
+                if not isinstance(base_dir, str):
+                    raise MalformedManifest(
+                        f'invalid west-commands entry {item!r}: \'base-dir\' must be a string'
+                    )
+                extras = set(item) - {'file', 'base-dir'}
+                if extras:
+                    raise MalformedManifest(
+                        f'invalid west-commands entry {item!r}: unexpected keys {sorted(extras)}'
+                    )
+                ret.append(WestCommandsEntry(path=file, base_dir=base_dir))
+            case _:
+                raise MalformedManifest(
+                    f'invalid west-commands element {item!r}: '
+                    'expected a string or a {file, base-dir} map'
+                )
+    return ret
 
 
-def _west_commands_maybe_delist(west_commands: list[str]) -> WestCommandsType:
-    # Convert a west_commands list to a string if there's
-    # just one element, otherwise return the list itself.
+def _emit_west_commands(entries: list[WestCommandsEntry]) -> str | list:
+    # Serialize a list of WestCommandsEntry into the simplest YAML form
+    # that preserves info:
+    #   - all base_dir == ''  ->  single str (1 entry) or list[str]
+    #   - any non-empty       ->  list of (str | {file, base-dir})
 
-    if len(west_commands) == 1:
-        return west_commands[0]
-    else:
-        return west_commands
+    if all(not e.base_dir for e in entries):
+        if len(entries) == 1:
+            return entries[0].path
+        return [e.path for e in entries]
+    return [e.path if not e.base_dir else {'file': e.path, 'base-dir': e.base_dir} for e in entries]
 
 
-def _west_commands_merge(wc1: list[str], wc2: list[str]) -> list[str]:
-    # Merge two west_commands lists, filtering out duplicates.
+def _merge_west_commands(
+    wc1: list[WestCommandsEntry], wc2: list[WestCommandsEntry]
+) -> list[WestCommandsEntry]:
+    # Merge two west_commands lists, dropping any entry from wc2
+    # whose path is already in wc1 (first wins).
 
-    if wc1 and wc2:
-        return wc1 + [wc for wc in wc2 if wc not in wc1]
-    else:
-        return wc1 or wc2
+    if not wc1:
+        return list(wc2)
+    if not wc2:
+        return list(wc1)
+    paths = {e.path for e in wc1}
+    kept = []
+    for e in wc2:
+        if e.path in paths:
+            _logger.debug('west-commands: keeping first %s, dropping duplicate', e.path)
+        else:
+            kept.append(e)
+    return list(wc1) + kept
 
 
 # Manifest import handling
@@ -410,11 +484,11 @@ class _import_ctx(NamedTuple):
     # the import tree in precedence order.
     group_filter_q: deque
 
-    # The list of west command names provided by the manifest
+    # The list of west command entries provided by the manifest
     # repository itself. This is mutable state in the same way
     # 'projects' is. Manifests which are imported earlier get
     # higher precedence here as usual.
-    manifest_west_commands: list[str]
+    manifest_west_commands_entries: list[WestCommandsEntry]
 
     # The current restrictions on which projects the importing
     # manifest is interested in.
@@ -823,8 +897,13 @@ class Project:
     - ``clone_depth``: clone depth to fetch when first cloning the
       project, or ``None`` (the revision should not be a SHA
       if this is used)
-    - ``west_commands``: list of YAML files where extension commands in
-      the project are declared
+    - ``west_commands_entries``: list of `WestCommandsEntry` records
+      describing the YAML files where extension commands in the project
+      are declared, and the base directory each spec's ``file:`` entries
+      are resolved against
+    - ``west_commands`` (**deprecated**): list of the YAML file paths
+      from ``west_commands_entries``. Loses per-entry ``base_dir`` info;
+      emits ``DeprecationWarning`` on read.
     - ``topdir``: the top level directory of the west workspace
       the project is part of, or ``None``
     - ``remote_name``: the name of the remote which should be set up
@@ -845,7 +924,7 @@ class Project:
             f'Project("{self.name}", "{self.url}", '
             f'revision="{self.revision}", path={self.path!r}, '
             f'clone_depth={self.clone_depth}, '
-            f'west_commands={self.west_commands}, '
+            f'west_commands_entries={self.west_commands_entries}, '
             f'topdir={self.topdir!r}, '
             f'groups={self.groups!r}, '
             f'userdata={self.userdata!r})'
@@ -864,7 +943,7 @@ class Project:
         path: PathType | None = None,
         submodules: SubmodulesType = False,
         clone_depth: int | None = None,
-        west_commands: WestCommandsType | None = None,
+        west_commands: Any = None,
         topdir: PathType | None = None,
         remote_name: str | None = None,
         groups: GroupsType | None = None,
@@ -882,9 +961,9 @@ class Project:
         :param path: path (relative to topdir), or None for *name*
         :param submodules: submodules to pull within the project
         :param clone_depth: depth to use for initial clone
-        :param west_commands: path to a west commands specification YAML
-            file in the project, relative to its base directory,
-            or list of these
+        :param west_commands: raw west-commands value from the manifest
+            (a string, a list of strings, or a list of {file, base-dir}
+            maps), or an already-parsed list of `WestCommandsEntry`
         :param topdir: the west workspace's top level directory
         :param remote_name: the name of the remote which should be
             set up if the project is being cloned (default: 'origin')
@@ -899,14 +978,28 @@ class Project:
         self.revision = revision or _DEFAULT_REV
         self.clone_depth = clone_depth
         self.path = os.fspath(path or name)
-        self.west_commands = _west_commands_list(west_commands)
+        self.west_commands_entries: list[WestCommandsEntry] = _parse_west_commands(west_commands)
         self.topdir = os.fspath(topdir) if topdir else None
         self.remote_name = remote_name or 'origin'
         self.groups: GroupsType = groups or []
         self.userdata: Any = userdata
 
-        # Internal helpers
-        self._west_commands_manifest_dirs: dict[str, str] = {}
+    @property
+    def west_commands(self) -> list[str]:
+        '''Deprecated: paths from `west_commands_entries`.
+
+        Use `west_commands_entries` instead — that exposes the per-entry
+        ``base_dir`` needed to resolve Python files inside the spec when
+        the entry was promoted from a subdirectory submanifest.
+        '''
+        warnings.warn(
+            'Project.west_commands is deprecated; use '
+            'west_commands_entries (list[WestCommandsEntry] with .path '
+            'and .base_dir).',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return [e.path for e in self.west_commands_entries]
 
     @property
     def path(self) -> str:
@@ -951,8 +1044,8 @@ class Project:
             ret['path'] = self.path
         if self.clone_depth:
             ret['clone-depth'] = self.clone_depth
-        if self.west_commands:
-            ret['west-commands'] = _west_commands_maybe_delist(self.west_commands)
+        if self.west_commands_entries:
+            ret['west-commands'] = _emit_west_commands(self.west_commands_entries)
         if self.groups:
             ret['groups'] = self.groups
         if isinstance(self.submodules, bool) and self.submodules:
@@ -1201,9 +1294,12 @@ class ManifestProject(Project):
       native path name format (or ``None`` if ``topdir`` is)
     - ``posixpath``: like ``abspath``, but with slashes (``/``) as
       path separators
-    - ``west_commands``:``west_commands:`` key in the manifest's
-      ``self:`` map. This may be a list of such if the self
-      section imports multiple additional files with west commands.
+    - ``west_commands_entries``: list of `WestCommandsEntry` records
+      derived from the ``west-commands:`` key in the manifest's ``self:``
+      map (plus any extra west commands files contributed by self
+      imports).
+    - ``west_commands`` (**deprecated**): paths from
+      ``west_commands_entries``. Emits ``DeprecationWarning`` on read.
     - ``userdata``: the parsed 'userdata' field under self in the manifest file
 
     Other readable attributes included for Project compatibility:
@@ -1219,7 +1315,7 @@ class ManifestProject(Project):
     def __repr__(self):
         return (
             f'ManifestProject(path={self.path!r}, '
-            f'west_commands={self.west_commands}, '
+            f'west_commands_entries={self.west_commands_entries}, '
             f'topdir={self.topdir!r}, '
             f'userdata={self.userdata!r})'
         )
@@ -1227,16 +1323,16 @@ class ManifestProject(Project):
     def __init__(
         self,
         path: PathType | None = None,
-        west_commands: WestCommandsType | None = None,
+        west_commands: Any = None,
         topdir: PathType | None = None,
         userdata: Any | None = None,
     ):
         '''
         :param path: Relative path to the manifest repository in the
             west workspace, if known.
-        :param west_commands: path to a west commands specification YAML
-            file in the project, relative to its base directory,
-            or list of these
+        :param west_commands: raw west-commands value from the manifest
+            (a string, a list of strings, or a list of {file, base-dir}
+            maps), or an already-parsed list of `WestCommandsEntry`
         :param topdir: Root of the west workspace the manifest
             project is inside. If not given, all absolute path
             attributes (abspath and posixpath) will be None.
@@ -1266,8 +1362,7 @@ class ManifestProject(Project):
         self._posixpath: str | None = None
 
         # Extension commands.
-        self.west_commands = _west_commands_list(west_commands)
-        self._west_commands_manifest_dirs: dict[str, str] = {}
+        self.west_commands_entries: list[WestCommandsEntry] = _parse_west_commands(west_commands)
 
     @property
     def abspath(self) -> str | None:
@@ -1281,8 +1376,8 @@ class ManifestProject(Project):
         ret: dict = {}
         if self.path:
             ret['path'] = self.path
-        if self.west_commands:
-            ret['west-commands'] = _west_commands_maybe_delist(self.west_commands)
+        if self.west_commands_entries:
+            ret['west-commands'] = _emit_west_commands(self.west_commands_entries)
         if self.userdata:
             ret['userdata'] = self.userdata
         return ret
@@ -2061,7 +2156,7 @@ class Manifest:
             projects={},
             project_filter=project_filter,
             group_filter_q=deque(),
-            manifest_west_commands=[],
+            manifest_west_commands_entries=[],
             imap_filter=None,
             path_prefix=Path('.'),
             current_abspath=current_abspath,
@@ -2124,7 +2219,7 @@ class Manifest:
             # Create the ManifestProject instance.
             mp = ManifestProject(
                 path=self._config_path if self.topdir else self.yaml_path,
-                west_commands=self._ctx.manifest_west_commands,
+                west_commands=self._ctx.manifest_west_commands_entries,
                 topdir=self.topdir,
                 userdata=self.userdata,
             )
@@ -2237,14 +2332,9 @@ class Manifest:
         # we treat imports from self as if they are defined "before"
         # the contents in the higher level manifest, so any west
         # commands imported from self have higher precedence.
-        west_commands = slf.get('west-commands')
-        if west_commands:
-            assert isinstance(west_commands, str)
-            west_commands = [west_commands]
-        else:
-            west_commands = []
-        self._ctx.manifest_west_commands[:] = _west_commands_merge(
-            self._ctx.manifest_west_commands, west_commands
+        west_commands = _parse_west_commands(slf.get('west-commands'))
+        self._ctx.manifest_west_commands_entries[:] = _merge_west_commands(
+            self._ctx.manifest_west_commands_entries, west_commands
         )
 
     def _assert_imports_ok(self) -> None:
@@ -2723,32 +2813,34 @@ class Manifest:
             # west commands, they logically belong to 'project'.
             # We therefore use a separate list for tracking them
             # from our current list.
-            manifest_west_commands=[],
+            manifest_west_commands_entries=[],
         )
         try:
             submanifest = Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
         except RecursionError as e:
             raise _ManifestImportDepth(None, mfst_path) from e
 
-        # Patch up any extension commands in the imported data
-        # by allocating them to the project.
-
-        # If the manifest was imported from a project subdirectory
-        # (manifest_path is a relative path within the project),
-        # we need to adjust the west_commands paths to be relative
-        # to the project root, not to the manifest subdirectory.
+        # Patch up any extension commands in the imported data by
+        # allocating them to the project. If the manifest was imported
+        # from a project subdirectory, each entry's path and base_dir
+        # are prefixed with the subdirectory so they stay relative to
+        # the project root and the spec's `file:` entries still resolve
+        # correctly. An entry that already carries a base_dir (e.g.
+        # from a resolved manifest) composes with the subdirectory
+        # rather than being overwritten by it.
         mfst_dir = Path(mfst_path) if directory_import else Path(mfst_path).parent
-        west_commands_to_merge = [
-            (mfst_dir / cmd).as_posix() for cmd in submanifest._ctx.manifest_west_commands
-        ]
-
-        # Keep track of which imported manifest directory each adjusted
-        # west-commands entry came from, so command Python files can be
-        # resolved relative to that manifest root later in commands.py.
-        for adjusted_cmd in west_commands_to_merge:
-            project._west_commands_manifest_dirs.setdefault(adjusted_cmd, str(mfst_dir))
-
-        project.west_commands = _west_commands_merge(project.west_commands, west_commands_to_merge)
+        adjusted = []
+        for entry in submanifest._ctx.manifest_west_commands_entries:
+            base_dir = mfst_dir / entry.base_dir
+            adjusted.append(
+                WestCommandsEntry(
+                    path=(mfst_dir / entry.path).as_posix(),
+                    base_dir='' if base_dir == Path('.') else base_dir.as_posix(),
+                )
+            )
+        project.west_commands_entries = _merge_west_commands(
+            project.west_commands_entries, adjusted
+        )
 
     def _import_content_from_project(self, project: Project, path: str) -> ImportedContentType:
         if not (self._ctx.import_flags & ImportFlag.FORCE_PROJECTS) and project.is_cloned():
