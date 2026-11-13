@@ -174,7 +174,7 @@ API changes:
   which contains the parsed value of the ``description:`` field
   in the manifest data.
 
-.. _ripgrep: https://github.com/BurntSushi/ripgrep#readme
+.. _ripgrep: https://github.com/BurntSushi/ripgrep
 
 v1.1.0
 ******

@@ -9,7 +9,7 @@
 
 This is the Zephyr RTOS meta tool, ``west``.
 
-https://docs.zephyrproject.org/latest/develop/west/index.html
+https://docs.zephyrproject.org/west/latest/
 
 Installation
 ------------
@@ -36,9 +36,8 @@ are now required to pass it explicitly and, you are more encouraged than
 before to design your own manifest(s) instead and minimized security SBOMs
 based on your specific needs.
 
-For more details, see the `West (Zephyr's meta-tool)
-<https://docs.zephyrproject.org/latest/develop/west/index.html>`_ in the Zephyr
-documentation.
+For more details, see the `west documentation
+<https://docs.zephyrproject.org/west/latest/>`_.
 
 Example usage using the upstream manifest file::
 
@@ -71,7 +70,7 @@ command with ``west <command> -h``.
 
 West is extensible: you can add new commands to west without modifying its
 source code. See `Extensions
-<https://docs.zephyrproject.org/latest/develop/west/extensions.html>`_ in the
+<https://docs.zephyrproject.org/west/latest/extensions.html>`_ in the
 documentation for details.
 
 

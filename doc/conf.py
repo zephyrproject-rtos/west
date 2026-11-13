@@ -16,7 +16,6 @@ version = importlib.metadata.version("west")
 
 extensions = [
     "sphinx_rtd_theme",
-    "sphinx_tabs.tabs",
     'sphinx.ext.autodoc',
     "sphinx.ext.intersphinx",
 ]
@@ -33,15 +32,14 @@ html_theme_options = {
     "navigation_depth": 5,
 }
 html_title = "West Documentation"
+html_last_updated_fmt = "%b %d, %Y"
+html_show_sphinx = False
 html_logo = str(WEST_BASE / "doc" / "_static" / "images" / "logo.svg")
 html_static_path = [str(WEST_BASE / 'doc' / '_static')]
 
 html_context = {
-    "show_license": True,
     "docs_title": docs_title,
     "is_release": is_release,
-    "current_version": version,
-    "versions": (("latest", "/"),),
     # Set google_searchengine_id to your Search Engine ID to replace built-in search
     # engine with Google's Programmable Search Engine.
     # See https://programmablesearchengine.google.com/ for details.
@@ -58,6 +56,11 @@ intersphinx_mapping = {
 html_additional_pages = {"gsearch": "gsearch.html"}
 
 GITHUB_BLOB_URL = "https://github.com/zephyrproject-rtos/west/blob/main/doc/"
+
+linkcheck_ignore = [
+    # Rate limits automated requests.
+    r"https://en\.wiktionary\.org/",
+]
 
 pygments_style = "sphinx"
 highlight_language = "none"

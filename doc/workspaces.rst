@@ -176,7 +176,7 @@ command instructs Git to use SSH URLs for GitHub instead of HTTPS ones:
 .. _git-credential-cache:
    https://git-scm.com/docs/git-credential-cache
 .. _personal access token:
-   https://docs.github.com/en/github/authenticating-to-github/creating-a-personal-access-token
+   https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens
 
 Fetching via SSH
 ================
@@ -188,9 +188,9 @@ On GitHub, see `Connecting to GitHub with SSH`_ for details on configuration
 and key creation.
 
 .. _ssh-agent:
-   https://www.ssh.com/ssh/agent
+   https://www.ssh.com/academy/ssh/agent
 .. _Connecting to GitHub with SSH:
-   https://docs.github.com/en/github/authenticating-to-github/connecting-to-github-with-ssh
+   https://docs.github.com/en/authentication/connecting-to-github-with-ssh
 
 Project locations
 *****************
