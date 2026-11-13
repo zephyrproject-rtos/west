@@ -557,7 +557,7 @@ def manifest_path() -> str:
         - ``FileNotFoundError`` if no manifest file exists as determined by
           ``manifest.path`` and ``manifest.file``
     '''
-    topdir = Path(util.west_topdir(start=Path.cwd(), fall_back=True))
+    topdir = Path(util.west_topdir(start=Path.cwd()))
     config = Configuration(topdir=topdir)
     manifest_path = config.get('manifest.path', configfile=ConfigFile.LOCAL)
     if manifest_path is None:
@@ -1313,7 +1313,7 @@ class Manifest:
         :param import_flags: passed to Manifest()
         '''
         if topdir is None:
-            topdir = Path(util.west_topdir(start=Path.cwd(), fall_back=False)).resolve()
+            topdir = Path(util.west_topdir(start=Path.cwd())).resolve()
         return Manifest(topdir=topdir, config=config, importer=importer, import_flags=import_flags)
 
     @staticmethod
@@ -1355,14 +1355,12 @@ class Manifest:
         '''
         if source_file is None:
             start = Path.cwd()
-            fall_back = True
         else:
             source_file = Path(source_file).resolve()
             start = source_file.parent
-            fall_back = False
 
         # Find the workspace topdir.
-        topdir = Path(util.west_topdir(start=start, fall_back=fall_back)).resolve()
+        topdir = Path(util.west_topdir(start=start)).resolve()
 
         # Load a Configuration.
         if source_file is None:

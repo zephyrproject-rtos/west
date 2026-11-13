@@ -33,7 +33,6 @@ from conftest import (
     create_repo,
     create_workspace,
     rev_parse,
-    update_env,
 )
 
 from west.configuration import ConfigFile, Configuration, MalformedConfig
@@ -165,19 +164,6 @@ def test_manifest_from_data_without_topdir():
     )
     assert manifest.projects[-1].name == 'foo'
     assert manifest.projects[-1].abspath is None
-
-
-def test_manifest_from_file_with_fall_back(manifest_repo):
-    with open(manifest_repo / 'west.yml', 'w') as f:
-        f.write('''
-        manifest:
-          projects: []
-        ''')
-    repo_abspath = Path(str(manifest_repo))
-    os.chdir(repo_abspath.parent.parent)  # this is the tmp_workspace dir
-    with update_env({'ZEPHYR_BASE': os.fspath(manifest_repo)}):
-        manifest = MF()
-    assert Path(manifest.repo_abspath) == repo_abspath
 
 
 def test_validate():
