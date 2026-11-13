@@ -37,11 +37,8 @@ html_logo = str(WEST_BASE / "doc" / "_static" / "images" / "logo.svg")
 html_static_path = [str(WEST_BASE / 'doc' / '_static')]
 
 html_context = {
-    "show_license": True,
     "docs_title": docs_title,
     "is_release": is_release,
-    "current_version": version,
-    "versions": (("latest", "/"),),
     # Set google_searchengine_id to your Search Engine ID to replace built-in search
     # engine with Google's Programmable Search Engine.
     # See https://programmablesearchengine.google.com/ for details.
