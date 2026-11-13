@@ -42,3 +42,24 @@ jobs:
           name: html-output
           path: doc/_build/html
           include-hidden-files: true
+
+      # The "Publish documentation (Pull Request)" workflow picks up the
+      # artifacts of this run and uploads the HTML to a preview location.
+      - name: Record the pull request number
+        if: github.event_name == 'pull_request'
+        env:
+          PR_NUM: ${{ github.event.pull_request.number }}
+        run: |
+          echo "${PR_NUM}" > pr_num
+          {
+            echo "The documentation for this pull request will be available shortly at:"
+            echo ""
+            echo "https://builds.zephyrproject.io/west/pr/${PR_NUM}/doc/"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the pull request number
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr_num
+          path: pr_num
