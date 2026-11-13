@@ -33,6 +33,7 @@ html_theme_options = {
 }
 html_title = "West Documentation"
 html_last_updated_fmt = "%b %d, %Y"
+html_show_sphinx = False
 html_logo = str(WEST_BASE / "doc" / "_static" / "images" / "logo.svg")
 html_static_path = [str(WEST_BASE / 'doc' / '_static')]
 
