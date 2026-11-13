@@ -494,6 +494,139 @@ def test_project_paths_with_repo_path():
     check_proj_consistency(m.projects[2], expected2)
 
 
+def test_non_posix_paths_rejected():
+    # Manifest paths that would be parsed differently on Windows than
+    # on POSIX ("non-POSIX" paths) are rejected by default: west never
+    # normalizes manifest path data, so it cannot "fix" them. See:
+    # https://github.com/zephyrproject-rtos/west/issues/961
+
+    def check(content):
+        with pytest.raises(MalformedManifest) as e:
+            M(content)
+        assert 'is not a POSIX-style path' in str(e.value)
+
+    # Backslashes are path separators on Windows only.
+    check('''\
+    projects:
+    - name: p
+      url: u
+      path: sub\\dir
+    ''')
+    # So are Windows drive letters, in several flavors.
+    check('''\
+    projects:
+    - name: p
+      url: u
+      path: "C:foo"
+    ''')
+    check('''\
+    projects:
+    - name: p
+      url: u
+      path: "C:"
+    ''')
+    # project "west-commands:"
+    check('''\
+    projects:
+    - name: p
+      url: u
+      west-commands: scripts\\foo.yml
+    ''')
+    # "self:" paths
+    check('''\
+    projects:
+    - name: p
+      url: u
+    self:
+      path: sub\\dir
+    ''')
+    check('''\
+    projects:
+    - name: p
+      url: u
+    self:
+      west-commands: scripts\\foo.yml
+    ''')
+    # "import:" paths
+    check('''\
+    projects:
+    - name: p
+      url: u
+      import:
+        file: sub\\west.yml
+    ''')
+    check('''\
+    projects:
+    - name: p
+      url: u
+      import:
+        path-prefix: sub\\dir
+    ''')
+    check('''\
+    projects:
+    - name: p
+      url: u
+      import: sub\\west.yml
+    ''')
+    # Submodule paths.
+    check('''\
+    projects:
+    - name: p
+      url: u
+      submodules:
+      - name: sub
+        path: sub\\dir
+    ''')
+
+
+def test_non_posix_paths_allowed(caplog):
+    # With an explicit opt-in, non-POSIX paths are accepted unchanged,
+    # with a warning; west never normalizes them.
+
+    m = M(
+        '''\
+    projects:
+    - name: p
+      url: u
+      path: sub\\dir
+    ''',
+        allow_non_posix_paths=True,
+    )
+    assert m.get_projects(['p'])[0].path == 'sub\\dir'
+    # The raw path round-trips through as_dict() unchanged.
+    assert m.as_dict()['manifest']['projects'][0]['path'] == 'sub\\dir'
+    assert 'is not a POSIX-style path' in caplog.text
+
+
+def test_allow_non_posix_paths_config_option(manifest_repo):
+    # The "manifest.allow-non-posix-paths" configuration option is a
+    # workspace-wide alternative to the allow_non_posix_paths() API.
+
+    with open(manifest_repo / 'west.yml', 'w') as f:
+        f.write('''\
+        manifest:
+          projects:
+          - name: p
+            url: u
+            path: sub\\dir
+        ''')
+
+    with pytest.raises(MalformedManifest) as e:
+        MT(topdir=manifest_repo.topdir)
+    assert 'is not a POSIX-style path' in str(e.value)
+
+    config = Configuration(topdir=Path(manifest_repo.topdir))
+    config.set('manifest.allow-non-posix-paths', 'true', configfile=ConfigFile.LOCAL)
+    m = MT(topdir=manifest_repo.topdir)
+    assert m.get_projects(['p'])[0].path == 'sub\\dir'
+
+    # An invalid boolean value is a configuration error.
+    config.set('manifest.allow-non-posix-paths', 'not-a-bool', configfile=ConfigFile.LOCAL)
+    with pytest.raises(MalformedConfig) as e:
+        MT(topdir=manifest_repo.topdir)
+    assert 'manifest.allow-non-posix-paths' in str(e.value)
+
+
 # Officially _not_ supported! Was actually broken from 1.3 to 1.5
 # See #910 and zephyr commit 7d40091fbfedfc
 # If this gets in the way of some great new feature then feel free to remove this test.

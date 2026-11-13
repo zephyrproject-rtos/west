@@ -32,7 +32,7 @@ from packaging.version import parse as parse_version
 
 from west import util
 from west.configuration import ConfigFile, Configuration, MalformedConfig
-from west.util import PathType
+from west.util import PathType, is_posix_style_path
 
 #
 # Public constants
@@ -426,7 +426,12 @@ class _import_ctx(NamedTuple):
     # The current prefix which should be added to any project paths
     # as defined by all the importing manifests up to this point.
     # These accumulate as we pick up 'import: path-prefix: ...' values.
-    path_prefix: Path
+    #
+    # This is a PurePosixPath, not a host flavor Path: manifest path
+    # data is operating system independent and must be joined with
+    # POSIX semantics on every host, so that e.g. a Windows host
+    # does not treat '\' in path data as a directory separator.
+    path_prefix: PurePosixPath
 
     # The absolute path to the manifest file we are currently loading.
     # One of the following things:
@@ -456,6 +461,12 @@ class _import_ctx(NamedTuple):
 
     # Bit vector of flags that modify import behavior.
     import_flags: 'ImportFlag'
+
+    # Whether non-POSIX paths (i.e. paths which are parsed differently
+    # on Windows than on POSIX) are accepted as-is, with a warning,
+    # instead of being rejected. This is inherited from the importing
+    # manifest's context when resolving imports recursively.
+    allow_non_posix_paths: bool
 
 
 def _imap_filter_allows(imap_filter: ImapFilterFnType, project: 'Project') -> bool:
@@ -1300,6 +1311,7 @@ class Manifest:
         config: Configuration | None = None,
         importer: ImporterType | None = None,
         import_flags: ImportFlag = ImportFlag.DEFAULT,
+        allow_non_posix_paths: bool | None = None,
     ) -> 'Manifest':
         '''Manifest object factory given a workspace topdir.
 
@@ -1311,16 +1323,24 @@ class Manifest:
         :param config: passed to Manifest()
         :param importer: passed to Manifest()
         :param import_flags: passed to Manifest()
+        :param allow_non_posix_paths: passed to Manifest()
         '''
         if topdir is None:
             topdir = Path(util.west_topdir(start=Path.cwd(), fall_back=False)).resolve()
-        return Manifest(topdir=topdir, config=config, importer=importer, import_flags=import_flags)
+        return Manifest(
+            topdir=topdir,
+            config=config,
+            importer=importer,
+            import_flags=import_flags,
+            allow_non_posix_paths=allow_non_posix_paths,
+        )
 
     @staticmethod
     def from_file(
         source_file: PathType | None = None,
         importer: ImporterType | None = None,
         import_flags: ImportFlag = ImportFlag.DEFAULT,
+        allow_non_posix_paths: bool | None = None,
     ) -> 'Manifest':
         '''Manifest object factory given a source YAML file.
 
@@ -1352,6 +1372,7 @@ class Manifest:
         :param source_file: source file to load
         :param importer: passed to Manifest()
         :param import_flags: passed to Manifest()
+        :param allow_non_posix_paths: passed to Manifest()
         '''
         if source_file is None:
             start = Path.cwd()
@@ -1385,13 +1406,20 @@ class Manifest:
             # source_file was the manifest file, as a special case.
             config = _PatchedConfiguration(patch_dict, topdir=topdir)
 
-        return Manifest(topdir=topdir, config=config, importer=importer, import_flags=import_flags)
+        return Manifest(
+            topdir=topdir,
+            config=config,
+            importer=importer,
+            import_flags=import_flags,
+            allow_non_posix_paths=allow_non_posix_paths,
+        )
 
     @staticmethod
     def from_data(
         source_data: ManifestDataType,
         importer: ImporterType | None = None,
         import_flags: ImportFlag = ImportFlag.DEFAULT,
+        allow_non_posix_paths: bool | None = None,
     ) -> 'Manifest':
         '''Manifest object factory given parsed YAML data.
 
@@ -1407,10 +1435,16 @@ class Manifest:
             string with unparsed YAML data
         :param importer: passed to Manifest
         :param import_flags: passed to Manifest
+        :param allow_non_posix_paths: passed to Manifest
         '''
         if not source_data:
             raise MalformedManifest('manifest contains no data')
-        return Manifest(source_data=source_data, importer=importer, import_flags=import_flags)
+        return Manifest(
+            source_data=source_data,
+            importer=importer,
+            import_flags=import_flags,
+            allow_non_posix_paths=allow_non_posix_paths,
+        )
 
     def __init__(
         self,
@@ -1420,6 +1454,7 @@ class Manifest:
         config: Configuration | None = None,
         importer: ImporterType | None = None,
         import_flags: ImportFlag = ImportFlag.DEFAULT,
+        allow_non_posix_paths: bool | None = None,
         internal_import_ctx: _import_ctx | None = None,
     ):
         '''Using one of the factory methods may be easier than direct
@@ -1534,6 +1569,15 @@ class Manifest:
         :param config: optional pre-loaded configuration from topdir
         :param importer: provides missing manifest import data
         :param import_flags: bit mask, controls import resolution
+        :param allow_non_posix_paths: if true, manifest paths which
+            are parsed differently on Windows than on POSIX (paths
+            containing backslashes, Windows drive letters, etc.) are
+            accepted as-is, with a warning. If false, such paths are
+            rejected with MalformedManifest. If None (the default),
+            the manifest.allow-non-posix-paths configuration option
+            is consulted when a workspace is available. West never
+            normalizes manifest path data, so "pathological" paths
+            which merely look unusual are always stored unchanged.
         :param internal_import_ctx: for internal use only; do not use
         '''
 
@@ -1599,6 +1643,7 @@ class Manifest:
                 config,
                 importer or _default_importer,
                 import_flags,
+                allow_non_posix_paths,
             )
         else:
             self._top_level = False
@@ -1826,6 +1871,13 @@ class Manifest:
         '''
         return self._projects
 
+    @property
+    def allow_non_posix_paths(self) -> bool:
+        '''Whether non-POSIX manifest paths are accepted as-is, with
+        a warning, instead of being rejected with MalformedManifest.
+        '''
+        return self._ctx.allow_non_posix_paths
+
     def is_active(self, project: Project, extra_filter: Iterable[str] | None = None) -> bool:
         '''Is a project active?
 
@@ -1983,6 +2035,36 @@ class Manifest:
 
         return ret
 
+    def _check_non_posix_path(self, path: str, source: str) -> None:
+        # Check that a manifest path field's value is a POSIX-style
+        # path; see is_posix_style_path() for the definition.
+        #
+        # Windows-only syntax is rejected unless explicitly allowed,
+        # because it can never refer to git content: git only
+        # understands POSIX-style paths. Content which merely cannot
+        # be checked out on Windows (such as control characters) is
+        # accepted, since it means the same thing on every operating
+        # system. See:
+        # https://github.com/zephyrproject-rtos/west/issues/961
+
+        if is_posix_style_path(path):
+            return
+
+        if self.allow_non_posix_paths:
+            _logger.warning(
+                f'{source}: "{path}" is not a POSIX-style path; it contains '
+                'syntax which is only meaningful on Windows. Accepting it '
+                'because non-POSIX paths are allowed, but it may not work '
+                'on every operating system'
+            )
+        else:
+            self._malformed(
+                f'{source}: "{path}" is not a POSIX-style path: it contains '
+                'syntax which is only meaningful on Windows. Set the '
+                '"manifest.allow-non-posix-paths" configuration option '
+                'to accept it unchanged.'
+            )
+
     def _malformed(self, complaint: str, parent: Exception | None = None) -> NoReturn:
         context = f'file: {self._ctx.current_abspath} ' if self._ctx.current_abspath else 'data'
         args = [f'Malformed manifest {context}', f'Schema file: {_SCHEMA_PATH}']
@@ -1995,7 +2077,14 @@ class Manifest:
             raise exc
 
     def _top_level_init(
-        self, source_data, topdir, topdir_abspath, config, project_importer, import_flags
+        self,
+        source_data,
+        topdir,
+        topdir_abspath,
+        config,
+        project_importer,
+        import_flags,
+        allow_non_posix_paths,
     ) -> _import_ctx:
         # Validate the top-level arguments, perform some
         # top-level-only early initialization, and set up the initial
@@ -2057,19 +2146,39 @@ class Manifest:
             self._config_path = manifest_path
             _update_project_filter(project_filter, config.get('manifest.project-filter'))
 
+        # Whether non-POSIX paths are allowed is resolved from these
+        # sources, in decreasing order of precedence:
+        #
+        # 1. the allow_non_posix_paths constructor argument, if given
+        # 2. the manifest.allow-non-posix-paths configuration option,
+        #    if we have a configuration available
+        # 3. False
+        if allow_non_posix_paths is None:
+            allow_non_posix_paths = False
+            if topdir_abspath:
+                try:
+                    allow_opt = config.getboolean('manifest.allow-non-posix-paths')
+                except ValueError as e:
+                    raise MalformedConfig(
+                        'invalid "manifest.allow-non-posix-paths" option value'
+                    ) from e
+                if allow_opt is not None:
+                    allow_non_posix_paths = allow_opt
+
         return _import_ctx(
             projects={},
             project_filter=project_filter,
             group_filter_q=deque(),
             manifest_west_commands=[],
             imap_filter=None,
-            path_prefix=Path('.'),
+            path_prefix=PurePosixPath('.'),
             current_abspath=current_abspath,
             current_relpath=current_relpath,
             current_data=current_data,
             current_repo_abspath=current_repo_abspath,
             project_importer=project_importer,
             import_flags=import_flags,
+            allow_non_posix_paths=allow_non_posix_paths,
         )
 
     def _recursive_init(self, ctx: _import_ctx):
@@ -2222,6 +2331,8 @@ class Manifest:
         yaml_path = slf.get('path')
         if 'path' in slf and not yaml_path:
             self._malformed(f'self: path: is {yaml_path}; this value must be nonempty if present')
+        if yaml_path:
+            self._check_non_posix_path(yaml_path, 'self: "path"')
         self.yaml_path = yaml_path
 
         imp = slf.get('import')
@@ -2241,6 +2352,8 @@ class Manifest:
         if west_commands:
             assert isinstance(west_commands, str)
             west_commands = [west_commands]
+            for cmd in west_commands:
+                self._check_non_posix_path(cmd, 'self: "west-commands"')
         else:
             west_commands = []
         self._ctx.manifest_west_commands[:] = _west_commands_merge(
@@ -2306,6 +2419,7 @@ class Manifest:
             self._malformed(f'"self: import: {imp}" has invalid type {imptype}')
 
     def _import_path_from_self(self, imp: str) -> None:
+        self._check_non_posix_path(imp, 'self: "import"')
         pathobj = Path(imp)
         if pathobj.is_absolute():
             self._malformed(f'{imp} is an absolute path')
@@ -2479,17 +2593,11 @@ class Manifest:
         else:
             pfx = ''
 
-        # Historically, path attributes came directly from the manifest data
-        # itself and were passed along to the Project constructor unmodified.
-        # When we added path-prefix support, we needed to introduce pathlib
-        # wrappers around the pd['path'] value as is done here.
-        #
-        # Since west is a git wrapper and git prefers to work with
-        # POSIX paths in general, we've decided for now to force paths
-        # to POSIX style in all circumstances. If this breaks
-        # anything, we can always revisit, maybe adding a 'nativepath'
-        # attribute or something like that.
-        path = (self._ctx.path_prefix / pfx / pd.get('path', name)).as_posix()
+        # Manifest path data is operating system independent, so it
+        # must be joined with POSIX semantics on every host. See #961.
+        raw_path = pd.get('path', name)
+        self._check_non_posix_path(raw_path, f'project {name}: "path"')
+        path = str(self._ctx.path_prefix / pfx / raw_path)
 
         raw_groups = pd.get('groups')
         if raw_groups:
@@ -2506,6 +2614,9 @@ class Manifest:
             self._malformed(f'project {name}: "groups" cannot be combined with "import"')
 
         userdata = pd.get('userdata')
+
+        for cmd in _west_commands_list(pd.get('west-commands')):
+            self._check_non_posix_path(cmd, f'project {name}: "west-commands"')
 
         ret = Project(
             name,
@@ -2606,6 +2717,7 @@ class Manifest:
             ret = []
             for index, value in enumerate(submodules):
                 if _is_submodule_dict_ok(value):
+                    self._check_non_posix_path(value['path'], f'{src}: submodule "path"')
                     ret.append(Submodule(**value))
                 else:
                     self._malformed(f'{src}: invalid submodule element {value} at index {index}')
@@ -2640,6 +2752,7 @@ class Manifest:
             assert imp
             self._import_path_from_project(project, _WEST_YML)
         elif imptype is str:
+            self._check_non_posix_path(imp, f'project {project.name}: "import"')
             self._import_path_from_project(project, imp)
         elif imptype is list:
             for subimp in imp:
@@ -2737,9 +2850,13 @@ class Manifest:
         # (manifest_path is a relative path within the project),
         # we need to adjust the west_commands paths to be relative
         # to the project root, not to the manifest subdirectory.
-        mfst_dir = Path(mfst_path) if directory_import else Path(mfst_path).parent
+        #
+        # As above, the pathlib flavor is PurePosixPath: manifest
+        # west-commands paths must be adjusted with POSIX semantics
+        # on every host.
+        mfst_dir = PurePosixPath(mfst_path) if directory_import else PurePosixPath(mfst_path).parent
         west_commands_to_merge = [
-            (mfst_dir / cmd).as_posix() for cmd in submanifest._ctx.manifest_west_commands
+            str(mfst_dir / cmd) for cmd in submanifest._ctx.manifest_west_commands
         ]
 
         # Keep track of which imported manifest directory each adjusted
@@ -2812,6 +2929,9 @@ class Manifest:
                 f'{ret.path_prefix}; expected str, not '
                 f'{type(ret.path_prefix)}'
             )
+
+        self._check_non_posix_path(ret.file, f'{src}: import "file"')
+        self._check_non_posix_path(ret.path_prefix, f'{src}: import "path-prefix"')
 
         return ret
 
