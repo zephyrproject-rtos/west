@@ -32,6 +32,7 @@ html_theme_options = {
     "navigation_depth": 5,
 }
 html_title = "West Documentation"
+html_last_updated_fmt = "%b %d, %Y"
 html_logo = str(WEST_BASE / "doc" / "_static" / "images" / "logo.svg")
 html_static_path = [str(WEST_BASE / 'doc' / '_static')]
 

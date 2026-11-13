@@ -8,10 +8,6 @@
   {%- if last_updated %}
   <div class="lastupdated">
     Last generated: {{ last_updated }}.
-    {%- set git_last_updated, sha1 = pagename | git_info | default((None, None), true) %}
-    {%- if git_last_updated %}
-    Last source update: {{ git_last_updated }}.
-    {%- endif %}
   </div>
   {%- endif -%}
 </p>
