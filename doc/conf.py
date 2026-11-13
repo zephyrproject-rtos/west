@@ -16,7 +16,6 @@ version = importlib.metadata.version("west")
 
 extensions = [
     "sphinx_rtd_theme",
-    "sphinx_tabs.tabs",
     'sphinx.ext.autodoc',
     "sphinx.ext.intersphinx",
 ]
