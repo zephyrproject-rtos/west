@@ -89,11 +89,12 @@ class EarlyArgs(NamedTuple):
     # - setting up log levels from the verbosity level
 
     # Expected arguments:
-    help: bool  # True if -h was given
-    version: bool  # True if -V was given
-    zephyr_base: str | None  # -z argument value
+    help: bool  # True if -h/--help was given
+    version: bool  # True if -V/--version was given
+    zephyr_base: str | None  # -z/--zephyr-base argument value
     verbosity: int  # 0 if not given, otherwise counts
     command_name: str | None
+    command_index: int | None  # index of command_name in argv
 
     # Other arguments are appended here.
     unexpected_arguments: list[str]
@@ -107,6 +108,7 @@ def parse_early_args(argv: list[str]) -> EarlyArgs:
     zephyr_base = None
     verbosity = 0
     command_name = None
+    command_index = None
     unexpected_arguments = []
 
     expecting_zephyr_base = False
@@ -142,27 +144,37 @@ def parse_early_args(argv: list[str]) -> EarlyArgs:
         else:
             unexpected_arguments.append(rest)
 
-    for arg in argv:
+    # Keep the long options in sync with make_parsers(). Abbreviations
+    # are not handled on purpose: the top level parser is created with
+    # allow_abbrev=False, so it doesn't accept them either.
+    for i, arg in enumerate(argv):
         if expecting_zephyr_base:
             zephyr_base = arg
+            expecting_zephyr_base = False
+        elif arg == '--help':
+            help = True
+        elif arg == '--version':
+            version = True
+        elif arg == '--verbose':
+            verbosity += 1
+        elif arg == '--quiet':
+            verbosity -= 1
+        elif arg == '--zephyr-base':
+            expecting_zephyr_base = True
+        elif arg.startswith('--zephyr-base='):
+            zephyr_base = arg[len('--zephyr-base=') :]
         elif arg.startswith('-h'):
             help = True
             consume_more_args(arg[2:])
         elif arg.startswith('-V'):
             version = True
             consume_more_args(arg[2:])
-        elif arg == '--version':
-            version = True
         elif arg.startswith('-v'):
             verbosity += 1
             consume_more_args(arg[2:])
         elif arg.startswith('-q'):
             verbosity -= 1
             consume_more_args(arg[2:])
-        elif arg == '--verbose':
-            verbosity += 1
-        elif arg == '--quiet':
-            verbosity -= 1
         elif arg.startswith('-z'):
             if arg == '-z':
                 expecting_zephyr_base = True
@@ -174,9 +186,12 @@ def parse_early_args(argv: list[str]) -> EarlyArgs:
             unexpected_arguments.append(arg)
         else:
             command_name = arg
+            command_index = i
             break
 
-    return EarlyArgs(help, version, zephyr_base, verbosity, command_name, unexpected_arguments)
+    return EarlyArgs(
+        help, version, zephyr_base, verbosity, command_name, command_index, unexpected_arguments
+    )
 
 
 class LogFormatter(logging.Formatter):
@@ -587,29 +602,44 @@ class WestApp:
         # If we're running an extension, instantiate it from its
         # spec and re-parse arguments before running.
 
-        if not early_args.help and early_args.command_name != "help":
-            # Recursively replace alias command(s) if set
-            aliases = self.aliases.copy()
-            while early_args.command_name in aliases:
-                # Make sure we don't end up in an infinite loop
-                alias = aliases.pop(early_args.command_name)
+        # Recursively replace alias command(s) if set.
+        #
+        # The loop conditions are re-evaluated on every iteration on
+        # purpose: an alias can expand to early args of its own, and
+        # those must be treated like the ones the user typed. In
+        # particular "-h" stops the expansion, so that help is printed
+        # for the alias instead of for whatever it expands to.
+        aliases = self.aliases.copy()
+        while (
+            not early_args.help
+            and early_args.command_name != "help"
+            and early_args.command_name in aliases
+        ):
+            # Make sure we don't end up in an infinite loop
+            alias = aliases.pop(early_args.command_name)
 
-                self.queued_io.append(
-                    lambda cmd, alias=alias: cmd.dbg(
-                        f'Replacing alias {alias.name} with {alias.args}'
-                    )
-                )
+            self.queued_io.append(
+                lambda cmd, alias=alias: cmd.dbg(f'Replacing alias {alias.name} with {alias.args}')
+            )
 
-                if len(alias.args) == 0:
-                    # This loses the cmd.dbg() above - too bad, don't use empty aliases
-                    self.print_usage_and_exit(f'west: empty alias "{alias.name}"')
+            if len(alias.args) == 0:
+                # This loses the cmd.dbg() above - too bad, don't use empty aliases
+                self.print_usage_and_exit(f'west: empty alias "{alias.name}"')
 
-                # Find and replace the command name. Must skip any other early args like -v
-                for i, arg in enumerate(argv):
-                    if arg == early_args.command_name:
-                        argv = argv[:i] + alias.args + argv[i + 1 :]
-                        break
-                early_args = early_args._replace(command_name=alias.args[0])
+            # Replace the command name with the alias arguments. Early
+            # args before it and user arguments after it are preserved.
+            i = early_args.command_index
+            assert i is not None  # implied by command_name being set
+            argv = argv[:i] + alias.args + argv[i + 1 :]
+
+            # Re-parse the expanded argv so early args coming from the
+            # alias itself (e.g. "-v") are handled instead of being
+            # mistaken for the command name.
+            early_args = parse_early_args(argv)
+
+            # The alias may have changed the verbosity; west's own log
+            # level was set up from the pre-expansion arguments.
+            self.set_west_log_level(early_args.verbosity)
 
         self.handle_early_arg_errors(early_args)
         args, unknown = self.west_parser.parse_known_args(args=argv)
@@ -726,6 +756,10 @@ class WestApp:
         sys.exit(message)
 
     def setup_west_logging(self, verbosity):
+        self.set_west_log_level(verbosity)
+        logging.getLogger('west.manifest').addHandler(LogHandler())
+
+    def set_west_log_level(self, verbosity):
         logger = logging.getLogger('west.manifest')
 
         if verbosity >= 2:
@@ -738,8 +772,6 @@ class WestApp:
             logger.setLevel(logging.ERROR)
         else:
             logger.setLevel(logging.CRITICAL)
-
-        logger.addHandler(LogHandler())
 
     def run_builtin(self, args, unknown):
         self.queued_io.append(

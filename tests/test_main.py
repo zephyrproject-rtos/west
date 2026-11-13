@@ -6,6 +6,7 @@ import pytest
 from conftest import cmd, cmd_subprocess
 
 import west.version
+from west.app.main import parse_early_args
 
 
 def test_main():
@@ -48,3 +49,70 @@ def test_module_run(tmp_path, monkeypatch):
     # check that that the sys.path was correctly inserted
     expected_path = Path(__file__).parents[1] / 'src'
     assert actual_path == [f'{expected_path}', 'initial-path']
+
+
+# What parse_early_args() returns when given no arguments at all.
+EARLY_ARGS_DEFAULTS = {
+    'help': False,
+    'version': False,
+    'zephyr_base': None,
+    'verbosity': 0,
+    'command_name': None,
+    'command_index': None,
+    'unexpected_arguments': [],
+}
+
+
+@pytest.mark.parametrize(
+    ('argv', 'expected'),
+    [
+        ([], {}),
+        (['topdir'], {'command_name': 'topdir', 'command_index': 0}),
+        (['-h'], {'help': True}),
+        (['--help'], {'help': True}),
+        (['-h', 'topdir'], {'help': True, 'command_name': 'topdir', 'command_index': 1}),
+        (['--help', 'topdir'], {'help': True, 'command_name': 'topdir', 'command_index': 1}),
+        (['-V'], {'version': True}),
+        (['--version'], {'version': True}),
+        (['-v', 'topdir'], {'verbosity': 1, 'command_name': 'topdir', 'command_index': 1}),
+        (['--verbose', 'topdir'], {'verbosity': 1, 'command_name': 'topdir', 'command_index': 1}),
+        (['-q', 'topdir'], {'verbosity': -1, 'command_name': 'topdir', 'command_index': 1}),
+        (['--quiet', 'topdir'], {'verbosity': -1, 'command_name': 'topdir', 'command_index': 1}),
+        (['-vvv', 'topdir'], {'verbosity': 3, 'command_name': 'topdir', 'command_index': 1}),
+        # An option taking a value must not swallow the command name.
+        (
+            ['-z', '/p', 'topdir'],
+            {'zephyr_base': '/p', 'command_name': 'topdir', 'command_index': 2},
+        ),
+        (['-z/p', 'topdir'], {'zephyr_base': '/p', 'command_name': 'topdir', 'command_index': 1}),
+        (['-z=/p', 'topdir'], {'zephyr_base': '/p', 'command_name': 'topdir', 'command_index': 1}),
+        (
+            ['--zephyr-base', '/p', 'topdir'],
+            {'zephyr_base': '/p', 'command_name': 'topdir', 'command_index': 2},
+        ),
+        (
+            ['--zephyr-base=/p', 'topdir'],
+            {'zephyr_base': '/p', 'command_name': 'topdir', 'command_index': 1},
+        ),
+        (
+            ['-vz', '/p', 'topdir'],
+            {'verbosity': 1, 'zephyr_base': '/p', 'command_name': 'topdir', 'command_index': 2},
+        ),
+        (
+            ['-hV', 'topdir'],
+            {'help': True, 'version': True, 'command_name': 'topdir', 'command_index': 1},
+        ),
+        # Everything after the command name belongs to the command.
+        (['topdir', '-h', '-z', '/p'], {'command_name': 'topdir', 'command_index': 0}),
+        # Unknown options are collected, not treated as the command name.
+        (
+            ['--nope', 'topdir'],
+            {'command_name': 'topdir', 'command_index': 1, 'unexpected_arguments': ['--nope']},
+        ),
+    ],
+)
+def test_parse_early_args(argv, expected):
+    # parse_early_args() must agree with the top level argument parser
+    # about which arguments are west's own and where the command name
+    # is. Alias expansion depends on both.
+    assert parse_early_args(argv)._asdict() == EARLY_ARGS_DEFAULTS | expected
