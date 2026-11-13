@@ -27,20 +27,41 @@ for available west commands, and ``west <command> -h`` for detailed help on
 each command.
 
 .. toctree::
+   :caption: Getting started
    :maxdepth: 1
 
    install.rst
-   release-notes.rst
-   troubleshooting.rst
    basics.rst
+
+.. toctree::
+   :caption: Using west
+   :maxdepth: 1
+
    built-in.rst
    workspaces.rst
    manifest.rst
    config.rst
    alias.rst
+   troubleshooting.rst
+
+.. toctree::
+   :caption: Extending west
+   :maxdepth: 1
+
    extensions.rst
+
+.. toctree::
+   :caption: Reference
+   :maxdepth: 1
+
    west-apis.rst
+
+.. toctree::
+   :caption: Project
+   :maxdepth: 1
+
    why.rst
+   release-notes.rst
 
 .. rubric:: Footnotes
 
