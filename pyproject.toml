@@ -127,6 +127,10 @@ ref = "test -n auto"
 cmd = "sphinx-build -M html . _build"
 cwd = "./doc"
 
+[tool.poe.tasks.linkcheck-docs]
+cmd = "sphinx-build -M linkcheck . _build"
+cwd = "./doc"
+
 [tool.poe.tasks]
 lint = "ruff check ."
 format = "ruff format"

@@ -57,6 +57,11 @@ html_additional_pages = {"gsearch": "gsearch.html"}
 
 GITHUB_BLOB_URL = "https://github.com/zephyrproject-rtos/west/blob/main/doc/"
 
+linkcheck_ignore = [
+    # Rate limits automated requests.
+    r"https://en\.wiktionary\.org/",
+]
+
 pygments_style = "sphinx"
 highlight_language = "none"
 
