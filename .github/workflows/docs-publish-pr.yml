@@ -1,0 +1,92 @@
+name: Publish documentation (Pull Request)
+
+# Runs after a "Build documentation" run for a pull request, in the context of
+# the base repository so the AWS credentials are available, and uploads the
+# HTML to https://builds.zephyrproject.io/west/pr/<number>/doc/ for review.
+on:
+  workflow_run:
+    workflows: ["Build documentation"]
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish preview to S3
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: |
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.repository == 'zephyrproject-rtos/west'
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
+      # Without a name, every artifact of the run is downloaded into a
+      # directory of its own: html-output/ and pr_num/.
+      - name: Download build artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate the pull request number
+        id: check-pr
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require("fs");
+            const head_sha = context.payload.workflow_run.head_sha;
+
+            function skip(reason) {
+              core.warning(`Documentation not published: ${reason}`);
+              core.setOutput("publish", "false");
+            }
+
+            const pr_num = Number(fs.readFileSync("./pr_num/pr_num", "utf8").trim());
+            if (!Number.isSafeInteger(pr_num) || pr_num <= 0) {
+              skip("the artifact carries a malformed PR number.");
+              return;
+            }
+
+            let pr;
+            try {
+              pr = (await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr_num,
+              })).data;
+            } catch (err) {
+              skip(`PR #${pr_num} could not be retrieved (status ${err.status}).`);
+              return;
+            }
+
+            // The artifact comes from a workflow that ran untrusted code, so
+            // make sure the PR number it carries belongs to the commit the
+            // documentation was built from. A mismatch means a stale build
+            // (a newer build is on its way) or a spoofed PR number.
+            if (pr.head.sha !== head_sha) {
+              skip(`documentation was built from ${head_sha}, but PR #${pr_num} ` +
+                   `is now at ${pr.head.sha}.`);
+              return;
+            }
+
+            core.exportVariable("PR_NUM", pr_num);
+            core.setOutput("publish", "true");
+
+      - name: Configure AWS credentials
+        if: steps.check-pr.outputs.publish == 'true'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-access-key-id: ${{ vars.AWS_BUILDS_WEST_PR_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_BUILDS_WEST_PR_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Upload to AWS S3
+        if: steps.check-pr.outputs.publish == 'true'
+        run: |
+          aws s3 sync --quiet html-output "s3://builds.zephyrproject.org/west/pr/${PR_NUM}/doc" --delete
