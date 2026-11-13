@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        python-version: ['3.11', '3.12', '3.13', '3.14', '3.15']
         task: [gh-test]
         # The include map here is actually used to extend the matrix.
         # By passing all keys used in the matrix we append new unique combinations
@@ -31,23 +31,25 @@ jobs:
         include:
           # Run linter/type checks only on 1 combination
           - os: ubuntu-latest
-            python-version: '3.13'
+            # Python version for the single-run jobs below and the report job.
+            # Keep this at the newest version in the matrix above.
+            python-version: &default-python '3.15'
             task: test
           - os: ubuntu-latest
-            python-version: '3.13'
+            python-version: *default-python
             task: gh-lint
           - os: ubuntu-latest
-            python-version: '3.13'
+            python-version: *default-python
             task: gh-format
           - os: ubuntu-latest
-            python-version: '3.13'
+            python-version: *default-python
             task: types
           # Running tests in parallel can produce confusing logs and only saves a
           # few minutes, so don't do it across the whole matrix. This section is
           # not to save time in Github; it is here to make sure pytest-xdist keeps
           # working so developers can keep saving time on their workstations.
           - os: ubuntu-latest
-            python-version: '3.13'
+            python-version: *default-python
             task: test-xdist
 
     steps:
@@ -102,7 +104,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.13'
+          python-version: *default-python
 
       - name: Download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
