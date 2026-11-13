@@ -12,6 +12,7 @@ Nothing in here is public API.
 '''
 
 import argparse
+import difflib
 import logging
 import os
 import platform
@@ -719,7 +720,35 @@ class WestApp:
             )
         else:
             extra_help = 'do you need to run this inside a workspace?'
-        self.print_usage_and_exit(f'west: unknown command "{command_name}"; {extra_help}')
+
+        suggestion = self.suggest_command(command_name)
+        suggestion_msg = f' Did you mean "{suggestion}"?' if suggestion else ''
+        self.print_usage_and_exit(
+            f'west: unknown command "{command_name}"; {extra_help}{suggestion_msg}'
+        )
+
+    def suggest_command(self, command_name):
+        candidates = set(self.builtins)
+        if self.extensions:
+            candidates.update(self.extensions)
+        if self.aliases:
+            candidates.update(self.aliases)
+        if not candidates:
+            return None
+
+        lower_to_name = {}
+        for name in candidates:
+            lower_to_name.setdefault(name.lower(), name)
+
+        lowered = command_name.lower()
+        if lowered in lower_to_name and command_name not in candidates:
+            return lower_to_name[lowered]
+
+        matches = difflib.get_close_matches(lowered, lower_to_name.keys(), n=1, cutoff=0.6)
+        if matches:
+            return lower_to_name[matches[0]]
+
+        return None
 
     def print_usage_and_exit(self, message):
         self.west_parser.print_usage(file=sys.stderr)
