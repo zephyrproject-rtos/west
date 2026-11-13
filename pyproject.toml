@@ -33,6 +33,7 @@ content-type = "text/x-rst"
 
 [project.urls]
 Homepage = "https://github.com/zephyrproject-rtos/west"
+Documentation = "https://docs.zephyrproject.org/west/latest/"
 
 [project.scripts]
 west = "west.app.main:main"
