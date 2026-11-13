@@ -14,7 +14,6 @@ import os
 import re
 import shlex
 import subprocess
-import sys
 from collections import deque
 from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
@@ -385,8 +384,11 @@ def _is_imap_ok(imap: _import_map, project: 'Project') -> bool:
 
 
 class _import_ctx(NamedTuple):
-    # Holds shared state that we want to pass around as we
-    # resolve imports.
+    # Holds shared state that we want to pass around as we resolve
+    # imports. A NamedTuple is an immutable dict, so `_replace()` must
+    # be used to produce a changed copy. But that _replace() copy is
+    # only shallow, so modifications to its (typically mutable) values
+    # are shared and global.
 
     # The current map from already-defined project names to Projects.
     #
@@ -1009,13 +1011,6 @@ class Project:
                 cwd = self.abspath
             else:
                 raise ValueError('no abspath; cwd must be given')
-        elif sys.version_info < (3, 6, 1) and not isinstance(cwd, str):
-            # Popen didn't accept a PathLike cwd on Windows until
-            # python v3.7; this was backported onto cpython v3.6.1,
-            # though. West currently supports "python 3.6", though, so
-            # in the unlikely event someone is running 3.6.0 on
-            # Windows, do the right thing.
-            cwd = os.fspath(cwd)
 
         args = ['git'] + cmd_list + extra_args
         cmd_str = util.quote_sh_list(args)
@@ -1618,7 +1613,7 @@ class Manifest:
 
         # Finish loading the validated data.
 
-        self._load_validated()
+        self._init_load_validated()
 
     def get_projects(
         self,
@@ -2079,7 +2074,7 @@ class Manifest:
         if ctx.current_repo_abspath:
             self.repo_abspath = os.fspath(ctx.current_repo_abspath)
 
-    def _load_validated(self) -> None:
+    def _init_load_validated(self) -> None:
         # Finish initializing this instance by loading data from YAML
         # that's been validated against the schema.
 
@@ -2113,7 +2108,7 @@ class Manifest:
         # projects and group-filter values.
         url_bases = {r['name']: r['url-base'] for r in manifest_data.get('remotes', [])}
         defaults = self._load_defaults(manifest_data.get('defaults', {}), url_bases)
-        self._load_projects(manifest_data, url_bases, defaults)
+        self._init_load_projects(manifest_data, url_bases, defaults)
 
         # The manifest is resolved; perform post-resolution validation.
         self._check_paths_are_unique()
@@ -2336,13 +2331,14 @@ class Manifest:
         # Destructively merge imported content into self._ctx. The
         # intermediate manifest is thrown away; we're just
         # using __init__ as a function here.
+        # _replace() returns a *shallow* copy pointing at shared variables.
         child_ctx = self._ctx._replace(
             current_abspath=pathobj_abs,
             current_relpath=pathobj,
             current_data=pathobj_abs.read_text(encoding=Manifest.encoding),
         )
         try:
-            Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
+            _ignoredMF = Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
         except RecursionError as e:
             raise _ManifestImportDepth(None, pathobj) from e
 
@@ -2370,6 +2366,7 @@ class Manifest:
             to_import = iter([pathobj_abs])
 
         for import_abs in to_import:
+            # _replace() returns a *shallow* copy pointing at shared variables.
             child_ctx = self._ctx._replace(
                 imap_filter=imap_filter,
                 path_prefix=path_prefix,
@@ -2378,7 +2375,7 @@ class Manifest:
                 current_data=import_abs.read_text(encoding=Manifest.encoding),
             )
             try:
-                Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
+                _ignoredMF = Manifest(topdir=self.topdir, internal_import_ctx=child_ctx)
             except RecursionError as e:
                 raise _ManifestImportDepth(None, import_abs) from e
 
@@ -2392,10 +2389,12 @@ class Manifest:
             self._malformed(f'default remote {mdrem} is not defined')
         return _defaults(mdrem, defaults.get('revision', _DEFAULT_REV))
 
-    def _load_projects(
+    def _init_load_projects(
         self, manifest: dict[str, Any], url_bases: dict[str, str], defaults: _defaults
     ) -> None:
-        # Load projects and add them to self._ctx.projects.
+        # Recursively loads projects and add them to the self._ctx.projects.
+        # Imports instantiate new Manifest objects that call this function again, all sharing
+        # the same _ctx data.
 
         have_imports = []
         names = set()
@@ -2618,7 +2617,10 @@ class Manifest:
         )
 
     def _import_from_project(self, project: Project, imp: Any):
-        # Recursively resolve a manifest import from 'project'.
+        # Recursively resolve manifest imports from 'project'.  Performs a
+        # match/case that selects the lower-level function corresponding to
+        # the `imp` type, or calls itself on each element when `imp` is a
+        # list.
         #
         # - project: Project instance to import from
         # - imp: the parsed value of project's import key (string, list, etc.)
@@ -2712,6 +2714,7 @@ class Manifest:
             case _:
                 raise AssertionError(f'imap_or_mfpath has unexpected type {type(imap_or_mfpath)}')
 
+        # _replace() returns a *shallow* copy pointing at shared variables.
         child_ctx = self._ctx._replace(
             imap_filter=imap_filter,
             path_prefix=self._ctx.path_prefix / imap_path_prefix,
