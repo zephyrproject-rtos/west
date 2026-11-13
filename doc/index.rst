@@ -39,9 +39,8 @@ each command.
    config.rst
    alias.rst
    extensions.rst
+   west-apis.rst
    why.rst
-
-For details on west's Python APIs, see :ref:`west-apis`.
 
 .. rubric:: Footnotes
 

@@ -1,5 +1,3 @@
-:orphan:
-
 .. _west-apis:
 .. _west-apis-west:
 
