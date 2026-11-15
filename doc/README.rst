@@ -12,13 +12,14 @@ Last synchronized with Zephyr ``main`` at commit
 Copied files
 ------------
 
-======================== ========================
-West                     Zephyr
-======================== ========================
-``doc/_static/css/*``    ``doc/_static/css/*``
-``doc/_static/js/*``     ``doc/_static/js/*``
-``doc/_templates/*``     ``doc/_templates/*``
-======================== ========================
+================================== ==================================
+West                               Zephyr
+================================== ==================================
+``doc/_static/css/*``              ``doc/_static/css/*``
+``doc/_static/js/*``               ``doc/_static/js/*``
+``doc/_static/images/favicon.png`` ``doc/_static/images/favicon.png``
+``doc/_templates/*``               ``doc/_templates/*``
+================================== ==================================
 
 Deliberate differences
 ----------------------
@@ -43,7 +44,7 @@ With a Zephyr checkout next to this repository:
 
 .. code-block:: shell
 
-   for f in _static/css/*.css _static/js/* _templates/*.html; do
+   for f in _static/css/*.css _static/js/* _static/images/favicon.png _templates/*.html; do
        diff -u ../zephyr/doc/$f doc/$f
    done
 

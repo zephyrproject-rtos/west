@@ -36,6 +36,7 @@ html_title = "West Documentation"
 html_last_updated_fmt = "%b %d, %Y"
 html_show_sphinx = False
 html_logo = str(WEST_BASE / "doc" / "_static" / "images" / "logo.svg")
+html_favicon = str(WEST_BASE / "doc" / "_static" / "images" / "favicon.png")
 html_static_path = [str(WEST_BASE / 'doc' / '_static')]
 
 html_context = {
