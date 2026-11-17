@@ -636,7 +636,8 @@ def validate(data: Any) -> dict[str, Any]:
             raise MalformedManifest(msg)
 
     try:
-        pykwalify.core.Core(source_data=data, schema_files=[_SCHEMA_PATH]).validate()
+        schema = util._load_yaml_cached(_SCHEMA_PATH)
+        pykwalify.core.Core(source_data=data, schema_data=schema).validate()
     except pykwalify.errors.SchemaError as se:
         raise MalformedManifest(se.msg) from se
 
