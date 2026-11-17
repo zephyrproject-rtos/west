@@ -2911,7 +2911,6 @@ def test_import_path_prefix_basics(manifest_repo):
                            url: https://example.com/not-cloned-{i}
                        '''
             },
-            reconfigure=False,
         )
         revs[i] = rev_parse(p, 'HEAD')
 
@@ -2944,7 +2943,6 @@ def test_import_path_prefix_basics(manifest_repo):
                          path-prefix: {prefixes[3]}
                    '''
         },
-        reconfigure=False,
     )
 
     # Check semantics for directly imported projects and nested imports.
@@ -3030,7 +3028,6 @@ def test_import_path_prefix_self(manifest_repo):
                      projects: []
                    ''',
         },
-        reconfigure=False,
     )
 
     # Check semantics for directly imported projects and nested imports.
@@ -3079,7 +3076,6 @@ def test_import_path_prefix_propagation(manifest_repo):
                        url: https://example.com/project-2
                    ''',
         },
-        reconfigure=False,
     )
 
     # Check semantics for directly imported projects and nested imports.
@@ -3121,12 +3117,12 @@ def test_import_path_prefix_no_escape(manifest_repo):
 
     # As a base case, make sure we can parse this manifest with an
     # OK path-prefix.
-    add_commit(manifest_repo, 'OK', files={'west.yml': mfst('ext')}, reconfigure=False)
+    add_commit(manifest_repo, 'OK', files={'west.yml': mfst('ext')})
     m = MT(topdir=topdir, import_flags=ImportFlag.IGNORE)
     assert Path(m.projects[1].abspath) == Path(topdir) / 'ext' / 'project'
 
     # An invalid path-prefix, all other things equal, should fail.
-    add_commit(manifest_repo, 'NOK 1', files={'west.yml': mfst('..')}, reconfigure=False)
+    add_commit(manifest_repo, 'NOK 1', files={'west.yml': mfst('..')})
     with pytest.raises(MalformedManifest) as excinfo:
         MT(topdir=topdir, import_flags=ImportFlag.IGNORE)
     assert 'escapes the workspace topdir' in str(excinfo.value)

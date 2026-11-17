@@ -939,9 +939,9 @@ def test_update_projects_local_branch_commits(west_init_tmpdir):
     checkout_branch('net-tools', 'local_net_tools_test_branch', create=True)
     checkout_branch('subdir/Kconfiglib', 'local_kconfig_test_branch', create=True)
     checkout_branch('tagged_repo', 'local_tagged_repo_test_branch', create=True)
-    add_commit('net-tools', 'test local branch commit', reconfigure=True)
-    add_commit('subdir/Kconfiglib', 'test local branch commit', reconfigure=True)
-    add_commit('tagged_repo', 'test local branch commit', reconfigure=True)
+    add_commit('net-tools', 'test local branch commit')
+    add_commit('subdir/Kconfiglib', 'test local branch commit')
+    add_commit('tagged_repo', 'test local branch commit')
     net_tools_prev = head_subject('net-tools')
     kconfiglib_prev = head_subject('subdir/Kconfiglib')
     tagged_repo_prev = head_subject('tagged_repo')
@@ -981,7 +981,7 @@ def test_update_projects_local_branch_commits(west_init_tmpdir):
     # leave the branch checked out and gather statistics.
     checkout_branch('net-tools', 'manifest-rev')
     checkout_branch('net-tools', 'descendant_branch', create=True)
-    add_commit('net-tools', 'net-tools descendant commit', reconfigure=True)
+    add_commit('net-tools', 'net-tools descendant commit')
 
     out = cmd('update --stats --keep-descendants net-tools')
     assert 'left descendant branch "descendant_branch" checked out' in out
@@ -1825,7 +1825,7 @@ def test_update_recovery(tmpdir):
     create_repo(p)
 
     # Create revision rbad, which contains a bogus manifest, in p.
-    add_commit(p, 'rbad commit message', files={'west.yml': 'bogus_data'}, reconfigure=False)
+    add_commit(p, 'rbad commit message', files={'west.yml': 'bogus_data'})
     rbad = rev_parse(p, 'HEAD')
 
     # Create revision rgood, which contains a good manifest, in p.
@@ -1833,7 +1833,6 @@ def test_update_recovery(tmpdir):
         p,
         'rgood commit message',
         files={'west.yml': 'manifest:\n  projects: []'},
-        reconfigure=False,
     )
     rgood = rev_parse(p, 'HEAD')
 
@@ -1888,7 +1887,7 @@ def setup_narrow(tmpdir):
     add_tag(remote, 'tag')
 
     create_branch(remote, 'branch', checkout=True)
-    add_commit(remote, 'second commit, branch', reconfigure=False)
+    add_commit(remote, 'second commit, branch')
 
     workspace = tmpdir / 'workspace'
     create_workspace(workspace)
