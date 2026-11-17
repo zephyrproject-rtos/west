@@ -173,6 +173,29 @@ def _check_git_capabilities(tmpdir_factory):
         pass
 
 
+@pytest.fixture(scope='session', autouse=True)
+def _git_identity():
+    # Set the author and committer identity through the environment,
+    # instead of running 'git config' in each and every repository the
+    # tests create or clone.
+    #
+    # These variables take precedence over user.name and user.email
+    # from any git configuration file, so the identity does not depend
+    # on the configuration of the machine running the tests. It also
+    # means 'git config' cannot override them: a test which needs
+    # another identity must change the variables themselves, e.g. with
+    # update_env().
+    with update_env(
+        {
+            'GIT_AUTHOR_NAME': 'West Test',
+            'GIT_AUTHOR_EMAIL': 'west-test@example.com',
+            'GIT_COMMITTER_NAME': 'West Test',
+            'GIT_COMMITTER_EMAIL': 'west-test@example.com',
+        }
+    ):
+        yield
+
+
 @pytest.fixture(autouse=True)
 def setup_teardown_test_environment(tmpdir_factory):
     """
@@ -544,16 +567,8 @@ def create_repo(path, initial_branch='master'):
         # already exists with plain '-b'.
         subprocess.check_call([GIT, 'checkout', '-B', initial_branch], cwd=path)
 
-    config_repo(path)
     # make an individual commit to ensure a unique commit id
     add_commit(path, f'initial {uuid.uuid4()}')
-
-
-def config_repo(path):
-    # Set name and email. This avoids a "Please tell me who you are" error when
-    # there's no global default.
-    subprocess.check_call([GIT, 'config', 'user.name', 'West Test'], cwd=path)
-    subprocess.check_call([GIT, 'config', 'user.email', 'west-test@example.com'], cwd=path)
 
 
 def create_branch(path, branch, checkout=False):
@@ -567,19 +582,13 @@ def checkout_branch(path, branch, detach=False):
     subprocess.check_call([GIT, 'checkout', branch] + detach, cwd=path)
 
 
-def add_commit(repo, msg, files=None, reconfigure=True):
+def add_commit(repo, msg, files=None):
     # Adds a commit with message 'msg' to the repo in 'repo'
     #
     # If 'files' is given, it must be a dictionary mapping files to
     # edit to the contents they should contain in the new
     # commit. Otherwise, the commit will be empty.
-    #
-    # If 'reconfigure' is True, the user.name and user.email git
-    # configuration variables will be set in 'repo' using config_repo().
     repo = os.fspath(repo)
-
-    if reconfigure:
-        config_repo(repo)
 
     # Edit any files as specified by the user and add them to the index.
     if files:
