@@ -7,176 +7,90 @@
 .. image:: https://codecov.io/gh/zephyrproject-rtos/west/graph/badge.svg
    :target: https://codecov.io/gh/zephyrproject-rtos/west
 
-This is the Zephyr RTOS meta tool, ``west``.
+West
+====
 
-https://docs.zephyrproject.org/west/latest/
+West is the swiss-army knife command line tool developed by the `Zephyr
+Project`_. It manages a workspace of Git repositories from a single file, the
+*west manifest*: ``west init`` creates the workspace and ``west update`` clones
+and updates the repositories the manifest names. West is also extensible: you
+can add your own commands to it without modifying its source code.
 
 Installation
 ------------
 
-Using pip::
+West is distributed through `PyPI`_. Install it with ``pip``, preferably in a
+virtual environment::
 
-  pip3 install west
+  pip install west
 
-(Use ``pip3 uninstall west`` to uninstall it.)
+See `Installing west`_ for the details and for other ways to install it.
 
-Basic Usage
+Quick start
 -----------
 
-West lets you manage multiple Git repositories under a single directory using a
-single file, called the *west manifest file*, or *manifest* for short.
-By default the manifest file is named ``west.yml``.
-You use ``west init`` to set up this directory, then ``west update`` to fetch
-and/or update the repositories named in the manifest.
+Create a workspace from a manifest repository and fetch the repositories it
+lists. This example uses the Zephyr manifest::
 
-West used to default to `upstream Zephyr's manifest file
-<https://github.com/zephyrproject-rtos/zephyr/blob/main/west.yml>`_.
-You are still able and will always be able to use this manifest but you
-are now required to pass it explicitly and, you are more encouraged than
-before to design your own manifest(s) instead and minimized security SBOMs
-based on your specific needs.
-
-For more details, see the `west documentation
-<https://docs.zephyrproject.org/west/latest/>`_.
-
-Example usage using the upstream manifest file::
-
-  mkdir zephyrproject && cd zephyrproject
-  west init -m https://github.com/zephyrproject-rtos/zephyr/
+  west init -m https://github.com/zephyrproject-rtos/zephyr zephyrproject
+  cd zephyrproject
   west update
 
-What just happened:
+- ``west init -m`` clones the manifest repository, here the Zephyr repository,
+  into the new ``zephyrproject`` workspace. The manifest repository contains
+  ``west.yml``, the manifest file listing the other repositories. Use ``--mr``
+  to select a revision of the manifest repository and ``--mf`` to use a
+  manifest file other than ``west.yml``.
 
-- ``west init -m ...`` clones the upstream *west manifest* repository, which in this
-  case is the zephyr repository. The manifest repository contains ``west.yml``,
-  a YAML description of the Zephyr installation, including Git repositories and
-  other metadata.
+- ``west update`` clones the repositories named in the manifest file into the
+  workspace, and updates them when it is run again.
 
-- ``west update`` clones the other repositories named in the manifest file,
-  creating working trees in the installation directory ``zephyrproject``.
+After ``west init``, you can run west commands from anywhere in the workspace.
+For a list of the available commands, run ``west -h``; for help on a command,
+run ``west <command> -h``. See `Extensions`_ for adding your own commands.
 
-Use ``west init -m`` to specify another manifest repository. Use ``--mr`` to
-use a revision to initialize from; if not given, the remote's default branch is used.
-Use ``--mf`` to use a manifest file other than ``west.yml``.
+Resources
+---------
 
-Additional Commands
--------------------
-
-West has multiple sub-commands. After running ``west init``, you can
-run them from anywhere under ``zephyrproject``.
-
-For a list of available commands, run ``west -h``. Get help on a
-command with ``west <command> -h``.
-
-West is extensible: you can add new commands to west without modifying its
-source code. See `Extensions
-<https://docs.zephyrproject.org/west/latest/extensions.html>`_ in the
-documentation for details.
-
-
-Hacking on West
----------------
-
-This section contains notes for getting started developing west itself.
-
-`pip` offers many different ways to (download and) install Python
-software. Below are common ways relevant to `west`; for a complete list
-check `<https://pip.pypa.io/en/stable/topics/>`_
-
-Quick Install
+Documentation
 ~~~~~~~~~~~~~
 
-If you are not interested in source code and git history, GitHub offers
-`pip` the ability to download and install a .zip archive of any random
-version with a single command.  This allows testing work in progress
-very quickly. Examples::
+  | 📖 `West Documentation`_
+  | 🚀 `Installing west`_
+  | 📝 `Release notes`_
 
-  pip3 uninstall west
-  # Pull request 830
-  pip3 install --dry-run https://github.com/zephyrproject-rtos/west/archive/pull/830/head.zip
-  # Release v1.4
-  pip3 install https://github.com/zephyrproject-rtos/west/archive/v1.4-branch.zip
-  # Someone's random version
-  pip3 install https://github.com/someone_you_trust/west/archive/some_branch_or_tag.zip
+Code and Development
+~~~~~~~~~~~~~~~~~~~~
 
-Warning: never install software from people or locations you do not trust!
+  | 🌐 `Source Code Repository`_
+  | 📦 `Releases`_
+  | 🤝 `Contributing`_: guidelines, installing west from source, running its
+    tests and building its documentation
 
-Editable Install
-~~~~~~~~~~~~~~~~
+Community and Support
+~~~~~~~~~~~~~~~~~~~~~
 
-To run west "live" from the current source code tree, run this command from the
-top level directory in the west repository::
+  | 💬 `Discord Server`_ for real-time community discussions, in the ``#west``
+    channel
+  | 📧 `User mailing list (users@lists.zephyrproject.org)`_
+  | 📧 `Developer mailing list (devel@lists.zephyrproject.org)`_
 
-  pip3 install -e .
+Issue Tracking and Security
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This is useful if you are actively working on west and don't want to re-package
-and install a wheel each time you run it.
+  | 🐛 `GitHub Issues`_
+  | ⚠️ Report security vulnerabilities at vulnerabilities@zephyrproject.org
 
-Creating a wheel package
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-You can create a wheel package and distribute it to others.
-
-To build the west wheel file::
-
-  # Using uv
-  uv build
-
-  # Without uv
-  pip3 install --upgrade build
-  python -m build
-
-This will create a file named ``dist/west-x.y.z-py3-none-any.whl``,
-where ``x.y.z`` is the current version in pyproject.toml.
-
-To install the wheel::
-
-  pip3 install -U dist/west-x.y.z-py3-none-any.whl
-
-You can ``pip3 uninstall west`` to remove this wheel before re-installing the
-version from PyPI, etc.
-
-Running the Tests
-~~~~~~~~~~~~~~~~~
-
-First, install the dependencies::
-
-  # Using uv
-  uv sync --frozen
-
-  # Using pip (requires v25.1 or newer)
-  # Recommended in an active virtual environment
-  pip3 install --group dev
-
-
-Then, run the tests (from the project's top level directory)::
-
-  # Run the full test suite with uv (recommended)
-  uv run poe all
-
-  # Or run the full test suite with poe directly.
-  # (recommended in an active virtual environment)
-  poe all
-
-  # Run only the pytest tests (against the local worktree)
-  pytest
-
-The ``all`` target from ``poe`` runs multiple tasks sequentially. Use ``poe -h``
-to get a list of all available tasks.
-You can pass arguments to any ``poe`` task, which are forwarded to the
-underlying command. This is especially helpful when you want to run
-only specific tests to save time. Examples::
-
-  # Run a subset of tests (file)
-  poe test tests/test_project.py
-
-  # Run a single test
-  poe test tests/test_project.py::test_workspace
-
-  # Run the ``test_update_narrow()`` code with ``pdb`` (but _not_ the
-  # west code which is running in subprocesses)
-  poe test --exitfirst --trace -k test_update_narrow
-
-  # Run all tests with "import" in their name and let them log to the
-  # current terminal
-  poe test -k import --capture=no
+.. _Zephyr Project: https://www.zephyrproject.org/
+.. _PyPI: https://pypi.org/project/west/
+.. _Installing west: https://docs.zephyrproject.org/west/latest/install.html
+.. _Extensions: https://docs.zephyrproject.org/west/latest/extensions.html
+.. _Contributing: https://docs.zephyrproject.org/west/latest/contributing.html
+.. _West Documentation: https://docs.zephyrproject.org/west/latest/
+.. _Release notes: https://docs.zephyrproject.org/west/latest/release-notes.html
+.. _Source Code Repository: https://github.com/zephyrproject-rtos/west
+.. _Releases: https://github.com/zephyrproject-rtos/west/releases
+.. _Discord Server: https://chat.zephyrproject.org
+.. _User mailing list (users@lists.zephyrproject.org): https://lists.zephyrproject.org/g/users
+.. _Developer mailing list (devel@lists.zephyrproject.org): https://lists.zephyrproject.org/g/devel
+.. _GitHub Issues: https://github.com/zephyrproject-rtos/west/issues
