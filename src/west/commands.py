@@ -33,7 +33,7 @@ import yaml
 
 from west.configuration import Configuration
 from west.manifest import Manifest, Project
-from west.util import PathType, escapes_directory, quote_sh_list
+from west.util import PathType, _load_yaml_cached, escapes_directory, quote_sh_list
 
 '''\
 This package provides WestCommand, which is the common abstraction all
@@ -719,9 +719,8 @@ def _ext_specs(project):
             except yaml.YAMLError as e:
                 raise ExtensionCommandError from e
         try:
-            pykwalify.core.Core(
-                source_data=commands_spec, schema_files=[_EXT_SCHEMA_PATH]
-            ).validate()
+            schema = _load_yaml_cached(_EXT_SCHEMA_PATH)
+            pykwalify.core.Core(source_data=commands_spec, schema_data=schema).validate()
         except pykwalify.errors.SchemaError as e:
             raise ExtensionCommandError from e
 
