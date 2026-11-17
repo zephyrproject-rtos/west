@@ -334,8 +334,23 @@ def _session_repos(tmp_path_factory):
     return session_repos
 
 
+@pytest.fixture(scope='session')
+def _session_clones(tmp_path_factory, _session_repos):
+    '''Just a helper, do not use directly.'''
+
+    # Copying a directory tree is cheaper than running 'git clone', so
+    # clone the session repositories just once and let the per-test
+    # fixtures copy the results.
+    session_clones = tmp_path_factory.mktemp('session_clones')
+    for repo in 'Kconfiglib', 'tagged_repo', 'net-tools', 'zephyr':
+        subprocess.check_call(
+            [GIT, 'clone', os.path.join(_session_repos, repo)], cwd=session_clones
+        )
+    return session_clones
+
+
 @pytest.fixture
-def repos_tmpdir(tmpdir, _session_repos):
+def repos_tmpdir(tmpdir, _session_clones):
     '''Fixture for tmpdir with "remote" repositories.
 
     These can then be used to bootstrap a workspace and run
@@ -385,14 +400,9 @@ def repos_tmpdir(tmpdir, _session_repos):
         path: zephyr
 
     '''
-    kconfiglib, tagged_repo, net_tools, zephyr = [
-        os.path.join(_session_repos, x)
-        for x in ['Kconfiglib', 'tagged_repo', 'net-tools', 'zephyr']
-    ]
-    repos = tmpdir.mkdir('repos')
+    repos = tmpdir.join('repos')
+    shutil.copytree(_session_clones, repos, symlinks=True)
     repos.chdir()
-    for r in [kconfiglib, tagged_repo, net_tools, zephyr]:
-        subprocess.check_call([GIT, 'clone', r])
 
     manifest = MANIFEST_TEMPLATE.replace('THE_URL_BASE', str(tmpdir.join('repos')))
     add_commit(str(repos.join('zephyr')), 'add manifest', files={'west.yml': manifest})
