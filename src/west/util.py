@@ -4,11 +4,20 @@
 
 '''Miscellaneous utilities.'''
 
+import functools
 import os
 import shlex
 import textwrap
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
+
+import yaml
+
+try:
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:
+    from yaml import SafeLoader  # type: ignore
 
 # What west's APIs accept for paths.
 #
@@ -38,6 +47,14 @@ def escapes_directory(path: PathType, directory: PathType) -> bool:
     except ValueError:
         ret = True
     return ret
+
+
+@functools.cache
+def _load_yaml_cached(path: str) -> Any:
+    # Do not modify the returned object, it is shared by all callers.
+    # Only use this for files which do not change while west is running.
+    with open(path, encoding='utf-8') as f:
+        return yaml.load(f, Loader=SafeLoader)
 
 
 def quote_sh_list(cmd: Iterable[str | os.PathLike]) -> str:
