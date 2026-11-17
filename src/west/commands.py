@@ -7,6 +7,7 @@
 import argparse
 import importlib.util
 import itertools
+import logging
 import os
 import re
 import shutil
@@ -33,7 +34,7 @@ import yaml
 
 from west.configuration import Configuration
 from west.manifest import Manifest, Project
-from west.util import PathType, escapes_directory, quote_sh_list
+from west.util import PathType, escapes_directory, is_posix_style_path, quote_sh_list
 
 '''\
 This package provides WestCommand, which is the common abstraction all
@@ -42,6 +43,8 @@ west commands subclass.
 This package also provides support for extension commands.'''
 
 __all__ = ['CommandContextError', 'CommandError', 'WestCommand']
+
+_logger = logging.getLogger(__name__)
 
 _EXT_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'west-commands-schema.yml')
 
@@ -683,14 +686,20 @@ def extension_commands(config: Configuration, manifest: Manifest | None = None):
     if manifest is None:
         manifest = Manifest.from_file()
 
+    # The same non-POSIX path rules apply to west-commands files as to
+    # the manifest itself; see Manifest._check_non_posix_path(). The
+    # manifest knows whether non-POSIX paths were allowed when it was
+    # loaded, so use that instead of re-reading the configuration.
+    allow_non_posix_paths = manifest.allow_non_posix_paths
+
     specs = OrderedDict()
     for project in manifest.projects:
         if project.west_commands:
-            specs[project.path] = _ext_specs(project)
+            specs[project.path] = _ext_specs(project, allow_non_posix_paths)
     return specs
 
 
-def _ext_specs(project):
+def _ext_specs(project, allow_non_posix_paths):
     # Get a list of WestExtCommandSpec objects for the given
     # west.manifest.Project.
 
@@ -731,12 +740,37 @@ def _ext_specs(project):
         base_dir = os.path.join(project.abspath, mfst_dir) if mfst_dir else project.abspath
 
         for commands_desc in commands_spec['west-commands']:
-            ret.extend(_ext_specs_from_desc(project, commands_desc, base_dir))
+            ret.extend(
+                _ext_specs_from_desc(project, commands_desc, base_dir, allow_non_posix_paths)
+            )
     return ret
 
 
-def _ext_specs_from_desc(project, commands_desc, base_dir):
-    py_file = os.path.join(base_dir, commands_desc['file'])
+def _ext_specs_from_desc(project, commands_desc, base_dir, allow_non_posix_paths):
+    cmd_file = commands_desc['file']
+
+    # The "file:" value maps a west extension command to the python
+    # file it is defined in, so the same non-POSIX path rules apply
+    # here as to manifest path data.
+    if not is_posix_style_path(cmd_file):
+        if allow_non_posix_paths:
+            _logger.warning(
+                f'extension command python file "{cmd_file}" in project '
+                f'{project.path} is not a POSIX-style path; it contains '
+                'syntax which is only meaningful on Windows. Accepting it '
+                'because non-POSIX paths are allowed, but it may not work '
+                'on every operating system'
+            )
+        else:
+            raise ExtensionCommandError(
+                hint=f'extension command python file "{cmd_file}" in project '
+                f'{project.path} is not a POSIX-style path: it contains '
+                'syntax which is only meaningful on Windows. Set the '
+                '"manifest.allow-non-posix-paths" configuration option '
+                'to accept it unchanged.'
+            )
+
+    py_file = os.path.join(base_dir, cmd_file)
 
     # Verify the YAML's python file doesn't escape the project directory.
     if escapes_directory(py_file, project.abspath):

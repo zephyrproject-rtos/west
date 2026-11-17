@@ -8,7 +8,7 @@ import os
 import shlex
 import textwrap
 from collections.abc import Iterable
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 # What west's APIs accept for paths.
 #
@@ -92,3 +92,36 @@ def west_topdir(start: PathType | None = None, fall_back: bool = True) -> str:
 def expand_path(path: PathType) -> Path:
     '''Returns an expanded path for the provided path-like argument.'''
     return Path(path).expanduser()
+
+
+def is_posix_style_path(path: str) -> bool:
+    '''Returns True if `path` is a POSIX-style path.
+
+    :param path: path to check
+
+    Windows path syntax is a superset of the POSIX one: the
+    flavors parse path components identically, but Windows also
+    recognizes backslash separators, drive letters, and leading
+    "//" anchors. Parsing `path` with both flavors therefore
+    agrees exactly when the path contains none of that
+    Windows-only syntax, i.e. when it means the same thing on
+    every operating system.
+
+    A single leading '/' is dropped first: it means the same
+    thing everywhere, but the flavors write a root differently
+    ('/' on POSIX, '\\' on Windows), and a path with a second
+    leading slash retains a root and still disagrees. A lone
+    drive letter like "C:" parses identically and is rejected
+    explicitly.
+
+    Windows-reserved characters like '?' are not rejected:
+    Windows parses them the same way and only errors during
+    resolution, and we primarily consider POSIX paths.
+    '''
+    path = path.removeprefix('/')
+
+    if PureWindowsPath(path).drive:
+        # Windows drive letter ('C:foo', 'C:/foo', 'C:', ...)
+        return False
+
+    return PurePosixPath(path).parts == PureWindowsPath(path).parts

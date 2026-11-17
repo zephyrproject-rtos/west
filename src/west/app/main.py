@@ -739,7 +739,10 @@ class WestApp:
         else:
             logger.setLevel(logging.CRITICAL)
 
-        logger.addHandler(LogHandler())
+        # The handler is attached to the 'west' parent logger, so
+        # output from every logger in the west package is printed,
+        # not just west.manifest's.
+        logging.getLogger('west').addHandler(LogHandler())
 
     def run_builtin(self, args, unknown):
         self.queued_io.append(
