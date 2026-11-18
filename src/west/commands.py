@@ -612,7 +612,11 @@ class _ExtFactory:
         try:
             mod = _commands_module_from_file(self.py_file)
         except ImportError as ie:
-            raise ExtensionCommandError(hint=f'could not import {self.py_file}') from ie
+            hint = f'could not import {self.py_file}: {ie}'
+            venv_hint = _outside_virtual_env_hint()
+            if venv_hint:
+                hint += '\n  ' + venv_hint
+            raise ExtensionCommandError(hint=hint) from ie
 
         # Get the attribute which provides the WestCommand subclass.
         try:
@@ -755,6 +759,26 @@ def _ext_specs_from_desc(project, commands_desc, base_dir):
 
     # Return the thunks for this project.
     return thunks
+
+
+def _outside_virtual_env_hint() -> str | None:
+    # A virtual environment can be active (VIRTUAL_ENV is set by its
+    # activation script) while west itself is installed elsewhere, for
+    # example from a distribution package or with pipx. West then runs
+    # with another Python environment and cannot import the packages
+    # installed in the virtual environment, so an extension command
+    # fails to import dependencies that were installed there.
+    virtual_env = os.environ.get('VIRTUAL_ENV')
+    if not virtual_env:
+        return None
+    if Path(virtual_env).resolve() == Path(sys.prefix).resolve():
+        return None
+    return (
+        f'west is running with {sys.executable}, which is outside of the active\n'
+        f'  virtual environment {virtual_env}, so it cannot use the packages installed\n'
+        '  in the latter. Install another instance of west in that virtual environment,\n'
+        '  then deactivate and activate it again.'
+    )
 
 
 def _commands_module_from_file(file):
