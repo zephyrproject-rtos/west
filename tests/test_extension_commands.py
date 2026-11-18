@@ -3,12 +3,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 import yaml
 from conftest import GIT, WINDOWS, add_commit, cmd, cmd_raises, yaml_editor
+
+from west.commands import _outside_virtual_env_hint
 
 
 def _yaml_get_proj(mf: dict, projname: str):
@@ -178,8 +181,8 @@ def test_extension_command_constructor_error(west_update_tmpdir):
     assert 'command constructor threw an exception' in err_msg
 
 
-def test_extension_command_import_error(west_update_tmpdir):
-    # Test handling of extension command with import errors
+def _add_import_error_command(west_update_tmpdir):
+    # Add the extension command "import-error", which fails to import
     net_tools_path = west_update_tmpdir / 'net-tools'
     add_commit(
         net_tools_path,
@@ -202,8 +205,41 @@ def test_extension_command_import_error(west_update_tmpdir):
         },
     )
 
+
+def test_extension_command_import_error(west_update_tmpdir, monkeypatch):
+    # Test handling of extension command with import errors
+    _add_import_error_command(west_update_tmpdir)
+
+    monkeypatch.delenv('VIRTUAL_ENV', raising=False)
     _, err_msg = cmd_raises('import-error', SystemExit)
     assert 'could not import' in err_msg
+    assert "No module named 'nonexistent_module'" in err_msg
+    # Check the absence of the virtual environment hint at its source:
+    # looking for keywords in err_msg depends on its exact wording and
+    # on the temporary paths it contains.
+    assert _outside_virtual_env_hint() is None
+
+
+def test_extension_command_import_error_outside_venv(west_update_tmpdir, monkeypatch, tmp_path):
+    # Test the hint given for an import error when a virtual
+    # environment is active but west is not running from it
+    _add_import_error_command(west_update_tmpdir)
+
+    # An active virtual environment west is not running from explains
+    # why packages installed there cannot be imported.
+    other_venv = tmp_path / 'other-venv'
+    monkeypatch.setenv('VIRTUAL_ENV', str(other_venv))
+    _, err_msg = cmd_raises('import-error', SystemExit)
+    assert 'could not import' in err_msg
+    assert f'virtual environment {other_venv}' in err_msg
+    assert 'another instance of west' in err_msg
+    assert 'activate it again' in err_msg
+
+    # No such hint when west runs from the active virtual environment.
+    monkeypatch.setenv('VIRTUAL_ENV', sys.prefix)
+    _, err_msg = cmd_raises('import-error', SystemExit)
+    assert 'could not import' in err_msg
+    assert _outside_virtual_env_hint() is None
 
 
 def test_extension_command_directory_escape(west_update_tmpdir):
