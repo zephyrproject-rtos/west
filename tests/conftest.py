@@ -150,7 +150,32 @@ def chdir(path):
 
 
 @pytest.fixture(scope='session', autouse=True)
-def _check_git_capabilities(tmpdir_factory):
+def _isolate_git_config(tmp_path_factory):
+    # Keep the git configuration of the machine running the tests out
+    # of them: settings like commit.gpgSign, url.*.insteadOf or
+    # safe.bareRepository change what git does and make tests fail, for
+    # the git commands run by the tests as well as for the ones run by
+    # west.
+    #
+    # GIT_CONFIG_GLOBAL replaces both ~/.gitconfig and the XDG
+    # configuration file. It requires git 2.32; older versions ignore
+    # it and keep reading the configuration of the user.
+    #
+    # GIT_CONFIG_NOSYSTEM skips the system wide configuration file,
+    # e.g. /etc/gitconfig.
+    #
+    # A test which needs a particular setting can use 'git config' in
+    # its repositories, 'git -c', or the GIT_CONFIG_COUNT,
+    # GIT_CONFIG_KEY_<n> and GIT_CONFIG_VALUE_<n> environment variables.
+    global_config = tmp_path_factory.mktemp('git-config') / 'global'
+    global_config.touch()
+
+    with update_env({'GIT_CONFIG_GLOBAL': str(global_config), 'GIT_CONFIG_NOSYSTEM': '1'}):
+        yield
+
+
+@pytest.fixture(scope='session', autouse=True)
+def _check_git_capabilities(tmpdir_factory, _isolate_git_config):
     # Do checks for git behaviors. Right now this is limited to
     # deciding whether or not 'git init --branch' is supported.
     #
