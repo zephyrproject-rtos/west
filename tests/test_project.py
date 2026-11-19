@@ -900,7 +900,7 @@ def test_grep(west_init_tmpdir):
     assert re.search('west-commands', cmd('grep -- -- -commands'))
 
 
-def test_update_projects(west_init_tmpdir):
+def test_update_projects(west_init_tmpdir, update_jobs):
     # Test the 'west update' command. It calls through to the same backend
     # functions that are used for automatic updates and 'west init'
     # reinitialization.
@@ -926,7 +926,7 @@ def test_update_projects(west_init_tmpdir):
     assert ur.tr_head_0 == ur.tr_head_1, 'tagged_repo HEAD changed'
 
 
-def test_update_projects_local_branch_commits(west_init_tmpdir):
+def test_update_projects_local_branch_commits(west_init_tmpdir, update_jobs):
     # Test the 'west update' command when working on local branch with local
     # commits and then updating project to upstream commit.
     # It calls through to the same backend functions that are used for
@@ -990,7 +990,7 @@ def test_update_projects_local_branch_commits(west_init_tmpdir):
     assert head_subject('net-tools') == 'net-tools descendant commit'
 
 
-def test_update_tag_to_tag(west_init_tmpdir):
+def test_update_tag_to_tag(west_init_tmpdir, update_jobs):
     # Verify we can update the tagged_repo repo to a new tag.
 
     # We only need to clone tagged_repo locally.
@@ -1107,7 +1107,7 @@ def test_update_head_0(west_init_tmpdir):
     assert modified_files.strip() == "M CODEOWNERS", 'local zephyr change not preserved'
 
 
-def test_update_some_with_imports(repos_tmpdir):
+def test_update_some_with_imports(repos_tmpdir, update_jobs):
     # 'west update project1 project2' should work fine even when
     # imports are used, as long as the relevant projects are all
     # defined in the manifest repository.
@@ -1311,7 +1311,7 @@ def test_update_submodules_list(repos_tmpdir):
     _match_multiline_regex(expected_res, actual)
 
 
-def test_update_all_submodules(repos_tmpdir):
+def test_update_all_submodules(repos_tmpdir, update_jobs):
     # The west update command should not only update projects,
     # but also its submodules. Test verifies whether setting submodules
     # value to boolean True results in updating all project submodules
@@ -1520,7 +1520,7 @@ def test_update_no_submodules(repos_tmpdir):
     _match_multiline_regex(expected_res, actual)
 
 
-def test_update_submodules_strategy(repos_tmpdir):
+def test_update_submodules_strategy(repos_tmpdir, update_jobs):
     # The west update command is able to update submodules using default
     # checkout strategy or rebase strategy, selected by adding -r argument
     # to the invoked command. Test verifies if both strategies are working
@@ -1905,7 +1905,7 @@ def setup_narrow(tmpdir):
     return remote, workspace
 
 
-def test_update_narrow(tmpdir):
+def test_update_narrow(tmpdir, update_jobs):
     # Test that 'west update --narrow' doesn't fetch tags, and that
     # 'west update' respects the 'update.narrow' config option.
 
@@ -1931,7 +1931,7 @@ def test_update_narrow(tmpdir):
     assert project_tags() != []
 
 
-def test_update_narrow_depth1(tmpdir):
+def test_update_narrow_depth1(tmpdir, update_jobs):
     # Test that 'west update --narrow -o=--depth=1' fetches exactly
     # one commit, regardless of how many there are in the remote
     # repository.
@@ -2496,7 +2496,7 @@ def test_init_with_clone_option_depth_one(repos_tmpdir):
     )
 
 
-def test_update_with_groups_enabled(west_init_tmpdir):
+def test_update_with_groups_enabled(west_init_tmpdir, update_jobs):
     # Test "west update" with increasing numbers of groups enabled.
 
     remotes = west_init_tmpdir / '..' / 'repos'
@@ -2547,7 +2547,7 @@ def test_update_with_groups_enabled(west_init_tmpdir):
     assert (west_init_tmpdir / 'net-tools').check(dir=1)
 
 
-def test_update_with_groups_disabled(west_init_tmpdir):
+def test_update_with_groups_disabled(west_init_tmpdir, update_jobs):
     # Test "west update" with decreasing numbers of groups disabled.
 
     remotes = west_init_tmpdir / '..' / 'repos'
@@ -2599,7 +2599,7 @@ def test_update_with_groups_disabled(west_init_tmpdir):
     assert (west_init_tmpdir / 'subdir' / 'Kconfiglib').check(dir=1)
 
 
-def test_update_with_groups_explicit(west_init_tmpdir):
+def test_update_with_groups_explicit(west_init_tmpdir, update_jobs):
     # Even inactive projects must be updated if the user specifically
     # requests it.
 
