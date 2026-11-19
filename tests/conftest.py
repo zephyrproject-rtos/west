@@ -161,13 +161,16 @@ def _isolate_git_config(tmp_path_factory):
     # configuration file. It requires git 2.32; older versions ignore
     # it and keep reading the configuration of the user.
     #
+    # GIT_CONFIG_NOSYSTEM skips the system wide configuration file,
+    # e.g. /etc/gitconfig.
+    #
     # A test which needs a particular setting can use 'git config' in
     # its repositories, 'git -c', or the GIT_CONFIG_COUNT,
     # GIT_CONFIG_KEY_<n> and GIT_CONFIG_VALUE_<n> environment variables.
     global_config = tmp_path_factory.mktemp('git-config') / 'global'
     global_config.touch()
 
-    with update_env({'GIT_CONFIG_GLOBAL': str(global_config)}):
+    with update_env({'GIT_CONFIG_GLOBAL': str(global_config), 'GIT_CONFIG_NOSYSTEM': '1'}):
         yield
 
 
