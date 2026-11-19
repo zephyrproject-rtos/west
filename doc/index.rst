@@ -74,6 +74,8 @@ interpreter explicitly, run it as ``python3 -m west`` instead. Run ``west
 
    why.rst
    release-notes.rst
+   contributing.rst
+   releasing.rst
 
 .. rubric:: Footnotes
 
