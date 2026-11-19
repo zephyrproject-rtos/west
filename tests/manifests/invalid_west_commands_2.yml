@@ -7,4 +7,6 @@ manifest:
     - name: testproject
       remote: testremote
       west-commands:
-        - this-should-be-a-string-not-a-sequence
+        - file: cmd.yml
+          base-dir: sub
+          bogus: oops
