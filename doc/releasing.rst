@@ -3,10 +3,11 @@
 Release process
 ###############
 
-Notes for maintainers.
+Notes for west maintainers on testing, tagging and publishing a release, and
+on cutting a release branch.
 
 Pre-release test plan
----------------------
+*********************
 
 0. If no release branch exists, fork the version numbers in the release branch
    (vX.Y-branch) and the main branch. See "Cutting a release branch", below,
@@ -18,7 +19,7 @@ Pre-release test plan
 
 1. Make testing happy on the following first-party non-Linux platforms:
 
-   - Windows 10
+   - Windows
    - the latest macOS
 
    Do this by hand and check for any anomalous warnings in the output.
@@ -37,9 +38,10 @@ Pre-release test plan
    Automated infrastructure for doing this using docker is in the
    test-distros.yml workflow action on Github.
 
-3. Build alpha N (N=1 to start, then N=2 if you need more commits, etc.) and
-   upload to pypi. See "Building and uploading the release wheels" below for
-   a procedure.
+3. Release alpha N (N=1 to start, then N=2 if you need more commits, etc.):
+   tag vX.Y.ZaN and publish it on GitHub as a pre-release, which uploads it to
+   PyPI. See "Tagging the release" and "Building and uploading the release
+   wheels" below for the procedures.
 
 4. Install the alpha on test platforms. ::
 
@@ -48,7 +50,7 @@ Pre-release test plan
 5. Create and update a default (Zephyr) workspace on all of the platforms from
    1., using the installed alpha::
 
-     west init zephyrproject
+     west init -m https://github.com/zephyrproject-rtos/zephyr zephyrproject
      cd zephyrproject
      west update
 
@@ -77,44 +79,47 @@ Pre-release test plan
 
 7. Assuming that all went well (if it didn't, go fix it and repeat):
 
-   - update version in pyproject.toml to 'X.Y.Z' (i.e. drop the 'aN' suffix
-     that denotes alpha N)
+   - update the version in :file:`pyproject.toml` to 'X.Y.Z' (i.e. drop the
+     'aN' suffix that denotes alpha N)
 
    - tag the release on GitHub (see "Tagging the release" for a procedure)
 
    - create a release on GitHub from the new tag by going to
      https://github.com/zephyrproject-rtos/west/releases
-     clicking "Draft a new release", and following instructions
-
-   - upload the release artifacts to PyPI (see "Building and uploading the
-     release wheels" for a procedure)
+     clicking "Draft a new release", and following instructions. Publishing
+     the release uploads the wheel to PyPI (see "Building and uploading the
+     release wheels" below)
 
 8. Send email to the Zephyr lists, announce@ and users@, notifying them of the
    new release. Include 'git shortlog' data of the new commits since the last
    release to give credit to all contributors.
 
 Building and uploading the release wheels
------------------------------------------
+*****************************************
 
-Creating Pypi releases is done automatically from Github. After publishing
-a release on Github a release build is packaged and uploaded with the
-version specified in pyproject.toml.
+PyPI releases are made automatically from GitHub: publishing a release on
+GitHub runs the ``Release`` workflow (:file:`.github/workflows/release.yml`),
+which builds the package with the version specified in :file:`pyproject.toml`
+and uploads it to PyPI using `trusted publishing`_.
 
 To do these steps manually, you need the zephyr-project PyPI credentials
-for the 'twine upload' command. ::
+for the ``twine upload`` command::
 
   git clean -ffdx
   pip3 install --upgrade build twine
   python -m build
   twine upload -u zephyr-project dist/*
 
-The 'git clean' step is important. We've anecdotally observed broken wheels
+The ``git clean`` step is important. We've anecdotally observed broken wheels
 being generated from dirty repositories.
 
-Check out [packaging.python.org](https://packaging.python.org/en/latest/tutorials/packaging-projects/#generating-distribution-archives) for more detailed instructions.
+See the `Python packaging tutorial`_ for more detailed instructions.
+
+.. _trusted publishing: https://docs.pypi.org/trusted-publishers/
+.. _Python packaging tutorial: https://packaging.python.org/en/latest/tutorials/packaging-projects/#generating-distribution-archives
 
 Tagging the release
--------------------
+*******************
 
 Create and push a GPG signed tag. ::
 
@@ -125,7 +130,7 @@ Create and push a GPG signed tag. ::
   git push origin vX.Y.Z
 
 Cutting a release branch
-------------------------
+************************
 
 This is how to cut a new release branch for minor version vX.Y.
 
@@ -179,10 +184,10 @@ Summary of what happens:
    being backported from main (or the other way around in case of an urgent
    hotfix).
 
-3. In vX.Y-branch, in src/west/version.py, set __version__ to X.Y.0a1.
+3. In vX.Y-branch, set the version in :file:`pyproject.toml` to X.Y.0a1.
    Push this to origin/vX.Y-branch. You don't need a PR for this.
 
-4. In the main branch, set version in pyproject.toml to X.Y.99.
+4. In the main branch, set the version in :file:`pyproject.toml` to X.Y.99.
    Push this to origin/main. You don't need a PR for this.
 
 5. Create an annotated tag vX.Y.99 which points to the main branch commit you
