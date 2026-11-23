@@ -1,7 +1,7 @@
 .. _west-contributing:
 
-Contribution Guidelines
-#######################
+Contributing
+############
 
 West lives under the umbrella of `The Zephyr Project`_, and contributions
 follow the same process as the rest of the project. The authoritative reference
@@ -26,106 +26,158 @@ is the full `Zephyr Contribution Guidelines`_; the essentials are:
 
 * CI runs on every pull request, verifying coding style, type checks, and the
   test suite across supported platforms. Every one of these checks can be run
-  locally with ``poe``. See `Running the Tests`_ below. A CI failure
+  locally with ``poe``; see :ref:`west-contributing-tests` below. A CI failure
   you cannot reproduce on your own workstation is considered a bug; please
   report it.
+
+* Most CI checks test the pull request as a whole, not its individual
+  commits. It is your responsibility to make sure every commit passes all
+  checks, so that ``git bisect`` and branching from any commit keep working.
 
 * The `Zephyr Discord server`_ (see the ``#west`` channel) and the `Zephyr
   devel mailing list`_ are good places to ask questions and engage with the
   community.
 
-Hacking on West
----------------
+Hacking on west
+***************
 
 This section contains notes for getting started developing west itself.
 
-`pip` offers many different ways to (download and) install Python
-software. Below are common ways relevant to `west`; for a complete list
-check `<https://pip.pypa.io/en/stable/topics/>`_
+``pip`` offers many different ways to (download and) install Python software.
+Below are common ways relevant to west; for a complete list check
+https://pip.pypa.io/en/stable/topics/. Where `uv`_ offers an alternative, the
+commands for both are given.
 
-Quick Install
-~~~~~~~~~~~~~
+Quick install
+=============
 
-If you are not interested in source code and git history, GitHub offers
-`pip` the ability to download and install a .zip archive of any random
-version with a single command.  This allows testing work in progress
-very quickly. Examples::
+If you are interested in neither west source code nor its history, GitHub
+offers ``pip`` the ability to download and install a .zip archive of any random
+version with a single command. This allows testing work in progress very
+quickly. Examples::
 
-  pip3 uninstall west
+  pip uninstall west
   # Pull request 830
-  pip3 install --dry-run https://github.com/zephyrproject-rtos/west/archive/pull/830/head.zip
+  pip install --dry-run https://github.com/zephyrproject-rtos/west/archive/pull/830/head.zip
   # Release v1.4
-  pip3 install https://github.com/zephyrproject-rtos/west/archive/v1.4-branch.zip
+  pip install https://github.com/zephyrproject-rtos/west/archive/v1.4-branch.zip
   # Someone's random version
-  pip3 install https://github.com/someone_you_trust/west/archive/some_branch_or_tag.zip
+  pip install https://github.com/someone_you_trust/west/archive/some_branch_or_tag.zip
 
-Warning: never install software from people or locations you do not trust!
+.. warning::
 
-Editable Install
-~~~~~~~~~~~~~~~~
+   Never install software from people or locations you do not trust!
 
-To run west "live" from the current source code tree, run this command from the
-top level directory in the west repository::
+Editable install
+================
 
-  pip3 install -e .
+To run west "live" from the current source code tree, install it in editable
+mode from the top level directory in the west repository:
 
-This is useful if you are actively working on west and don't want to re-package
-and install a wheel each time you run it.
+.. tabs::
+
+   .. group-tab:: uv
+
+      ``uv sync`` creates a virtual environment in :file:`.venv` and installs
+      west in it in editable mode; ``uv run`` runs commands inside it.
+
+      .. code-block:: shell
+
+         uv sync --frozen
+         uv run west --version
+
+   .. group-tab:: pip
+
+      Preferably in an active virtual environment:
+
+      .. code-block:: shell
+
+         pip install -e .
+
+This is useful if you are actively working on west and don't want to
+re-package and install a wheel each time you run it.
 
 Creating a wheel package
-~~~~~~~~~~~~~~~~~~~~~~~~
+========================
 
 You can create a wheel package and distribute it to others.
 
-To build the west wheel file::
+To build the west wheel file:
 
-  # Using uv
-  uv build
+.. tabs::
 
-  # Without uv
-  pip3 install --upgrade build
-  python -m build
+   .. group-tab:: uv
 
-This will create a file named ``dist/west-x.y.z-py3-none-any.whl``,
-where ``x.y.z`` is the current version in pyproject.toml.
+      .. code-block:: shell
+
+         uv build
+
+   .. group-tab:: pip
+
+      .. code-block:: shell
+
+         pip install --upgrade build
+         python -m build
+
+This will create a file named :file:`dist/west-x.y.z-py3-none-any.whl`, where
+``x.y.z`` is the current version in :file:`pyproject.toml`.
 
 To install the wheel::
 
-  pip3 install -U dist/west-x.y.z-py3-none-any.whl
+  pip install -U dist/west-x.y.z-py3-none-any.whl
 
-You can ``pip3 uninstall west`` to remove this wheel before re-installing the
+You can ``pip uninstall west`` to remove this wheel before re-installing the
 version from PyPI, etc.
 
-Running the Tests
-~~~~~~~~~~~~~~~~~
+.. _west-contributing-tests:
 
-First, install the dependencies::
+Running the tests
+=================
 
-  # Using uv
-  uv sync --frozen
+The test suite, linter, formatter and type checker are run through `poe`_
+tasks defined in :file:`pyproject.toml`; CI runs the same checks. Install west
+in editable mode together with the development dependencies, which include
+``poe`` itself, then run everything:
 
-  # Using pip (requires v25.1 or newer)
-  # Recommended in an active virtual environment
-  pip3 install --group dev
+.. tabs::
 
+   .. group-tab:: uv
 
-Then, run the tests (from the project's top level directory)::
+      ``uv sync`` installs west and the development dependencies.
 
-  # Run the full test suite with uv (recommended)
-  uv run poe all
+      .. code-block:: shell
 
-  # Or run the full test suite with poe directly.
-  # (recommended in an active virtual environment)
-  poe all
+         uv sync --frozen
+         uv run poe all
 
-  # Run only the pytest tests (against the local worktree)
-  pytest
+   .. group-tab:: pip
 
-The ``all`` target from ``poe`` runs multiple tasks sequentially. Use ``poe -h``
-to get a list of all available tasks.
-You can pass arguments to any ``poe`` task, which are forwarded to the
-underlying command. This is especially helpful when you want to run
-only specific tests to save time. Examples::
+      Requires pip v25.1 or newer, preferably in an active virtual
+      environment. The dependency group does not include west itself, hence
+      the editable install.
+
+      .. code-block:: shell
+
+         pip install -e . --group dev
+         poe all
+
+      ``poe`` runs its tasks in a :file:`.venv` directory at the top of the
+      repository when there is one, such as the environment ``uv`` creates,
+      instead of the active environment.
+
+``poe all`` runs these tasks in sequence; each can also be run on its own:
+
+- ``poe test``: the test suite with ``pytest``, with warnings turned into
+  errors like in CI
+- ``poe lint``: ``ruff check``
+- ``poe format``: ``ruff format``, which rewrites files in place. CI only
+  checks the formatting, so run this before committing.
+- ``poe types``: ``mypy``
+
+Run ``poe`` without arguments to list all tasks. Arguments given to a task are
+forwarded to the underlying command, which is useful to run a subset of the
+tests. In the examples below, prefix the commands with ``uv run`` when not in
+an active virtual environment::
 
   # Run a subset of tests (file)
   poe test tests/test_project.py
@@ -141,6 +193,51 @@ only specific tests to save time. Examples::
   # current terminal
   poe test -k import --capture=no
 
+  # Run the test suite in parallel, using pytest-xdist
+  poe test-xdist
+
+Running ``pytest`` directly also works, since it is configured in
+:file:`pyproject.toml`, but without the warnings-as-errors setting ``poe test``
+adds. Either way the tests run against the source tree, not against an
+installed west; pass ``-o pythonpath=`` to test the installed west instead.
+
+.. _poe: https://poethepoet.natn.io/
+
+Building the documentation
+==========================
+
+The documentation you are reading lives in the :file:`doc` directory of the
+west repository and is built with Sphinx. Install the documentation
+dependencies and build it:
+
+.. tabs::
+
+   .. group-tab:: uv
+
+      The documentation dependencies are in the ``docs`` dependency group,
+      which ``uv`` does not install by default; select it on each command.
+
+      .. code-block:: shell
+
+         uv run --group docs poe build-docs
+
+   .. group-tab:: pip
+
+      .. code-block:: shell
+
+         pip install -e . --group dev --group docs
+         poe build-docs
+
+The HTML output is in :file:`doc/_build/html`. While editing, ``poe
+serve-docs`` serves the documentation on http://127.0.0.1:8000 and rebuilds it
+whenever a source file changes, and ``poe linkcheck-docs`` checks the external
+links. Both need the ``docs`` dependency group as well.
+
+The theme files under :file:`doc/_static` and :file:`doc/_templates` are
+copied from the Zephyr repository; :file:`doc/README.rst` records where they
+come from and how to synchronize them.
+
+.. _uv: https://docs.astral.sh/uv/
 .. _The Zephyr Project: https://www.zephyrproject.org/
 .. _Zephyr Contribution Guidelines: https://docs.zephyrproject.org/latest/contribute/index.html
 .. _Apache 2.0 license: https://github.com/zephyrproject-rtos/west/blob/main/LICENSE
