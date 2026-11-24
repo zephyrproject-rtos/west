@@ -3,6 +3,7 @@
 
 import datetime
 import importlib.metadata
+import sys
 from pathlib import Path
 
 WEST_BASE = Path(__file__).resolve().parents[1]
@@ -12,6 +13,15 @@ copyright = (
     f'{datetime.datetime.now(tz=datetime.timezone.utc).year}, The Zephyr Project Contributors'
 )
 author = 'The Zephyr Project Contributors'
+
+
+# SRC first (0), before some other, random west version that happens to be around.
+# "autodoc" also needs this:
+# https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#ensuring-the-code-can-be-imported
+# Note it is never required when building with "uv" which takes care of everything in an isolated
+# venv.  Note a string is required: passing a Path is silently ignored (!) when autodoc tries to
+# import west... but not ignored by importlib! What a mess.
+sys.path.insert(0, str(WEST_BASE / 'src'))
 version = importlib.metadata.version("west")
 
 extensions = [
