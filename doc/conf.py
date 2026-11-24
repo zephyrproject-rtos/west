@@ -24,6 +24,10 @@ extensions = [
 templates_path = [str(WEST_BASE / 'doc' / '_templates')]
 exclude_patterns = ['_build', 'README.rst', 'Thumbs.db', '.DS_Store']
 
+# Warning: when used in the "wrong" order, the -M option silently corrupts tags while everything
+# builds fine! For instance, with sphinx-build 9.2.0:
+#    sphinx-build -M html -t release -t foo . _build
+# assert False, tags # shows: Tags(foo, release/html) !
 is_release = tags.has("release")  # pylint: disable=undefined-variable  # noqa: F821
 docs_title = "Docs / {}".format(version if is_release else "Latest")
 html_theme = 'sphinx_rtd_theme'
