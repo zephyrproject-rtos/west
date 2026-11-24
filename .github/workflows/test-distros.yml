@@ -17,8 +17,9 @@ on:
 # 1. Start a docker container with (read-only) access to the source files
 # $ docker run -it -v $(pwd):/west:ro <container>
 #
-# 2. Install, depending on the OS, git, python and curl, for example in Arch linux:
-# $ pacman -Syu --noconfirm git python curl
+# 2. Install, depending on the OS, git, python, curl, a C compiler and the Python
+#    headers, for example in Arch linux (where python ships its own headers):
+# $ pacman -Syu --noconfirm git python curl gcc
 #
 # 3. Clone the repository to a temporary directory
 # $ git config --global --add safe.directory /west
@@ -63,22 +64,26 @@ jobs:
           - "opensuse/tumbleweed:latest"
           - "ubuntu:devel"
     steps:
+      # Besides git, python and curl, every distro gets a C compiler and the
+      # Python headers. A distro's Python can be newer than the wheels published
+      # for the locked dependencies (librt and pyyaml have no pure Python
+      # wheel), in which case uv builds them from source.
       - if: ${{ startsWith(matrix.container, 'archlinux') }}
         run: |
-          pacman -Syu --noconfirm git python curl
+          pacman -Syu --noconfirm git python curl gcc
 
       - if: ${{ startsWith(matrix.container, 'debian') || startsWith(matrix.container, 'ubuntu') }}
         run: |
           apt-get update
-          apt-get install -y git python3 curl
+          apt-get install -y git python3 curl gcc python3-dev
 
       - if: ${{ startsWith(matrix.container, 'fedora') }}
         run: |
-          dnf install -y git python3 curl
+          dnf install -y git python3 curl gcc python3-devel
 
       - if: ${{ startsWith(matrix.container, 'opensuse') }}
         run: |
-          zypper -n install git python3 python3-sqlite3 curl
+          zypper -n install git python3 python3-sqlite3 curl gcc python3-devel
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
