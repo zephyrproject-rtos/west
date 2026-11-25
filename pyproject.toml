@@ -142,6 +142,7 @@ help = "Serve the documentation locally and rebuild it on changes"
 [tool.poe.tasks]
 lint = "ruff check ."
 format = "ruff format"
+format-check = "ruff format --check"
 types = "mypy --package west"
 # work in progress
 types-extra = "mypy --package west --check-untyped-defs"
