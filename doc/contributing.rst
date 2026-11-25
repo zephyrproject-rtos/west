@@ -237,6 +237,122 @@ The theme files under :file:`doc/_static` and :file:`doc/_templates` are
 copied from the Zephyr repository; :file:`doc/README.rst` records where they
 come from and how to synchronize them.
 
+
+WINE and wenv
+=============
+
+While Python provides a great OS-abstraction layer, there is still a few, dark
+corners of west code that remain OS-specific, most notably around file paths.
+See for instance `west issue 961`_ and the many other issues linked from there.
+
+Switching back and forth between machines during interactive testing is slow
+and inconvenient. It requires either dual-booting or copying/sharing files
+across multiple systems - and a Windows license. Thanks to WINE and wenv, this
+section provides a very quick way to simulate running west's test suite on
+Windows. It has been successfully used in the past to reproduce, debug and fix
+Windows-specific issues on Linux.
+
+.. warning::
+
+   What this section documents is only a development shortcut.  A "real"
+   Windows system *must* still be used to validate official releases.
+
+WINE
+----
+
+`WINE`_ provides a way to run Windows binaries on Linux.  First you need to
+install WINE. Try the following commands and your Linux distribution will most
+likely tell you what packages are missing::
+
+  wine   --help
+  wine64 --help
+  wine32 --help
+
+At least one of these must print WINE's help message before you proceed.
+Some distributions let you install both wine32 and wine64 at the same
+time. To find which one the ``wine`` command currently points at::
+
+  wine cmd
+  dir c:
+
+If you see *both* ``Program Files`` *and* ``Program Files (x86)``, then you are
+running 64 bits WINE.
+
+wenv
+----
+
+`WENV`_ has a comprehensive but complex documentation.  The recipe below
+provides all the necessary shortcuts to get you started before even looking at
+the wenv documentation yet::
+
+  pipx install wenv
+  export WENV_PYTHONVERSION=3.12.10 # or any other version that works. Required.
+  export WENV_ARCH=win64            # Optional - wenv defaults to WINE 32 bits.
+
+  # This copies a couple gigabytes from your local WINE installation into
+  # $HOME/.local/share/wenv/. Then it downloads and install Python there.
+  wenv init
+
+  # wenv help should now list "python" and "pip"
+  wenv help
+
+  # Among others, Python's interactive prompt shows whether it's 32 or 64 bits
+  wenv python
+  # Warning: pykwalify is being replaced by jsonschema, see west issue #904 and west/pyproject.toml
+  wenv pip -v install setuptools
+  wenv pip -v install pyyaml pykwalify pytest pytest-xdist pytest-env
+
+``~/.wenv.json`` offers a permanent alternative to the ``WENV_*`` environment variables above::
+
+  echo '{ "pythonversion": "3.12.10" }' >> ~/.wenv.json
+  # Or, for WINE64
+  echo '{ "pythonversion": "3.12.10", "arch":"win64" }' >> ~/.wenv.json
+
+Download a ``MinGit-*-.zip`` file from https://github.com/git-for-windows/git/releases/
+and "install" it in wenv's ``C:`` disk::
+
+  unzip -d ~/.local/share/wenv/win64/drive_c/MinGit/  ~/Downloads/MinGit-version-64-bit.zip
+
+Add this somewhere in ``west/pyproject.toml``::
+
+  # TODO: find a way to do this in "wenv" itself instead of modifying
+  # a file tracked in git.
+  # Useful flag: wenv pytest --pytest-env-verbose ...
+  [tool.pytest_env]
+  PATH = { value = "{PATH};C:\\MinGit\\cmd", transform = true }
+
+At last::
+
+  cd west
+  wenv pytest -h
+  wenv pytest -v -s -k round_trip -n auto
+  ....
+  ============== 9 passed ==============
+
+When not used anymore, delete the current ``$WENV_ARCH`` +
+``$WENV_PYTHONVERSION`` combination and reclaim the couple gigabytes consumed by
+``wenv init`` in ``$HOME/.local/share/wenv/``::
+
+  wenv help
+
+    => The following interpreters, scripts and modules are installed and available:
+    - wenv python
+    - wenv pythonw
+    - wenv pip3.12
+    - wenv py.test
+    - wenv pykwalify
+    - wenv pytest
+    - ...
+
+  wenv clean
+
+  wenv help
+
+   => The following interpreters, scripts and modules are installed and available:
+
+     (None)
+
+
 .. _uv: https://docs.astral.sh/uv/
 .. _The Zephyr Project: https://www.zephyrproject.org/
 .. _Zephyr Contribution Guidelines: https://docs.zephyrproject.org/latest/contribute/index.html
@@ -245,3 +361,6 @@ come from and how to synchronize them.
 .. _PR requirements: https://docs.zephyrproject.org/latest/contribute/contributor_expectations.html#pr-requirements
 .. _Zephyr Discord server: https://chat.zephyrproject.org/
 .. _Zephyr devel mailing list: https://lists.zephyrproject.org/g/devel
+.. _WINE: https://www.winehq.org/
+.. _west issue 961: https://github.com/zephyrproject-rtos/west/issues/961
+.. _WENV: https://wenv.readthedocs.io/en/latest/usage.html
