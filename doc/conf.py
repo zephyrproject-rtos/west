@@ -19,6 +19,7 @@ extensions = [
     "sphinx_tabs.tabs",
     'sphinx.ext.autodoc',
     "sphinx.ext.intersphinx",
+    "sphinx_sitemap",
 ]
 
 templates_path = [str(WEST_BASE / 'doc' / '_templates')]
@@ -33,6 +34,7 @@ html_theme_options = {
     "navigation_depth": 5,
 }
 html_title = "West Documentation"
+html_baseurl = "https://docs.zephyrproject.org/west/latest/"
 html_last_updated_fmt = "%b %d, %Y"
 html_show_sphinx = False
 html_logo = str(WEST_BASE / "doc" / "_static" / "images" / "logo.svg")
@@ -47,6 +49,10 @@ html_context = {
     # See https://programmablesearchengine.google.com/ for details.
     "google_searchengine_id": "6301741b36c2a481a",
 }
+
+# The default scheme adds language and version directories to the URLs.
+sitemap_url_scheme = "{link}"
+sitemap_excludes = ["search.html", "gsearch.html", "genindex.html", "py-modindex.html"]
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
