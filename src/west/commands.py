@@ -78,7 +78,6 @@ def _no_topdir_msg(cwd, name):
 no west workspace found from "{cwd}"; "west {name}" requires one.
 Things to try:
   - Change directory to somewhere inside a west workspace and retry.
-  - Set ZEPHYR_BASE to a zephyr repository path in a west workspace.
   - Run "west init" to set up a workspace here.
   - Run "west init -h" for additional information.
 '''
