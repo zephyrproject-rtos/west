@@ -167,8 +167,7 @@ in editable mode together with the development dependencies, which include
 
 ``poe all`` runs these tasks in sequence; each can also be run on its own:
 
-- ``poe test``: the test suite with ``pytest``, with warnings turned into
-  errors like in CI
+- ``poe test``: the test suite with ``pytest``
 - ``poe lint``: ``ruff check``
 - ``poe format``: ``ruff format``, which rewrites files in place. CI only
   checks the formatting, so run this before committing.
@@ -197,9 +196,10 @@ an active virtual environment::
   poe test-xdist
 
 Running ``pytest`` directly also works, since it is configured in
-:file:`pyproject.toml`, but without the warnings-as-errors setting ``poe test``
-adds. Either way the tests run against the source tree, not against an
-installed west; pass ``-o pythonpath=`` to test the installed west instead.
+:file:`pyproject.toml`. Either way warnings are turned into errors, pass
+``-W default`` to only print them, and the tests run against the source tree,
+not against an installed west; pass ``-o pythonpath=`` to test the installed
+west instead.
 
 .. _poe: https://poethepoet.natn.io/
 

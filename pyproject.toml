@@ -118,9 +118,11 @@ ignore_missing_imports = true
 # You can override any pytest option via pytest argument `-o key=value`.
 # E.g. unset option `-o pythonpath=` to use the installed west in tests
 pythonpath = "src"
+# Fail on any warning. Use `-W default` to only print them.
+filterwarnings = ["error"]
 
 [tool.poe.tasks.test]
-cmd = "python -m pytest -W error"
+cmd = "python -m pytest"
 env = {PYTHONIOENCODING = "utf-8"}
 
 [tool.poe.tasks.test-xdist]
@@ -154,5 +156,5 @@ gh-format = "ruff format --check --output-format=github"
 
 [tool.poe.tasks.gh-test]
 # Keep the --cov= option in sync with [tool.coverage.run] above.
-cmd = "python -m pytest -W error -v -o pythonpath= -o junit_family=xunit1 --junitxml=junit.xml --cov-report=html --cov=src/"
+cmd = "python -m pytest -v -o pythonpath= -o junit_family=xunit1 --junitxml=junit.xml --cov-report=html --cov=src/"
 env = {PYTHONIOENCODING = "utf-8"}
