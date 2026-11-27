@@ -456,9 +456,21 @@ Manifest and sub-objects
    .. versionadded:: 1.2.0
       The *description* attribute.
 
+   .. versionadded:: 1.6.0
+      The *west_commands_entries* attribute.
+
+   .. deprecated:: 1.6.0
+      The *west_commands* attribute. Use *west_commands_entries* instead.
+      Reading *west_commands* now returns a new list each time, so changing
+      that list in place no longer changes the project.
+
    Constructor:
 
    .. automethod:: __init__
+
+   .. versionchanged:: 1.6.0
+      The *west_commands* parameter can now be a list of maps or of
+      :py:class:`west.manifest.WestCommandsEntry`.
 
    .. versionchanged:: 0.8.0
       The *path* and *topdir* parameters can now be any ``os.PathLike``.
@@ -526,6 +538,10 @@ Manifest and sub-objects
 .. autoclass:: west.manifest.Submodule
 
 .. versionadded:: 0.9.0
+
+.. autoclass:: west.manifest.WestCommandsEntry
+
+.. versionadded:: 1.6.0
 
 Exceptions
 ==========

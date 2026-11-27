@@ -289,6 +289,21 @@ next.
        file is named :file:`west-commands.yml` by convention. See
        :ref:`west-extensions` for details.
 
+       Since west v1.6.0, this can also be a list, to name several such files.
+       Each element of the list is either a path as above, or a map with these
+       keys:
+
+       - ``file``: mandatory, the path to the YAML file, relative to the root
+         of the project.
+       - ``base-dir``: optional, a directory relative to the root of the
+         project. The ``file:`` paths *inside* the YAML file, which locate the
+         Python files implementing the commands, are relative to this
+         directory. The default is the root of the project.
+
+       ``west manifest --resolve`` writes ``base-dir`` when it needs to; see
+       :ref:`west-manifest-import-extensions`. There is normally no reason to
+       write it yourself.
+
    * - ``import``
      - Optional. If ``true``, imports projects from manifest files in the
        given repository into the current manifest. See
@@ -505,6 +520,10 @@ about the manifest file features that were introduced in that version.
    * - ``"1.2"``
      - Support for ``description:`` in ``projects:``
        (:ref:`west-manifests-projects`)
+
+   * - ``"1.6"``
+     - Support for lists, and for ``file:`` and ``base-dir:`` maps in these
+       lists, in ``west-commands:`` (:ref:`west-manifests-projects`)
 
 .. note::
 
@@ -2184,6 +2203,8 @@ extra projects shouldn't take too much time unless it's really needed. See the
 documentation for the :ref:`update.fetch <west-config-index>` configuration
 option for more information.
 
+.. _west-manifest-import-extensions:
+
 Extensions
 ----------
 
@@ -2194,6 +2215,42 @@ If an imported manifest file has a ``west-commands:`` definition in its
 ``self:`` section, the extension commands defined there are added to the set of
 available extensions at the time the manifest is imported. They will thus take
 precedence over any extension commands with the same names added later on.
+
+A manifest file can be imported from a subdirectory of a project. The paths in
+its ``west-commands:`` definition are then relative to that subdirectory, and
+so are the ``file:`` paths inside the YAML files which this definition names.
+The resolved manifest has no such subdirectory to refer to: all the extension
+commands belong to the project there, where paths are relative to the root of
+the project. It therefore records the subdirectory as a ``base-dir``.
+
+For example, if :file:`my-project/sub/west.yml` contains:
+
+.. code-block:: yaml
+
+   manifest:
+     self:
+       west-commands: scripts/west-commands.yml
+
+and is imported with ``import: sub/west.yml`` in the ``my-project`` project,
+then the resolved manifest contains:
+
+.. code-block:: yaml
+
+   manifest:
+     projects:
+       - name: my-project
+         west-commands:
+           - file: sub/scripts/west-commands.yml
+             base-dir: sub
+
+If the ``my-project`` project also names
+:file:`sub/scripts/west-commands.yml` in its own ``west-commands:``, the
+resolved manifest still contains this single element for that file.
+
+.. note::
+
+   The resolved manifest can only be loaded by west v1.6.0 or later, like any
+   manifest file using ``base-dir``.
 
 Group filters
 -------------
