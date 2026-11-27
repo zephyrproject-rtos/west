@@ -165,17 +165,19 @@ in editable mode together with the development dependencies, which include
       repository when there is one, such as the environment ``uv`` creates,
       instead of the active environment.
 
-``poe all`` runs these tasks in sequence; each can also be run on its own:
+``poe all`` runs these tasks; each can also be run on its own:
 
-- ``poe test``: the test suite with ``pytest``, with warnings turned into
-  errors like in CI
 - ``poe lint``: ``ruff check``
-- ``poe format``: ``ruff format``, which rewrites files in place. CI only
-  checks the formatting, so run this before committing.
+- ``poe format-check``: ``ruff format --check``. To rewrite files in place,
+  use ``poe format``.
 - ``poe types``: ``mypy``
+- ``poe test-xdist``: the test suite with ``pytest``, with warnings turned
+  into errors like in CI. Tests are run in parallel with ``xdist``, one test
+  per CPU core.
 
 Run ``poe`` without arguments to list all tasks. Arguments given to a task are
-forwarded to the underlying command, which is useful to run a subset of the
+forwarded by ``poe`` to the underlying command. For instance: ``poe lint
+--fix`` runs ``ruff check . --fix``. This is also useful to run a subset of the
 tests. In the examples below, prefix the commands with ``uv run`` when not in
 an active virtual environment::
 
@@ -192,9 +194,6 @@ an active virtual environment::
   # Run all tests with "import" in their name and let them log to the
   # current terminal
   poe test -k import --capture=no
-
-  # Run the test suite in parallel, using pytest-xdist
-  poe test-xdist
 
 Running ``pytest`` directly also works, since it is configured in
 :file:`pyproject.toml`, but without the warnings-as-errors setting ``poe test``
